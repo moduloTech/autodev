@@ -9,6 +9,7 @@
 - Per-project `sparse_checkout` config option for monorepo support.
 - Better branch slug generation using `i18n` transliteration (`incohérent` → `incoherent` instead of `incohrent`).
 - `--dry-run` flag to poll and display which issues would be processed without side effects.
+- Capture and store danger-claude stdout/stderr (`dc_stdout`, `dc_stderr` columns) from all calls (`-p` and `-c`) in the database for debugging and audit.
 
 ### Fixed
 

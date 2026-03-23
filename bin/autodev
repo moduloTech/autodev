@@ -239,12 +239,19 @@ module Database
         mr_iid        INTEGER,
         mr_url        TEXT,
         error_message TEXT,
+        dc_stdout     TEXT,
+        dc_stderr     TEXT,
         started_at    TEXT,
         finished_at   TEXT,
         created_at    TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(project_path, issue_iid)
       );
     SQL
+
+    # Add columns for existing databases
+    %w[dc_stdout dc_stderr].each do |col|
+      @db.run("ALTER TABLE issues ADD COLUMN #{col} TEXT") rescue nil
+    end
   end
 
   # -- Issues CRUD --
@@ -368,6 +375,8 @@ class IssueProcessor
     @token          = token
     @project_path   = project_config["path"]
     @gitlab_url     = config["gitlab_url"]
+    @dc_stdout      = +""
+    @dc_stderr      = +""
   end
 
   def process(issue)
@@ -425,7 +434,10 @@ class IssueProcessor
       # 11. Review (non-fatal)
       run_review(mr.web_url)
 
-      Database.update_issue(@project_path, iid, status: "done", finished_at: Sequel.lit("datetime('now')"))
+      Database.update_issue(@project_path, iid,
+        status: "done", finished_at: Sequel.lit("datetime('now')"),
+        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
+      )
       log "Issue ##{iid} completed: #{mr.web_url}"
 
     rescue StandardError => e
@@ -433,6 +445,7 @@ class IssueProcessor
       Database.update_issue(@project_path, iid,
         status: "error",
         error_message: "#{e.class}: #{e.message}\n  #{bt}",
+        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
         finished_at: Sequel.lit("datetime('now')")
       )
       log_error "Issue ##{iid} failed: #{e.class}: #{e.message}"
@@ -638,6 +651,8 @@ class IssueProcessor
 
   def danger_claude_prompt(work_dir, prompt)
     out, err, status = Open3.capture3(CLEAN_ENV, "danger-claude", "-p", prompt, chdir: work_dir)
+    @dc_stdout << "=== danger-claude -p ===\n#{out}\n"
+    @dc_stderr << "=== danger-claude -p ===\n#{err}\n"
     unless status.success?
       raise ImplementationError, "danger-claude -p failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
     end
@@ -646,6 +661,8 @@ class IssueProcessor
 
   def danger_claude_commit(work_dir)
     out, err, status = Open3.capture3(CLEAN_ENV, "danger-claude", "-c", chdir: work_dir)
+    @dc_stdout << "=== danger-claude -c ===\n#{out}\n"
+    @dc_stderr << "=== danger-claude -c ===\n#{err}\n"
     unless status.success?
       raise ImplementationError, "danger-claude -c failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
     end
