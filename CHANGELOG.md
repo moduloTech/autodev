@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-03-23
+
 ### Added
 
 - Automated GitLab issue implementation via danger-claude.
