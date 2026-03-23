@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-23
+
 ### Added
 
 - Shallow clone by default (`--depth 1`) for faster cloning of large repos.
