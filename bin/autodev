@@ -517,34 +517,54 @@ class IssueProcessor
       return
     end
 
+    # Check for partial progress from previous attempt
+    existing = Database.find_issue(@project_path, iid)
+    previous_branch = existing[:branch_name] if existing
+    skip_to_mr = false
+
+    if previous_branch && branch_exists_on_remote?(previous_branch)
+      log "Branch #{previous_branch} already exists on remote, checking for recovery..."
+      if %w[creating_mr reviewing].include?(existing[:status]) || existing[:error_message]&.include?("creating_mr")
+        skip_to_mr = true
+        log "Recovering: skipping to MR creation"
+      end
+    end
+
     work_dir = "/tmp/autodev_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
-      # 1. Clone
-      clone_repo(work_dir)
+      if skip_to_mr
+        # Re-clone just to get the work_dir for MR description extraction
+        clone_repo(work_dir)
+        run_cmd(["git", "checkout", previous_branch], chdir: work_dir)
+        branch_name = previous_branch
+      else
+        # 1. Clone
+        clone_repo(work_dir)
 
-      # 2. Branch
-      branch_name = create_branch(work_dir, iid, title)
-      Database.update_issue(@project_path, iid, branch_name: branch_name, status: "implementing")
+        # 2. Branch
+        branch_name = create_branch(work_dir, iid, title)
+        Database.update_issue(@project_path, iid, branch_name: branch_name, status: "implementing")
 
-      # 3. Fetch full issue context
-      context = fetch_issue_context(@client, @project_path, iid)
+        # 3. Fetch full issue context
+        context = fetch_issue_context(@client, @project_path, iid)
 
-      # 4. Ensure CLAUDE.md exists
-      ensure_claude_md(work_dir)
+        # 4. Ensure CLAUDE.md exists
+        ensure_claude_md(work_dir)
 
-      # 5. Implement
-      implement(work_dir, context, iid)
-      Database.update_issue(@project_path, iid, status: "committing")
+        # 5. Implement
+        implement(work_dir, context, iid)
+        Database.update_issue(@project_path, iid, status: "committing")
 
-      # 6. Commit
-      commit(work_dir)
+        # 6. Commit
+        commit(work_dir)
 
-      # 7. Verify changes were produced
-      verify_changes(work_dir, branch_name)
-      Database.update_issue(@project_path, iid, status: "pushing")
+        # 7. Verify changes were produced
+        verify_changes(work_dir, branch_name)
+        Database.update_issue(@project_path, iid, status: "pushing")
 
-      # 8. Push
-      push(work_dir, branch_name)
+        # 8. Push
+        push(work_dir, branch_name)
+      end
 
       # 9. Create MR
       Database.update_issue(@project_path, iid, status: "creating_mr")
@@ -847,6 +867,14 @@ class IssueProcessor
   ensure
     stdout_r&.close
     stderr_r&.close
+  end
+
+  def branch_exists_on_remote?(branch_name)
+    # Use GitLab API to check if branch exists
+    @client.branch(@project_path, branch_name)
+    true
+  rescue Gitlab::Error::ResponseError
+    false
   end
 
   def command_exists?(cmd)
