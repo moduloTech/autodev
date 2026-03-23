@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Shallow clone by default (`--depth 1`) for faster cloning of large repos.
+- Per-project `clone_depth` config option (0 for full clone, default: 1).
+- Per-project `sparse_checkout` config option for monorepo support.
+
 ### Fixed
 
 - Label guard: labels are now updated after MR creation succeeds, preventing issues from being left in a bad state if MR creation fails.

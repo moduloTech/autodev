@@ -81,6 +81,10 @@ module Config
         #   - "todo"
         # label_to_add: "Development::Awaiting CR"
         # extra_prompt: "Use RSpec for tests"   # additional instructions for Claude
+        # clone_depth: 1                         # git clone depth (0 = full clone, default: 1)
+        # sparse_checkout:                       # sparse checkout paths (for monorepos)
+        #   - "src/"
+        #   - "lib/"
   YAML
 
   DEFAULTS = {
@@ -437,8 +441,23 @@ class IssueProcessor
     host_port = uri.port && ![80, 443].include?(uri.port) ? "#{uri.host}:#{uri.port}" : uri.host
     clone_url = "#{uri.scheme}://oauth2:#{@token}@#{host_port}/#{@project_path}.git"
 
-    log "Cloning #{@project_path}..."
-    run_cmd(["git", "clone", clone_url, work_dir])
+    clone_depth = @project_config["clone_depth"] || 1
+    sparse_paths = @project_config["sparse_checkout"]
+
+    cmd = ["git", "clone"]
+    cmd += ["--depth", clone_depth.to_s] if clone_depth.positive?
+    if sparse_paths.is_a?(Array) && sparse_paths.any?
+      cmd += ["--filter=blob:none", "--sparse"]
+    end
+    cmd += [clone_url, work_dir]
+
+    log "Cloning #{@project_path} (depth: #{clone_depth.positive? ? clone_depth : "full"})..."
+    run_cmd(cmd)
+
+    if sparse_paths.is_a?(Array) && sparse_paths.any?
+      log "Setting up sparse checkout: #{sparse_paths.join(", ")}"
+      run_cmd(["git", "sparse-checkout", "set"] + sparse_paths, chdir: work_dir)
+    end
   end
 
   def create_branch(work_dir, iid, title)
