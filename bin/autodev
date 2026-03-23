@@ -61,6 +61,98 @@ CLEAN_ENV = %w[
   BUNDLER_SETUP RUBYOPT RUBYLIB
 ].each_with_object({}) { |var, h| h[var] = nil }.freeze
 
+# == Logging ==================================================================
+
+class AppLogger
+  LEVELS = { "DEBUG" => 0, "INFO" => 1, "WARN" => 2, "ERROR" => 3 }.freeze
+
+  def initialize(pastel:)
+    @pastel       = pastel
+    @mutex        = Mutex.new
+    @log_dir      = nil
+    @project_dirs = {}
+    @global_file  = nil
+    @global_date  = nil
+    @level        = LEVELS["INFO"]
+  end
+
+  def configure(log_dir:, level: "INFO")
+    @log_dir = File.expand_path(log_dir)
+    @level   = LEVELS[level.to_s.upcase] || LEVELS["INFO"]
+    FileUtils.mkdir_p(File.join(@log_dir, "autodev"))
+  end
+
+  def debug(msg, project: nil) = write("DEBUG", msg, project: project)
+  def info(msg, project: nil)  = write("INFO",  msg, project: project)
+  def warn(msg, project: nil)  = write("WARN",  msg, project: project)
+  def error(msg, project: nil) = write("ERROR", msg, project: project)
+
+  def close
+    @mutex.synchronize do
+      @global_file&.close
+      @project_dirs.each_value { |f| f[:file]&.close }
+    end
+  end
+
+  private
+
+  def write(level, msg, project: nil)
+    return if LEVELS[level] < @level
+
+    timestamp = Time.now.strftime("%Y-%m-%d %H:%M:%S")
+    prefix = project ? "[#{project}]" : "[autodev]"
+    line = "#{timestamp} #{level.ljust(5)} #{prefix} #{msg}"
+
+    @mutex.synchronize do
+      # Console output with color
+      console_line = case level
+                     when "ERROR" then @pastel.red("  #{prefix} #{msg}")
+                     when "WARN"  then @pastel.yellow("  #{prefix} #{msg}")
+                     when "DEBUG" then @pastel.dim("  #{prefix} #{msg}")
+                     else "  #{@pastel.cyan(prefix)} #{msg}"
+                     end
+      if level == "ERROR"
+        $stderr.puts console_line
+      else
+        $stdout.puts console_line
+      end
+
+      # File output (if configured)
+      write_to_global_file(line) if @log_dir
+      write_to_project_file(project, line) if @log_dir && project
+    end
+  end
+
+  def write_to_global_file(line)
+    today = Time.now.strftime("%Y-%m-%d")
+    if @global_date != today
+      @global_file&.close
+      path = File.join(@log_dir, "autodev", "#{today}.log")
+      @global_file = File.open(path, "a")
+      @global_file.sync = true
+      @global_date = today
+    end
+    @global_file.puts(line)
+  end
+
+  def write_to_project_file(project, line)
+    slug = project.gsub("/", "_")
+    today = Time.now.strftime("%Y-%m-%d")
+    entry = @project_dirs[slug] ||= { file: nil, date: nil }
+
+    if entry[:date] != today
+      entry[:file]&.close
+      dir = File.join(@log_dir, slug)
+      FileUtils.mkdir_p(dir)
+      path = File.join(dir, "#{today}.log")
+      entry[:file] = File.open(path, "a")
+      entry[:file].sync = true
+      entry[:date] = today
+    end
+    entry[:file].puts(line)
+  end
+end
+
 # == Configuration =============================================================
 
 module Config
@@ -78,6 +170,8 @@ module Config
     poll_interval: 300                          # seconds between poll cycles
     max_workers: 3                              # concurrent worker threads
     dc_timeout: 1800                              # danger-claude timeout in seconds (default: 1800 = 30min)
+    log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
+    log_level: INFO                                # DEBUG, INFO, WARN, ERROR (default: INFO)
     # database_url: sqlite://~/.autodev/autodev.db  # default
 
     projects:
@@ -102,6 +196,8 @@ module Config
     "poll_interval"  => 300,
     "max_workers"    => 3,
     "dc_timeout"     => 1800,
+    "log_dir"        => File.join(CONFIG_DIR, "logs"),
+    "log_level"      => "INFO",
     "database_url"   => "sqlite://#{DEFAULT_DB}",
     "projects"       => []
   }.freeze
@@ -371,11 +467,11 @@ end
 # == IssueProcessor ===========================================================
 
 class IssueProcessor
-  def initialize(client:, config:, project_config:, pastel:, token:)
+  def initialize(client:, config:, project_config:, logger:, token:)
     @client         = client
     @config         = config
     @project_config = project_config
-    @pastel         = pastel
+    @logger         = logger
     @token          = token
     @project_path   = project_config["path"]
     @gitlab_url     = config["gitlab_url"]
@@ -721,21 +817,21 @@ class IssueProcessor
   end
 
   def log(msg)
-    puts "  #{@pastel.cyan("[#{@project_path}]")} #{msg}"
+    @logger.info(msg, project: @project_path)
   end
 
   def log_error(msg)
-    warn "  #{@pastel.red("[#{@project_path}]")} #{msg}"
+    @logger.error(msg, project: @project_path)
   end
 end
 
 # == WorkerPool ================================================================
 
 class WorkerPool
-  def initialize(size:, pastel:)
+  def initialize(size:, logger:)
     @size    = size
     @queue   = Queue.new
-    @pastel  = pastel
+    @logger  = logger
     @threads = []
     @running = true
   end
@@ -752,7 +848,7 @@ class WorkerPool
             # Queue empty, wait briefly
             sleep 0.5
           rescue StandardError => e
-            warn @pastel.red("  [worker-#{i}] Unhandled error: #{e.class}: #{e.message}")
+            @logger.error("[worker-#{i}] Unhandled error: #{e.class}: #{e.message}")
           end
         end
       end
@@ -779,24 +875,28 @@ end
 
 def main
   pastel = Pastel.new
+  logger = AppLogger.new(pastel: pastel)
 
-  puts pastel.bold.blue("+=== autodev ================================================+")
+  logger.info("+=== autodev ================================================+")
 
   # 1. Parse args + load config
   config = parse_args(ARGV)
 
-  # 2. Validate — offer to create template config if missing
+  # 2. Configure logger
+  logger.configure(log_dir: config["log_dir"], level: config["log_level"])
+
+  # 3. Validate — offer to create template config if missing
   config_path = config["_config_path"] || Config::CONFIG_PATH
 
   unless File.exist?(config_path)
-    puts pastel.yellow("  No config file found at #{config_path}")
+    logger.warn("No config file found at #{config_path}")
     print pastel.bold("  Create a template config to edit? [Y/n] ")
     answer = $stdin.gets&.strip&.downcase
     if answer.nil? || answer.empty? || answer == "y"
       FileUtils.mkdir_p(File.dirname(config_path))
       File.write(config_path, Config::TEMPLATE)
-      puts pastel.green("  Created #{config_path}")
-      puts "  Edit this file with your GitLab URL, token and projects, then re-run autodev."
+      logger.info("Created #{config_path}")
+      logger.info("Edit this file with your GitLab URL, token and projects, then re-run autodev.")
       exit 0
     else
       raise ConfigError, "No config file at #{config_path}. Create one manually or re-run to generate a template."
@@ -818,29 +918,29 @@ def main
   # Check mr-review (warning only)
   _, mr_status = Open3.capture2e("which", "mr-review")
   unless mr_status.success?
-    puts pastel.yellow("  Warning: mr-review not installed, review step will be skipped")
+    logger.warn("mr-review not installed, review step will be skipped")
   end
 
-  # 3. Connect SQLite + migrate
+  # 4. Connect SQLite + migrate
   token = config["gitlab_token"]
   client = build_gitlab_client(config["gitlab_url"], token)
 
   if Database.connect(config["database_url"])
-    puts pastel.dim("  Database connected")
+    logger.debug("Database connected")
   else
     raise ConfigError, "Database connection required for autodev"
   end
 
   # Reset errored issues for retry
   reset_count = Database.reset_errors_to_pending!
-  puts pastel.yellow("  Reset #{reset_count} errored issue(s) to pending") if reset_count && reset_count > 0
+  logger.warn("Reset #{reset_count} errored issue(s) to pending") if reset_count && reset_count > 0
 
-  # 4. Start WorkerPool
-  pool = WorkerPool.new(size: config["max_workers"], pastel: pastel)
+  # 5. Start WorkerPool
+  pool = WorkerPool.new(size: config["max_workers"], logger: logger)
   pool.start
-  puts pastel.dim("  Worker pool started (#{config["max_workers"]} workers)")
+  logger.debug("Worker pool started (#{config["max_workers"]} workers)")
 
-  # 5. Trap signals
+  # 6. Trap signals
   shutdown_requested = false
   %w[INT TERM].each do |sig|
     Signal.trap(sig) do
@@ -850,7 +950,7 @@ def main
 
   trigger_label = config["trigger_label"]
 
-  # 6. Poll loop
+  # 7. Poll loop
   loop do
     break if shutdown_requested
 
@@ -858,7 +958,7 @@ def main
       break if shutdown_requested
 
       project_path = project_config["path"]
-      puts pastel.dim("  Polling #{project_path} for label '#{trigger_label}'...")
+      logger.debug("Polling #{project_path} for label '#{trigger_label}'...", project: project_path)
 
       begin
         issues = fetch_trigger_issues(client, project_path, trigger_label)
@@ -873,7 +973,7 @@ def main
           end
 
           if config["dry_run"]
-            puts "  #{pastel.yellow("[dry-run]")} Would process issue ##{issue.iid}: #{issue.title}"
+            logger.info("[dry-run] Would process issue ##{issue.iid}: #{issue.title}", project: project_path)
             next
           end
 
@@ -893,15 +993,15 @@ def main
             client:         worker_client,
             config:         config,
             project_config: project_config,
-            pastel:         pastel,
+            logger:         logger,
             token:          token
           )
 
           pool.enqueue { processor.process(issue) }
-          puts "  Enqueued issue ##{issue.iid}: #{issue.title}"
+          logger.info("Enqueued issue ##{issue.iid}: #{issue.title}", project: project_path)
         end
       rescue AutodevError => e
-        warn pastel.red("  Error polling #{project_path}: #{e.message}")
+        logger.error("Error polling #{project_path}: #{e.message}", project: project_path)
       end
     end
 
@@ -914,28 +1014,26 @@ def main
     end
   end
 
-  # 7. Graceful shutdown
-  puts pastel.dim("\n  Shutting down workers...")
+  # 8. Graceful shutdown
+  logger.info("Shutting down workers...")
   pool.shutdown
-  puts pastel.bold.green("  autodev stopped.")
+  logger.info("autodev stopped.")
 
 rescue ConfigError => e
-  pastel ||= Pastel.new
-  warn pastel.red.bold("\n  Config error: #{e.message}")
+  logger&.error("Config error: #{e.message}") || (warn "Config error: #{e.message}")
   exit 1
 
 rescue Interrupt
-  pastel ||= Pastel.new
-  warn pastel.yellow("\n  Interrupted.")
+  logger&.warn("Interrupted.") || (warn "Interrupted.")
   exit 130
 
 rescue StandardError => e
-  pastel ||= Pastel.new
-  warn pastel.red.bold("\n  Unexpected error: #{e.class}: #{e.message}")
-  warn pastel.dim(e.backtrace&.first(5)&.join("\n  "))
+  logger&.error("Unexpected error: #{e.class}: #{e.message}") || (warn "Unexpected error: #{e.class}: #{e.message}")
+  logger&.error(e.backtrace&.first(5)&.join("\n  ")) if e.backtrace
   exit 1
 
 ensure
+  logger&.close
   Database.disconnect
 end
 

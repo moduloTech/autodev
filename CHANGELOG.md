@@ -11,6 +11,7 @@
 - `--dry-run` flag to poll and display which issues would be processed without side effects.
 - Capture and store danger-claude stdout/stderr (`dc_stdout`, `dc_stderr` columns) from all calls (`-p` and `-c`) in the database for debugging and audit.
 - Configurable danger-claude timeout (`dc_timeout`, default: 1800s/30min). Global or per-project. Uses `Process.spawn` with TERM/KILL for reliable subprocess cleanup.
+- Structured logging with levels (DEBUG/INFO/WARN/ERROR), timestamps, dual output (stdout + file), daily log rotation. Global logs in `~/.autodev/logs/autodev/`, per-project logs in `~/.autodev/logs/{project}/`. Configurable via `log_dir` and `log_level` in config.
 
 ### Fixed
 
