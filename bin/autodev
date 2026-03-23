@@ -170,6 +170,11 @@ def parse_args(argv)
       cli_overrides["once"] = true
     end
 
+    opts.on("--dry-run", "Poll and show what would be processed, no side effects") do
+      cli_overrides["dry_run"] = true
+      cli_overrides["once"] = true
+    end
+
     opts.on("-h", "--help", "Show this help") do
       puts opts
       exit 0
@@ -801,6 +806,11 @@ def main
           # Skip if already tracked (unless it was reset to pending)
           existing = Database.find_issue(project_path, issue.iid)
           if existing && existing[:status] != "pending"
+            next
+          end
+
+          if config["dry_run"]
+            puts "  #{pastel.yellow("[dry-run]")} Would process issue ##{issue.iid}: #{issue.title}"
             next
           end
 
