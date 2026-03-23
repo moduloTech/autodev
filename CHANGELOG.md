@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Shallow clone with `target_branch`: pass `--branch` to `git clone` so the target branch is fetched even with `--depth 1` (previously failed with "pathspec did not match").
+
 ## [0.2.0] - 2026-03-23
 
 ### Added

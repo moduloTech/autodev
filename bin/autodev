@@ -652,8 +652,11 @@ class IssueProcessor
     clone_depth = @project_config["clone_depth"] || 1
     sparse_paths = @project_config["sparse_checkout"]
 
+    target = @project_config["target_branch"]
+
     cmd = ["git", "clone"]
     cmd += ["--depth", clone_depth.to_s] if clone_depth.positive?
+    cmd += ["--branch", target] if target
     if sparse_paths.is_a?(Array) && sparse_paths.any?
       cmd += ["--filter=blob:none", "--sparse"]
     end
@@ -669,11 +672,7 @@ class IssueProcessor
   end
 
   def create_branch(work_dir, iid, title)
-    # Determine base branch
-    target = @project_config["target_branch"]
-    if target
-      run_cmd(["git", "checkout", target], chdir: work_dir)
-    end
+    # target_branch is already checked out via --branch in clone_repo
 
     slug = I18n.transliterate(title)
                 .downcase
