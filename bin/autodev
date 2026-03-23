@@ -1075,6 +1075,7 @@ class MrFixer
         thread_context = format_discussion(discussion)
         log "Fixing discussion #{idx + 1}/#{discussions.size}: #{discussion[:title]}"
 
+        extra = @project_config["extra_prompt"]
         prompt = <<~PROMPT
           Tu dois corriger le code en reponse a un commentaire de review sur une Merge Request.
 
@@ -1089,6 +1090,7 @@ class MrFixer
           - Respecte les conventions du projet (voir CLAUDE.md si present).
           - Ne modifie que ce qui est necessaire pour repondre au commentaire.
           - Ne touche pas aux autres parties du code.
+          #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
         PROMPT
 
         danger_claude_prompt(work_dir, prompt)
