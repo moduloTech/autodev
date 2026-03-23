@@ -170,6 +170,8 @@ module Config
     poll_interval: 300                          # seconds between poll cycles
     max_workers: 3                              # concurrent worker threads
     dc_timeout: 1800                              # danger-claude timeout in seconds (default: 1800 = 30min)
+    max_retries: 3                                 # max retry attempts per issue (default: 3)
+    retry_backoff: 30                              # base backoff in seconds, doubles each retry (default: 30)
     log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
     log_level: INFO                                # DEBUG, INFO, WARN, ERROR (default: INFO)
     # database_url: sqlite://~/.autodev/autodev.db  # default
@@ -183,6 +185,8 @@ module Config
         # label_to_add: "Development::Awaiting CR"
         # extra_prompt: "Use RSpec for tests"   # additional instructions for Claude
         # dc_timeout: 1800                        # danger-claude timeout in seconds (overrides global)
+        # max_retries: 3                          # max retries per issue (overrides global)
+        # retry_backoff: 30                       # base backoff seconds (overrides global)
         # clone_depth: 1                         # git clone depth (0 = full clone, default: 1)
         # sparse_checkout:                       # sparse checkout paths (for monorepos)
         #   - "src/"
@@ -196,6 +200,8 @@ module Config
     "poll_interval"  => 300,
     "max_workers"    => 3,
     "dc_timeout"     => 1800,
+    "max_retries"    => 3,
+    "retry_backoff"  => 30,
     "log_dir"        => File.join(CONFIG_DIR, "logs"),
     "log_level"      => "INFO",
     "database_url"   => "sqlite://#{DEFAULT_DB}",
@@ -233,6 +239,8 @@ module Config
     config["poll_interval"] = config["poll_interval"].to_i
     config["max_workers"]   = config["max_workers"].to_i
     config["dc_timeout"]    = config["dc_timeout"].to_i
+    config["max_retries"]   = config["max_retries"].to_i
+    config["retry_backoff"] = config["retry_backoff"].to_i
 
     config
   end
@@ -339,11 +347,13 @@ module Database
         mr_iid        INTEGER,
         mr_url        TEXT,
         error_message TEXT,
-        dc_stdout     TEXT,
-        dc_stderr     TEXT,
-        started_at    TEXT,
-        finished_at   TEXT,
-        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        dc_stdout      TEXT,
+        dc_stderr      TEXT,
+        retry_count    INTEGER NOT NULL DEFAULT 0,
+        next_retry_at  TEXT,
+        started_at     TEXT,
+        finished_at    TEXT,
+        created_at     TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(project_path, issue_iid)
       );
     SQL
@@ -352,6 +362,8 @@ module Database
     %w[dc_stdout dc_stderr].each do |col|
       @db.run("ALTER TABLE issues ADD COLUMN #{col} TEXT") rescue nil
     end
+    @db.run("ALTER TABLE issues ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0") rescue nil
+    @db.run("ALTER TABLE issues ADD COLUMN next_retry_at TEXT") rescue nil
   end
 
   # -- Issues CRUD --
@@ -379,10 +391,21 @@ module Database
     @db[:issues].where(project_path: project_path, issue_iid: issue_iid).update(**fields)
   end
 
-  def self.reset_errors_to_pending!
+  def self.reset_errors_to_pending!(max_retries:)
     return unless connected?
-    count = @db[:issues].where(status: "error").update(status: "pending", error_message: nil, started_at: nil)
+    # Only reset errors that haven't exceeded max retries
+    count = @db[:issues]
+      .where(status: "error")
+      .where { retry_count < max_retries }
+      .where { Sequel.lit("next_retry_at IS NULL OR next_retry_at <= datetime('now')") }
+      .update(status: "pending", error_message: nil, started_at: nil)
     count
+  end
+
+  def self.exceeded_max_retries?(project_path, issue_iid, max_retries)
+    return false unless connected?
+    row = find_issue(project_path, issue_iid)
+    row && row[:retry_count] >= max_retries
   end
 end
 
@@ -542,13 +565,28 @@ class IssueProcessor
 
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
-      Database.update_issue(@project_path, iid,
+      existing = Database.find_issue(@project_path, iid)
+      retry_count = (existing ? existing[:retry_count] : 0) + 1
+      max_retries = (@project_config["max_retries"] || @config["max_retries"] || 3).to_i
+      backoff = (@project_config["retry_backoff"] || @config["retry_backoff"] || 30).to_i
+      backoff_seconds = backoff * (2**(retry_count - 1))
+
+      fields = {
         status: "error",
         error_message: "#{e.class}: #{e.message}\n  #{bt}",
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
+        retry_count: retry_count,
         finished_at: Sequel.lit("datetime('now')")
-      )
-      log_error "Issue ##{iid} failed: #{e.class}: #{e.message}"
+      }
+
+      if retry_count < max_retries
+        fields[:next_retry_at] = Sequel.lit("datetime('now', '+#{backoff_seconds} seconds')")
+        log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, retry in #{backoff_seconds}s): #{e.class}: #{e.message}"
+      else
+        log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, no more retries): #{e.class}: #{e.message}"
+      end
+
+      Database.update_issue(@project_path, iid, **fields)
       log_error "  #{bt}" if bt
     ensure
       # Cleanup temp directory
@@ -932,7 +970,7 @@ def main
   end
 
   # Reset errored issues for retry
-  reset_count = Database.reset_errors_to_pending!
+  reset_count = Database.reset_errors_to_pending!(max_retries: config["max_retries"])
   logger.warn("Reset #{reset_count} errored issue(s) to pending") if reset_count && reset_count > 0
 
   # 5. Start WorkerPool
@@ -969,6 +1007,13 @@ def main
           # Skip if already tracked (unless it was reset to pending)
           existing = Database.find_issue(project_path, issue.iid)
           if existing && existing[:status] != "pending"
+            next
+          end
+
+          # Skip if max retries exceeded
+          max_retries = (project_config["max_retries"] || config["max_retries"]).to_i
+          if Database.exceeded_max_retries?(project_path, issue.iid, max_retries)
+            logger.debug("Issue ##{issue.iid} exceeded max retries (#{max_retries}), skipping", project: project_path)
             next
           end
 
