@@ -924,6 +924,7 @@ class IssueProcessor
   end
 
   def danger_claude_prompt(work_dir, prompt)
+    @logger.debug("danger-claude -p prompt:\n#{prompt}", project: @project_path)
     out, err, ok = run_with_timeout("danger-claude", ["-p", prompt], chdir: work_dir, label: "-p")
     unless ok
       raise ImplementationError, "danger-claude -p failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
@@ -1207,6 +1208,7 @@ class MrFixer
   end
 
   def danger_claude_prompt(work_dir, prompt)
+    @logger.debug("danger-claude -p prompt:\n#{prompt}", project: @project_path)
     out, err, ok = run_with_timeout("danger-claude", ["-p", prompt], chdir: work_dir, label: "-p")
     unless ok
       raise ImplementationError, "danger-claude -p failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
