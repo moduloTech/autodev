@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- MR comment fixing: automatically fix unresolved MR discussions (from mr-review or humans). One discussion = one danger-claude call = one commit. Discussions are resolved after fixing. Status lifecycle: `done` → `mr_fixing` → `mr_fixed` → ... → `over`. Configurable `max_fix_rounds` (default: 3, per-project overridable). Only processes issues that still have the `autodev` trigger label.
+
 ### Fixed
 
 - Shallow clone with `target_branch`: pass `--branch` to `git clone` so the target branch is fetched even with `--depth 1` (previously failed with "pathspec did not match").

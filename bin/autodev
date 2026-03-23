@@ -172,6 +172,7 @@ module Config
     dc_timeout: 1800                              # danger-claude timeout in seconds (default: 1800 = 30min)
     max_retries: 3                                 # max retry attempts per issue (default: 3)
     retry_backoff: 30                              # base backoff in seconds, doubles each retry (default: 30)
+    max_fix_rounds: 3                              # max MR comment fix rounds per issue (default: 3)
     log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
     log_level: INFO                                # DEBUG, INFO, WARN, ERROR (default: INFO)
     # database_url: sqlite://~/.autodev/autodev.db  # default
@@ -187,6 +188,7 @@ module Config
         # dc_timeout: 1800                        # danger-claude timeout in seconds (overrides global)
         # max_retries: 3                          # max retries per issue (overrides global)
         # retry_backoff: 30                       # base backoff seconds (overrides global)
+        # max_fix_rounds: 3                       # max MR comment fix rounds (overrides global)
         # clone_depth: 1                         # git clone depth (0 = full clone, default: 1)
         # sparse_checkout:                       # sparse checkout paths (for monorepos)
         #   - "src/"
@@ -202,6 +204,7 @@ module Config
     "dc_timeout"     => 1800,
     "max_retries"    => 3,
     "retry_backoff"  => 30,
+    "max_fix_rounds" => 3,
     "log_dir"        => File.join(CONFIG_DIR, "logs"),
     "log_level"      => "INFO",
     "database_url"   => "sqlite://#{DEFAULT_DB}",
@@ -239,8 +242,9 @@ module Config
     config["poll_interval"] = config["poll_interval"].to_i
     config["max_workers"]   = config["max_workers"].to_i
     config["dc_timeout"]    = config["dc_timeout"].to_i
-    config["max_retries"]   = config["max_retries"].to_i
-    config["retry_backoff"] = config["retry_backoff"].to_i
+    config["max_retries"]    = config["max_retries"].to_i
+    config["retry_backoff"]  = config["retry_backoff"].to_i
+    config["max_fix_rounds"] = config["max_fix_rounds"].to_i
 
     config
   end
@@ -350,6 +354,7 @@ module Database
         dc_stdout      TEXT,
         dc_stderr      TEXT,
         retry_count    INTEGER NOT NULL DEFAULT 0,
+        fix_round      INTEGER NOT NULL DEFAULT 0,
         next_retry_at  TEXT,
         clarification_requested_at TEXT,
         started_at     TEXT,
@@ -366,6 +371,7 @@ module Database
     @db.run("ALTER TABLE issues ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0") rescue nil
     @db.run("ALTER TABLE issues ADD COLUMN next_retry_at TEXT") rescue nil
     @db.run("ALTER TABLE issues ADD COLUMN clarification_requested_at TEXT") rescue nil
+    @db.run("ALTER TABLE issues ADD COLUMN fix_round INTEGER NOT NULL DEFAULT 0") rescue nil
   end
 
   # -- Issues CRUD --
@@ -408,6 +414,25 @@ module Database
     return false unless connected?
     row = find_issue(project_path, issue_iid)
     row && row[:retry_count] >= max_retries
+  end
+
+  def self.issues_for_mr_fixing(project_path, max_fix_rounds)
+    return [] unless connected?
+    @db[:issues]
+      .where(project_path: project_path)
+      .where(status: %w[done mr_fixed])
+      .where { fix_round < max_fix_rounds }
+      .exclude(mr_url: nil)
+      .all
+  end
+
+  def self.mark_max_rounds_as_over!(project_path, max_fix_rounds)
+    return unless connected?
+    @db[:issues]
+      .where(project_path: project_path)
+      .where(status: "mr_fixed")
+      .where { fix_round >= max_fix_rounds }
+      .update(status: "over")
   end
 end
 
@@ -988,6 +1013,269 @@ class IssueProcessor
   end
 end
 
+# == MrFixer ==================================================================
+
+class MrFixer
+  def initialize(client:, config:, project_config:, logger:, token:)
+    @client         = client
+    @config         = config
+    @project_config = project_config
+    @logger         = logger
+    @token          = token
+    @project_path   = project_config["path"]
+    @gitlab_url     = config["gitlab_url"]
+    @dc_stdout      = +""
+    @dc_stderr      = +""
+  end
+
+  def fix(issue_row)
+    iid        = issue_row[:issue_iid]
+    mr_iid     = issue_row[:mr_iid]
+    branch     = issue_row[:branch_name]
+    fix_round  = issue_row[:fix_round]
+
+    log "Checking MR !#{mr_iid} for unresolved discussions (round #{fix_round + 1})..."
+
+    # Verify the issue still has the trigger label
+    trigger_label = @config["trigger_label"]
+    begin
+      gi = @client.issue(@project_path, iid)
+      unless gi.labels&.include?(trigger_label)
+        log "Issue ##{iid} no longer has '#{trigger_label}' label, skipping"
+        return
+      end
+    rescue Gitlab::Error::ResponseError => e
+      log_error "Cannot fetch issue ##{iid}: #{e.message}"
+      return
+    end
+
+    # Fetch unresolved discussions
+    discussions = fetch_unresolved_discussions(mr_iid)
+    if discussions.empty?
+      log "No unresolved discussions on MR !#{mr_iid}"
+      # If already in mr_fixed, move to over since nothing left to fix
+      if issue_row[:status] == "mr_fixed"
+        Database.update_issue(@project_path, iid, status: "over")
+        log "Issue ##{iid}: all discussions resolved, status → over"
+      end
+      return
+    end
+
+    log "Found #{discussions.size} unresolved discussion(s) on MR !#{mr_iid}"
+    Database.update_issue(@project_path, iid, status: "mr_fixing")
+
+    work_dir = "/tmp/autodev_mrfix_#{@project_path.gsub("/", "_")}_#{iid}"
+    begin
+      # Clone and checkout the branch
+      clone_and_checkout(work_dir, branch)
+
+      # Process each discussion: one danger-claude call + one commit per discussion
+      discussions.each_with_index do |discussion, idx|
+        thread_context = format_discussion(discussion)
+        log "Fixing discussion #{idx + 1}/#{discussions.size}: #{discussion[:title]}"
+
+        prompt = <<~PROMPT
+          Tu dois corriger le code en reponse a un commentaire de review sur une Merge Request.
+
+          ## Commentaire de review
+
+          #{thread_context}
+
+          ## Instructions
+
+          - Lis attentivement le commentaire et le contexte du diff.
+          - Corrige le code pour repondre au commentaire.
+          - Respecte les conventions du projet (voir CLAUDE.md si present).
+          - Ne modifie que ce qui est necessaire pour repondre au commentaire.
+          - Ne touche pas aux autres parties du code.
+        PROMPT
+
+        danger_claude_prompt(work_dir, prompt)
+        danger_claude_commit(work_dir)
+
+        # Resolve the discussion
+        resolve_discussion(mr_iid, discussion[:id])
+      end
+
+      # Verify there are new commits
+      _out, _err, ok = run_cmd_status(["git", "log", "origin/#{branch}..HEAD", "--oneline"], chdir: work_dir)
+      unless ok
+        log "No new commits after fixing, skipping push"
+        Database.update_issue(@project_path, iid, status: "mr_fixed", fix_round: fix_round + 1)
+        return
+      end
+
+      # Push
+      log "Pushing fixes to #{branch}..."
+      _out, _err, push_ok = run_cmd_status(["git", "push", "origin", branch], chdir: work_dir)
+      unless push_ok
+        log "Push failed, retrying with --force-with-lease..."
+        run_cmd(["git", "push", "--force-with-lease", "origin", branch], chdir: work_dir)
+      end
+
+      Database.update_issue(@project_path, iid,
+        status: "mr_fixed",
+        fix_round: fix_round + 1,
+        dc_stdout: @dc_stdout,
+        dc_stderr: @dc_stderr
+      )
+      notify_issue(iid, ":wrench: **autodev** : #{discussions.size} commentaire(s) de review corrige(s) sur #{issue_row[:mr_url]} (round #{fix_round + 1})")
+      log "MR !#{mr_iid}: fixed #{discussions.size} discussion(s) (round #{fix_round + 1})"
+
+    rescue StandardError => e
+      bt = e.backtrace&.first(10)&.join("\n  ")
+      Database.update_issue(@project_path, iid,
+        status: "error",
+        error_message: "MR fix error: #{e.class}: #{e.message}\n  #{bt}",
+        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
+      )
+      notify_issue(iid, ":x: **autodev** : echec correction MR — #{e.class}: #{e.message[0, 200]}")
+      log_error "MR fix failed: #{e.class}: #{e.message}"
+      log_error "  #{bt}" if bt
+    ensure
+      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
+    end
+  end
+
+  private
+
+  def clone_and_checkout(work_dir, branch)
+    FileUtils.rm_rf(work_dir) if Dir.exist?(work_dir)
+
+    uri = URI.parse(@gitlab_url)
+    host_port = uri.port && ![80, 443].include?(uri.port) ? "#{uri.host}:#{uri.port}" : uri.host
+    clone_url = "#{uri.scheme}://oauth2:#{@token}@#{host_port}/#{@project_path}.git"
+
+    clone_depth = @project_config["clone_depth"] || 1
+    cmd = ["git", "clone"]
+    cmd += ["--depth", clone_depth.to_s] if clone_depth.positive?
+    cmd += ["--branch", branch]
+    cmd += [clone_url, work_dir]
+
+    log "Cloning #{@project_path} (branch: #{branch})..."
+    run_cmd(cmd)
+  end
+
+  def fetch_unresolved_discussions(mr_iid)
+    discussions = @client.merge_request_discussions(@project_path, mr_iid)
+    discussions.select { |d| d.notes&.any? && !resolved?(d) }.map do |d|
+      first_note = d.notes.first
+      {
+        id:    d.id,
+        title: first_note.body.to_s[0, 80],
+        notes: d.notes
+      }
+    end
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to fetch MR discussions: #{e.message}"
+    []
+  end
+
+  def resolved?(discussion)
+    # A discussion is resolved if all resolvable notes are resolved
+    resolvable_notes = discussion.notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
+    return true if resolvable_notes.empty?
+    resolvable_notes.all? { |n| n.respond_to?(:resolved) && n.resolved }
+  end
+
+  def format_discussion(discussion)
+    lines = []
+    discussion[:notes].each do |note|
+      author = note.author&.name || "Unknown"
+      lines << "### #{author} (#{note.created_at})"
+      if note.respond_to?(:position) && note.position
+        pos = note.position
+        lines << "Fichier: `#{pos.respond_to?(:new_path) ? pos.new_path : pos["new_path"]}`" if pos
+      end
+      lines << note.body.to_s
+      lines << ""
+    end
+    lines.join("\n")
+  end
+
+  def resolve_discussion(mr_iid, discussion_id)
+    @client.resolve_merge_request_discussion(@project_path, mr_iid, discussion_id, resolved: true)
+    log "Resolved discussion #{discussion_id}"
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to resolve discussion #{discussion_id}: #{e.message}"
+  end
+
+  def notify_issue(iid, message)
+    @client.create_issue_note(@project_path, iid, message)
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to post comment on ##{iid}: #{e.message}"
+  end
+
+  def danger_claude_prompt(work_dir, prompt)
+    out, err, ok = run_with_timeout("danger-claude", ["-p", prompt], chdir: work_dir, label: "-p")
+    unless ok
+      raise ImplementationError, "danger-claude -p failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
+    end
+    out
+  end
+
+  def danger_claude_commit(work_dir)
+    out, err, ok = run_with_timeout("danger-claude", ["-c"], chdir: work_dir, label: "-c")
+    unless ok
+      raise ImplementationError, "danger-claude -c failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
+    end
+    out
+  end
+
+  def run_with_timeout(cmd, args, chdir:, label: nil)
+    timeout = (@project_config["dc_timeout"] || @config["dc_timeout"] || 1800).to_i
+    tag = label ? "#{cmd} #{label}" : cmd
+
+    stdout_r, stdout_w = IO.pipe
+    stderr_r, stderr_w = IO.pipe
+
+    pid = Process.spawn(CLEAN_ENV, cmd, *args, chdir: chdir, out: stdout_w, err: stderr_w)
+    stdout_w.close
+    stderr_w.close
+
+    out_thread = Thread.new { stdout_r.read }
+    err_thread = Thread.new { stderr_r.read }
+
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    loop do
+      remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      if remaining <= 0
+        Process.kill("TERM", pid)
+        sleep 5
+        Process.kill("KILL", pid) rescue nil
+        Process.wait(pid) rescue nil
+        out = out_thread.value
+        err = err_thread.value
+        @dc_stdout << "=== #{tag} (TIMEOUT after #{timeout}s) ===\n#{out}\n"
+        @dc_stderr << "=== #{tag} (TIMEOUT after #{timeout}s) ===\n#{err}\n"
+        raise ImplementationError, "#{tag} timed out after #{timeout}s"
+      end
+
+      _pid, status = Process.wait2(pid, Process::WNOHANG)
+      if status
+        out = out_thread.value
+        err = err_thread.value
+        @dc_stdout << "=== #{tag} ===\n#{out}\n"
+        @dc_stderr << "=== #{tag} ===\n#{err}\n"
+        return [out, err, status.success?]
+      end
+
+      sleep 1
+    end
+  ensure
+    stdout_r&.close
+    stderr_r&.close
+  end
+
+  def log(msg)
+    @logger.info(msg, project: @project_path)
+  end
+
+  def log_error(msg)
+    @logger.error(msg, project: @project_path)
+  end
+end
+
 # == WorkerPool ================================================================
 
 class WorkerPool
@@ -1183,6 +1471,32 @@ def main
         end
       rescue AutodevError => e
         logger.error("Error polling #{project_path}: #{e.message}", project: project_path)
+      end
+
+      # -- MR comment fixing poll --
+      next if config["dry_run"]
+      begin
+        max_fix_rounds = (project_config["max_fix_rounds"] || config["max_fix_rounds"]).to_i
+        Database.mark_max_rounds_as_over!(project_path, max_fix_rounds)
+        fixable = Database.issues_for_mr_fixing(project_path, max_fix_rounds)
+
+        fixable.each do |issue_row|
+          break if shutdown_requested
+
+          worker_client = build_gitlab_client(config["gitlab_url"], token)
+          fixer = MrFixer.new(
+            client:         worker_client,
+            config:         config,
+            project_config: project_config,
+            logger:         logger,
+            token:          token
+          )
+
+          pool.enqueue { fixer.fix(issue_row) }
+          logger.info("Enqueued MR fix for issue ##{issue_row[:issue_iid]} (round #{issue_row[:fix_round] + 1})", project: project_path)
+        end
+      rescue StandardError => e
+        logger.error("Error polling MR fixes for #{project_path}: #{e.message}", project: project_path)
       end
     end
 
