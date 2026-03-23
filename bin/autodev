@@ -399,13 +399,13 @@ class IssueProcessor
       # 8. Push
       push(work_dir, branch_name)
 
-      # 9. Labels
+      # 9. Create MR
       Database.update_issue(@project_path, iid, status: "creating_mr")
-      update_labels(iid)
-
-      # 10. Create MR
       mr = create_merge_request(work_dir, iid, branch_name, title)
       Database.update_issue(@project_path, iid, mr_iid: mr.iid, mr_url: mr.web_url, status: "reviewing")
+
+      # 10. Labels (after MR to avoid bad state on failure)
+      update_labels(iid)
 
       # 11. Review (non-fatal)
       run_review(mr.web_url)

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Label guard: labels are now updated after MR creation succeeds, preventing issues from being left in a bad state if MR creation fails.
+
 ## [0.1.0] - 2026-03-23
 
 ### Added
