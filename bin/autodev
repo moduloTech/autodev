@@ -351,6 +351,7 @@ module Database
         dc_stderr      TEXT,
         retry_count    INTEGER NOT NULL DEFAULT 0,
         next_retry_at  TEXT,
+        clarification_requested_at TEXT,
         started_at     TEXT,
         finished_at    TEXT,
         created_at     TEXT NOT NULL DEFAULT (datetime('now')),
@@ -364,6 +365,7 @@ module Database
     end
     @db.run("ALTER TABLE issues ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0") rescue nil
     @db.run("ALTER TABLE issues ADD COLUMN next_retry_at TEXT") rescue nil
+    @db.run("ALTER TABLE issues ADD COLUMN clarification_requested_at TEXT") rescue nil
   end
 
   # -- Issues CRUD --
@@ -468,6 +470,20 @@ def fetch_issue_context(client, project_path, issue_iid)
   lines.join("\n")
 end
 
+def clarification_answered?(client, project_path, issue_iid, requested_at)
+  return true unless requested_at # No timestamp means we should retry
+
+  notes = client.issue_notes(project_path, issue_iid, per_page: 100)
+  # Check for non-system, non-autodev comments posted after the clarification request
+  notes.any? do |note|
+    !note.system &&
+      note.created_at > requested_at &&
+      !note.body.to_s.include?("**autodev**")
+  end
+rescue Gitlab::Error::ResponseError
+  false
+end
+
 # == Shell helpers =============================================================
 
 def run_cmd(cmd, chdir: nil, env: {})
@@ -550,17 +566,23 @@ class IssueProcessor
         # 3. Fetch full issue context
         context = fetch_issue_context(@client, @project_path, iid)
 
-        # 4. Ensure CLAUDE.md exists
+        # 4. Check specification clarity
+        if check_specification(work_dir, context, iid)
+          # Spec needs clarification — abort processing
+          return
+        end
+
+        # 5. Ensure CLAUDE.md exists
         ensure_claude_md(work_dir)
 
-        # 5. Implement
+        # 6. Implement
         implement(work_dir, context, iid)
         Database.update_issue(@project_path, iid, status: "committing")
 
-        # 6. Commit
+        # 7. Commit
         commit(work_dir)
 
-        # 7. Verify changes were produced
+        # 8. Verify changes were produced
         verify_changes(work_dir, branch_name)
         Database.update_issue(@project_path, iid, status: "pushing")
 
@@ -678,6 +700,72 @@ class IssueProcessor
       "Sois concis et factuel."
     )
     danger_claude_commit(work_dir)
+  end
+
+  def check_specification(work_dir, context, iid)
+    log "Checking specification clarity for ##{iid}..."
+
+    prompt = <<~PROMPT
+      Analyse le ticket GitLab suivant et determine si la specification est suffisamment precise
+      pour etre implementee. Identifie les ambiguites, informations manquantes ou contradictions.
+
+      #{context}
+
+      ## Instructions de reponse
+
+      Reponds UNIQUEMENT avec un objet JSON valide (sans bloc de code markdown), avec cette structure :
+      {
+        "clear": true/false,
+        "issues": ["description du probleme 1", "description du probleme 2"]
+      }
+
+      - Si la specification est suffisamment claire pour etre implementee, reponds {"clear": true, "issues": []}
+      - Si elle ne l'est pas, liste les problemes specifiques dans "issues"
+      - Sois pragmatique : des details mineurs ne doivent pas bloquer l'implementation
+      - Concentre-toi sur les ambiguites qui pourraient mener a une implementation incorrecte
+    PROMPT
+
+    out = danger_claude_prompt(work_dir, prompt)
+
+    # Parse the JSON response
+    json_match = out.match(/\{[^{}]*"clear"\s*:\s*(true|false)[^{}]*\}/m)
+    unless json_match
+      log "Could not parse spec check response, proceeding with implementation"
+      return false
+    end
+
+    result = JSON.parse(json_match[0])
+
+    if result["clear"]
+      log "Specification is clear, proceeding"
+      return false
+    end
+
+    issues_list = result["issues"] || []
+    if issues_list.empty?
+      log "Spec check returned unclear but no issues listed, proceeding"
+      return false
+    end
+
+    # Post comment with ambiguities and mark as needs_clarification
+    comment = <<~COMMENT
+      :thinking: **autodev** : la specification necessite des precisions avant implementation.
+
+      #{issues_list.map.with_index(1) { |issue, i| "#{i}. #{issue}" }.join("\n")}
+
+      Merci de repondre a ces questions dans les commentaires. L'implementation reprendra automatiquement.
+    COMMENT
+
+    notify_issue(iid, comment.strip)
+    Database.update_issue(@project_path, iid,
+      status: "needs_clarification",
+      clarification_requested_at: Sequel.lit("datetime('now')")
+    )
+    log "Issue ##{iid} needs clarification, #{issues_list.size} question(s) posted"
+    true
+  rescue JSON::ParserError
+    log "Could not parse spec check JSON response, proceeding with implementation"
+    false
   end
 
   def implement(work_dir, context, iid)
@@ -1044,8 +1132,19 @@ def main
 
           # Skip if already tracked (unless it was reset to pending)
           existing = Database.find_issue(project_path, issue.iid)
-          if existing && existing[:status] != "pending"
-            next
+          if existing
+            if existing[:status] == "needs_clarification"
+              # Check if new comments were posted since clarification was requested
+              if clarification_answered?(client, project_path, issue.iid, existing[:clarification_requested_at])
+                logger.info("Issue ##{issue.iid}: clarification received, re-queuing", project: project_path)
+                Database.update_issue(project_path, issue.iid,
+                  status: "pending", clarification_requested_at: nil, error_message: nil)
+              else
+                next
+              end
+            elsif existing[:status] != "pending"
+              next
+            end
           end
 
           # Skip if max retries exceeded

@@ -15,6 +15,7 @@
 - Retry with exponential backoff and max retries per issue (`max_retries` default: 3, `retry_backoff` default: 30s). Global or per-project. Issues that exceed max retries are skipped. Backoff doubles each attempt (30s → 60s → 120s).
 - Partial progress recovery: on retry, if the branch was already pushed, skip directly to MR creation instead of re-implementing from scratch.
 - Issue notifications: post comments on GitLab issues when processing starts, succeeds (with MR link), or fails (with error summary).
+- Specification check: before implementation, analyse the spec for ambiguities via a dedicated danger-claude call. If unclear, post a comment listing questions and mark as `needs_clarification`. On each poll, check for new human comments to automatically resume.
 
 ### Fixed
 
