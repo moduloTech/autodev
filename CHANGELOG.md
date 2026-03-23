@@ -14,6 +14,7 @@
 - Structured logging with levels (DEBUG/INFO/WARN/ERROR), timestamps, dual output (stdout + file), daily log rotation. Global logs in `~/.autodev/logs/autodev/`, per-project logs in `~/.autodev/logs/{project}/`. Configurable via `log_dir` and `log_level` in config.
 - Retry with exponential backoff and max retries per issue (`max_retries` default: 3, `retry_backoff` default: 30s). Global or per-project. Issues that exceed max retries are skipped. Backoff doubles each attempt (30s → 60s → 120s).
 - Partial progress recovery: on retry, if the branch was already pushed, skip directly to MR creation instead of re-implementing from scratch.
+- Issue notifications: post comments on GitLab issues when processing starts, succeeds (with MR link), or fails (with error summary).
 
 ### Fixed
 

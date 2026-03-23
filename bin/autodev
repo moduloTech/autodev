@@ -517,6 +517,8 @@ class IssueProcessor
       return
     end
 
+    notify_issue(iid, ":robot: **autodev** : traitement en cours...")
+
     # Check for partial progress from previous attempt
     existing = Database.find_issue(@project_path, iid)
     previous_branch = existing[:branch_name] if existing
@@ -581,6 +583,7 @@ class IssueProcessor
         status: "done", finished_at: Sequel.lit("datetime('now')"),
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
       )
+      notify_issue(iid, ":white_check_mark: **autodev** : MR creee : #{mr.web_url}")
       log "Issue ##{iid} completed: #{mr.web_url}"
 
     rescue StandardError => e
@@ -607,6 +610,7 @@ class IssueProcessor
       end
 
       Database.update_issue(@project_path, iid, **fields)
+      notify_issue(iid, ":x: **autodev** : echec — #{e.class}: #{e.message[0, 200]}")
       log_error "  #{bt}" if bt
     ensure
       # Cleanup temp directory
@@ -867,6 +871,12 @@ class IssueProcessor
   ensure
     stdout_r&.close
     stderr_r&.close
+  end
+
+  def notify_issue(iid, message)
+    @client.create_issue_note(@project_path, iid, message)
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to post comment on ##{iid}: #{e.message}"
   end
 
   def branch_exists_on_remote?(branch_name)
