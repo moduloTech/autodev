@@ -77,6 +77,7 @@ module Config
     trigger_label: autodev                      # label that triggers processing
     poll_interval: 300                          # seconds between poll cycles
     max_workers: 3                              # concurrent worker threads
+    dc_timeout: 1800                              # danger-claude timeout in seconds (default: 1800 = 30min)
     # database_url: sqlite://~/.autodev/autodev.db  # default
 
     projects:
@@ -87,6 +88,7 @@ module Config
         #   - "todo"
         # label_to_add: "Development::Awaiting CR"
         # extra_prompt: "Use RSpec for tests"   # additional instructions for Claude
+        # dc_timeout: 1800                        # danger-claude timeout in seconds (overrides global)
         # clone_depth: 1                         # git clone depth (0 = full clone, default: 1)
         # sparse_checkout:                       # sparse checkout paths (for monorepos)
         #   - "src/"
@@ -99,6 +101,7 @@ module Config
     "trigger_label"  => "autodev",
     "poll_interval"  => 300,
     "max_workers"    => 3,
+    "dc_timeout"     => 1800,
     "database_url"   => "sqlite://#{DEFAULT_DB}",
     "projects"       => []
   }.freeze
@@ -133,6 +136,7 @@ module Config
     # Coerce types
     config["poll_interval"] = config["poll_interval"].to_i
     config["max_workers"]   = config["max_workers"].to_i
+    config["dc_timeout"]    = config["dc_timeout"].to_i
 
     config
   end
@@ -650,23 +654,65 @@ class IssueProcessor
   end
 
   def danger_claude_prompt(work_dir, prompt)
-    out, err, status = Open3.capture3(CLEAN_ENV, "danger-claude", "-p", prompt, chdir: work_dir)
-    @dc_stdout << "=== danger-claude -p ===\n#{out}\n"
-    @dc_stderr << "=== danger-claude -p ===\n#{err}\n"
-    unless status.success?
+    out, err, ok = run_with_timeout("danger-claude", ["-p", prompt], chdir: work_dir, label: "-p")
+    unless ok
       raise ImplementationError, "danger-claude -p failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
     end
     out
   end
 
   def danger_claude_commit(work_dir)
-    out, err, status = Open3.capture3(CLEAN_ENV, "danger-claude", "-c", chdir: work_dir)
-    @dc_stdout << "=== danger-claude -c ===\n#{out}\n"
-    @dc_stderr << "=== danger-claude -c ===\n#{err}\n"
-    unless status.success?
+    out, err, ok = run_with_timeout("danger-claude", ["-c"], chdir: work_dir, label: "-c")
+    unless ok
       raise ImplementationError, "danger-claude -c failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
     end
     out
+  end
+
+  def run_with_timeout(cmd, args, chdir:, label: nil)
+    timeout = (@project_config["dc_timeout"] || @config["dc_timeout"] || 1800).to_i
+    tag = label ? "#{cmd} #{label}" : cmd
+
+    stdout_r, stdout_w = IO.pipe
+    stderr_r, stderr_w = IO.pipe
+
+    pid = Process.spawn(CLEAN_ENV, cmd, *args, chdir: chdir, out: stdout_w, err: stderr_w)
+    stdout_w.close
+    stderr_w.close
+
+    # Read output in threads to avoid pipe buffer deadlock
+    out_thread = Thread.new { stdout_r.read }
+    err_thread = Thread.new { stderr_r.read }
+
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    loop do
+      remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      if remaining <= 0
+        Process.kill("TERM", pid)
+        sleep 5
+        Process.kill("KILL", pid) rescue nil
+        Process.wait(pid) rescue nil
+        out = out_thread.value
+        err = err_thread.value
+        @dc_stdout << "=== #{tag} (TIMEOUT after #{timeout}s) ===\n#{out}\n"
+        @dc_stderr << "=== #{tag} (TIMEOUT after #{timeout}s) ===\n#{err}\n"
+        raise ImplementationError, "#{tag} timed out after #{timeout}s"
+      end
+
+      _pid, status = Process.wait2(pid, Process::WNOHANG)
+      if status
+        out = out_thread.value
+        err = err_thread.value
+        @dc_stdout << "=== #{tag} ===\n#{out}\n"
+        @dc_stderr << "=== #{tag} ===\n#{err}\n"
+        return [out, err, status.success?]
+      end
+
+      sleep 1
+    end
+  ensure
+    stdout_r&.close
+    stderr_r&.close
   end
 
   def command_exists?(cmd)
