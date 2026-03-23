@@ -27,6 +27,7 @@ gemfile(true) do
   gem "sequel",  "~> 5.0"
   gem "sqlite3", "~> 2.0"
   gem "pastel",  "~> 0.8"
+  gem "i18n",    "~> 1.0"
 end
 
 require "fileutils"
@@ -37,6 +38,11 @@ require "shellwords"
 require "uri"
 require "yaml"
 require "thread"
+require "i18n"
+
+# Configure I18n transliteration (no locale files needed, just the transliterator)
+I18n.available_locales = [:en]
+I18n.default_locale = :en
 
 # == Exceptions ================================================================
 
@@ -467,7 +473,8 @@ class IssueProcessor
       run_cmd(["git", "checkout", target], chdir: work_dir)
     end
 
-    slug = title.downcase
+    slug = I18n.transliterate(title)
+                .downcase
                 .gsub(/[^a-z0-9\s-]/, "")
                 .gsub(/\s+/, "-")
                 .gsub(/-+/, "-")

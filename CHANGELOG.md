@@ -7,6 +7,7 @@
 - Shallow clone by default (`--depth 1`) for faster cloning of large repos.
 - Per-project `clone_depth` config option (0 for full clone, default: 1).
 - Per-project `sparse_checkout` config option for monorepo support.
+- Better branch slug generation using `i18n` transliteration (`incohérent` → `incoherent` instead of `incohrent`).
 
 ### Fixed
 
