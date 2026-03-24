@@ -464,7 +464,7 @@ def fetch_issue_context(client, project_path, issue_iid)
   # Fetch comments/discussions
   begin
     notes = client.issue_notes(project_path, issue_iid, per_page: 100)
-    user_notes = notes.select { |n| !n.system }
+    user_notes = notes.select { |n| !n.system && !n.body.to_s.include?("**autodev**") }
     if user_notes.any?
       lines << "## Comments"
       lines << ""

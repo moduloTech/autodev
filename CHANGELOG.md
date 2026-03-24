@@ -9,6 +9,7 @@
 
 ### Changed
 
+- Exclude autodev's own comments from the issue context passed to the implementation prompt.
 - Log all danger-claude prompts at DEBUG level for troubleshooting.
 
 ### Fixed
