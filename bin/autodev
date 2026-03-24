@@ -35,6 +35,7 @@ require "json"
 require "open3"
 require "optparse"
 require "shellwords"
+require "net/http"
 require "uri"
 require "yaml"
 require "thread"
@@ -452,13 +453,56 @@ rescue Gitlab::Error::ResponseError => e
   raise AutodevError, "Failed to fetch issues for #{project_path}: #{e.message}"
 end
 
-def fetch_issue_context(client, project_path, issue_iid)
+def download_gitlab_images(text, gitlab_url:, project_path:, token:, dest_dir:)
+  image_dir = File.join(dest_dir, ".autodev-images")
+  downloaded = false
+
+  result = text.gsub(/!\[([^\]]*)\]\((\/uploads\/[^)]+)\)(\{[^}]*\})?/) do
+    alt = $1
+    upload_path = $2
+    url = "#{gitlab_url}/#{project_path}#{upload_path}"
+    filename = File.basename(upload_path)
+    local_path = File.join(image_dir, filename)
+
+    begin
+      unless downloaded
+        FileUtils.mkdir_p(image_dir)
+        downloaded = true
+      end
+
+      uri = URI.parse(url)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = (uri.scheme == "https")
+      request = Net::HTTP::Get.new(uri.request_uri)
+      request["PRIVATE-TOKEN"] = token
+      response = http.request(request)
+
+      if response.is_a?(Net::HTTPSuccess)
+        File.binwrite(local_path, response.body)
+        "![#{alt}](#{local_path})"
+      else
+        "[Image: #{filename} — download failed (#{response.code})]"
+      end
+    rescue StandardError
+      "[Image: #{filename} — download failed]"
+    end
+  end
+
+  result
+end
+
+def fetch_issue_context(client, project_path, issue_iid, gitlab_url: nil, token: nil, work_dir: nil)
   issue = client.issue(project_path, issue_iid)
+  can_download = gitlab_url && token && work_dir
 
   lines = []
   lines << "# Issue ##{issue.iid}: #{issue.title}"
   lines << ""
-  lines << issue.description.to_s if issue.description && !issue.description.empty?
+  if issue.description && !issue.description.empty?
+    desc = issue.description.to_s
+    desc = download_gitlab_images(desc, gitlab_url: gitlab_url, project_path: project_path, token: token, dest_dir: work_dir) if can_download
+    lines << desc
+  end
   lines << ""
 
   # Fetch comments/discussions
@@ -470,7 +514,9 @@ def fetch_issue_context(client, project_path, issue_iid)
       lines << ""
       user_notes.each do |note|
         lines << "### #{note.author&.name || "Unknown"} (#{note.created_at})"
-        lines << note.body.to_s
+        body = note.body.to_s
+        body = download_gitlab_images(body, gitlab_url: gitlab_url, project_path: project_path, token: token, dest_dir: work_dir) if can_download
+        lines << body
         lines << ""
       end
     end
@@ -597,7 +643,7 @@ class IssueProcessor
         Database.update_issue(@project_path, iid, branch_name: branch_name, status: "implementing")
 
         # 3. Fetch full issue context
-        context = fetch_issue_context(@client, @project_path, iid)
+        context = fetch_issue_context(@client, @project_path, iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
 
         # 4. Check specification clarity
         if check_specification(work_dir, context, iid)
@@ -922,7 +968,7 @@ class IssueProcessor
     log "Waiting 15s for GitLab to compute diff_refs..."
     sleep 15
     log "Running mr-review on #{mr_url}..."
-    out, err, status = Open3.capture3(CLEAN_ENV, "mr-review", "-H", mr_url)
+    _, err, status = Open3.capture3(CLEAN_ENV, "mr-review", "-H", mr_url)
     if status.success?
       log "Review completed successfully"
     else
