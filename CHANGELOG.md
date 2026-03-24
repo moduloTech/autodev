@@ -5,6 +5,7 @@
 ### Added
 
 - MR comment fixing: automatically fix unresolved MR discussions (from mr-review or humans). One discussion = one danger-claude call = one commit. Discussions are resolved after fixing. Status lifecycle: `done` → `mr_fixing` → `mr_fixed` → ... → `over`. Configurable `max_fix_rounds` (default: 3, per-project overridable). Only processes issues that still have the `autodev` trigger label.
+- Random suffix in branch names (`autodev/{iid}-{slug}-{hex8}`) to allow re-processing the same issue. Reuses the existing branch from the database if it still exists on the remote; otherwise generates a new name.
 
 ### Changed
 

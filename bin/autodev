@@ -39,6 +39,7 @@ require "uri"
 require "yaml"
 require "thread"
 require "i18n"
+require "securerandom"
 
 # Configure I18n transliteration (no locale files needed, just the transliterator)
 I18n.available_locales = [:en]
@@ -563,9 +564,10 @@ class IssueProcessor
     # Check for partial progress from previous attempt
     existing = Database.find_issue(@project_path, iid)
     previous_branch = existing[:branch_name] if existing
+    reuse_branch = previous_branch && branch_exists_on_remote?(previous_branch)
     skip_to_mr = false
 
-    if previous_branch && branch_exists_on_remote?(previous_branch)
+    if reuse_branch
       log "Branch #{previous_branch} already exists on remote, checking for recovery..."
       if %w[creating_mr reviewing].include?(existing[:status]) || existing[:error_message]&.include?("creating_mr")
         skip_to_mr = true
@@ -584,8 +586,14 @@ class IssueProcessor
         # 1. Clone
         clone_repo(work_dir)
 
-        # 2. Branch
-        branch_name = create_branch(work_dir, iid, title)
+        # 2. Branch — reuse existing remote branch or create a new one
+        if reuse_branch
+          log "Reusing existing branch: #{previous_branch}"
+          run_cmd(["git", "checkout", previous_branch], chdir: work_dir)
+          branch_name = previous_branch
+        else
+          branch_name = create_branch(work_dir, iid, title)
+        end
         Database.update_issue(@project_path, iid, branch_name: branch_name, status: "implementing")
 
         # 3. Fetch full issue context
@@ -705,7 +713,8 @@ class IssueProcessor
                 .gsub(/\s+/, "-")
                 .gsub(/-+/, "-")
                 .gsub(/^-|-$/, "")[0, 50]
-    branch_name = "autodev/#{iid}-#{slug}"
+    random = SecureRandom.hex(4)
+    branch_name = "autodev/#{iid}-#{slug}-#{random}"
 
     run_cmd(["git", "checkout", "-b", branch_name], chdir: work_dir)
     log "Created branch: #{branch_name}"
