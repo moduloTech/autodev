@@ -33,26 +33,6 @@ Settings are resolved in 4 layers (highest priority wins):
 3. **Environment variables** — `GITLAB_API_TOKEN`, `GITLAB_URL`
 4. **CLI flags** — `-c`, `-d`, `-t`, `-n`, `-i`, `--once`
 
-### Config file example (`~/.autodev/config.yml`)
-
-```yaml
-gitlab_url: https://gitlab.example.com
-gitlab_token: glpat-xxxxxxxxxxxxxxxxxxxx
-trigger_label: autodev
-poll_interval: 300
-max_workers: 3
-database_url: sqlite://~/.autodev/autodev.db
-
-projects:
-  - path: group/project-name
-    target_branch: develop
-    labels_to_remove:
-      - "development::todo"
-      - "todo"
-    label_to_add: "Development::Awaiting CR"
-    extra_prompt: "Use RSpec for tests"
-```
-
 ### CLI flags
 
 - `-c` / `--config PATH` — Config file path
@@ -65,59 +45,51 @@ projects:
 
 ## Architecture
 
-The script has three main components:
+### State Machine (AASM)
 
-### Main loop
+The Issue model uses the `aasm` gem for a formalized state machine. Each state = one action. Events define valid transitions with guards.
 
-Polls GitLab projects for issues with the trigger label, checks the DB for already-processed issues, and enqueues new ones into the worker pool.
+The Issue Sequel::Model is built dynamically after DB connection via `Database.build_model!`.
 
 ### IssueProcessor
 
-Handles the full lifecycle for a single issue:
-
-1. **Clone** — `git clone` into `/tmp/autodev_{project}_{iid}/`
-2. **Branch** — `git checkout -b autodev/{iid}-{title-slug}`
-3. **CLAUDE.md** — If absent, generate via `danger-claude -p` then commit
-4. **Implement** — `danger-claude -p` with full issue context (title, description, comments, linked items)
-5. **Commit** — `danger-claude -c`
-6. **Push** — `git push -u origin`, retry with `--force-with-lease` on failure
-7. **Labels** — Remove configured labels, add completion label via GitLab API
-8. **MR** — Create via GitLab API with `Fixes #{iid}` in description
-9. **Review** — `mr-review -H` (non-fatal)
-10. **Cleanup** — Remove temp directory
+Handles the sequential flow from `pending` through `reviewing`:
+`start_processing!` → clone → `clone_complete!` → check spec → `spec_clear!` → implement → `impl_complete!` → commit → `commit_complete!` → push → `push_complete!` → create MR → `mr_created!` → review → `review_complete!`
 
 ### MrFixer
 
-Handles `mr_fixing` issues: clones the MR branch, fetches unresolved discussions, fixes each one via `danger-claude -p` + `-c`, resolves discussions, pushes. After fixing → `mr_fixed`.
+Handles `fixing_discussions`: clones the MR branch, fetches unresolved discussions, fixes each one via `danger-claude -p` + `-c`, resolves discussions, pushes. Fires `discussions_fixed!` → `checking_pipeline`.
 
 ### PipelineMonitor
 
-Handles `mr_pipeline_running` issues: fetches MR head pipeline via GitLab API. If running → skip. If green → checks for unresolved conversations (none → `over`, some → `mr_fixing`). If red → retrigger once, then on re-fail evaluates via `danger-claude` whether the failure is code-related (`mr_fixing`) or not (`blocked`).
+Handles `checking_pipeline`: fetches MR head pipeline via GitLab API. If running → skip. If green → fires `pipeline_green!` (guards decide `over` vs `fixing_discussions`). If red → retrigger once, then evaluates via danger-claude. Code-related → fires `pipeline_failed_code!` → `fixing_pipeline` (fix inline) → `pipeline_fix_done!`. Non-code → `pipeline_failed_infra!` → `blocked`.
 
 ### WorkerPool
 
-N threads (configurable) consuming a shared `Queue`. Each worker gets its own GitLab client for thread safety. Graceful shutdown via SIGINT/SIGTERM: finish current work, don't take new issues.
+N threads (configurable) consuming a shared `Queue`. Each worker gets its own GitLab client for thread safety. Graceful shutdown via SIGINT/SIGTERM.
 
 ## SQLite Schema
 
-Single table `issues` with status lifecycle:
+Single table `issues` with AASM status lifecycle:
 
 ```
-pending → cloning → implementing → committing → pushing → creating_mr → reviewing → done
-                                                                                      ↓
-done/mr_fixed → mr_pipeline_running → (green + no conversations) → over (terminal)
-                       ↓ (green + conversations)
-                    mr_fixing → mr_fixed → mr_pipeline_running (loop, capped by max_fix_rounds)
-                       ↓ (code-related pipeline failure)
-                    mr_pipeline_fixing → mr_fixed → mr_pipeline_running (loop, capped by max_fix_rounds)
-                       ↓ (non-code failure)
-                    blocked
+pending → cloning → checking_spec → implementing → committing → pushing → creating_mr → reviewing
+                                                                                          ↓
+                                                                              checking_pipeline ←─────────┐
+                                                                             /        |         \         │
+                                                                   (green,           (red,     (red,      │
+                                                                    no convos)        code)     infra)    │
+                                                                       ↓               ↓         ↓       │
+                                                                     over     fixing_pipeline  blocked    │
+                                                                                    │                     │
+                                                               (green,              │                     │
+                                                                convos)             │                     │
+                                                                  ↓                 │                     │
+                                                          fixing_discussions────────┴─────────────────────┘
 
-error (any stage) → pending (on restart, with backoff)
-needs_clarification → pending (when clarification comment posted)
+error (from any active state) → pending (on retry, with backoff)
+needs_clarification (from checking_spec) → pending (when clarification comment posted)
 ```
-
-Errored issues are automatically reset to `pending` on restart for retry.
 
 ## Error Handling
 
@@ -125,19 +97,23 @@ Errored issues are automatically reset to `pending` on restart for retry.
 |------|-----------|
 | `danger-claude` not installed | Abort at startup |
 | `mr-review` not installed | Warning at startup, review step skipped |
-| Clone fails | status=error, next issue |
-| No changes produced | status=error "No changes produced" |
+| Clone fails | `mark_failed!` → error, next issue |
+| No changes produced | `mark_failed!` → error |
 | Push fails | Retry with --force-with-lease |
 | MR already exists for branch | Reuse existing MR |
-| Issue closed between poll and processing | Skip, mark done |
-| Issues in error at restart | Auto-reset to pending for retry |
+| Issue closed between poll and processing | `clone_complete!` → over (guard: issue_closed?) |
+| Issues in error at startup | `recover_on_startup!` resets to pending |
 | Pipeline red (first time) | Retrigger once, recheck next poll |
-| Pipeline red (after retrigger) | Evaluate via Claude: code → mr_fixing, non-code → blocked |
-| Pipeline canceled/skipped | status=blocked, comment posted |
+| Pipeline red (after retrigger) | Evaluate via Claude: code → fixing_pipeline, non-code → blocked |
+| Pipeline canceled/skipped | `pipeline_canceled!` → blocked |
+| Interrupted fixing_pipeline | Reset to checking_pipeline on startup |
 
 ## Key Design Decisions
 
+- **AASM state machine**: Formalized transitions prevent invalid state changes. Guards handle conditional branching. `after_all_transitions :persist_status_change!` auto-saves.
+- **No pass-through states**: `done` and `mr_fixed` eliminated. Direct transitions from `reviewing`/`fixing_*` to `checking_pipeline`.
 - **Single-file CLI**: Same pattern as `mr-review` and `danger-claude` — `bundler/inline` for dependencies.
+- **Dynamic model**: Issue Sequel::Model defined after DB connection via `Database.build_model!` using `Class.new(Sequel::Model(...))`.
 - **Thread pool over processes**: Simpler resource management, shared Queue, per-worker GitLab clients for thread safety.
 - **danger-claude as implementation engine**: Leverages the existing Docker-based Claude CLI wrapper for sandboxed code generation.
 - **Non-fatal review**: `mr-review` failure doesn't block the MR creation pipeline.

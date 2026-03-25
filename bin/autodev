@@ -28,6 +28,7 @@ gemfile(true) do
   gem "sqlite3", "~> 2.0"
   gem "pastel",  "~> 0.8"
   gem "i18n",    "~> 1.0"
+  gem "aasm",    "~> 5.5"
 end
 
 require "fileutils"
@@ -309,7 +310,6 @@ module Database
 
     if url.start_with?("sqlite://")
       db_path = url.sub("sqlite://", "")
-      # Expand ~ in path
       db_path = File.expand_path(db_path)
       url = "sqlite://#{db_path}"
       FileUtils.mkdir_p(File.dirname(db_path))
@@ -319,6 +319,7 @@ module Database
     @db.run("PRAGMA journal_mode=WAL")
     @db.run("PRAGMA busy_timeout=5000")
     migrate!
+    migrate_statuses!
     true
   rescue Sequel::DatabaseConnectionError, Sequel::DatabaseError => e
     warn "  Database connection failed: #{e.message}"
@@ -359,6 +360,7 @@ module Database
         fix_round      INTEGER NOT NULL DEFAULT 0,
         next_retry_at  TEXT,
         clarification_requested_at TEXT,
+        pipeline_retrigger_count INTEGER NOT NULL DEFAULT 0,
         started_at     TEXT,
         finished_at    TEXT,
         created_at     TEXT NOT NULL DEFAULT (datetime('now')),
@@ -377,84 +379,191 @@ module Database
     @db.run("ALTER TABLE issues ADD COLUMN pipeline_retrigger_count INTEGER NOT NULL DEFAULT 0") rescue nil
   end
 
-  # -- Issues CRUD --
+  # -- Status migration from pre-AASM names --
 
-  def self.find_issue(project_path, issue_iid)
-    return nil unless connected?
-    @db[:issues].where(project_path: project_path, issue_iid: issue_iid).first
+  def self.migrate_statuses!
+    {
+      "mr_pipeline_running" => "checking_pipeline",
+      "mr_fixing"           => "fixing_discussions",
+      "mr_pipeline_fixing"  => "fixing_pipeline"
+    }.each do |old_status, new_status|
+      @db[:issues].where(status: old_status).update(status: new_status)
+    end
+
+    # done/mr_fixed with mr_iid → checking_pipeline
+    @db[:issues].where(status: %w[done mr_fixed]).exclude(mr_iid: nil).update(status: "checking_pipeline")
+    # done/mr_fixed without mr_iid → over
+    @db[:issues].where(status: %w[done mr_fixed]).update(status: "over")
   end
 
-  def self.insert_issue(project_path:, issue_iid:, issue_title:)
-    return nil unless connected?
-    @db[:issues].insert(
-      project_path: project_path,
-      issue_iid:    issue_iid,
-      issue_title:  issue_title,
-      status:       "pending"
-    )
-  rescue Sequel::UniqueConstraintViolation
-    # Already tracked
-    nil
+  # -- Build Issue Sequel::Model with AASM --
+
+  def self.build_model!
+    klass = Class.new(Sequel::Model(db[:issues])) do
+      include AASM
+
+      # Transient context setters — used by workers to set guard context before firing events
+      attr_writer :_issue_closed, :_skip_to_mr, :_max_fix_rounds, :_unresolved_discussions_empty
+
+      aasm column: :status, whiny_transitions: false do
+        state :pending, initial: true
+        state :cloning
+        state :checking_spec
+        state :implementing
+        state :committing
+        state :pushing
+        state :creating_mr
+        state :reviewing
+        state :checking_pipeline
+        state :fixing_discussions
+        state :fixing_pipeline
+        state :needs_clarification
+        state :over
+        state :blocked
+        state :error
+
+        after_all_transitions :persist_status_change!
+
+        # === Happy path: issue → MR ===
+
+        event :start_processing do
+          transitions from: :pending, to: :cloning
+        end
+
+        event :clone_complete do
+          transitions from: :cloning, to: :over, guard: :issue_closed?
+          transitions from: :cloning, to: :creating_mr, guard: :skip_to_mr?
+          transitions from: :cloning, to: :checking_spec
+        end
+
+        event :spec_clear do
+          transitions from: :checking_spec, to: :implementing
+        end
+
+        event :spec_unclear do
+          transitions from: :checking_spec, to: :needs_clarification
+        end
+
+        event :impl_complete do
+          transitions from: :implementing, to: :committing
+        end
+
+        event :commit_complete do
+          transitions from: :committing, to: :pushing
+        end
+
+        event :push_complete do
+          transitions from: :pushing, to: :creating_mr
+        end
+
+        event :mr_created do
+          transitions from: :creating_mr, to: :reviewing
+        end
+
+        event :review_complete do
+          transitions from: :reviewing, to: :checking_pipeline
+        end
+
+        # === Pipeline monitoring ===
+
+        event :pipeline_green do
+          transitions from: :checking_pipeline, to: :over, guard: :no_unresolved_discussions?
+          transitions from: :checking_pipeline, to: :over, guard: :max_fix_rounds_reached?
+          transitions from: :checking_pipeline, to: :fixing_discussions
+        end
+
+        event :pipeline_failed_code do
+          transitions from: :checking_pipeline, to: :fixing_pipeline, guard: :can_fix?
+          transitions from: :checking_pipeline, to: :blocked
+        end
+
+        event :pipeline_failed_infra do
+          transitions from: :checking_pipeline, to: :blocked
+        end
+
+        event :pipeline_canceled do
+          transitions from: :checking_pipeline, to: :blocked
+        end
+
+        # === Fix cycles ===
+
+        event :discussions_fixed do
+          transitions from: :fixing_discussions, to: :checking_pipeline
+        end
+
+        event :pipeline_fix_done do
+          transitions from: :fixing_pipeline, to: :checking_pipeline
+        end
+
+        # === Clarification ===
+
+        event :clarification_received do
+          transitions from: :needs_clarification, to: :pending
+        end
+
+        # === Error handling ===
+
+        event :mark_failed do
+          transitions from: [:cloning, :checking_spec, :implementing, :committing,
+                             :pushing, :creating_mr, :reviewing,
+                             :fixing_discussions, :fixing_pipeline], to: :error
+        end
+
+        event :retry_processing do
+          transitions from: :error, to: :pending
+        end
+      end
+
+      # -- Guard methods --
+
+      def issue_closed?
+        @_issue_closed == true
+      end
+
+      def skip_to_mr?
+        @_skip_to_mr == true
+      end
+
+      def no_unresolved_discussions?
+        @_unresolved_discussions_empty == true
+      end
+
+      def max_fix_rounds_reached?
+        fix_round >= (@_max_fix_rounds || 3)
+      end
+
+      def can_fix?
+        fix_round < (@_max_fix_rounds || 3)
+      end
+
+      # -- Persistence callback --
+
+      def persist_status_change!
+        save_changes
+      end
+    end
+
+    Object.const_set(:Issue, klass)
   end
 
-  def self.update_issue(project_path, issue_iid, **fields)
-    return unless connected?
-    @db[:issues].where(project_path: project_path, issue_iid: issue_iid).update(**fields)
-  end
+  # -- Startup recovery --
 
-  def self.reset_errors_to_pending!(max_retries:)
-    return unless connected?
-    # Only reset errors that haven't exceeded max retries
-    count = @db[:issues]
+  def self.recover_on_startup!(max_retries:)
+    return 0 unless connected?
+
+    # Reset retryable errors to pending
+    count = db[:issues]
       .where(status: "error")
       .where { retry_count < max_retries }
       .where { Sequel.lit("next_retry_at IS NULL OR next_retry_at <= datetime('now')") }
       .update(status: "pending", error_message: nil, started_at: nil)
-    # Reset interrupted pipeline fixes back to mr_pipeline_running
-    count2 = @db[:issues]
-      .where(status: "mr_pipeline_fixing")
-      .update(status: "mr_pipeline_running")
+
+    # Reset interrupted pipeline fixes back to checking_pipeline
+    count2 = db[:issues]
+      .where(status: "fixing_pipeline")
+      .update(status: "checking_pipeline")
+
     (count || 0) + (count2 || 0)
-  end
-
-  def self.exceeded_max_retries?(project_path, issue_iid, max_retries)
-    return false unless connected?
-    row = find_issue(project_path, issue_iid)
-    row && row[:retry_count] >= max_retries
-  end
-
-  def self.issues_for_mr_fixing(project_path, max_fix_rounds)
-    return [] unless connected?
-    @db[:issues]
-      .where(project_path: project_path)
-      .where(status: "mr_fixing")
-      .where { fix_round < max_fix_rounds }
-      .exclude(mr_iid: nil)
-      .all
-  end
-
-  def self.transition_to_pipeline_running!(project_path, max_fix_rounds)
-    return unless connected?
-    # Mark max-rounds mr_fixed as over (terminal — we gave up fixing)
-    @db[:issues]
-      .where(project_path: project_path)
-      .where(status: "mr_fixed")
-      .where { fix_round >= max_fix_rounds }
-      .update(status: "over")
-    # Transition done and mr_fixed → mr_pipeline_running
-    @db[:issues]
-      .where(project_path: project_path)
-      .where(status: %w[done mr_fixed])
-      .exclude(mr_iid: nil)
-      .update(status: "mr_pipeline_running", pipeline_retrigger_count: 0)
-  end
-
-  def self.issues_for_pipeline_monitoring(project_path)
-    return [] unless connected?
-    @db[:issues]
-      .where(project_path: project_path, status: "mr_pipeline_running")
-      .exclude(mr_iid: nil)
-      .all
   end
 end
 
@@ -611,47 +720,46 @@ class IssueProcessor
   end
 
   def process(issue)
-    iid   = issue.iid
-    title = issue.title
+    iid   = issue.issue_iid
+    title = issue.issue_title
 
     log "Processing issue ##{iid}: #{title}"
-    Database.update_issue(@project_path, iid, status: "cloning", started_at: Sequel.lit("datetime('now')"))
+    issue.start_processing! # pending → cloning
+    issue.update(started_at: Sequel.lit("datetime('now')"))
 
     # Verify issue is still open
     current = @client.issue(@project_path, iid)
     if current.state != "opened"
       log "Issue ##{iid} is no longer open (#{current.state}), skipping"
-      Database.update_issue(@project_path, iid, status: "done", finished_at: Sequel.lit("datetime('now')"))
+      issue._issue_closed = true
+      issue.clone_complete! # cloning → over
+      issue.update(finished_at: Sequel.lit("datetime('now')"))
       return
     end
 
     notify_issue(iid, ":robot: **autodev** : traitement en cours...")
 
     # Check for partial progress from previous attempt
-    existing = Database.find_issue(@project_path, iid)
-    previous_branch = existing[:branch_name] if existing
+    previous_branch = issue.branch_name
     reuse_branch = previous_branch && branch_exists_on_remote?(previous_branch)
     skip_to_mr = false
 
     if reuse_branch
       log "Branch #{previous_branch} already exists on remote, checking for recovery..."
-      if %w[creating_mr reviewing].include?(existing[:status]) || existing[:error_message]&.include?("creating_mr")
-        skip_to_mr = true
-        log "Recovering: skipping to MR creation"
-      end
+      skip_to_mr = true if %w[creating_mr reviewing].include?(issue.status)
     end
 
     work_dir = "/tmp/autodev_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
+      # 1. Clone
+      clone_repo(work_dir)
+
       if skip_to_mr
-        # Re-clone just to get the work_dir for MR description extraction
-        clone_repo(work_dir)
         run_cmd(["git", "checkout", previous_branch], chdir: work_dir)
         branch_name = previous_branch
+        issue._skip_to_mr = true
+        issue.clone_complete! # cloning → creating_mr
       else
-        # 1. Clone
-        clone_repo(work_dir)
-
         # 2. Branch — reuse existing remote branch or create a new one
         if reuse_branch
           log "Reusing existing branch: #{previous_branch}"
@@ -660,48 +768,53 @@ class IssueProcessor
         else
           branch_name = create_branch(work_dir, iid, title)
         end
-        Database.update_issue(@project_path, iid, branch_name: branch_name, status: "implementing")
+        issue.update(branch_name: branch_name)
+        issue.clone_complete! # cloning → checking_spec
 
         # 3. Fetch full issue context
         context = fetch_issue_context(@client, @project_path, iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
 
         # 4. Check specification clarity
-        if check_specification(work_dir, context, iid)
+        if check_specification(work_dir, context, iid, issue)
           # Spec needs clarification — abort processing
           return
         end
+        # spec_clear! was fired inside check_specification
 
         # 5. Ensure CLAUDE.md exists
         ensure_claude_md(work_dir)
 
         # 6. Implement
         implement(work_dir, context, iid)
-        Database.update_issue(@project_path, iid, status: "committing")
+        issue.impl_complete! # implementing → committing
 
         # 7. Commit
         commit(work_dir)
+        issue.commit_complete! # committing → pushing
 
         # 8. Verify changes were produced
         verify_changes(work_dir, branch_name)
-        Database.update_issue(@project_path, iid, status: "pushing")
 
-        # 8. Push
+        # 9. Push
         push(work_dir, branch_name)
+        issue.push_complete! # pushing → creating_mr
       end
 
-      # 9. Create MR
-      Database.update_issue(@project_path, iid, status: "creating_mr")
+      # 10. Create MR
       mr = create_merge_request(work_dir, iid, branch_name, title)
-      Database.update_issue(@project_path, iid, mr_iid: mr.iid, mr_url: mr.web_url, status: "reviewing")
+      issue.update(mr_iid: mr.iid, mr_url: mr.web_url)
+      issue.mr_created! # creating_mr → reviewing
 
-      # 10. Labels (after MR to avoid bad state on failure)
+      # 11. Labels (after MR to avoid bad state on failure)
       update_labels(iid)
 
-      # 11. Review (non-fatal)
+      # 12. Review (non-fatal)
       run_review(mr.web_url)
 
-      Database.update_issue(@project_path, iid,
-        status: "done", finished_at: Sequel.lit("datetime('now')"),
+      issue.review_complete! # reviewing → checking_pipeline
+      issue.update(
+        finished_at: Sequel.lit("datetime('now')"),
+        pipeline_retrigger_count: 0,
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
       )
       notify_issue(iid, ":white_check_mark: **autodev** : MR creee : #{mr.web_url}")
@@ -709,14 +822,19 @@ class IssueProcessor
 
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
-      existing = Database.find_issue(@project_path, iid)
-      retry_count = (existing ? existing[:retry_count] : 0) + 1
+      retry_count = (issue.retry_count || 0) + 1
       max_retries = (@project_config["max_retries"] || @config["max_retries"] || 3).to_i
       backoff = (@project_config["retry_backoff"] || @config["retry_backoff"] || 30).to_i
       backoff_seconds = backoff * (2**(retry_count - 1))
 
+      begin
+        issue.mark_failed! # → error
+      rescue AASM::InvalidTransition
+        # Already in a terminal state or error — force update
+        issue.update(status: "error")
+      end
+
       fields = {
-        status: "error",
         error_message: "#{e.class}: #{e.message}\n  #{bt}",
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
         retry_count: retry_count,
@@ -730,7 +848,7 @@ class IssueProcessor
         log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, no more retries): #{e.class}: #{e.message}"
       end
 
-      Database.update_issue(@project_path, iid, **fields)
+      issue.update(**fields)
       notify_issue(iid, ":x: **autodev** : echec — #{e.class}: #{e.message[0, 200]}")
       log_error "  #{bt}" if bt
     ensure
@@ -771,8 +889,6 @@ class IssueProcessor
   end
 
   def create_branch(work_dir, iid, title)
-    # target_branch is already checked out via --branch in clone_repo
-
     slug = I18n.transliterate(title)
                 .downcase
                 .gsub(/[^a-z0-9\s-]/, "")
@@ -801,7 +917,7 @@ class IssueProcessor
     danger_claude_commit(work_dir)
   end
 
-  def check_specification(work_dir, context, iid)
+  def check_specification(work_dir, context, iid, issue)
     log "Checking specification clarity for ##{iid}..."
 
     prompt = <<~PROMPT
@@ -830,6 +946,7 @@ class IssueProcessor
     json_match = out.match(/\{[^{}]*"clear"\s*:\s*(true|false)[^{}]*\}/m)
     unless json_match
       log "Could not parse spec check response, proceeding with implementation"
+      issue.spec_clear! # checking_spec → implementing
       return false
     end
 
@@ -837,12 +954,14 @@ class IssueProcessor
 
     if result["clear"]
       log "Specification is clear, proceeding"
+      issue.spec_clear! # checking_spec → implementing
       return false
     end
 
     issues_list = result["issues"] || []
     if issues_list.empty?
       log "Spec check returned unclear but no issues listed, proceeding"
+      issue.spec_clear! # checking_spec → implementing
       return false
     end
 
@@ -850,20 +969,19 @@ class IssueProcessor
     comment = <<~COMMENT
       :thinking: **autodev** : la specification necessite des precisions avant implementation.
 
-      #{issues_list.map.with_index(1) { |issue, i| "#{i}. #{issue}" }.join("\n")}
+      #{issues_list.map.with_index(1) { |iss, i| "#{i}. #{iss}" }.join("\n")}
 
       Merci de repondre a ces questions dans les commentaires. L'implementation reprendra automatiquement.
     COMMENT
 
     notify_issue(iid, comment.strip)
-    Database.update_issue(@project_path, iid,
-      status: "needs_clarification",
-      clarification_requested_at: Sequel.lit("datetime('now')")
-    )
+    issue.spec_unclear! # checking_spec → needs_clarification
+    issue.update(clarification_requested_at: Sequel.lit("datetime('now')"))
     log "Issue ##{iid} needs clarification, #{issues_list.size} question(s) posted"
     true
   rescue JSON::ParserError
     log "Could not parse spec check JSON response, proceeding with implementation"
+    issue.spec_clear!
     false
   end
 
@@ -894,7 +1012,6 @@ class IssueProcessor
   end
 
   def verify_changes(work_dir, branch_name)
-    # Check if there are commits beyond the base
     target = @project_config["target_branch"] || default_branch(work_dir)
     out, _err, ok = run_cmd_status(
       ["git", "log", "#{target}..#{branch_name}", "--oneline"],
@@ -906,7 +1023,6 @@ class IssueProcessor
   end
 
   def default_branch(work_dir)
-    # Try to detect default branch from remote
     out, _err, ok = run_cmd_status(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short"], chdir: work_dir)
     if ok && !out.empty?
       out.sub("origin/", "")
@@ -922,20 +1038,18 @@ class IssueProcessor
       chdir: work_dir
     )
     unless ok
-      # Retry with force-with-lease
       log "Push failed, retrying with --force-with-lease..."
       run_cmd(["git", "push", "--force-with-lease", "-u", "origin", branch_name], chdir: work_dir)
     end
   end
 
   def update_labels(iid)
-    # Remove configured labels
     labels_to_remove = @project_config["labels_to_remove"] || []
     label_to_add     = @project_config["label_to_add"]
 
     begin
-      issue = @client.issue(@project_path, iid)
-      current_labels = issue.labels || []
+      gi = @client.issue(@project_path, iid)
+      current_labels = gi.labels || []
 
       new_labels = current_labels - labels_to_remove
       new_labels << label_to_add if label_to_add && !new_labels.include?(label_to_add)
@@ -950,7 +1064,6 @@ class IssueProcessor
   def create_merge_request(work_dir, iid, branch_name, issue_title)
     target = @project_config["target_branch"] || default_branch(work_dir)
 
-    # Get commit message for MR description
     commit_msg = run_cmd(["git", "log", "-1", "--format=%B"], chdir: work_dir)
     commit_subject = run_cmd(["git", "log", "-1", "--format=%s"], chdir: work_dir)
 
@@ -1026,7 +1139,6 @@ class IssueProcessor
     stdout_w.close
     stderr_w.close
 
-    # Read output in threads to avoid pipe buffer deadlock
     out_thread = Thread.new { stdout_r.read }
     err_thread = Thread.new { stderr_r.read }
 
@@ -1068,7 +1180,6 @@ class IssueProcessor
   end
 
   def branch_exists_on_remote?(branch_name)
-    # Use GitLab API to check if branch exists
     @client.branch(@project_path, branch_name)
     true
   rescue Gitlab::Error::ResponseError
@@ -1104,11 +1215,11 @@ class MrFixer
     @dc_stderr      = +""
   end
 
-  def fix(issue_row)
-    iid        = issue_row[:issue_iid]
-    mr_iid     = issue_row[:mr_iid]
-    branch     = issue_row[:branch_name]
-    fix_round  = issue_row[:fix_round]
+  def fix(issue)
+    iid        = issue.issue_iid
+    mr_iid     = issue.mr_iid
+    branch     = issue.branch_name
+    fix_round  = issue.fix_round
 
     log "Checking MR !#{mr_iid} for unresolved discussions (round #{fix_round + 1})..."
 
@@ -1128,13 +1239,14 @@ class MrFixer
     # Fetch unresolved discussions
     discussions = fetch_unresolved_discussions(mr_iid)
     if discussions.empty?
-      log "No unresolved discussions on MR !#{mr_iid}, moving to mr_fixed"
-      Database.update_issue(@project_path, iid, status: "mr_fixed")
+      log "No unresolved discussions on MR !#{mr_iid}"
+      issue.update(pipeline_retrigger_count: 0)
+      issue.discussions_fixed! # fixing_discussions → checking_pipeline
+      log "Issue ##{iid}: no discussions to fix → checking_pipeline"
       return
     end
 
     log "Found #{discussions.size} unresolved discussion(s) on MR !#{mr_iid}"
-    Database.update_issue(@project_path, iid, status: "mr_fixing")
 
     work_dir = "/tmp/autodev_mrfix_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
@@ -1175,7 +1287,8 @@ class MrFixer
       _out, _err, ok = run_cmd_status(["git", "log", "origin/#{branch}..HEAD", "--oneline"], chdir: work_dir)
       unless ok
         log "No new commits after fixing, skipping push"
-        Database.update_issue(@project_path, iid, status: "mr_fixed", fix_round: fix_round + 1)
+        issue.update(fix_round: fix_round + 1, pipeline_retrigger_count: 0)
+        issue.discussions_fixed! # fixing_discussions → checking_pipeline
         return
       end
 
@@ -1187,19 +1300,24 @@ class MrFixer
         run_cmd(["git", "push", "--force-with-lease", "origin", branch], chdir: work_dir)
       end
 
-      Database.update_issue(@project_path, iid,
-        status: "mr_fixed",
+      issue.update(
         fix_round: fix_round + 1,
+        pipeline_retrigger_count: 0,
         dc_stdout: @dc_stdout,
         dc_stderr: @dc_stderr
       )
-      notify_issue(iid, ":wrench: **autodev** : #{discussions.size} commentaire(s) de review corrige(s) sur #{issue_row[:mr_url]} (round #{fix_round + 1})")
+      issue.discussions_fixed! # fixing_discussions → checking_pipeline
+      notify_issue(iid, ":wrench: **autodev** : #{discussions.size} commentaire(s) de review corrige(s) sur #{issue.mr_url} (round #{fix_round + 1})")
       log "MR !#{mr_iid}: fixed #{discussions.size} discussion(s) (round #{fix_round + 1})"
 
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
-      Database.update_issue(@project_path, iid,
-        status: "error",
+      begin
+        issue.mark_failed! # → error
+      rescue AASM::InvalidTransition
+        issue.update(status: "error")
+      end
+      issue.update(
         error_message: "MR fix error: #{e.class}: #{e.message}\n  #{bt}",
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
       )
@@ -1246,7 +1364,6 @@ class MrFixer
   end
 
   def resolved?(discussion)
-    # A discussion is resolved if all resolvable notes are resolved
     resolvable_notes = discussion.notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
     return true if resolvable_notes.empty?
     resolvable_notes.all? { |n| n.respond_to?(:resolved) && n.resolved }
@@ -1366,9 +1483,10 @@ class PipelineMonitor
     @dc_stderr      = +""
   end
 
-  def check(issue_row)
-    iid    = issue_row[:issue_iid]
-    mr_iid = issue_row[:mr_iid]
+  def check(issue)
+    iid    = issue.issue_iid
+    mr_iid = issue.mr_iid
+    max_fix_rounds = (@project_config["max_fix_rounds"] || @config["max_fix_rounds"]).to_i
 
     log "Checking pipeline for MR !#{mr_iid} (issue ##{iid})..."
 
@@ -1378,7 +1496,7 @@ class PipelineMonitor
 
     unless pipeline
       log "No pipeline found for MR !#{mr_iid}, checking conversations..."
-      handle_green(issue_row)
+      handle_green(issue, max_fix_rounds)
       return
     end
 
@@ -1388,16 +1506,15 @@ class PipelineMonitor
     case status
     when "running", "pending", "created", "waiting_for_resource", "preparing", "scheduled"
       log "Pipeline still running for MR !#{mr_iid}, skipping"
-      # Do nothing — recheck next poll
+      # No event — stay in checking_pipeline, recheck next poll
     when "success"
-      handle_green(issue_row)
+      handle_green(issue, max_fix_rounds)
     when "failed"
-      handle_red(issue_row, pipeline)
+      handle_red(issue, pipeline, max_fix_rounds)
     when "canceled", "skipped"
-      # Treat like a non-code failure
       log "Pipeline #{status} for MR !#{mr_iid}"
-      Database.update_issue(@project_path, iid, status: "blocked")
-      notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue_row[:mr_url]} est #{status}. Intervention manuelle requise.")
+      issue.pipeline_canceled! # checking_pipeline → blocked
+      notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} est #{status}. Intervention manuelle requise.")
       log "Issue ##{iid}: pipeline #{status} → blocked"
     else
       log "Unknown pipeline status '#{status}' for MR !#{mr_iid}, skipping"
@@ -1406,66 +1523,66 @@ class PipelineMonitor
     log_error "Failed to check pipeline for MR !#{mr_iid}: #{e.message}"
   rescue StandardError => e
     bt = e.backtrace&.first(5)&.join("\n  ")
-    log_error "Pipeline check failed for issue ##{issue_row[:issue_iid]}: #{e.class}: #{e.message}"
+    log_error "Pipeline check failed for issue ##{issue.issue_iid}: #{e.class}: #{e.message}"
     log_error "  #{bt}" if bt
   end
 
   private
 
-  def handle_green(issue_row)
-    iid    = issue_row[:issue_iid]
-    mr_iid = issue_row[:mr_iid]
+  def handle_green(issue, max_fix_rounds)
+    iid    = issue.issue_iid
+    mr_iid = issue.mr_iid
 
     # Pipeline green — check for unresolved conversations
     discussions = fetch_unresolved_discussions(mr_iid)
-    if discussions.empty?
-      Database.update_issue(@project_path, iid, status: "over")
-      log "Issue ##{iid}: pipeline green, no open conversations → over"
-    else
-      max_fix_rounds = (@project_config["max_fix_rounds"] || @config["max_fix_rounds"]).to_i
-      if issue_row[:fix_round] >= max_fix_rounds
-        Database.update_issue(@project_path, iid, status: "over")
-        log "Issue ##{iid}: pipeline green, #{discussions.size} conversation(s) but max fix rounds reached → over"
+    issue._unresolved_discussions_empty = discussions.empty?
+    issue._max_fix_rounds = max_fix_rounds
+    issue.pipeline_green! # → over (if no discussions or max rounds) or fixing_discussions
+
+    if issue.over?
+      if discussions.empty?
+        log "Issue ##{iid}: pipeline green, no open conversations → over"
       else
-        Database.update_issue(@project_path, iid, status: "mr_fixing")
-        log "Issue ##{iid}: pipeline green, #{discussions.size} unresolved conversation(s) → mr_fixing"
+        log "Issue ##{iid}: pipeline green, #{discussions.size} conversation(s) but max fix rounds reached → over"
       end
+    else
+      log "Issue ##{iid}: pipeline green, #{discussions.size} unresolved conversation(s) → fixing_discussions"
     end
   end
 
-  def handle_red(issue_row, pipeline)
-    iid    = issue_row[:issue_iid]
-    mr_iid = issue_row[:mr_iid]
-    retrigger_count = issue_row[:pipeline_retrigger_count] || 0
+  def handle_red(issue, pipeline, max_fix_rounds)
+    iid    = issue.issue_iid
+    mr_iid = issue.mr_iid
+    retrigger_count = issue.pipeline_retrigger_count || 0
 
     if retrigger_count < 1
       # Retrigger once
       log "Pipeline failed for MR !#{mr_iid}, retriggering (attempt #{retrigger_count + 1})..."
       begin
         @client.retry_pipeline(@project_path, pipeline_id(pipeline))
-        Database.update_issue(@project_path, iid, pipeline_retrigger_count: retrigger_count + 1)
+        issue.update(pipeline_retrigger_count: retrigger_count + 1)
         log "Pipeline retriggered for MR !#{mr_iid}"
+        # Stay in checking_pipeline — no event fired
       rescue Gitlab::Error::ResponseError => e
         log_error "Failed to retrigger pipeline: #{e.message}"
         # Proceed to evaluation since retrigger failed
-        evaluate_failure(issue_row, pipeline)
+        evaluate_failure(issue, pipeline, max_fix_rounds)
       end
     else
       # Already retriggered — evaluate the failure
-      evaluate_failure(issue_row, pipeline)
+      evaluate_failure(issue, pipeline, max_fix_rounds)
     end
   end
 
-  def evaluate_failure(issue_row, pipeline)
-    iid       = issue_row[:issue_iid]
-    fix_round = issue_row[:fix_round]
+  def evaluate_failure(issue, pipeline, max_fix_rounds)
+    iid = issue.issue_iid
 
     # Fetch failed jobs and their logs
     failed_jobs = fetch_failed_jobs(pipeline)
     if failed_jobs.empty?
       log "No failed jobs found for pipeline ##{pipeline_id(pipeline)}, marking as blocked"
-      Database.update_issue(@project_path, iid, status: "blocked")
-      notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue_row[:mr_url]} a echoue mais aucun job en echec n'a ete trouve. Intervention manuelle requise.")
+      issue.pipeline_failed_infra! # checking_pipeline → blocked
+      notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} a echoue mais aucun job en echec n'a ete trouve. Intervention manuelle requise.")
       return
     end
 
@@ -1475,49 +1592,51 @@ class PipelineMonitor
     # Clone once — used for both evaluation and potential fix
     work_dir = "/tmp/autodev_pipeline_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
-      clone_and_checkout(work_dir, issue_row[:branch_name])
+      clone_and_checkout(work_dir, issue.branch_name)
 
       # Step 1: Evaluate if the failure is code-related
       eval_result = evaluate_code_related(work_dir, job_context)
 
       unless eval_result
-        # Could not parse evaluation — default to blocked
         log "Could not parse pipeline evaluation response, marking as blocked"
-        Database.update_issue(@project_path, iid, status: "blocked")
-        notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue_row[:mr_url]} a echoue et l'evaluation automatique n'a pas abouti. Intervention manuelle requise.")
+        issue.pipeline_failed_infra! # checking_pipeline → blocked
+        notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} a echoue et l'evaluation automatique n'a pas abouti. Intervention manuelle requise.")
         return
       end
 
       explanation = eval_result["explanation"] || "Aucune explication fournie"
 
       unless eval_result["code_related"]
-        Database.update_issue(@project_path, iid, status: "blocked")
-        notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue_row[:mr_url]} echoue pour une raison hors code. Intervention manuelle requise.\n\n> #{explanation}")
+        issue.pipeline_failed_infra! # checking_pipeline → blocked
+        notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} echoue pour une raison hors code. Intervention manuelle requise.\n\n> #{explanation}")
         log "Issue ##{iid}: non-code pipeline failure → blocked (#{explanation})"
         return
       end
 
-      # Code-related failure — check if we can still fix
-      max_fix_rounds = (@project_config["max_fix_rounds"] || @config["max_fix_rounds"]).to_i
-      if fix_round >= max_fix_rounds
-        Database.update_issue(@project_path, iid, status: "blocked")
-        notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue_row[:mr_url]} echoue a cause du code mais le nombre maximum de rounds de fix est atteint. Intervention manuelle requise.\n\n> #{explanation}")
+      # Code-related failure — fire event (guard decides fixing_pipeline vs blocked)
+      issue._max_fix_rounds = max_fix_rounds
+      issue.pipeline_failed_code! # → fixing_pipeline (if can_fix?) or → blocked
+
+      if issue.blocked?
+        notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} echoue a cause du code mais le nombre maximum de rounds de fix est atteint. Intervention manuelle requise.\n\n> #{explanation}")
         log "Issue ##{iid}: code-related pipeline failure but max fix rounds reached → blocked"
         return
       end
 
       # Step 2: Fix the code based on pipeline failure logs
       log "Issue ##{iid}: code-related pipeline failure, fixing... (#{explanation})"
-      Database.update_issue(@project_path, iid, status: "mr_pipeline_fixing")
-
-      fix_pipeline_failure(work_dir, job_context, issue_row)
+      fix_pipeline_failure(work_dir, job_context, issue)
 
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
       log_error "Pipeline evaluation/fix failed: #{e.class}: #{e.message}"
       log_error "  #{bt}" if bt
-      Database.update_issue(@project_path, iid,
-        status: "error",
+      begin
+        issue.mark_failed! # → error
+      rescue AASM::InvalidTransition
+        issue.update(status: "error")
+      end
+      issue.update(
         error_message: "Pipeline fix error: #{e.class}: #{e.message}\n  #{bt}",
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
       )
@@ -1566,10 +1685,10 @@ class PipelineMonitor
     nil
   end
 
-  def fix_pipeline_failure(work_dir, job_context, issue_row)
-    iid       = issue_row[:issue_iid]
-    branch    = issue_row[:branch_name]
-    fix_round = issue_row[:fix_round]
+  def fix_pipeline_failure(work_dir, job_context, issue)
+    iid       = issue.issue_iid
+    branch    = issue.branch_name
+    fix_round = issue.fix_round
 
     extra = @project_config["extra_prompt"]
     prompt = <<~PROMPT
@@ -1596,8 +1715,8 @@ class PipelineMonitor
     _out, _err, ok = run_cmd_status(["git", "log", "origin/#{branch}..HEAD", "--oneline"], chdir: work_dir)
     unless ok
       log "No new commits after pipeline fix, skipping push"
-      Database.update_issue(@project_path, iid, status: "mr_fixed", fix_round: fix_round + 1,
-        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
+      issue.update(fix_round: fix_round + 1, pipeline_retrigger_count: 0)
+      issue.pipeline_fix_done! # fixing_pipeline → checking_pipeline
       return
     end
 
@@ -1609,22 +1728,15 @@ class PipelineMonitor
       run_cmd(["git", "push", "--force-with-lease", "origin", branch], chdir: work_dir)
     end
 
-    Database.update_issue(@project_path, iid,
-      status: "mr_fixed",
+    issue.update(
       fix_round: fix_round + 1,
+      pipeline_retrigger_count: 0,
       dc_stdout: @dc_stdout,
       dc_stderr: @dc_stderr
     )
-    notify_issue(iid, ":wrench: **autodev** : correction du pipeline appliquee sur #{issue_row[:mr_url]} (round #{fix_round + 1})")
+    issue.pipeline_fix_done! # fixing_pipeline → checking_pipeline
+    notify_issue(iid, ":wrench: **autodev** : correction du pipeline appliquee sur #{issue.mr_url} (round #{fix_round + 1})")
     log "Issue ##{iid}: pipeline fix pushed (round #{fix_round + 1})"
-  end
-
-  def danger_claude_commit(work_dir)
-    out, err, ok = run_with_timeout("danger-claude", ["-c"], chdir: work_dir, label: "-c (pipeline fix)")
-    unless ok
-      raise ImplementationError, "danger-claude -c failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
-    end
-    out
   end
 
   def fetch_failed_jobs(pipeline)
@@ -1642,7 +1754,6 @@ class PipelineMonitor
   def fetch_job_trace(job)
     jid = job.respond_to?(:id) ? job.id : job["id"]
     trace = @client.job_trace(@project_path, jid)
-    # Limit trace to last 3000 chars to stay within prompt limits
     trace = trace.to_s
     trace.length > 3000 ? trace[-3000..] : trace
   rescue Gitlab::Error::ResponseError => e
@@ -1682,9 +1793,17 @@ class PipelineMonitor
 
   def danger_claude_prompt(work_dir, prompt)
     @logger.debug("danger-claude -p prompt:\n#{prompt}", project: @project_path)
-    out, err, ok = run_with_timeout("danger-claude", ["-p", prompt], chdir: work_dir, label: "-p (pipeline eval)")
+    out, err, ok = run_with_timeout("danger-claude", ["-p", prompt], chdir: work_dir, label: "-p (pipeline)")
     unless ok
       raise ImplementationError, "danger-claude -p failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
+    end
+    out
+  end
+
+  def danger_claude_commit(work_dir)
+    out, err, ok = run_with_timeout("danger-claude", ["-c"], chdir: work_dir, label: "-c (pipeline fix)")
+    unless ok
+      raise ImplementationError, "danger-claude -c failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
     end
     out
   end
@@ -1849,19 +1968,20 @@ def main
     logger.warn("mr-review not installed, review step will be skipped")
   end
 
-  # 4. Connect SQLite + migrate
+  # 4. Connect SQLite + migrate + build model
   token = config["gitlab_token"]
   client = build_gitlab_client(config["gitlab_url"], token)
 
   if Database.connect(config["database_url"])
-    logger.debug("Database connected")
+    Database.build_model!
+    logger.debug("Database connected, Issue model initialized")
   else
     raise ConfigError, "Database connection required for autodev"
   end
 
-  # Reset errored issues for retry
-  reset_count = Database.reset_errors_to_pending!(max_retries: config["max_retries"])
-  logger.warn("Reset #{reset_count} errored issue(s) to pending") if reset_count && reset_count > 0
+  # Recover from previous run
+  reset_count = Database.recover_on_startup!(max_retries: config["max_retries"])
+  logger.warn("Recovered #{reset_count} issue(s) on startup") if reset_count > 0
 
   # 5. Start WorkerPool
   pool = WorkerPool.new(size: config["max_workers"], logger: logger)
@@ -1888,49 +2008,56 @@ def main
       project_path = project_config["path"]
       logger.debug("Polling #{project_path} for label '#{trigger_label}'...", project: project_path)
 
+      # -- New/pending issues --
       begin
         issues = fetch_trigger_issues(client, project_path, trigger_label)
 
-        issues.each do |issue|
+        issues.each do |gl_issue|
           break if shutdown_requested
 
-          # Skip if already tracked (unless it was reset to pending)
-          existing = Database.find_issue(project_path, issue.iid)
+          existing = Issue.where(project_path: project_path, issue_iid: gl_issue.iid).first
           if existing
-            if existing[:status] == "needs_clarification"
-              # Check if new comments were posted since clarification was requested
-              if clarification_answered?(client, project_path, issue.iid, existing[:clarification_requested_at])
-                logger.info("Issue ##{issue.iid}: clarification received, re-queuing", project: project_path)
-                Database.update_issue(project_path, issue.iid,
-                  status: "pending", clarification_requested_at: nil, error_message: nil)
+            if existing.status == "needs_clarification"
+              if clarification_answered?(client, project_path, gl_issue.iid, existing.clarification_requested_at)
+                logger.info("Issue ##{gl_issue.iid}: clarification received, re-queuing", project: project_path)
+                existing.clarification_received! # needs_clarification → pending
+                existing.update(clarification_requested_at: nil, error_message: nil)
               else
                 next
               end
-            elsif existing[:status] != "pending"
+            elsif existing.status != "pending"
               next
             end
           end
 
           # Skip if max retries exceeded
           max_retries = (project_config["max_retries"] || config["max_retries"]).to_i
-          if Database.exceeded_max_retries?(project_path, issue.iid, max_retries)
-            logger.debug("Issue ##{issue.iid} exceeded max retries (#{max_retries}), skipping", project: project_path)
+          if existing && existing.retry_count >= max_retries
+            logger.debug("Issue ##{gl_issue.iid} exceeded max retries (#{max_retries}), skipping", project: project_path)
             next
           end
 
           if config["dry_run"]
-            logger.info("[dry-run] Would process issue ##{issue.iid}: #{issue.title}", project: project_path)
+            logger.info("[dry-run] Would process issue ##{gl_issue.iid}: #{gl_issue.title}", project: project_path)
             next
           end
 
           # Insert if new
           unless existing
-            Database.insert_issue(
-              project_path: project_path,
-              issue_iid:    issue.iid,
-              issue_title:  issue.title
-            )
+            begin
+              Issue.create(
+                project_path: project_path,
+                issue_iid:    gl_issue.iid,
+                issue_title:  gl_issue.title,
+                status:       "pending"
+              )
+            rescue Sequel::UniqueConstraintViolation
+              # Already tracked
+            end
+            existing = Issue.where(project_path: project_path, issue_iid: gl_issue.iid).first
           end
+
+          next unless existing
 
           # Build a per-worker client (thread safety)
           worker_client = build_gitlab_client(config["gitlab_url"], token)
@@ -1943,26 +2070,19 @@ def main
             token:          token
           )
 
-          pool.enqueue { processor.process(issue) }
-          logger.info("Enqueued issue ##{issue.iid}: #{issue.title}", project: project_path)
+          pool.enqueue { processor.process(existing) }
+          logger.info("Enqueued issue ##{gl_issue.iid}: #{gl_issue.title}", project: project_path)
         end
       rescue AutodevError => e
         logger.error("Error polling #{project_path}: #{e.message}", project: project_path)
       end
 
-      # -- Transition done/mr_fixed → mr_pipeline_running --
       next if config["dry_run"]
-      begin
-        max_fix_rounds = (project_config["max_fix_rounds"] || config["max_fix_rounds"]).to_i
-        Database.transition_to_pipeline_running!(project_path, max_fix_rounds)
-      rescue StandardError => e
-        logger.error("Error transitioning to pipeline_running for #{project_path}: #{e.message}", project: project_path)
-      end
 
-      # -- Pipeline monitoring poll --
+      # -- Pipeline monitoring (checking_pipeline) --
       begin
-        pipeline_issues = Database.issues_for_pipeline_monitoring(project_path)
-        pipeline_issues.each do |issue_row|
+        Issue.where(project_path: project_path, status: "checking_pipeline")
+             .exclude(mr_iid: nil).each do |issue|
           break if shutdown_requested
 
           worker_client = build_gitlab_client(config["gitlab_url"], token)
@@ -1974,19 +2094,19 @@ def main
             token:          token
           )
 
-          pool.enqueue { monitor.check(issue_row) }
-          logger.info("Enqueued pipeline check for issue ##{issue_row[:issue_iid]} (MR !#{issue_row[:mr_iid]})", project: project_path)
+          pool.enqueue { monitor.check(issue) }
+          logger.info("Enqueued pipeline check for issue ##{issue.issue_iid} (MR !#{issue.mr_iid})", project: project_path)
         end
       rescue StandardError => e
         logger.error("Error polling pipeline monitoring for #{project_path}: #{e.message}", project: project_path)
       end
 
-      # -- MR comment fixing poll --
+      # -- Discussion fixes (fixing_discussions) --
       begin
         max_fix_rounds = (project_config["max_fix_rounds"] || config["max_fix_rounds"]).to_i
-        fixable = Database.issues_for_mr_fixing(project_path, max_fix_rounds)
-
-        fixable.each do |issue_row|
+        Issue.where(project_path: project_path, status: "fixing_discussions")
+             .where { fix_round < max_fix_rounds }
+             .exclude(mr_iid: nil).each do |issue|
           break if shutdown_requested
 
           worker_client = build_gitlab_client(config["gitlab_url"], token)
@@ -1998,11 +2118,30 @@ def main
             token:          token
           )
 
-          pool.enqueue { fixer.fix(issue_row) }
-          logger.info("Enqueued MR fix for issue ##{issue_row[:issue_iid]} (round #{issue_row[:fix_round] + 1})", project: project_path)
+          pool.enqueue { fixer.fix(issue) }
+          logger.info("Enqueued discussion fix for issue ##{issue.issue_iid} (round #{issue.fix_round + 1})", project: project_path)
         end
       rescue StandardError => e
-        logger.error("Error polling MR fixes for #{project_path}: #{e.message}", project: project_path)
+        logger.error("Error polling discussion fixes for #{project_path}: #{e.message}", project: project_path)
+      end
+
+      # -- Error retry --
+      begin
+        max_retries = (project_config["max_retries"] || config["max_retries"]).to_i
+        Issue.where(project_path: project_path, status: "error")
+             .where { retry_count < max_retries }
+             .where { Sequel.lit("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')") }
+             .each do |issue|
+          begin
+            issue.retry_processing! # error → pending
+            issue.update(error_message: nil, started_at: nil)
+            logger.info("Issue ##{issue.issue_iid} retried (attempt #{issue.retry_count + 1})", project: project_path)
+          rescue AASM::InvalidTransition => e
+            logger.error("Could not retry issue ##{issue.issue_iid}: #{e.message}", project: project_path)
+          end
+        end
+      rescue StandardError => e
+        logger.error("Error retrying issues for #{project_path}: #{e.message}", project: project_path)
       end
     end
 
