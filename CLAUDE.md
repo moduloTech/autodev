@@ -86,6 +86,14 @@ Handles the full lifecycle for a single issue:
 9. **Review** — `mr-review -H` (non-fatal)
 10. **Cleanup** — Remove temp directory
 
+### MrFixer
+
+Handles `mr_fixing` issues: clones the MR branch, fetches unresolved discussions, fixes each one via `danger-claude -p` + `-c`, resolves discussions, pushes. After fixing → `mr_fixed`.
+
+### PipelineMonitor
+
+Handles `mr_pipeline_running` issues: fetches MR head pipeline via GitLab API. If running → skip. If green → checks for unresolved conversations (none → `over`, some → `mr_fixing`). If red → retrigger once, then on re-fail evaluates via `danger-claude` whether the failure is code-related (`mr_fixing`) or not (`blocked`).
+
 ### WorkerPool
 
 N threads (configurable) consuming a shared `Queue`. Each worker gets its own GitLab client for thread safety. Graceful shutdown via SIGINT/SIGTERM: finish current work, don't take new issues.
@@ -94,7 +102,20 @@ N threads (configurable) consuming a shared `Queue`. Each worker gets its own Gi
 
 Single table `issues` with status lifecycle:
 
-`pending` -> `cloning` -> `implementing` -> `committing` -> `pushing` -> `creating_mr` -> `reviewing` -> `done` | `error`
+```
+pending → cloning → implementing → committing → pushing → creating_mr → reviewing → done
+                                                                                      ↓
+done/mr_fixed → mr_pipeline_running → (green + no conversations) → over (terminal)
+                       ↓ (green + conversations)
+                    mr_fixing → mr_fixed → mr_pipeline_running (loop, capped by max_fix_rounds)
+                       ↓ (code-related pipeline failure)
+                    mr_pipeline_fixing → mr_fixed → mr_pipeline_running (loop, capped by max_fix_rounds)
+                       ↓ (non-code failure)
+                    blocked
+
+error (any stage) → pending (on restart, with backoff)
+needs_clarification → pending (when clarification comment posted)
+```
 
 Errored issues are automatically reset to `pending` on restart for retry.
 
@@ -110,6 +131,9 @@ Errored issues are automatically reset to `pending` on restart for retry.
 | MR already exists for branch | Reuse existing MR |
 | Issue closed between poll and processing | Skip, mark done |
 | Issues in error at restart | Auto-reset to pending for retry |
+| Pipeline red (first time) | Retrigger once, recheck next poll |
+| Pipeline red (after retrigger) | Evaluate via Claude: code → mr_fixing, non-code → blocked |
+| Pipeline canceled/skipped | status=blocked, comment posted |
 
 ## Key Design Decisions
 

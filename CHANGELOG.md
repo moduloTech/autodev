@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- Pipeline monitoring: new `mr_pipeline_running` status after `mr_fixed`. Checks MR pipeline status each poll cycle: green + no conversations → `over`, green + conversations → `mr_fixing`, running → skip, red → retrigger once then evaluate.
+- Pipeline failure evaluation: uses danger-claude to analyse failed job logs and determine if the failure is code-related (→ `mr_fixing`) or infrastructure-related (→ `blocked`).
+- Pipeline code fix: when a pipeline failure is code-related, PipelineMonitor fixes the code directly using failed job logs as context (danger-claude -p + -c), commits and pushes, then transitions to `mr_fixed`. Uses dedicated `mr_pipeline_fixing` status during the fix to prevent race conditions with MrFixer.
+- New `blocked` status for issues requiring manual intervention (non-code pipeline failures, canceled/skipped pipelines).
+- `over` is now the terminal status, reached only when pipeline is green and no open conversations remain.
+
+### Changed
+
+- Status flow after MR creation: `done` → `mr_pipeline_running` → (pipeline green + no conversations) → `over`. Previously `done` directly checked conversations.
+- `mr_fixed` now transitions to `mr_pipeline_running` instead of rechecking conversations directly.
+
 ## [0.3.0] - 2026-03-24
 
 ### Added
