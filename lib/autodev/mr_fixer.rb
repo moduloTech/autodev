@@ -40,18 +40,32 @@ class MrFixer
 
     log "Found #{discussions.size} unresolved discussion(s) on MR !#{mr_iid}"
 
+    # Fetch issue and MR context once for all discussions
+    issue_context = fetch_issue_context(iid)
+    mr_context = fetch_mr_context(mr_iid)
+
     work_dir = "/tmp/autodev_mrfix_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
       clone_and_checkout(work_dir, branch)
       SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+      target_branch = mr_context[:target_branch] || default_branch(work_dir)
 
       discussions.each_with_index do |discussion, idx|
-        thread_context = format_discussion(discussion)
+        thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: target_branch)
         log "Fixing discussion #{idx + 1}/#{discussions.size}: #{discussion[:title]}"
 
         extra = @project_config["extra_prompt"]
         prompt = <<~PROMPT
           Tu dois corriger le code en reponse a un commentaire de review sur une Merge Request.
+
+          ## Contexte de l'issue
+
+          **##{iid}: #{issue_context[:title]}**
+          #{issue_context[:description]}
+
+          ## Description de la MR
+
+          #{mr_context[:description]}
 
           ## Commentaire de review
 
@@ -59,7 +73,7 @@ class MrFixer
 
           ## Instructions
 
-          - Lis attentivement le commentaire et le contexte du diff.
+          - Le diff ci-dessus montre les lignes exactes concernees par le commentaire.
           - Corrige le code pour repondre au commentaire.
           - Respecte les conventions du projet (voir CLAUDE.md si present).
           - Ne modifie que ce qui est necessaire pour repondre au commentaire.
@@ -131,19 +145,114 @@ class MrFixer
     resolvable_notes.all? { |n| n.respond_to?(:resolved) && n.resolved }
   end
 
-  def format_discussion(discussion)
+  def fetch_issue_context(iid)
+    gi = @client.issue(@project_path, iid)
+    { title: gi.title.to_s, description: gi.description.to_s }
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to fetch issue ##{iid} context: #{e.message}"
+    { title: "", description: "" }
+  end
+
+  def fetch_mr_context(mr_iid)
+    mr = @client.merge_request(@project_path, mr_iid)
+    { description: mr.description.to_s, target_branch: mr.target_branch }
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to fetch MR !#{mr_iid} context: #{e.message}"
+    { description: "", target_branch: nil }
+  end
+
+  def default_branch(work_dir)
+    out, _err, ok = run_cmd_status(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short"], chdir: work_dir)
+    if ok && !out.strip.empty?
+      out.strip.sub("origin/", "")
+    else
+      "main"
+    end
+  end
+
+  def format_discussion(discussion, work_dir: nil, target_branch: nil)
     lines = []
+    diff_shown = false
+
     discussion[:notes].each do |note|
       author = note.author&.name || "Unknown"
       lines << "### #{author} (#{note.created_at})"
+
       if note.respond_to?(:position) && note.position
         pos = note.position
-        lines << "Fichier: `#{pos.respond_to?(:new_path) ? pos.new_path : pos["new_path"]}`" if pos
+        file_path = pos_field(pos, :new_path)
+        old_line = pos_field(pos, :old_line)
+        new_line = pos_field(pos, :new_line)
+
+        if file_path
+          location = +"Fichier: `#{file_path}`"
+          location << " (ligne #{new_line})" if new_line
+          location << " (ancienne ligne #{old_line})" if old_line && !new_line
+          lines << location
+
+          # Include the diff hunk for the first note (avoids repetition in replies)
+          if !diff_shown && work_dir && target_branch
+            hunk = extract_diff_hunk(work_dir, target_branch, file_path, new_line || old_line)
+            if hunk
+              lines << ""
+              lines << "#### Diff"
+              lines << "```diff"
+              lines << hunk
+              lines << "```"
+              diff_shown = true
+            end
+          end
+        end
       end
+
+      lines << ""
       lines << note.body.to_s
       lines << ""
     end
     lines.join("\n")
+  end
+
+  # Extract the diff hunk containing the given line for a specific file.
+  def extract_diff_hunk(work_dir, target_branch, file_path, target_line)
+    diff_output, _err, ok = run_cmd_status(
+      ["git", "diff", "origin/#{target_branch}..HEAD", "--", file_path],
+      chdir: work_dir
+    )
+    return nil unless ok && diff_output && !diff_output.strip.empty?
+
+    return diff_output unless target_line
+
+    # Split into hunks and find the one containing target_line
+    hunks = diff_output.split(/(?=^@@)/)
+    target_line = target_line.to_i
+
+    hunks.each do |hunk|
+      next unless hunk.start_with?("@@")
+
+      # Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
+      match = hunk.match(/^@@ .+\+(\d+)(?:,(\d+))? @@/)
+      next unless match
+
+      hunk_start = match[1].to_i
+      hunk_count = (match[2] || 1).to_i
+
+      if target_line >= hunk_start && target_line <= hunk_start + hunk_count
+        return hunk.strip
+      end
+    end
+
+    # Fallback: return the full diff if no matching hunk found
+    diff_output
+  rescue StandardError
+    nil
+  end
+
+  def pos_field(pos, field)
+    if pos.respond_to?(field)
+      pos.send(field)
+    elsif pos.is_a?(Hash)
+      pos[field.to_s] || pos[field]
+    end
   end
 
   def resolve_discussion(mr_iid, discussion_id)
