@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Add `logger` gem to inline Gemfile for Ruby 4.0 compatibility (`logger` was removed from default gems).
+
 ## [0.5.0] - 2026-03-26
 
 ### Added

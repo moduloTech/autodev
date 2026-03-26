@@ -29,6 +29,7 @@ gemfile(true) do
   gem "pastel",  "~> 0.8"
   gem "i18n",    "~> 1.0"
   gem "aasm",    "~> 5.5"
+  gem "logger"
 end
 
 require "fileutils"
