@@ -62,7 +62,9 @@ Handles `fixing_discussions`: clones the MR branch, fetches unresolved discussio
 
 ### PipelineMonitor
 
-Handles `checking_pipeline`: fetches MR head pipeline via GitLab API. If running → skip. If green → fires `pipeline_green!` (guards decide `over` vs `fixing_discussions`). If red → retrigger once, then evaluates via danger-claude. Code-related → fires `pipeline_failed_code!` → `fixing_pipeline` (fix inline) → `pipeline_fix_done!`. Non-code → `pipeline_failed_infra!` → `blocked`.
+Handles `checking_pipeline`: fetches MR head pipeline via GitLab API. If running → skip. If green → fires `pipeline_green!` (guards decide `over` vs `fixing_discussions`). If red → retrigger once, then evaluates via danger-claude. Code-related → fires `pipeline_failed_code!` → `fixing_pipeline` → `pipeline_fix_done!`. Non-code → `pipeline_failed_infra!` → `blocked`.
+
+Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log` files in the work directory (no truncation). Prompts reference these files by path so danger-claude reads the complete log. Each failed job is fixed in a separate danger-claude call + commit (same pattern as MrFixer's per-discussion approach).
 
 ### WorkerPool
 

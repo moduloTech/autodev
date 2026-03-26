@@ -102,12 +102,17 @@ class PipelineMonitor
       return
     end
 
-    job_context = build_job_context(failed_jobs)
     work_dir = "/tmp/autodev_pipeline_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
       clone_and_checkout(work_dir, issue.branch_name)
 
-      eval_result = evaluate_code_related(work_dir, job_context)
+      # Write full job logs to files in the work directory
+      log_dir = File.join(work_dir, "tmp", "ci_logs")
+      FileUtils.mkdir_p(log_dir)
+      job_entries = write_job_logs(failed_jobs, log_dir)
+
+      eval_context = build_eval_context(job_entries)
+      eval_result = evaluate_code_related(work_dir, eval_context)
 
       unless eval_result
         log "Could not parse pipeline evaluation response, marking as blocked"
@@ -135,9 +140,9 @@ class PipelineMonitor
         return
       end
 
-      # Fix the code
-      log "Issue ##{iid}: code-related pipeline failure, fixing... (#{explanation})"
-      fix_pipeline_failure(work_dir, job_context, issue)
+      # Fix each failed job in a separate commit
+      log "Issue ##{iid}: code-related pipeline failure, fixing #{job_entries.size} job(s)... (#{explanation})"
+      fix_pipeline_failures(work_dir, job_entries, issue)
 
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
@@ -156,22 +161,39 @@ class PipelineMonitor
     end
   end
 
-  def build_job_context(failed_jobs)
+  # Write full job logs to individual files and return metadata entries.
+  # Each entry: { name:, stage:, log_path: (relative to work_dir) }
+  def write_job_logs(failed_jobs, log_dir)
     failed_jobs.map do |job|
-      name = job.respond_to?(:name) ? job.name : job["name"]
+      name  = job.respond_to?(:name) ? job.name : job["name"]
       stage = job.respond_to?(:stage) ? job.stage : job["stage"]
       trace = fetch_job_trace(job)
-      "### Job: #{name} (stage: #{stage})\n\n```\n#{trace}\n```"
-    end.join("\n\n")
+
+      filename = "#{name.gsub(/[^a-zA-Z0-9_-]/, "_")}.log"
+      filepath = File.join(log_dir, filename)
+      File.write(filepath, trace)
+
+      rel_path = "tmp/ci_logs/#{filename}"
+      { name: name, stage: stage, log_path: rel_path }
+    end
   end
 
-  def evaluate_code_related(work_dir, job_context)
+  # Build a short summary for the evaluation prompt (no inline logs).
+  def build_eval_context(job_entries)
+    job_entries.map do |entry|
+      "- **#{entry[:name]}** (stage: #{entry[:stage]}) — log complet : `#{entry[:log_path]}`"
+    end.join("\n")
+  end
+
+  def evaluate_code_related(work_dir, eval_context)
     prompt = <<~PROMPT
       Tu dois analyser un echec de pipeline CI/CD sur une Merge Request et determiner s'il est lie au code ou non.
 
       ## Jobs en echec
 
-      #{job_context}
+      #{eval_context}
+
+      Lis chaque fichier de log reference ci-dessus pour comprendre la cause de l'echec.
 
       ## Instructions de reponse
 
@@ -195,31 +217,36 @@ class PipelineMonitor
     nil
   end
 
-  def fix_pipeline_failure(work_dir, job_context, issue)
+  # Fix each failed job in a separate danger-claude call + commit.
+  def fix_pipeline_failures(work_dir, job_entries, issue)
     iid       = issue.issue_iid
     branch    = issue.branch_name
     fix_round = issue.fix_round
+    extra     = @project_config["extra_prompt"]
 
-    extra = @project_config["extra_prompt"]
-    prompt = <<~PROMPT
-      Tu dois corriger le code pour resoudre un echec de pipeline CI/CD.
+    job_entries.each_with_index do |entry, idx|
+      log "Fixing job #{idx + 1}/#{job_entries.size}: #{entry[:name]} (issue ##{iid})"
 
-      ## Jobs en echec
+      prompt = <<~PROMPT
+        Tu dois corriger le code pour resoudre l'echec du job CI/CD "#{entry[:name]}" (stage: #{entry[:stage]}).
 
-      #{job_context}
+        ## Log du job
 
-      ## Instructions
+        Le log complet du job est dans le fichier `#{entry[:log_path]}`. Lis-le pour comprendre l'erreur.
 
-      - Analyse les logs des jobs en echec ci-dessus.
-      - Corrige le code source pour que ces jobs passent au vert.
-      - Respecte les conventions du projet (voir CLAUDE.md si present).
-      - Ne modifie que ce qui est necessaire pour corriger les erreurs de pipeline.
-      - Ne touche pas aux fichiers de configuration CI/CD sauf si c'est la cause directe de l'echec.
-      #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
-    PROMPT
+        ## Instructions
 
-    danger_claude_prompt(work_dir, prompt, label: "-p (pipeline fix)")
-    danger_claude_commit(work_dir, label: "-c (pipeline fix)")
+        - Analyse le log du job en echec.
+        - Corrige le code source pour que ce job passe au vert.
+        - Respecte les conventions du projet (voir CLAUDE.md si present).
+        - Ne modifie que ce qui est necessaire pour corriger l'erreur de ce job.
+        - Ne touche pas aux fichiers de configuration CI/CD sauf si c'est la cause directe de l'echec.
+        #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+      PROMPT
+
+      danger_claude_prompt(work_dir, prompt, label: "-p (pipeline fix: #{entry[:name]})")
+      danger_claude_commit(work_dir, label: "-c (pipeline fix: #{entry[:name]})")
+    end
 
     _out, _err, ok = run_cmd_status(["git", "log", "origin/#{branch}..HEAD", "--oneline"], chdir: work_dir)
     unless ok
@@ -229,7 +256,7 @@ class PipelineMonitor
       return
     end
 
-    log "Pushing pipeline fix to #{branch}..."
+    log "Pushing pipeline fixes to #{branch}..."
     _out, _err, push_ok = run_cmd_status(["git", "push", "origin", branch], chdir: work_dir)
     unless push_ok
       log "Push failed, retrying with --force-with-lease..."
@@ -239,8 +266,8 @@ class PipelineMonitor
     issue.update(fix_round: fix_round + 1, pipeline_retrigger_count: 0,
                  dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
     issue.pipeline_fix_done! # fixing_pipeline → checking_pipeline
-    notify_issue(iid, ":wrench: **autodev** : correction du pipeline appliquee sur #{issue.mr_url} (round #{fix_round + 1})")
-    log "Issue ##{iid}: pipeline fix pushed (round #{fix_round + 1})"
+    notify_issue(iid, ":wrench: **autodev** : correction du pipeline appliquee sur #{issue.mr_url} — #{job_entries.size} job(s) corrige(s) (round #{fix_round + 1})")
+    log "Issue ##{iid}: pipeline fix pushed — #{job_entries.size} job(s) (round #{fix_round + 1})"
   end
 
   def fetch_failed_jobs(pipeline)
@@ -257,9 +284,7 @@ class PipelineMonitor
 
   def fetch_job_trace(job)
     jid = job.respond_to?(:id) ? job.id : job["id"]
-    trace = @client.job_trace(@project_path, jid)
-    trace = trace.to_s
-    trace.length > 3000 ? trace[-3000..] : trace
+    @client.job_trace(@project_path, jid).to_s
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to fetch job trace: #{e.message}"
     "(trace unavailable: #{e.message})"

@@ -12,7 +12,7 @@
 
 - AASM state machine: formalized all status transitions using the `aasm` gem with Sequel::Model. Each state corresponds to exactly one action. Events with guards enforce valid transitions. Issue model is built dynamically after DB connection (`Database.build_model!`).
 - Pipeline monitoring: `checking_pipeline` state checks MR pipeline status each poll cycle. Green + no conversations → `over`, green + conversations → `fixing_discussions`, running → skip, red → retrigger once then evaluate via danger-claude.
-- Pipeline code fix: code-related pipeline failures are fixed directly by PipelineMonitor (`fixing_pipeline` state) using failed job logs as context.
+- Pipeline code fix: code-related pipeline failures are fixed directly by PipelineMonitor (`fixing_pipeline` state). Full job logs are written to `tmp/ci_logs/` files in the work directory (no truncation) and referenced by path in prompts. Each failed job is fixed in a separate danger-claude call + commit.
 - `blocked` status for issues requiring manual intervention (non-code pipeline failures, canceled/skipped pipelines).
 - `checking_spec` state: specification clarity check is now a dedicated state (previously embedded in `implementing`).
 
