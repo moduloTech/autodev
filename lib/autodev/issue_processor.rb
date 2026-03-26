@@ -270,10 +270,195 @@ class IssueProcessor
   end
 
   def implement(work_dir, context, iid)
+    if @project_config["parallel_agents"]
+      plan = evaluate_complexity(work_dir, context, iid)
+      if plan
+        implement_parallel(work_dir, context, iid, plan)
+      else
+        log "Complexity evaluation returned no plan, falling back"
+        implement_fallback(work_dir, context, iid)
+      end
+    else
+      implement_fallback(work_dir, context, iid)
+    end
+  end
+
+  def implement_fallback(work_dir, context, iid)
     if @project_config["split_implementation"]
       implement_split(work_dir, context, iid)
     else
       implement_single(work_dir, context, iid)
+    end
+  end
+
+  # Ask Claude to assess complexity and generate a work plan.
+  # Returns nil for simple issues (single-agent is fine),
+  # or an array of tasks for parallel execution.
+  def evaluate_complexity(work_dir, context, iid)
+    prompt = <<~PROMPT
+      Analyse le ticket GitLab suivant et determine si l'implementation necessite plusieurs agents
+      travaillant en parallele, ou si un seul agent suffit.
+
+      #{context}
+
+      ## Instructions de reponse
+
+      Reponds UNIQUEMENT avec un objet JSON valide (sans bloc de code markdown), avec cette structure :
+      {
+        "parallel": true/false,
+        "reason": "explication courte",
+        "tasks": [
+          {
+            "name": "nom-court-de-la-tache",
+            "description": "ce que cet agent doit faire",
+            "scope": "fichiers ou repertoires concernes (ex: app/models/, app/controllers/users*)"
+          }
+        ]
+      }
+
+      - `parallel: false` si l'issue est simple (1-3 fichiers, un seul domaine). `tasks` doit etre vide.
+      - `parallel: true` si l'issue touche plusieurs couches ou domaines independants.
+        Chaque tache doit etre autonome et ne PAS toucher les memes fichiers qu'une autre tache.
+        Ajoute toujours une tache "tests" dediee aux tests.
+      - Maximum 4 taches. Ne cree pas de taches inutiles.
+      - Sois pragmatique : en cas de doute, reponds `parallel: false`.
+    PROMPT
+
+    log "Evaluating issue complexity for ##{iid}..."
+    out = danger_claude_prompt(work_dir, prompt, label: "-p (complexity eval)")
+
+    json_match = out.match(/\{[^{}]*"parallel"\s*:\s*(true|false).*\}/m)
+    return nil unless json_match
+
+    result = JSON.parse(json_match[0])
+
+    unless result["parallel"] && result["tasks"].is_a?(Array) && result["tasks"].size > 1
+      log "Issue ##{iid} assessed as simple: #{result["reason"]}"
+      return nil
+    end
+
+    tasks = result["tasks"].map do |t|
+      { name: t["name"].to_s, description: t["description"].to_s, scope: t["scope"].to_s }
+    end
+
+    log "Issue ##{iid} assessed as complex (#{tasks.size} tasks): #{result["reason"]}"
+    tasks
+  rescue JSON::ParserError
+    log "Could not parse complexity evaluation, falling back to single agent"
+    nil
+  end
+
+  # Run N agents in parallel, each in its own worktree with a specific task.
+  def implement_parallel(work_dir, context, iid, tasks)
+    extra = @project_config["extra_prompt"]
+    log "Running #{tasks.size} parallel agents for issue ##{iid}..."
+
+    worktrees = []
+    threads = []
+    errors = []
+
+    tasks.each_with_index do |task, idx|
+      wt_path = "#{work_dir}_task_#{idx}"
+      run_cmd(["git", "worktree", "add", wt_path, "HEAD"], chdir: work_dir)
+      SkillsInjector.inject(wt_path, logger: @logger, project_path: @project_path)
+
+      # Copy injected agents
+      agents_src = File.join(work_dir, ".claude", "agents")
+      if Dir.exist?(agents_src)
+        agents_dst = File.join(wt_path, ".claude", "agents")
+        FileUtils.mkdir_p(agents_dst)
+        FileUtils.cp_r(Dir.glob(File.join(agents_src, "*")), agents_dst)
+      end
+
+      worktrees << { path: wt_path, task: task }
+
+      prompt = <<~PROMPT
+        Tu dois implementer UNE PARTIE d'un ticket GitLab. D'autres agents travaillent
+        en parallele sur d'autres parties. Ne fais QUE ta tache assignee.
+
+        ## Ticket complet (pour contexte)
+
+        #{context}
+
+        ## Ta tache
+
+        **#{task[:name]}** : #{task[:description]}
+
+        Scope : `#{task[:scope]}`
+
+        ## Instructions
+
+        - N'implemente QUE ta tache. Ne touche PAS aux fichiers hors de ton scope.
+        - Respecte les conventions du projet (voir CLAUDE.md si present).
+        - Ajoute les tests correspondant a ta tache si elle n'est pas dediee aux tests.
+        - Sois autonome : ne presuppose pas que les autres agents ont deja fait leur travail.
+        #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+      PROMPT
+
+      threads << Thread.new do
+        log "Agent #{idx + 1}/#{tasks.size}: #{task[:name]} (#{task[:scope]})"
+        danger_claude_prompt(wt_path, prompt, label: "-p (parallel: #{task[:name]})")
+      rescue StandardError => e
+        errors << { task: task[:name], error: e }
+      end
+    end
+
+    # Wait for all agents
+    threads.each(&:join)
+
+    if errors.any?
+      error_names = errors.map { |e| e[:task] }.join(", ")
+      log_error "#{errors.size} agent(s) failed: #{error_names}"
+    end
+
+    # Merge results from all worktrees into work_dir
+    worktrees.each do |wt|
+      merge_worktree_files(wt[:path], work_dir, wt[:task][:name])
+    end
+
+    # If ALL agents failed, raise
+    if errors.size == tasks.size
+      raise ImplementationError, "All parallel agents failed: #{errors.map { |e| "#{e[:task]}: #{e[:error].message}" }.join("; ")}"
+    end
+  ensure
+    # Clean up all worktrees
+    (worktrees || []).each do |wt|
+      if Dir.exist?(wt[:path])
+        run_cmd_status(["git", "worktree", "remove", "--force", wt[:path]], chdir: work_dir)
+        FileUtils.rm_rf(wt[:path])
+      end
+    end
+  end
+
+  # Copy all modified/new files from a worktree back to work_dir.
+  def merge_worktree_files(worktree_path, work_dir, task_name)
+    changed, _err, ok = run_cmd_status(
+      ["git", "diff", "--name-only", "HEAD"],
+      chdir: worktree_path
+    )
+    untracked, _err, ok2 = run_cmd_status(
+      ["git", "ls-files", "--others", "--exclude-standard"],
+      chdir: worktree_path
+    )
+
+    files = []
+    files += changed.split("\n").map(&:strip).reject(&:empty?) if ok
+    files += untracked.split("\n").map(&:strip).reject(&:empty?) if ok2
+    files.uniq!
+
+    if files.empty?
+      log "Agent '#{task_name}' produced no changes"
+      return
+    end
+
+    log "Merging #{files.size} file(s) from agent '#{task_name}'..."
+    files.each do |file|
+      src = File.join(worktree_path, file)
+      dst = File.join(work_dir, file)
+      next unless File.exist?(src)
+
+      FileUtils.mkdir_p(File.dirname(dst))
+      FileUtils.cp(src, dst)
     end
   end
 
