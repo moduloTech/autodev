@@ -72,29 +72,32 @@ class IssueProcessor
         # 5. Ensure CLAUDE.md exists
         ensure_claude_md(work_dir)
 
-        # 6. Implement
+        # 6. Inject default skills if project lacks its own
+        SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+
+        # 7. Implement
         implement(work_dir, context, iid)
         issue.impl_complete! # implementing → committing
 
-        # 7. Commit
+        # 8. Commit
         commit(work_dir)
         issue.commit_complete! # committing → pushing
 
-        # 8. Verify changes + Push
+        # 9. Verify changes + Push
         verify_changes(work_dir, branch_name)
         push(work_dir, branch_name)
         issue.push_complete! # pushing → creating_mr
       end
 
-      # 9. Create MR
+      # 10. Create MR
       mr = create_merge_request(work_dir, iid, branch_name, title)
       issue.update(mr_iid: mr.iid, mr_url: mr.web_url)
       issue.mr_created! # creating_mr → reviewing
 
-      # 10. Labels
+      # 11. Labels
       update_labels(iid)
 
-      # 11. Review (non-fatal)
+      # 12. Review (non-fatal)
       run_review(mr.web_url)
 
       issue.review_complete! # reviewing → checking_pipeline

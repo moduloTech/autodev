@@ -105,6 +105,7 @@ class PipelineMonitor
     work_dir = "/tmp/autodev_pipeline_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
       clone_and_checkout(work_dir, issue.branch_name)
+      SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
 
       # Write full job logs to files in the work directory
       log_dir = File.join(work_dir, "tmp", "ci_logs")

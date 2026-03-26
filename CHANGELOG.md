@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Skills injection: auto-detect project stack (Ruby version, Rails version, database, test framework) and inject default Claude Code skills (`rails-conventions`, `test-patterns`, `database-patterns`) into `.claude/skills/` of the cloned repo when the project doesn't provide its own. Skills are version-aware (Rails 4.x through 8.x) and DB-aware (PostgreSQL, MySQL). Existing skills are always preserved. Also detects Devise, Pundit, CanCanCan, Sidekiq, RuboCop, and API-only mode for targeted guidance.
+
 ## [0.4.0] - 2026-03-26
 
 ### Refactored

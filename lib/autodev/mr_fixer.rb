@@ -43,6 +43,7 @@ class MrFixer
     work_dir = "/tmp/autodev_mrfix_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
       clone_and_checkout(work_dir, branch)
+      SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
 
       discussions.each_with_index do |discussion, idx|
         thread_context = format_discussion(discussion)
