@@ -4,6 +4,8 @@
 
 ### Added
 
+- Pipeline pre-triage: classify pipeline failures using GitLab `failure_reason` before cloning or calling Claude. Infrastructure failures (`runner_system_failure`, `stuck_or_timeout_failure`, etc.) are blocked immediately — no clone, no tokens spent. Code failures (`script_failure`) skip the Claude evaluation call and go straight to fix. Only uncertain cases fall back to Claude evaluation.
+- Pipeline fix categorization: classify failed jobs as test/lint/build by job name, stage, and log patterns. Fix prompts are tailored per category with specific guidance (e.g., "fix source code not tests" for test failures, "fix only flagged files" for lint).
 - MR discussion fix: enrich context passed to danger-claude with issue title/description, MR description, exact line numbers, and the relevant diff hunk extracted via `git diff`. Eliminates the exploration turn Claude previously needed to locate the code.
 - Skills injection: auto-detect project stack (Ruby version, Rails version, database, test framework) and inject default Claude Code skills (`rails-conventions`, `test-patterns`, `database-patterns`) into `.claude/skills/` of the cloned repo when the project doesn't provide its own. Skills are version-aware (Rails 4.x through 8.x) and DB-aware (PostgreSQL, MySQL). Existing skills are always preserved. Also detects Devise, Pundit, CanCanCan, Sidekiq, RuboCop, and API-only mode for targeted guidance.
 

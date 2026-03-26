@@ -102,36 +102,59 @@ class PipelineMonitor
       return
     end
 
+    # --- Phase 1: pre-triage using failure_reason (no clone, no Claude) ---
+
+    triage = pre_triage(failed_jobs)
+
+    if triage[:verdict] == :infra
+      issue.pipeline_failed_infra!
+      notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} echoue pour une raison d'infrastructure (pre-triage). Intervention manuelle requise.\n\n> #{triage[:explanation]}")
+      log "Issue ##{iid}: infra failure detected by pre-triage → blocked (#{triage[:explanation]})"
+      return
+    end
+
+    # --- Phase 2: clone + write logs (needed for fix and possibly Claude eval) ---
+
     work_dir = "/tmp/autodev_pipeline_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
       clone_and_checkout(work_dir, issue.branch_name)
       SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
 
-      # Write full job logs to files in the work directory
       log_dir = File.join(work_dir, "tmp", "ci_logs")
       FileUtils.mkdir_p(log_dir)
       job_entries = write_job_logs(failed_jobs, log_dir)
 
-      eval_context = build_eval_context(job_entries)
-      eval_result = evaluate_code_related(work_dir, eval_context)
+      # --- Phase 3: determine code_related ---
 
-      unless eval_result
-        log "Could not parse pipeline evaluation response, marking as blocked"
-        issue.pipeline_failed_infra!
-        notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} a echoue et l'evaluation automatique n'a pas abouti. Intervention manuelle requise.")
-        return
+      if triage[:verdict] == :code
+        # Pre-triage was confident: skip Claude evaluation
+        log "Issue ##{iid}: code failure detected by pre-triage, skipping Claude evaluation (#{triage[:explanation]})"
+        explanation = triage[:explanation]
+      else
+        # Uncertain: fall back to Claude evaluation
+        log "Issue ##{iid}: pre-triage uncertain, evaluating with Claude..."
+        eval_context = build_eval_context(job_entries)
+        eval_result = evaluate_code_related(work_dir, eval_context)
+
+        unless eval_result
+          log "Could not parse pipeline evaluation response, marking as blocked"
+          issue.pipeline_failed_infra!
+          notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} a echoue et l'evaluation automatique n'a pas abouti. Intervention manuelle requise.")
+          return
+        end
+
+        explanation = eval_result["explanation"] || "Aucune explication fournie"
+
+        unless eval_result["code_related"]
+          issue.pipeline_failed_infra!
+          notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} echoue pour une raison hors code. Intervention manuelle requise.\n\n> #{explanation}")
+          log "Issue ##{iid}: non-code pipeline failure → blocked (#{explanation})"
+          return
+        end
       end
 
-      explanation = eval_result["explanation"] || "Aucune explication fournie"
+      # --- Phase 4: fix ---
 
-      unless eval_result["code_related"]
-        issue.pipeline_failed_infra!
-        notify_issue(iid, ":warning: **autodev** : le pipeline de #{issue.mr_url} echoue pour une raison hors code. Intervention manuelle requise.\n\n> #{explanation}")
-        log "Issue ##{iid}: non-code pipeline failure → blocked (#{explanation})"
-        return
-      end
-
-      # Code-related — fire event (guard decides fixing_pipeline vs blocked)
       issue._max_fix_rounds = max_fix_rounds
       issue.pipeline_failed_code!
 
@@ -141,7 +164,9 @@ class PipelineMonitor
         return
       end
 
-      # Fix each failed job in a separate commit
+      # Enrich job entries with failure category for targeted fix prompts
+      categorize_jobs!(job_entries, log_dir)
+
       log "Issue ##{iid}: code-related pipeline failure, fixing #{job_entries.size} job(s)... (#{explanation})"
       fix_pipeline_failures(work_dir, job_entries, issue)
 
@@ -160,6 +185,100 @@ class PipelineMonitor
     ensure
       FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Pre-triage: classify failures without Claude using GitLab failure_reason
+  # and job name/stage heuristics. Returns { verdict:, explanation: }.
+  #
+  # verdict is :infra, :code, or :uncertain.
+  # ---------------------------------------------------------------------------
+
+  INFRA_FAILURE_REASONS = %w[
+    runner_system_failure stuck_or_timeout_failure scheduler_failure
+    data_integrity_failure job_execution_timeout runner_unsupported
+    stale_schedule unmet_prerequisites ci_quota_exceeded
+    no_matching_runner trace_size_exceeded archived_failure
+  ].freeze
+
+  CODE_FAILURE_REASONS = %w[script_failure].freeze
+
+  def pre_triage(failed_jobs)
+    reasons = failed_jobs.map do |job|
+      reason = job.respond_to?(:failure_reason) ? job.failure_reason : (job["failure_reason"] if job.is_a?(Hash))
+      name   = job.respond_to?(:name) ? job.name : (job["name"] if job.is_a?(Hash))
+      stage  = job.respond_to?(:stage) ? job.stage : (job["stage"] if job.is_a?(Hash))
+      { reason: reason, name: name.to_s, stage: stage.to_s }
+    end
+
+    infra_jobs = reasons.select { |r| INFRA_FAILURE_REASONS.include?(r[:reason]) }
+    code_jobs  = reasons.select { |r| CODE_FAILURE_REASONS.include?(r[:reason]) }
+
+    # All jobs have an infra failure_reason → definite infra
+    if infra_jobs.size == reasons.size
+      names = infra_jobs.map { |r| "#{r[:name]} (#{r[:reason]})" }.join(", ")
+      return { verdict: :infra, explanation: "Tous les jobs en echec ont une raison d'infrastructure: #{names}" }
+    end
+
+    # All jobs have script_failure → definite code
+    if code_jobs.size == reasons.size
+      return { verdict: :code, explanation: "Tous les jobs en echec ont script_failure comme raison" }
+    end
+
+    # Mixed or unknown reasons → uncertain
+    { verdict: :uncertain, explanation: "Raisons mixtes ou inconnues" }
+  end
+
+  # ---------------------------------------------------------------------------
+  # Job categorization: classify each code failure as test/lint/build/unknown
+  # by scanning job name, stage, and the first lines of the log.
+  # ---------------------------------------------------------------------------
+
+  CATEGORY_PATTERNS = {
+    test: {
+      names:  /\b(r?spec|test|minitest|cucumber|capybara|cypress|jest|mocha)\b/i,
+      stages: /\btest/i,
+      logs:   /\b(failures?|failed examples?|tests?\s+failed|FAILED|assertion|expected\b.*\bgot\b|Error:.*spec)/i
+    },
+    lint: {
+      names:  /\b(rubocop|lint|eslint|stylelint|prettier|standardrb|brakeman|bundler.?audit|reek)\b/i,
+      stages: /\blint|quality|static/i,
+      logs:   /\b(offenses?\s+detected|violations?|warning:.*\[\w+\/\w+\]|rubocop)/i
+    },
+    build: {
+      names:  /\b(build|compile|assets|webpack|vite|bundle\s+install|yarn|npm)\b/i,
+      stages: /\bbuild|prepare|install/i,
+      logs:   /\b(syntax error|cannot find|could not|compilation failed|LoadError|ModuleNotFoundError|gem.*not found)\b/i
+    }
+  }.freeze
+
+  def categorize_jobs!(job_entries, log_dir)
+    job_entries.each do |entry|
+      entry[:category] = categorize_job(entry, log_dir)
+    end
+  end
+
+  def categorize_job(entry, log_dir)
+    name = entry[:name].to_s
+    stage = entry[:stage].to_s
+
+    # Check name and stage first (fast, no I/O)
+    CATEGORY_PATTERNS.each do |category, patterns|
+      return category if name.match?(patterns[:names]) || stage.match?(patterns[:stages])
+    end
+
+    # Check first 200 lines of the log for patterns
+    log_path = File.join(log_dir, File.basename(entry[:log_path]))
+    if File.exist?(log_path)
+      log_head = File.foreach(log_path).first(200)&.join
+      if log_head
+        CATEGORY_PATTERNS.each do |category, patterns|
+          return category if log_head.match?(patterns[:logs])
+        end
+      end
+    end
+
+    :unknown
   end
 
   # Write full job logs to individual files and return metadata entries.
@@ -226,7 +345,33 @@ class PipelineMonitor
     extra     = @project_config["extra_prompt"]
 
     job_entries.each_with_index do |entry, idx|
-      log "Fixing job #{idx + 1}/#{job_entries.size}: #{entry[:name]} (issue ##{iid})"
+      category = entry[:category] || :unknown
+      log "Fixing job #{idx + 1}/#{job_entries.size}: #{entry[:name]} [#{category}] (issue ##{iid})"
+
+      category_instructions = case category
+        when :test
+          <<~CI
+            Ce job est un job de **tests**. Concentre-toi sur :
+            - Les tests en echec : lis les messages d'erreur et les stack traces.
+            - Corrige le code source (pas les tests) sauf si les tests sont manifestement incorrects.
+            - Si un test echoue a cause d'un changement volontaire de comportement, adapte le test.
+          CI
+        when :lint
+          <<~CI
+            Ce job est un job de **lint/style**. Concentre-toi sur :
+            - Les offenses listees dans le log.
+            - Corrige uniquement les fichiers signales.
+            - Ne change pas la configuration du linter.
+          CI
+        when :build
+          <<~CI
+            Ce job est un job de **build/compilation**. Concentre-toi sur :
+            - Les erreurs de syntaxe, imports manquants, dependances non resolues.
+            - Corrige le code source pour que la compilation/le build passe.
+          CI
+        else
+          ""
+        end
 
       prompt = <<~PROMPT
         Tu dois corriger le code pour resoudre l'echec du job CI/CD "#{entry[:name]}" (stage: #{entry[:stage]}).
@@ -234,7 +379,7 @@ class PipelineMonitor
         ## Log du job
 
         Le log complet du job est dans le fichier `#{entry[:log_path]}`. Lis-le pour comprendre l'erreur.
-
+        #{category_instructions.empty? ? "" : "\n## Diagnostic\n\n#{category_instructions}"}
         ## Instructions
 
         - Analyse le log du job en echec.
