@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-26
+
 ### Refactored
 
 - Split single-file script into `lib/autodev/` modules: errors, logger, config, database, shell_helpers, gitlab_helpers, danger_claude_runner, issue_processor, mr_fixer, pipeline_monitor, worker_pool. Entry point `bin/autodev` reduced from ~2200 to 340 lines.
