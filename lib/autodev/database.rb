@@ -95,7 +95,13 @@ module Database
   # -- Build Issue Sequel::Model with AASM --
 
   def self.build_model!
-    klass = Class.new(Sequel::Model(db[:issues])) do
+    # Name the class BEFORE including AASM. AASM's StateMachineStore keys by
+    # klass.to_s — if the class is anonymous at registration time, the key is
+    # "#<Class:0x...>" but lookups after const_set use "Issue", causing a mismatch.
+    klass = Class.new(Sequel::Model(db[:issues]))
+    Object.const_set(:Issue, klass)
+
+    klass.class_eval do
       include AASM
 
       attr_writer :_issue_closed, :_skip_to_mr, :_max_fix_rounds, :_unresolved_discussions_empty
@@ -237,8 +243,6 @@ module Database
         save_changes
       end
     end
-
-    Object.const_set(:Issue, klass)
   end
 
   # -- Startup recovery --

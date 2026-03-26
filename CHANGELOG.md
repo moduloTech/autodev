@@ -5,6 +5,7 @@
 ### Fixed
 
 - Add `logger` gem to inline Gemfile for Ruby 4.0 compatibility (`logger` was removed from default gems).
+- Fix AASM + Sequel compatibility on Ruby 4.0: name the Issue class via `const_set` before `include AASM` so that AASM's `StateMachineStore` registers under the correct key (`"Issue"` instead of the anonymous class name).
 
 ## [0.5.0] - 2026-03-26
 
