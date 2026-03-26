@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-26
+
 ### Added
 
 - Parallel agents mode: when `parallel_agents: true` is set in project config, autodev evaluates issue complexity via a Claude call. Simple issues fall back to single/split mode. Complex issues (multi-layer, multi-domain) are decomposed into a work plan of up to 4 tasks, each executed by a specialized agent in its own git worktree in parallel. Results are merged back. All-agents-failed is fatal; partial failures are tolerated. Disabled by default.
