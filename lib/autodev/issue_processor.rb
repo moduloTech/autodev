@@ -270,6 +270,14 @@ class IssueProcessor
   end
 
   def implement(work_dir, context, iid)
+    if @project_config["split_implementation"]
+      implement_split(work_dir, context, iid)
+    else
+      implement_single(work_dir, context, iid)
+    end
+  end
+
+  def implement_single(work_dir, context, iid)
     extra = @project_config["extra_prompt"]
     prompt = <<~PROMPT
       Tu dois implementer le ticket GitLab suivant. Lis attentivement le contexte complet ci-dessous,
@@ -288,6 +296,188 @@ class IssueProcessor
 
     log "Running implementation via danger-claude..."
     danger_claude_prompt(work_dir, prompt)
+  end
+
+  def implement_split(work_dir, context, iid)
+    extra = @project_config["extra_prompt"]
+    implementer = detect_agent(work_dir, "implementer")
+    test_writer = detect_agent(work_dir, "test-writer")
+
+    # Create a worktree for the test-writer so both can run in parallel
+    test_worktree = "#{work_dir}_tests"
+    run_cmd(["git", "worktree", "add", test_worktree, "HEAD"], chdir: work_dir)
+    SkillsInjector.inject(test_worktree, logger: @logger, project_path: @project_path)
+    # Copy injected agents to worktree (they were injected in work_dir by detect_agent)
+    agents_src = File.join(work_dir, ".claude", "agents")
+    if Dir.exist?(agents_src)
+      agents_dst = File.join(test_worktree, ".claude", "agents")
+      FileUtils.mkdir_p(agents_dst)
+      FileUtils.cp_r(Dir.glob(File.join(agents_src, "*")), agents_dst)
+    end
+
+    code_prompt = <<~PROMPT
+      Tu dois implementer le ticket GitLab suivant. Lis attentivement le contexte complet ci-dessous,
+      puis implemente les changements necessaires dans le code.
+
+      #{context}
+
+      ## Instructions
+
+      - Implemente TOUS les changements decrits dans l'issue.
+      - Respecte les conventions du projet (voir CLAUDE.md si present).
+      - N'ecris PAS de tests. Les tests seront ecrits en parallele par un autre agent.
+      - Ne modifie que ce qui est necessaire pour resoudre l'issue.
+      #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+    PROMPT
+
+    test_prompt = <<~PROMPT
+      Tu dois ecrire les tests pour le ticket GitLab suivant. Un autre agent implemente
+      le code en parallele. Ecris les tests en te basant sur la specification de l'issue.
+
+      #{context}
+
+      ## Instructions
+
+      - Ecris les tests en te basant sur la specification de l'issue (pas sur le code, il n'est pas encore disponible).
+      - Respecte les conventions de test du projet (voir les tests existants).
+      - Ne modifie PAS le code source, uniquement les fichiers de test.
+      - Couvre les cas nominaux et les cas limites importants.
+      - Si tu dois creer des factories/fixtures, fais-le dans les fichiers de test appropriés.
+      #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+    PROMPT
+
+    # Run both agents in parallel
+    log "Running implementer + test-writer in parallel..."
+    code_error = nil
+    test_error = nil
+
+    code_thread = Thread.new do
+      danger_claude_prompt(work_dir, code_prompt, agent: implementer, label: "-p (implement code)")
+    rescue StandardError => e
+      code_error = e
+    end
+
+    test_thread = Thread.new do
+      danger_claude_prompt(test_worktree, test_prompt, agent: test_writer, label: "-p (write tests)")
+    rescue StandardError => e
+      test_error = e
+    end
+
+    code_thread.join
+    test_thread.join
+
+    # Raise code errors first (tests are useless without code)
+    raise code_error if code_error
+
+    # Merge test files from worktree into work_dir
+    if test_error
+      log_error "Test-writer failed (non-fatal): #{test_error.message}"
+    else
+      merge_test_files(test_worktree, work_dir)
+    end
+  ensure
+    if test_worktree && Dir.exist?(test_worktree)
+      run_cmd_status(["git", "worktree", "remove", "--force", test_worktree], chdir: work_dir)
+      FileUtils.rm_rf(test_worktree) # fallback if worktree remove failed
+    end
+  end
+
+  # Copy files modified in the test worktree back to the main work_dir.
+  def merge_test_files(test_worktree, work_dir)
+    # Get list of new/modified files in worktree
+    changed, _err, ok = run_cmd_status(
+      ["git", "diff", "--name-only", "HEAD"],
+      chdir: test_worktree
+    )
+    untracked, _err, ok2 = run_cmd_status(
+      ["git", "ls-files", "--others", "--exclude-standard"],
+      chdir: test_worktree
+    )
+
+    files = []
+    files += changed.split("\n").map(&:strip).reject(&:empty?) if ok
+    files += untracked.split("\n").map(&:strip).reject(&:empty?) if ok2
+    files.uniq!
+
+    if files.empty?
+      log "Test-writer produced no changes"
+      return
+    end
+
+    log "Merging #{files.size} test file(s) from worktree..."
+    files.each do |file|
+      src = File.join(test_worktree, file)
+      dst = File.join(work_dir, file)
+      next unless File.exist?(src)
+
+      FileUtils.mkdir_p(File.dirname(dst))
+      FileUtils.cp(src, dst)
+    end
+    log "Merged test files: #{files.join(", ")}"
+  end
+
+  IMPLEMENTER_AGENT = <<~AGENT
+    ---
+    name: implementer
+    description: Implement code changes from issue specifications. Use proactively for implementation tasks.
+    model: sonnet
+    ---
+
+    You are a senior developer implementing code changes from a GitLab issue specification.
+
+    Focus exclusively on production code. Do NOT write or modify tests — a separate agent handles testing.
+
+    When implementing:
+    1. Read the issue context and CLAUDE.md carefully.
+    2. Identify all files that need changes.
+    3. Make minimal, focused changes that satisfy the requirements.
+    4. Follow existing code patterns and conventions.
+  AGENT
+
+  TEST_WRITER_AGENT = <<~AGENT
+    ---
+    name: test-writer
+    description: Write tests from issue specifications. Use proactively for testing tasks.
+    model: sonnet
+    ---
+
+    You are a senior developer writing tests from an issue specification.
+    Another agent is implementing the code in parallel — you do NOT have access to it.
+
+    Focus exclusively on test files. Do NOT modify production code.
+
+    When writing tests:
+    1. Read the issue specification carefully to understand expected behavior.
+    2. Check existing tests for patterns, helpers, factories, and conventions.
+    3. Write tests that verify the specified behavior: nominal cases and edge cases.
+    4. Follow the project's test framework and style exactly.
+    5. Use descriptive test names that reflect the specification, not the implementation.
+  AGENT
+
+  def detect_agent(work_dir, agent_name)
+    # Config override
+    config_key = "#{agent_name.gsub("-", "_")}_agent"
+    config_agent = @project_config[config_key]
+    return config_agent if config_agent
+
+    # Project agent
+    agent_path = File.join(work_dir, ".claude", "agents", "#{agent_name}.md")
+    if File.exist?(agent_path)
+      log "Found agent '#{agent_name}' in project"
+      return agent_name
+    end
+
+    # Inject default
+    template = case agent_name
+               when "implementer" then IMPLEMENTER_AGENT
+               when "test-writer" then TEST_WRITER_AGENT
+               else return nil
+               end
+
+    log "Injecting default '#{agent_name}' agent"
+    FileUtils.mkdir_p(File.dirname(agent_path))
+    File.write(agent_path, template)
+    agent_name
   end
 
   def commit(work_dir)
