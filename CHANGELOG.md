@@ -4,6 +4,7 @@
 
 ### Added
 
+- MR discussion fix: use project-level `mr-fixer` subagent when `.claude/agents/mr-fixer.md` exists in the target repo. The agent is passed to danger-claude via the new `-a` flag, enabling persistent memory that accumulates fix patterns across conversations. Configurable per-project via `mr_fixer_agent` in config.
 - Pipeline pre-triage: classify pipeline failures using GitLab `failure_reason` before cloning or calling Claude. Infrastructure failures (`runner_system_failure`, `stuck_or_timeout_failure`, etc.) are blocked immediately — no clone, no tokens spent. Code failures (`script_failure`) skip the Claude evaluation call and go straight to fix. Only uncertain cases fall back to Claude evaluation.
 - Pipeline fix categorization: classify failed jobs as test/lint/build by job name, stage, and log patterns. Fix prompts are tailored per category with specific guidance (e.g., "fix source code not tests" for test failures, "fix only flagged files" for lint).
 - MR discussion fix: enrich context passed to danger-claude with issue title/description, MR description, exact line numbers, and the relevant diff hunk extracted via `git diff`. Eliminates the exploration turn Claude previously needed to locate the code.

@@ -30,9 +30,15 @@ module DangerClaudeRunner
     @dc_stderr      = +""
   end
 
-  def danger_claude_prompt(work_dir, prompt, label: "-p")
-    @logger.debug("danger-claude -p prompt:\n#{prompt}", project: @project_path)
-    out, err, ok = run_with_timeout("danger-claude", ["-p", prompt], chdir: work_dir, label: label)
+  def danger_claude_prompt(work_dir, prompt, label: "-p", agent: nil)
+    args = ["-p", prompt]
+    if agent
+      args.unshift("-a", agent)
+      @logger.debug("danger-claude -a #{agent} -p prompt:\n#{prompt}", project: @project_path)
+    else
+      @logger.debug("danger-claude -p prompt:\n#{prompt}", project: @project_path)
+    end
+    out, err, ok = run_with_timeout("danger-claude", args, chdir: work_dir, label: label)
     unless ok
       raise ImplementationError, "danger-claude -p failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
     end

@@ -50,6 +50,9 @@ class MrFixer
       SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
       target_branch = mr_context[:target_branch] || default_branch(work_dir)
 
+      # Use mr-fixer agent if available in the project
+      agent = detect_agent(work_dir, "mr-fixer")
+
       discussions.each_with_index do |discussion, idx|
         thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: target_branch)
         log "Fixing discussion #{idx + 1}/#{discussions.size}: #{discussion[:title]}"
@@ -81,7 +84,7 @@ class MrFixer
           #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
         PROMPT
 
-        danger_claude_prompt(work_dir, prompt)
+        danger_claude_prompt(work_dir, prompt, agent: agent)
         danger_claude_commit(work_dir)
         resolve_discussion(mr_iid, discussion[:id])
       end
@@ -143,6 +146,63 @@ class MrFixer
     resolvable_notes = discussion.notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
     return true if resolvable_notes.empty?
     resolvable_notes.all? { |n| n.respond_to?(:resolved) && n.resolved }
+  end
+
+  # Returns the agent name, injecting a default if needed.
+  # Priority: config override > project agent > injected default.
+  def detect_agent(work_dir, default_name)
+    # Config override takes precedence
+    config_agent = @project_config["mr_fixer_agent"]
+    return config_agent if config_agent
+
+    # Check if the agent file exists in the cloned repo
+    agent_path = File.join(work_dir, ".claude", "agents", "#{default_name}.md")
+    if File.exist?(agent_path)
+      log "Found agent '#{default_name}' in project"
+      return default_name
+    end
+
+    # Inject default agent into the clone
+    inject_default_mr_fixer_agent(work_dir, agent_path)
+    default_name
+  end
+
+  DEFAULT_MR_FIXER_AGENT = <<~AGENT
+    ---
+    name: mr-fixer
+    description: Fix MR review comments. Use proactively when fixing code review discussions.
+    memory: project
+    model: sonnet
+    ---
+
+    You are a senior developer fixing code review comments on a Merge Request.
+
+    ## Behavior
+
+    Before starting, check your agent memory for patterns you have seen before on this project.
+
+    When fixing a review comment:
+    1. Read the diff hunk and the reviewer's comment carefully.
+    2. Understand the intent of the original code (see the issue context).
+    3. Make the minimal change that addresses the comment.
+    4. Do not refactor surrounding code unless the comment explicitly asks for it.
+    5. Do not change tests unless the comment is about tests.
+
+    ## Memory
+
+    After fixing all comments, update your agent memory with:
+    - Recurring reviewer patterns (e.g., "reviewer X always requests guard clauses")
+    - Common mistakes you fixed (e.g., "missing null check on association")
+    - Project conventions you discovered that are not in CLAUDE.md
+    - Patterns that led to incorrect fixes so you can avoid them next time
+
+    Write concise notes. Focus on what will help you fix faster next time.
+  AGENT
+
+  def inject_default_mr_fixer_agent(work_dir, agent_path)
+    log "Injecting default mr-fixer agent"
+    FileUtils.mkdir_p(File.dirname(agent_path))
+    File.write(agent_path, DEFAULT_MR_FIXER_AGENT)
   end
 
   def fetch_issue_context(iid)
