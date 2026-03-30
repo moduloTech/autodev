@@ -112,6 +112,20 @@ class MrFixer
       notify_issue(iid, ":wrench: **autodev** : #{discussions.size} commentaire(s) de review corrige(s) sur #{issue.mr_url} (round #{fix_round + 1})")
       log "MR !#{mr_iid}: fixed #{discussions.size} discussion(s) (round #{fix_round + 1})"
 
+    rescue RateLimitError => e
+      wait = e.wait_seconds
+      log_error "MR !#{mr_iid}: rate limit hit, parking for #{wait}s"
+      begin
+        issue.mark_failed!
+      rescue AASM::InvalidTransition
+        issue.update(status: "error")
+      end
+      Issue.where(id: issue.id).update(
+        error_message: e.message,
+        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
+        next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')")
+      )
+
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
       begin

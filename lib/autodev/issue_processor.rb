@@ -109,6 +109,21 @@ class IssueProcessor
       notify_issue(iid, ":white_check_mark: **autodev** : MR creee : #{mr.web_url}")
       log "Issue ##{iid} completed: #{mr.web_url}"
 
+    rescue RateLimitError => e
+      wait = e.wait_seconds
+      log_error "Issue ##{iid}: rate limit hit, parking for #{wait}s"
+      begin
+        issue.mark_failed!
+      rescue AASM::InvalidTransition
+        issue.update(status: "error")
+      end
+      Issue.where(id: issue.id).update(
+        error_message: e.message,
+        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
+        next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')"),
+        finished_at: Sequel.lit("datetime('now')")
+      )
+
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
       retry_count = (issue.retry_count || 0) + 1

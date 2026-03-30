@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- API rate limit errors ("You've hit your limit") no longer burn retry attempts. Rate limits are detected from danger-claude output and the issue is parked until the reset time without incrementing `retry_count`. Applies to all three processors (IssueProcessor, MrFixer, PipelineMonitor).
 - Deploy jobs (deploy_review, etc.) no longer sent to danger-claude for fixing. Jobs matching deploy/release/provision/terraform/helm/k8s patterns are now classified as infra in pre-triage and skipped during pipeline fix. Previously, a deploy job with `script_failure` would be classified as code, causing a 30-minute timeout with no useful result.
 
 ## [0.6.3] - 2026-03-30

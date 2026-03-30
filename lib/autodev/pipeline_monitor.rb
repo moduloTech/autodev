@@ -170,6 +170,20 @@ class PipelineMonitor
       log "Issue ##{iid}: code-related pipeline failure, fixing #{job_entries.size} job(s)... (#{explanation})"
       fix_pipeline_failures(work_dir, job_entries, issue)
 
+    rescue RateLimitError => e
+      wait = e.wait_seconds
+      log_error "Issue ##{iid}: rate limit hit during pipeline fix, parking for #{wait}s"
+      begin
+        issue.mark_failed!
+      rescue AASM::InvalidTransition
+        issue.update(status: "error")
+      end
+      Issue.where(id: issue.id).update(
+        error_message: e.message,
+        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
+        next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')")
+      )
+
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
       log_error "Pipeline evaluation/fix failed: #{e.class}: #{e.message}"

@@ -30,6 +30,9 @@ module DangerClaudeRunner
     @dc_stderr      = +""
   end
 
+  RATE_LIMIT_PATTERN = /you've hit your limit|rate limit|usage limit/i
+  RATE_LIMIT_RESET_PATTERN = /resets?\s+(\d{1,2})(am|pm)\s*\(UTC\)/i
+
   def danger_claude_prompt(work_dir, prompt, label: "-p", agent: nil)
     args = ["-p", prompt]
     if agent
@@ -40,17 +43,43 @@ module DangerClaudeRunner
     end
     out, err, ok = run_with_timeout("danger-claude", args, chdir: work_dir, label: label)
     unless ok
+      check_rate_limit!(out, err)
       raise ImplementationError, "danger-claude -p failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
     end
+    check_rate_limit!(out, err)
     out
   end
 
   def danger_claude_commit(work_dir, label: "-c")
     out, err, ok = run_with_timeout("danger-claude", ["-c"], chdir: work_dir, label: label)
     unless ok
+      check_rate_limit!(out, err)
       raise ImplementationError, "danger-claude -c failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
     end
     out
+  end
+
+  def check_rate_limit!(stdout, stderr)
+    combined = "#{stdout}\n#{stderr}"
+    return unless combined.match?(RATE_LIMIT_PATTERN)
+
+    reset_time = parse_reset_time(combined)
+    raise RateLimitError.new("API rate limit reached#{reset_time ? " (resets #{reset_time.strftime("%H:%M UTC")})" : ""}", reset_time: reset_time)
+  end
+
+  def parse_reset_time(text)
+    match = text.match(RATE_LIMIT_RESET_PATTERN)
+    return nil unless match
+
+    hour = match[1].to_i
+    ampm = match[2].downcase
+    hour += 12 if ampm == "pm" && hour != 12
+    hour = 0 if ampm == "am" && hour == 12
+
+    now = Time.now.utc
+    reset = Time.utc(now.year, now.month, now.day, hour, 0, 0)
+    reset += 86_400 if reset <= now # next day if already past
+    reset
   end
 
   def clone_and_checkout(work_dir, branch)
