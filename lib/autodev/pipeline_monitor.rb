@@ -203,6 +203,8 @@ class PipelineMonitor
 
   CODE_FAILURE_REASONS = %w[script_failure].freeze
 
+  DEPLOY_JOB_PATTERN = /\b(deploy|release|publish|rollout|provision|terraform|ansible|helm|k8s|kubernetes|staging|production|review.?app)\b/i
+
   def pre_triage(failed_jobs)
     reasons = failed_jobs.map do |job|
       reason = job.respond_to?(:failure_reason) ? job.failure_reason : (job["failure_reason"] if job.is_a?(Hash))
@@ -220,7 +222,15 @@ class PipelineMonitor
       return { verdict: :infra, explanation: "Tous les jobs en echec ont une raison d'infrastructure: #{names}" }
     end
 
-    # All jobs have script_failure → definite code
+    # All script_failure jobs are deploy/infra by name or stage → infra
+    deploy_jobs = reasons.select { |r| r[:name].match?(DEPLOY_JOB_PATTERN) || r[:stage].match?(DEPLOY_JOB_PATTERN) }
+    if code_jobs.size == reasons.size && deploy_jobs.size == reasons.size
+      names = deploy_jobs.map { |r| r[:name] }.join(", ")
+      return { verdict: :infra, explanation: "Tous les jobs en echec sont des jobs de deploiement: #{names}" }
+    end
+
+    # Remaining script_failure jobs (at least some non-deploy) → code
+    # Deploy jobs will be skipped during fix_pipeline_failures
     if code_jobs.size == reasons.size
       return { verdict: :code, explanation: "Tous les jobs en echec ont script_failure comme raison" }
     end
@@ -235,6 +245,11 @@ class PipelineMonitor
   # ---------------------------------------------------------------------------
 
   CATEGORY_PATTERNS = {
+    deploy: {
+      names:  DEPLOY_JOB_PATTERN,
+      stages: DEPLOY_JOB_PATTERN,
+      logs:   /(?!)/ # never match on logs — name/stage is sufficient
+    },
     test: {
       names:  /\b(r?spec|test|minitest|cucumber|capybara|cypress|jest|mocha)\b/i,
       stages: /\btest/i,
@@ -346,6 +361,10 @@ class PipelineMonitor
 
     job_entries.each_with_index do |entry, idx|
       category = entry[:category] || :unknown
+      if category == :deploy
+        log "Skipping deploy job #{idx + 1}/#{job_entries.size}: #{entry[:name]} (not fixable by code change)"
+        next
+      end
       log "Fixing job #{idx + 1}/#{job_entries.size}: #{entry[:name]} [#{category}] (issue ##{iid})"
 
       category_instructions = case category

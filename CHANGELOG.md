@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Deploy jobs (deploy_review, etc.) no longer sent to danger-claude for fixing. Jobs matching deploy/release/provision/terraform/helm/k8s patterns are now classified as infra in pre-triage and skipped during pipeline fix. Previously, a deploy job with `script_failure` would be classified as code, causing a 30-minute timeout with no useful result.
+
 ## [0.6.3] - 2026-03-30
 
 ### Added
