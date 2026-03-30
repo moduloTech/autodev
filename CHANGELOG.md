@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix garbled stdout when multiple workers run in parallel. Multiline messages (full prompts) are now truncated to the first line on the console; full content goes to log files only. Also close stdin on spawned subprocesses to prevent TTY inheritance.
+
 ## [0.6.1] - 2026-03-30
 
 ### Fixed

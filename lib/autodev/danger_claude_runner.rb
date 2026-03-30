@@ -76,7 +76,7 @@ module DangerClaudeRunner
     stdout_r, stdout_w = IO.pipe
     stderr_r, stderr_w = IO.pipe
 
-    pid = Process.spawn(CLEAN_ENV, cmd, *args, chdir: chdir, out: stdout_w, err: stderr_w)
+    pid = Process.spawn(CLEAN_ENV, cmd, *args, chdir: chdir, in: :close, out: stdout_w, err: stderr_w)
     stdout_w.close
     stderr_w.close
 

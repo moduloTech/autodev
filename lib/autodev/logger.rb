@@ -41,11 +41,13 @@ class AppLogger
     line = "#{timestamp} #{level.ljust(5)} #{prefix} #{msg}"
 
     @mutex.synchronize do
+      # Truncate multiline messages on console (full message goes to log files)
+      console_msg = msg.include?("\n") ? msg.lines.first.chomp : msg
       console_line = case level
-                     when "ERROR" then @pastel.red("  #{prefix} #{msg}")
-                     when "WARN"  then @pastel.yellow("  #{prefix} #{msg}")
-                     when "DEBUG" then @pastel.dim("  #{prefix} #{msg}")
-                     else "  #{@pastel.cyan(prefix)} #{msg}"
+                     when "ERROR" then @pastel.red("  #{prefix} #{console_msg}")
+                     when "WARN"  then @pastel.yellow("  #{prefix} #{console_msg}")
+                     when "DEBUG" then @pastel.dim("  #{prefix} #{console_msg}")
+                     else "  #{@pastel.cyan(prefix)} #{console_msg}"
                      end
       if level == "ERROR"
         $stderr.puts console_line
