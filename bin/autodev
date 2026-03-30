@@ -12,6 +12,7 @@
 # Usage:
 #   autodev                                  # Poll with default config
 #   autodev --once                           # Single poll cycle then exit
+#   autodev --status                         # Show dashboard of tracked issues
 #   autodev -c ~/.autodev/custom.yml --once  # Custom config, single cycle
 #
 # Configuration (priority: defaults < config.yml < env vars < CLI flags):
@@ -87,6 +88,10 @@ def parse_args(argv)
       cli_overrides["once"] = true
     end
 
+    opts.on("--status", "Show dashboard of all tracked issues and exit") do
+      cli_overrides["status"] = true
+    end
+
     opts.on("-h", "--help", "Show this help") do
       puts opts
       exit 0
@@ -97,16 +102,131 @@ def parse_args(argv)
   Config.load(cli_overrides)
 end
 
+# == Dashboard =================================================================
+
+STATUS_COLORS = {
+  "pending"              => :yellow,
+  "cloning"              => :cyan,
+  "checking_spec"        => :cyan,
+  "implementing"         => :cyan,
+  "committing"           => :cyan,
+  "pushing"              => :cyan,
+  "creating_mr"          => :cyan,
+  "reviewing"            => :cyan,
+  "checking_pipeline"    => :cyan,
+  "fixing_discussions"   => :magenta,
+  "fixing_pipeline"      => :magenta,
+  "needs_clarification"  => :yellow,
+  "over"                 => :green,
+  "blocked"              => :red,
+  "error"                => :red,
+}.freeze
+
+ACTIVE_STATES = %w[
+  cloning checking_spec implementing committing pushing
+  creating_mr reviewing checking_pipeline
+  fixing_discussions fixing_pipeline
+].freeze
+
+def status_label(status)
+  case status
+  when *ACTIVE_STATES then "En cours"
+  when "pending"              then "En attente"
+  when "needs_clarification"  then "En attente de clarification"
+  when "over"                 then "Terminée"
+  when "blocked"              then "Bloquée"
+  when "error"                then "Erreur"
+  else status
+  end
+end
+
+def show_dashboard(config)
+  pastel = Pastel.new
+
+  Database.connect(config["database_url"])
+  Database.build_model!
+
+  issues = Database.db[:issues].order(Sequel.desc(:id)).all
+
+  if issues.empty?
+    puts "Aucune issue suivie."
+    return
+  end
+
+  # Build rows
+  rows = issues.map do |row|
+    project_short = row[:project_path].to_s.split("/").last
+    title = row[:issue_title].to_s
+    title = "#{title[0, 37]}…" if title.length > 38
+    status = row[:status]
+    label = status_label(status)
+    comment = label.dup
+    comment << " (#{status})" if ACTIVE_STATES.include?(status)
+    if row[:mr_url]
+      comment << " — MR !#{row[:mr_iid]}"
+    end
+    if status == "error" && row[:error_message]
+      err = row[:error_message].to_s.lines.first.to_s.strip
+      err = "#{err[0, 40]}…" if err.length > 41
+      comment << " — #{err}"
+    end
+    if status == "needs_clarification"
+      comment << " depuis #{row[:clarification_requested_at]}" if row[:clarification_requested_at]
+    end
+
+    {
+      iid: "##{row[:issue_iid]}",
+      title: "#{title} (#{project_short})",
+      status: status,
+      comment: comment,
+    }
+  end
+
+  # Column widths
+  w_iid     = [rows.map { |r| r[:iid].length }.max, 5].max
+  w_title   = [rows.map { |r| r[:title].length }.max, 5].max
+  w_status  = [rows.map { |r| r[:status].length }.max, 8].max
+  w_comment = [rows.map { |r| r[:comment].length }.max, 12].max
+
+  sep  = "+-#{"-" * w_iid}-+-#{"-" * w_title}-+-#{"-" * w_status}-+-#{"-" * w_comment}-+"
+  head = "| #{"#".ljust(w_iid)} | #{"Issue".ljust(w_title)} | #{"État".ljust(w_status)} | #{"Commentaire".ljust(w_comment)} |"
+
+  puts sep
+  puts pastel.bold(head)
+  puts sep
+
+  rows.each do |row|
+    color = STATUS_COLORS[row[:status]] || :white
+    colored_status = pastel.send(color, row[:status].ljust(w_status))
+    line = "| #{row[:iid].ljust(w_iid)} | #{row[:title].ljust(w_title)} | #{colored_status} | #{row[:comment].ljust(w_comment)} |"
+    puts line
+  end
+
+  puts sep
+
+  # Summary
+  active  = rows.count { |r| ACTIVE_STATES.include?(r[:status]) || r[:status] == "pending" }
+  done    = rows.count { |r| r[:status] == "over" }
+  blocked = rows.count { |r| %w[blocked error needs_clarification].include?(r[:status]) }
+  puts "#{pastel.bold(rows.size.to_s)} issues — #{pastel.cyan("#{active} actives")}, #{pastel.green("#{done} terminées")}, #{pastel.yellow("#{blocked} bloquées")}"
+end
+
 # == Main ======================================================================
 
 def main
   pastel = Pastel.new
   logger = AppLogger.new(pastel: pastel)
 
-  logger.info("+=== autodev ================================================+")
-
   # 1. Parse args + load config
   config = parse_args(ARGV)
+
+  # Handle --status early (only needs DB, not GitLab or danger-claude)
+  if config["status"]
+    show_dashboard(config)
+    exit 0
+  end
+
+  logger.info("+=== autodev ================================================+")
 
   # 2. Configure logger
   logger.configure(log_dir: config["log_dir"], level: config["log_level"])

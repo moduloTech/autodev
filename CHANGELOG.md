@@ -2,9 +2,9 @@
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- Fix clarification detection: compare timestamps as parsed `Time` objects instead of raw strings. SQLite's `datetime('now')` format (`2026-03-27 08:30:00`) and GitLab's ISO 8601 format (`2026-03-27T10:30:06+02:00`) were compared lexicographically, causing `needs_clarification` issues to never detect human replies.
+- Dashboard: `autodev --status` displays a table of all tracked issues with their state, project, MR link, and contextual comments. Color-coded by status with a summary line.
 
 ## [0.5.1] - 2026-03-27
 
