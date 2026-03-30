@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `--status` now shows the worker assigned to each active issue (e.g. `[worker-3]`), matching the poll status summary. Worker assignments are persisted to `~/.autodev/workers.json` by the running instance.
+
 ### Fixed
 
 - Fix `datetime('now')` and `datetime('now', '+N seconds')` stored as literal strings instead of being evaluated by SQLite for `started_at`, `finished_at`, and `next_retry_at` fields. This broke automatic error retries since `next_retry_at` comparisons never matched. Same root cause as the `clarification_requested_at` fix in v0.6.0 — use dataset-level `Issue.where(id:).update()` instead of model-level `issue.update()` so `Sequel.lit()` expressions are passed through to SQLite.

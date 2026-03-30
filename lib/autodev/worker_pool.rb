@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class WorkerPool
+  ASSIGNMENTS_FILE = File.expand_path("~/.autodev/workers.json")
+
   def initialize(size:, logger:)
     @size    = size
     @queue   = Queue.new
@@ -19,6 +21,7 @@ class WorkerPool
           begin
             job, issue_iid = @queue.pop(true)
             @mutex.synchronize { @assignments[i] = issue_iid }
+            persist_assignments
             job.call
           rescue ThreadError
             sleep 0.5
@@ -26,6 +29,7 @@ class WorkerPool
             @logger.error("[worker-#{i}] Unhandled error: #{e.class}: #{e.message}")
           ensure
             @mutex.synchronize { @assignments.delete(i) }
+            persist_assignments
           end
         end
       end
@@ -49,5 +53,31 @@ class WorkerPool
 
   def busy?
     !@queue.empty?
+  end
+
+  # Read persisted assignments (usable from other processes, e.g. --status)
+  def self.read_assignments
+    return {} unless File.exist?(ASSIGNMENTS_FILE)
+
+    data = JSON.parse(File.read(ASSIGNMENTS_FILE))
+    # Convert string keys back to integers
+    data.transform_keys(&:to_i)
+  rescue JSON::ParserError, Errno::ENOENT
+    {}
+  end
+
+  def cleanup
+    File.delete(ASSIGNMENTS_FILE) if File.exist?(ASSIGNMENTS_FILE)
+  rescue Errno::ENOENT
+    # ignore
+  end
+
+  private
+
+  def persist_assignments
+    mapping = @mutex.synchronize { @assignments.dup }
+    File.write(ASSIGNMENTS_FILE, JSON.generate(mapping))
+  rescue StandardError
+    # Non-critical, ignore write errors
   end
 end

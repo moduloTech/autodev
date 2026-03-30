@@ -159,6 +159,9 @@ def show_dashboard(config)
     return
   end
 
+  # Read worker assignments from running instance (if any)
+  worker_map = WorkerPool.read_assignments.invert # issue_iid => worker_index
+
   # Build rows
   rows = issues.map do |row|
     project_short = row[:project_path].to_s.split("/").last
@@ -168,6 +171,8 @@ def show_dashboard(config)
     label = status_label(status)
     comment = label.dup
     comment << " (#{status})" if ACTIVE_STATES.include?(status)
+    worker = worker_map[row[:issue_iid]]
+    comment << " [worker-#{worker}]" if worker
     if row[:mr_url]
       comment << " — MR !#{row[:mr_iid]}"
     end
@@ -463,6 +468,7 @@ def main
   # 8. Graceful shutdown
   logger.info("Shutting down workers...")
   pool.shutdown
+  pool.cleanup
   logger.info("autodev stopped.")
 
 rescue ConfigError => e
