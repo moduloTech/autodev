@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix crash on transient network errors (DNS resolution, connection refused) during issue polling. The rescue clause caught only `AutodevError` instead of `StandardError`, letting `Socket::ResolutionError` and similar exceptions kill the process.
+
 ## [0.6.0] - 2026-03-30
 
 ### Added

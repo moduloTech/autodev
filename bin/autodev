@@ -361,8 +361,8 @@ def main
           pool.enqueue { processor.process(existing) }
           logger.info("Enqueued issue ##{gl_issue.iid}: #{gl_issue.title}", project: project_path)
         end
-      rescue AutodevError => e
-        logger.error("Error polling #{project_path}: #{e.message}", project: project_path)
+      rescue StandardError => e
+        logger.error("Error polling #{project_path}: #{e.class}: #{e.message}", project: project_path)
       end
 
       next if config["dry_run"]
