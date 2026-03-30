@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Poll status summary: after each polling cycle, print a compact status of all active (non-over) issues to stdout with their state, project, and assigned worker. Not written to log files.
+
 ### Changed
 
 - Dashboard (`--status`) now hides completed (`over`) issues by default. Use `--status --all` to show all issues.

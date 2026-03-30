@@ -369,7 +369,7 @@ def main
             logger: logger, token: token
           )
 
-          pool.enqueue { processor.process(existing) }
+          pool.enqueue(issue_iid: existing.issue_iid) { processor.process(existing) }
           logger.info("Enqueued issue ##{gl_issue.iid}: #{gl_issue.title}", project: project_path)
         end
       rescue StandardError => e
@@ -390,7 +390,7 @@ def main
             logger: logger, token: token
           )
 
-          pool.enqueue { monitor.check(issue) }
+          pool.enqueue(issue_iid: issue.issue_iid) { monitor.check(issue) }
           logger.info("Enqueued pipeline check for issue ##{issue.issue_iid} (MR !#{issue.mr_iid})", project: project_path)
         end
       rescue StandardError => e
@@ -411,7 +411,7 @@ def main
             logger: logger, token: token
           )
 
-          pool.enqueue { fixer.fix(issue) }
+          pool.enqueue(issue_iid: issue.issue_iid) { fixer.fix(issue) }
           logger.info("Enqueued discussion fix for issue ##{issue.issue_iid} (round #{issue.fix_round + 1})", project: project_path)
         end
       rescue StandardError => e
@@ -436,6 +436,20 @@ def main
       rescue StandardError => e
         logger.error("Error retrying issues for #{project_path}: #{e.message}", project: project_path)
       end
+    end
+
+    # -- Poll status summary (stdout only, not log files) --
+    active_issues = Database.db[:issues].exclude(status: "over").all
+    unless active_issues.empty?
+      worker_map = pool.assignments.invert # issue_iid => worker_index
+      lines = active_issues.map do |row|
+        project_short = row[:project_path].to_s.split("/").last
+        worker = worker_map[row[:issue_iid]]
+        worker_tag = worker ? " [worker-#{worker}]" : ""
+        "  ##{row[:issue_iid]} #{row[:status].ljust(21)} #{row[:issue_title]} (#{project_short})#{worker_tag}"
+      end
+      $stdout.puts pastel.dim("  --- #{active_issues.size} active issue(s) ---")
+      lines.each { |l| $stdout.puts pastel.dim(l) }
     end
 
     break if config["once"]
