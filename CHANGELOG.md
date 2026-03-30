@@ -5,6 +5,8 @@
 ### Added
 
 - `--status` now shows the worker assigned to each active issue (e.g. `[worker-3]`), matching the poll status summary. Worker assignments are persisted to `~/.autodev/workers.json` by the running instance.
+- `--errors [IID]` shows error details (message, stderr) for issues in error state. Without IID, shows all; with IID, shows a specific issue.
+- `--reset [IID]` resets errored issues to pending (retry_count zeroed). Without IID, resets all; with IID, resets a specific issue.
 
 ### Fixed
 

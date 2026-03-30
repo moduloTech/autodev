@@ -41,6 +41,10 @@ Settings are resolved in 4 layers (highest priority wins):
 - `-n` / `--max-workers N` — Concurrent workers
 - `-i` / `--interval SECONDS` — Poll interval
 - `--once` — Single poll cycle then exit
+- `--status` — Show dashboard of tracked issues and exit
+- `--all` — Include completed (`over`) issues in `--status`
+- `--errors [IID]` — Show error details for errored issues (all or specific)
+- `--reset [IID]` — Reset errored issues to pending (all or specific)
 - `-h` / `--help` — Show help
 
 ## Architecture
