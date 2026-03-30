@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-03-30
+
 ### Added
 
 - `--status` now shows the worker assigned to each active issue (e.g. `[worker-3]`), matching the poll status summary. Worker assignments are persisted to `~/.autodev/workers.json` by the running instance.
