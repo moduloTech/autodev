@@ -52,8 +52,14 @@ module GitlabHelpers
         end
 
         if response.is_a?(Net::HTTPSuccess)
-          File.binwrite(local_path, response.body)
-          "![#{alt}](#{local_path})"
+          body = response.body
+          content_type = response["content-type"].to_s
+          if body.nil? || body.empty? || !content_type.start_with?("image/")
+            "[Image: #{filename} — format non supporté (#{content_type})]"
+          else
+            File.binwrite(local_path, body)
+            "![#{alt}](#{local_path})"
+          end
         else
           "[Image: #{filename} — download failed (#{response.code})]"
         end

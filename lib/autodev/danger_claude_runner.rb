@@ -104,6 +104,7 @@ module DangerClaudeRunner
         err = err_thread.value
         @dc_stdout << "=== #{tag} ===\n#{out}\n"
         @dc_stderr << "=== #{tag} ===\n#{err}\n"
+        raise Interrupt, "#{tag} interrupted by signal" if status.signaled? && status.termsig == Signal.list["INT"]
         return [out, err, status.success?]
       end
 

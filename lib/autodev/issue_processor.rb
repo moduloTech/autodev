@@ -41,7 +41,7 @@ class IssueProcessor
     begin
       if skip_to_mr
         clone_repo(work_dir)
-        run_cmd(["git", "checkout", previous_branch], chdir: work_dir)
+        fetch_and_checkout(work_dir, previous_branch)
         branch_name = previous_branch
         issue._skip_to_mr = true
         issue.clone_complete! # cloning → creating_mr
@@ -52,7 +52,7 @@ class IssueProcessor
         # 2. Branch — reuse existing remote branch or create a new one
         if reuse_branch
           log "Reusing existing branch: #{previous_branch}"
-          run_cmd(["git", "checkout", previous_branch], chdir: work_dir)
+          fetch_and_checkout(work_dir, previous_branch)
           branch_name = previous_branch
         else
           branch_name = create_branch(work_dir, iid, title)
@@ -172,6 +172,13 @@ class IssueProcessor
       log "Setting up sparse checkout: #{sparse_paths.join(", ")}"
       run_cmd(["git", "sparse-checkout", "set"] + sparse_paths, chdir: work_dir)
     end
+  end
+
+  def fetch_and_checkout(work_dir, branch)
+    # --depth implies --single-branch, so the refspec is limited to the cloned
+    # branch. We must provide an explicit refspec to fetch other branches.
+    run_cmd(["git", "fetch", "origin", "+refs/heads/#{branch}:refs/remotes/origin/#{branch}"], chdir: work_dir)
+    run_cmd(["git", "checkout", "-b", branch, "origin/#{branch}"], chdir: work_dir)
   end
 
   def create_branch(work_dir, iid, title)

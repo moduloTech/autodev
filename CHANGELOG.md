@@ -12,6 +12,9 @@
 
 ### Fixed
 
+- Fix branch checkout on shallow clones: fetch the remote branch before checkout when reusing an existing branch. Shallow clones (`--depth 1`) only fetch the target branch, so `git checkout autodev/...` would fail with "pathspec did not match".
+- Fix `Could not process image` API error: validate downloaded images by checking Content-Type header before writing to disk. Non-image responses (HTML error pages, etc.) are replaced with a text placeholder instead of being passed to Claude.
+- Fix Ctrl+C during danger-claude marking issues as errored: detect SIGINT on subprocess exit and re-raise `Interrupt` so the worker pool shuts down gracefully instead of treating it as an implementation failure.
 - Fix garbled stdout when multiple workers run in parallel. Multiline messages (full prompts) are now truncated to the first line on the console; full content goes to log files only. Also close stdin on spawned subprocesses to prevent TTY inheritance.
 
 ## [0.6.1] - 2026-03-30
