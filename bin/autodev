@@ -88,8 +88,12 @@ def parse_args(argv)
       cli_overrides["once"] = true
     end
 
-    opts.on("--status", "Show dashboard of all tracked issues and exit") do
+    opts.on("--status", "Show dashboard of active issues and exit") do
       cli_overrides["status"] = true
+    end
+
+    opts.on("--all", "Include completed (over) issues in --status") do
+      cli_overrides["status_all"] = true
     end
 
     opts.on("-h", "--help", "Show this help") do
@@ -146,10 +150,12 @@ def show_dashboard(config)
   Database.connect(config["database_url"])
   Database.build_model!
 
-  issues = Database.db[:issues].order(Sequel.desc(:id)).all
+  dataset = Database.db[:issues].order(Sequel.desc(:id))
+  dataset = dataset.exclude(status: "over") unless config["status_all"]
+  issues = dataset.all
 
   if issues.empty?
-    puts "Aucune issue suivie."
+    puts config["status_all"] ? "Aucune issue suivie." : "Aucune issue active. Utilisez --all pour inclure les issues terminées."
     return
   end
 
@@ -208,7 +214,12 @@ def show_dashboard(config)
   active  = rows.count { |r| ACTIVE_STATES.include?(r[:status]) || r[:status] == "pending" }
   done    = rows.count { |r| r[:status] == "over" }
   blocked = rows.count { |r| %w[blocked error needs_clarification].include?(r[:status]) }
-  puts "#{pastel.bold(rows.size.to_s)} issues — #{pastel.cyan("#{active} actives")}, #{pastel.green("#{done} terminées")}, #{pastel.yellow("#{blocked} bloquées")}"
+  summary = "#{pastel.bold(rows.size.to_s)} issues — #{pastel.cyan("#{active} actives")}, #{pastel.green("#{done} terminées")}, #{pastel.yellow("#{blocked} bloquées")}"
+  unless config["status_all"]
+    hidden = Database.db[:issues].where(status: "over").count
+    summary << " #{pastel.dim("(#{hidden} terminées masquées, --all pour tout voir)")}" if hidden > 0
+  end
+  puts summary
 end
 
 # == Main ======================================================================

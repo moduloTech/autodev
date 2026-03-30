@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Dashboard (`--status`) now hides completed (`over`) issues by default. Use `--status --all` to show all issues.
+
 ### Fixed
 
 - Fix garbled stdout when multiple workers run in parallel. Multiline messages (full prompts) are now truncated to the first line on the console; full content goes to log files only. Also close stdin on spawned subprocesses to prevent TTY inheritance.
