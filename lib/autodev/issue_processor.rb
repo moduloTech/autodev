@@ -13,7 +13,7 @@ class IssueProcessor
 
     log "Processing issue ##{iid}: #{title}"
     issue.start_processing! # pending → cloning
-    issue.update(started_at: Sequel.lit("datetime('now')"))
+    Issue.where(id: issue.id).update(started_at: Sequel.lit("datetime('now')"))
 
     # Verify issue is still open
     current = @client.issue(@project_path, iid)
@@ -21,7 +21,7 @@ class IssueProcessor
       log "Issue ##{iid} is no longer open (#{current.state}), skipping"
       issue._issue_closed = true
       issue.clone_complete! # cloning → over
-      issue.update(finished_at: Sequel.lit("datetime('now')"))
+      Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"))
       return
     end
 
@@ -101,7 +101,7 @@ class IssueProcessor
       run_review(mr.web_url)
 
       issue.review_complete! # reviewing → checking_pipeline
-      issue.update(
+      Issue.where(id: issue.id).update(
         finished_at: Sequel.lit("datetime('now')"),
         pipeline_retrigger_count: 0,
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
@@ -136,7 +136,7 @@ class IssueProcessor
         log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, no more retries): #{e.class}: #{e.message}"
       end
 
-      issue.update(**fields)
+      Issue.where(id: issue.id).update(**fields)
       notify_issue(iid, ":x: **autodev** : echec — #{e.class}: #{e.message[0, 200]}")
       log_error "  #{bt}" if bt
     ensure
