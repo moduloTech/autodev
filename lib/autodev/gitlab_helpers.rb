@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "time"
+
 module GitlabHelpers
   module_function
 
@@ -106,10 +108,11 @@ module GitlabHelpers
   def clarification_answered?(client, project_path, issue_iid, requested_at)
     return true unless requested_at
 
+    threshold = Time.parse(requested_at.to_s)
     notes = client.issue_notes(project_path, issue_iid, per_page: 100)
     notes.any? do |note|
       !note.system &&
-        note.created_at > requested_at &&
+        Time.parse(note.created_at.to_s) > threshold &&
         !note.body.to_s.include?("**autodev**")
     end
   rescue Gitlab::Error::ResponseError
