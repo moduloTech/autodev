@@ -36,11 +36,20 @@ module GitlabHelpers
         end
 
         uri = URI.parse(url)
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl = (uri.scheme == "https")
-        request = Net::HTTP::Get.new(uri.request_uri)
-        request["PRIVATE-TOKEN"] = token
-        response = http.request(request)
+        response = nil
+        3.times do
+          http = Net::HTTP.new(uri.host, uri.port)
+          http.use_ssl = (uri.scheme == "https")
+          request = Net::HTTP::Get.new(uri.request_uri)
+          request["PRIVATE-TOKEN"] = token
+          response = http.request(request)
+
+          if response.is_a?(Net::HTTPRedirection) && response["location"]
+            uri = URI.parse(response["location"])
+          else
+            break
+          end
+        end
 
         if response.is_a?(Net::HTTPSuccess)
           File.binwrite(local_path, response.body)

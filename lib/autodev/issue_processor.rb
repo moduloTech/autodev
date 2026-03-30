@@ -260,7 +260,7 @@ class IssueProcessor
 
     notify_issue(iid, comment.strip)
     issue.spec_unclear!
-    issue.update(clarification_requested_at: Sequel.lit("datetime('now')"))
+    Issue.where(id: issue.id).update(clarification_requested_at: Sequel.lit("datetime('now')"))
     log "Issue ##{iid} needs clarification, #{issues_list.size} question(s) posted"
     true
   rescue JSON::ParserError

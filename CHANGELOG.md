@@ -6,6 +6,11 @@
 
 - Dashboard: `autodev --status` displays a table of all tracked issues with their state, project, MR link, and contextual comments. Color-coded by status with a summary line.
 
+### Fixed
+
+- Fix `clarification_requested_at` stored as literal string `"datetime('now')"` instead of evaluated timestamp. `Sequel.lit()` is not interpreted by Sequel::Model#update — use dataset-level update instead.
+- Fix GitLab image download failing with 302: follow HTTP redirects (up to 3 hops) when downloading issue attachments. GitLab redirects authenticated upload URLs, and `Net::HTTP` does not follow redirects automatically.
+
 ## [0.5.1] - 2026-03-27
 
 ### Fixed
