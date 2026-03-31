@@ -273,6 +273,50 @@ module SkillsInjector
       - Prefer scopes on models for reusable queries.
       - Use I18n for user-facing strings when the project already does.
       - Follow RESTful routing patterns. Avoid custom routes when a standard CRUD action works.
+
+      ## Code Comments
+
+      **Always write comments in English.** Every class, module, method, and non-trivial block of code must be commented. Comments should address three questions:
+
+      1. **WHAT** — What does this code do? A concise summary of its purpose.
+      2. **WHY** — Why does it exist? The business reason, constraint, or decision behind it.
+      3. **HOW** — How does it work? Explain the approach when the logic is not self-evident.
+
+      Not every comment needs all three — use judgement:
+      - A simple method may only need WHAT.
+      - A workaround or edge-case handler should explain WHY.
+      - A complex algorithm or non-obvious flow should explain HOW.
+
+      ```ruby
+      # Recalculates the invoice total after line items change.
+      # Needed because cached totals can drift when discounts are applied retroactively.
+      # Iterates line items in DB-order to match the rounding behavior of the billing API.
+      def recalculate_total
+        # ...
+      end
+      ```
+
+      ## Commit Messages
+
+      **Always write commit messages in English.** Use this format:
+
+      1. **Summary line** — A concise one-line description of what changed (imperative mood, no period).
+      2. **Blank line**.
+      3. **Body** — A detailed explanation of what changed and why. Wrap at 72 characters.
+
+      The summary should be specific enough to be useful in `git log --oneline`. The body should explain
+      the reasoning behind the change, not just restate the diff.
+
+      ```
+      Add discount expiration check to invoice recalculation
+
+      Invoices with expired discounts were still applying the reduced rate
+      because recalculate_total read the discount amount without checking
+      its validity period. Now checks discount.expired? before applying
+      and falls back to the full line item price.
+      ```
+
+      Do not push. Do not ask for confirmation.
     GENERAL
 
     if stack[:has_devise]
