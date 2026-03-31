@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-31
+
 ### Added
 
 - Question/investigation ticket handling: autodev now recognizes tickets that ask questions about existing behavior (not implementation requests), investigates the codebase, and posts an answer as a GitLab comment instead of attempting code changes. New state `answering_question` with events `question_detected` and `question_answered`.
