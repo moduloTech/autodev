@@ -118,6 +118,7 @@ module Database
         state :checking_pipeline
         state :fixing_discussions
         state :fixing_pipeline
+        state :answering_question
         state :needs_clarification
         state :over
         state :blocked
@@ -143,6 +144,14 @@ module Database
 
         event :spec_unclear do
           transitions from: :checking_spec, to: :needs_clarification
+        end
+
+        event :question_detected do
+          transitions from: :checking_spec, to: :answering_question
+        end
+
+        event :question_answered do
+          transitions from: :answering_question, to: :over
         end
 
         event :impl_complete do
@@ -207,7 +216,8 @@ module Database
         event :mark_failed do
           transitions from: [:cloning, :checking_spec, :implementing, :committing,
                              :pushing, :creating_mr, :reviewing,
-                             :fixing_discussions, :fixing_pipeline], to: :error
+                             :fixing_discussions, :fixing_pipeline,
+                             :answering_question], to: :error
         end
 
         event :retry_processing do

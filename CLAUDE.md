@@ -60,6 +60,8 @@ The Issue Sequel::Model is built dynamically after DB connection via `Database.b
 Handles the sequential flow from `pending` through `reviewing`:
 `start_processing!` → clone → `clone_complete!` → check spec → `spec_clear!` → implement → `impl_complete!` → commit → `commit_complete!` → push → `push_complete!` → create MR → `mr_created!` → review → `review_complete!`
 
+For question/investigation tickets (no code changes needed): `question_detected!` → investigate codebase → post answer → `question_answered!` → `over`.
+
 ### MrFixer
 
 Handles `fixing_discussions`: clones the MR branch, fetches unresolved discussions, fixes each one via `danger-claude -p` + `-c`, resolves discussions, pushes. Fires `discussions_fixed!` → `checking_pipeline`.
@@ -95,6 +97,7 @@ pending → cloning → checking_spec → implementing → committing → pushin
 
 error (from any active state) → pending (on retry, with backoff)
 needs_clarification (from checking_spec) → pending (when clarification comment posted)
+answering_question (from checking_spec) → over (question answered via codebase investigation)
 ```
 
 ## Error Handling

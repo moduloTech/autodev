@@ -65,7 +65,7 @@ class IssueProcessor
 
         # 4. Check specification clarity
         if check_specification(work_dir, context, iid, issue)
-          return # spec_unclear! was fired → needs_clarification
+          return # spec_unclear! → needs_clarification, or question_detected! → answering_question → over
         end
         # spec_clear! was fired → implementing
 
@@ -229,8 +229,7 @@ class IssueProcessor
     log "Checking specification clarity for ##{iid}..."
 
     prompt = <<~PROMPT
-      Analyse le ticket GitLab suivant et determine si la specification est suffisamment precise
-      pour etre implementee. Identifie les ambiguites, informations manquantes ou contradictions.
+      Analyse le ticket GitLab suivant et determine sa nature.
 
       #{context}
 
@@ -238,14 +237,20 @@ class IssueProcessor
 
       Reponds UNIQUEMENT avec un objet JSON valide (sans bloc de code markdown), avec cette structure :
       {
-        "clear": true/false,
+        "type": "implementation" | "question" | "unclear",
         "issues": ["description du probleme 1", "description du probleme 2"]
       }
 
-      - Si la specification est suffisamment claire pour etre implementee, reponds {"clear": true, "issues": []}
-      - Si elle ne l'est pas, liste les problemes specifiques dans "issues"
-      - Sois pragmatique : des details mineurs ne doivent pas bloquer l'implementation
-      - Concentre-toi sur les ambiguites qui pourraient mener a une implementation incorrecte
+      - `"type": "implementation"` — la specification est suffisamment claire pour etre implementee. `issues` doit etre vide.
+      - `"type": "question"` — le ticket ne demande PAS de modification de code. C'est une question,
+        une investigation, ou une demande d'explication sur le comportement existant
+        (ex: "pourquoi X ?", "est-ce que A et B sont identiques ?", "a quoi sert X ?", "comment fonctionne X ?").
+        `issues` doit etre vide.
+      - `"type": "unclear"` — le ticket demande une implementation mais la specification n'est pas assez precise.
+        Liste les problemes specifiques dans `issues`.
+
+      - Sois pragmatique : des details mineurs ne doivent pas bloquer l'implementation.
+      - Concentre-toi sur les ambiguites qui pourraient mener a une implementation incorrecte.
       - Si le ticket contient des URLs de l'application (ex: https://app.example.com/companies/test/drivers/history),
         extrais le path (ex: /companies/:id/drivers/history), cherche la route correspondante dans config/routes.rb,
         identifie le controller#action, puis lis le code du controller et de la vue associee.
@@ -255,6 +260,26 @@ class IssueProcessor
 
     out = danger_claude_prompt(work_dir, prompt)
 
+    # Try new tri-state format first
+    json_match = out.match(/\{[^{}]*"type"\s*:\s*"(implementation|question|unclear)"[^{}]*\}/m)
+    if json_match
+      result = JSON.parse(json_match[0])
+      case result["type"]
+      when "implementation"
+        log "Specification is clear, proceeding"
+        issue.spec_clear!
+        return false
+      when "question"
+        log "Issue ##{iid} is a question/investigation, not an implementation request"
+        issue.question_detected!
+        answer_question(work_dir, context, iid, issue)
+        return true
+      when "unclear"
+        return handle_unclear_spec(result["issues"], iid, issue)
+      end
+    end
+
+    # Fallback: try old format { "clear": true/false }
     json_match = out.match(/\{[^{}]*"clear"\s*:\s*(true|false)[^{}]*\}/m)
     unless json_match
       log "Could not parse spec check response, proceeding with implementation"
@@ -263,14 +288,21 @@ class IssueProcessor
     end
 
     result = JSON.parse(json_match[0])
-
     if result["clear"]
       log "Specification is clear, proceeding"
       issue.spec_clear!
       return false
     end
 
-    issues_list = result["issues"] || []
+    handle_unclear_spec(result["issues"], iid, issue)
+  rescue JSON::ParserError
+    log "Could not parse spec check JSON response, proceeding with implementation"
+    issue.spec_clear!
+    false
+  end
+
+  def handle_unclear_spec(issues_list, iid, issue)
+    issues_list ||= []
     if issues_list.empty?
       log "Spec check returned unclear but no issues listed, proceeding"
       issue.spec_clear!
@@ -290,10 +322,47 @@ class IssueProcessor
     Issue.where(id: issue.id).update(clarification_requested_at: Sequel.lit("datetime('now')"))
     log "Issue ##{iid} needs clarification, #{issues_list.size} question(s) posted"
     true
-  rescue JSON::ParserError
-    log "Could not parse spec check JSON response, proceeding with implementation"
-    issue.spec_clear!
-    false
+  end
+
+  def answer_question(work_dir, context, iid, issue)
+    log "Investigating question for issue ##{iid}..."
+
+    prompt = <<~PROMPT
+      Le ticket GitLab suivant pose une question ou demande une investigation sur le code existant.
+      Ce n'est PAS une demande d'implementation. Tu dois analyser le codebase pour repondre a la question.
+
+      #{context}
+
+      ## Instructions
+
+      - Lis attentivement la question posee dans le ticket.
+      - Explore le codebase pour trouver la reponse (fichiers, modeles, controleurs, vues, routes, migrations, etc.).
+      - Fournis une reponse claire, factuelle et structuree.
+      - Cite les fichiers et lignes pertinents pour appuyer ta reponse.
+      - Si tu ne peux pas repondre avec certitude, indique-le clairement.
+      - Reponds en francais.
+      - Reponds UNIQUEMENT avec ta reponse (pas de JSON, pas de bloc de code englobant).
+    PROMPT
+
+    answer = danger_claude_prompt(work_dir, prompt, label: "-p (question investigation)")
+
+    comment = <<~COMMENT
+      :mag: **autodev** : reponse a la question
+
+      #{answer.strip}
+
+      ---
+      _Cette reponse a ete generee automatiquement par analyse du codebase. N'hesitez pas a demander des precisions._
+    COMMENT
+
+    notify_issue(iid, comment.strip)
+    update_labels(iid)
+    issue.question_answered!
+    Issue.where(id: issue.id).update(
+      finished_at: Sequel.lit("datetime('now')"),
+      dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
+    )
+    log "Issue ##{iid} answered (question/investigation)"
   end
 
   def implement(work_dir, context, iid)

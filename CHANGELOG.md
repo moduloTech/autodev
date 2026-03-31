@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Question/investigation ticket handling: autodev now recognizes tickets that ask questions about existing behavior (not implementation requests), investigates the codebase, and posts an answer as a GitLab comment instead of attempting code changes. New state `answering_question` with events `question_detected` and `question_answered`.
+
 ### Changed
 
 - Spec check now instructs Claude to resolve app URLs from tickets (e.g. `https://app.example.com/companies/test/drivers/history`) by looking up the route in `config/routes.rb`, reading the controller and view code, and using that context to self-answer questions before requesting clarification.
