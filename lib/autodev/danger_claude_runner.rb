@@ -34,7 +34,7 @@ module DangerClaudeRunner
   RATE_LIMIT_RESET_PATTERN = /resets?\s+(\d{1,2})(am|pm)\s*\(UTC\)/i
 
   def danger_claude_prompt(work_dir, prompt, label: "-p", agent: nil)
-    args = ["-p", prompt]
+    args = dc_global_args + ["-p", prompt]
     if agent
       args.unshift("-a", agent)
       @logger.debug("danger-claude -a #{agent} -p prompt:\n#{prompt}", project: @project_path)
@@ -51,7 +51,7 @@ module DangerClaudeRunner
   end
 
   def danger_claude_commit(work_dir, label: "-c")
-    out, err, ok = run_with_timeout("danger-claude", ["-c"], chdir: work_dir, label: label)
+    out, err, ok = run_with_timeout("danger-claude", dc_global_args + ["-c"], chdir: work_dir, label: label)
     unless ok
       check_rate_limit!(out, err)
       raise ImplementationError, "danger-claude -c failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
@@ -80,6 +80,16 @@ module DangerClaudeRunner
     reset = Time.utc(now.year, now.month, now.day, hour, 0, 0)
     reset += 86_400 if reset <= now # next day if already past
     reset
+  end
+
+  # Build global danger-claude args from config (project overrides global).
+  def dc_global_args
+    args = []
+    model = @project_config["model"] || @config["model"]
+    effort = @project_config["effort"] || @config["effort"]
+    args.push("-m", model) if model
+    args.push("-e", effort) if effort
+    args
   end
 
   def clone_and_checkout(work_dir, branch)

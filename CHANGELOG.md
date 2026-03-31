@@ -5,6 +5,7 @@
 ### Changed
 
 - `--errors` now includes blocked issues in addition to errored ones, with distinct color coding (yellow for blocked, red for error).
+- New `model` and `effort` config keys (global and per-project) forwarded to `danger-claude` as `--model` and `--effort`. Project-level overrides global.
 - `rails-conventions` skill now requires code comments in English covering WHAT, WHY, and HOW, and commit messages in English using Conventional Commits format (`<type>: <description>`) with a detailed body.
 - Pipeline auto-retrigger is now conditional on pre-triage verdict. Previously, every pipeline failure was retriggered once before analysis. Now, only `:infra` and `:uncertain` verdicts trigger a retry — `:code` failures go straight to the fix phase, saving a full pipeline cycle.
 
