@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Pipeline auto-retrigger is now conditional on pre-triage verdict. Previously, every pipeline failure was retriggered once before analysis. Now, only `:infra` and `:uncertain` verdicts trigger a retry — `:code` failures go straight to the fix phase, saving a full pipeline cycle.
+
 ### Fixed
 
 - API rate limit errors ("You've hit your limit") no longer burn retry attempts. Rate limits are detected from danger-claude output and the issue is parked until the reset time without incrementing `retry_count`. Applies to all three processors (IssueProcessor, MrFixer, PipelineMonitor).

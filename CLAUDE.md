@@ -66,7 +66,7 @@ Handles `fixing_discussions`: clones the MR branch, fetches unresolved discussio
 
 ### PipelineMonitor
 
-Handles `checking_pipeline`: fetches MR head pipeline via GitLab API. If running → skip. If green → fires `pipeline_green!` (guards decide `over` vs `fixing_discussions`). If red → retrigger once, then evaluates via danger-claude. Code-related → fires `pipeline_failed_code!` → `fixing_pipeline` → `pipeline_fix_done!`. Non-code → `pipeline_failed_infra!` → `blocked`.
+Handles `checking_pipeline`: fetches MR head pipeline via GitLab API. If running → skip. If green → fires `pipeline_green!` (guards decide `over` vs `fixing_discussions`). If red → pre-triage classifies failures. Code failures go straight to fix. Infra/uncertain failures retrigger once, then block or escalate to Claude evaluation. Code-related → fires `pipeline_failed_code!` → `fixing_pipeline` → `pipeline_fix_done!`. Non-code → `pipeline_failed_infra!` → `blocked`.
 
 Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log` files in the work directory (no truncation). Prompts reference these files by path so danger-claude reads the complete log. Each failed job is fixed in a separate danger-claude call + commit (same pattern as MrFixer's per-discussion approach).
 
@@ -109,8 +109,9 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | MR already exists for branch | Reuse existing MR |
 | Issue closed between poll and processing | `clone_complete!` → over (guard: issue_closed?) |
 | Issues in error at startup | `recover_on_startup!` resets to pending |
-| Pipeline red (first time) | Retrigger once, recheck next poll |
-| Pipeline red (after retrigger) | Evaluate via Claude: code → fixing_pipeline, non-code → blocked |
+| Pipeline red (code by pre-triage) | Skip retrigger, go straight to fix phase |
+| Pipeline red (infra/uncertain, first time) | Retrigger once, recheck next poll |
+| Pipeline red (infra/uncertain, after retrigger) | Infra → blocked; uncertain → evaluate via Claude |
 | Pipeline canceled/skipped | `pipeline_canceled!` → blocked |
 | Interrupted fixing_pipeline | Reset to checking_pipeline on startup |
 

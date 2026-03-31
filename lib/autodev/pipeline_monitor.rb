@@ -72,27 +72,12 @@ class PipelineMonitor
   end
 
   def handle_red(issue, pipeline, max_fix_rounds)
-    iid    = issue.issue_iid
-    mr_iid = issue.mr_iid
-    retrigger_count = issue.pipeline_retrigger_count || 0
-
-    if retrigger_count < 1
-      log "Pipeline failed for MR !#{mr_iid}, retriggering (attempt #{retrigger_count + 1})..."
-      begin
-        @client.retry_pipeline(@project_path, pipeline_id(pipeline))
-        issue.update(pipeline_retrigger_count: retrigger_count + 1)
-        log "Pipeline retriggered for MR !#{mr_iid}"
-      rescue Gitlab::Error::ResponseError => e
-        log_error "Failed to retrigger pipeline: #{e.message}"
-        evaluate_failure(issue, pipeline, max_fix_rounds)
-      end
-    else
-      evaluate_failure(issue, pipeline, max_fix_rounds)
-    end
+    evaluate_failure(issue, pipeline, max_fix_rounds)
   end
 
   def evaluate_failure(issue, pipeline, max_fix_rounds)
-    iid = issue.issue_iid
+    iid    = issue.issue_iid
+    mr_iid = issue.mr_iid
 
     failed_jobs = fetch_failed_jobs(pipeline)
     if failed_jobs.empty?
@@ -105,6 +90,22 @@ class PipelineMonitor
     # --- Phase 1: pre-triage using failure_reason (no clone, no Claude) ---
 
     triage = pre_triage(failed_jobs)
+
+    if triage[:verdict] != :code
+      # Infra or uncertain: retrigger once before escalating
+      retrigger_count = issue.pipeline_retrigger_count || 0
+      if retrigger_count < 1
+        log "Pipeline failed for MR !#{mr_iid} (pre-triage: #{triage[:verdict]}), retriggering (attempt #{retrigger_count + 1})..."
+        begin
+          @client.retry_pipeline(@project_path, pipeline_id(pipeline))
+          issue.update(pipeline_retrigger_count: retrigger_count + 1)
+          log "Pipeline retriggered for MR !#{mr_iid}"
+          return
+        rescue Gitlab::Error::ResponseError => e
+          log_error "Failed to retrigger pipeline: #{e.message}"
+        end
+      end
+    end
 
     if triage[:verdict] == :infra
       issue.pipeline_failed_infra!
