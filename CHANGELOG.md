@@ -4,6 +4,7 @@
 
 ### Changed
 
+- `--errors` now includes blocked issues in addition to errored ones, with distinct color coding (yellow for blocked, red for error).
 - Pipeline auto-retrigger is now conditional on pre-triage verdict. Previously, every pipeline failure was retriggered once before analysis. Now, only `:infra` and `:uncertain` verdicts trigger a retry — `:code` failures go straight to the fix phase, saving a full pipeline cycle.
 
 ### Fixed

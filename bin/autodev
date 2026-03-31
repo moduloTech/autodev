@@ -13,8 +13,8 @@
 #   autodev                                  # Poll with default config
 #   autodev --once                           # Single poll cycle then exit
 #   autodev --status                         # Show dashboard of tracked issues
-#   autodev --errors                         # Show error details for all errored issues
-#   autodev --errors 15712                   # Show error details for a specific issue
+#   autodev --errors                         # Show details for all errored/blocked issues
+#   autodev --errors 15712                   # Show details for a specific errored/blocked issue
 #   autodev --reset                          # Reset all errored issues to pending
 #   autodev --reset 15712                    # Reset a specific errored issue to pending
 #   autodev -c ~/.autodev/custom.yml --once  # Custom config, single cycle
@@ -105,7 +105,7 @@ def parse_args(argv)
       cli_overrides["reset_iid"] = iid
     end
 
-    opts.on("--errors [IID]", Integer, "Show error details (optionally for a specific issue IID)") do |iid|
+    opts.on("--errors [IID]", Integer, "Show details for errored and blocked issues (optionally for a specific issue IID)") do |iid|
       cli_overrides["errors"] = true
       cli_overrides["errors_iid"] = iid
     end
@@ -249,19 +249,21 @@ def show_errors(config)
   Database.connect(config["database_url"])
   Database.build_model!
 
-  dataset = Database.db[:issues].where(status: "error")
+  dataset = Database.db[:issues].where(status: %w[error blocked])
   dataset = dataset.where(issue_iid: config["errors_iid"]) if config["errors_iid"]
   issues = dataset.order(Sequel.desc(:id)).all
 
   if issues.empty?
-    puts config["errors_iid"] ? "Issue ##{config["errors_iid"]} non trouvée ou pas en erreur." : "Aucune issue en erreur."
+    puts config["errors_iid"] ? "Issue ##{config["errors_iid"]} non trouvée ou pas en erreur/bloquée." : "Aucune issue en erreur ou bloquée."
     return
   end
 
   issues.each_with_index do |row, idx|
     project_short = row[:project_path].to_s.split("/").last
-    puts pastel.bold("#{pastel.red("■")} Issue ##{row[:issue_iid]}: #{row[:issue_title]} (#{project_short})")
-    puts "  Tentative: #{row[:retry_count]}"
+    status_label = row[:status] == "blocked" ? pastel.yellow("blocked") : pastel.red("error")
+    status_icon  = row[:status] == "blocked" ? pastel.yellow("■") : pastel.red("■")
+    puts pastel.bold("#{status_icon} Issue ##{row[:issue_iid]}: #{row[:issue_title]} (#{project_short}) [#{status_label}]")
+    puts "  Tentative: #{row[:retry_count]}" if row[:status] == "error"
     puts "  Branche: #{row[:branch_name]}" if row[:branch_name]
     puts "  MR: !#{row[:mr_iid]} #{row[:mr_url]}" if row[:mr_iid]
     puts ""

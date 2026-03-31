@@ -43,7 +43,7 @@ Settings are resolved in 4 layers (highest priority wins):
 - `--once` — Single poll cycle then exit
 - `--status` — Show dashboard of tracked issues and exit
 - `--all` — Include completed (`over`) issues in `--status`
-- `--errors [IID]` — Show error details for errored issues (all or specific)
+- `--errors [IID]` — Show details for errored and blocked issues (all or specific)
 - `--reset [IID]` — Reset errored issues to pending (all or specific)
 - `-h` / `--help` — Show help
 
