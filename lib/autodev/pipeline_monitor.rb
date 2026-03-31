@@ -455,7 +455,8 @@ class PipelineMonitor
     jobs = @client.pipeline_jobs(@project_path, pid, per_page: 100)
     jobs.select do |j|
       status = j.respond_to?(:status) ? j.status : j["status"]
-      status == "failed"
+      allow_failure = j.respond_to?(:allow_failure) ? j.allow_failure : j["allow_failure"]
+      status == "failed" && !allow_failure
     end
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to fetch pipeline jobs: #{e.message}"
