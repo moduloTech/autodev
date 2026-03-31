@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "set"
+
 class WorkerPool
   ASSIGNMENTS_FILE = File.expand_path("~/.autodev/workers.json")
 
@@ -10,6 +12,7 @@ class WorkerPool
     @threads = []
     @running = true
     @assignments = {} # worker index => issue_iid
+    @queued_iids = Set.new # issue_iids in queue or being processed
     @mutex = Mutex.new
   end
 
@@ -20,7 +23,10 @@ class WorkerPool
         while @running
           begin
             job, issue_iid = @queue.pop(true)
-            @mutex.synchronize { @assignments[i] = issue_iid }
+            @mutex.synchronize do
+              @assignments[i] = issue_iid
+              # iid stays in @queued_iids until the job finishes
+            end
             persist_assignments
             job.call
           rescue ThreadError
@@ -28,7 +34,10 @@ class WorkerPool
           rescue StandardError => e
             @logger.error("[worker-#{i}] Unhandled error: #{e.class}: #{e.message}")
           ensure
-            @mutex.synchronize { @assignments.delete(i) }
+            @mutex.synchronize do
+              @queued_iids.delete(@assignments[i])
+              @assignments.delete(i)
+            end
             persist_assignments
           end
         end
@@ -36,8 +45,15 @@ class WorkerPool
     end
   end
 
+  # Returns false if the issue is already queued or being processed
   def enqueue(issue_iid: nil, &block)
+    @mutex.synchronize do
+      return false if issue_iid && @queued_iids.include?(issue_iid)
+
+      @queued_iids.add(issue_iid) if issue_iid
+    end
     @queue.push([block, issue_iid])
+    true
   end
 
   # Returns { worker_index => issue_iid } for busy workers

@@ -16,6 +16,7 @@
 
 ### Fixed
 
+- Worker pool now deduplicates enqueue calls: if an issue is already queued or being processed, subsequent enqueue attempts for the same `issue_iid` are silently skipped. Fixes a race condition where the polling loop could enqueue the same `fixing_discussions` task twice, causing a `git clone` failure when two workers tried to clone to the same temp directory.
 - Image download errors now include the exception class and message (e.g. `SocketError`, `URI::InvalidURIError`) instead of a generic "download failed", making it possible to diagnose failures from logs.
 - Skills are now injected as subdirectories with `SKILL.md` files (e.g. `.claude/skills/rails-conventions/SKILL.md`) instead of bare `.md` files. This matches the Claude Code skill format. Existing legacy `.md` skills are automatically migrated to the new format.
 - Jobs with `allow_failure: true` are now excluded from pipeline failure analysis and fix attempts. These jobs don't block the pipeline and should not trigger retriggers or fixes.
