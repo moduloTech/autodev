@@ -17,6 +17,11 @@ module SkillsInjector
     logger.info("Detected stack: #{stack.inspect}", project: project_path)
 
     skills_dir = File.join(work_dir, ".claude", "skills")
+    migrated = migrate_legacy_skills(skills_dir)
+    if migrated.any?
+      logger.info("Migrated #{migrated.size} legacy skill(s) to subdirectory format: #{migrated.join(", ")}", project: project_path)
+    end
+
     existing = existing_skills(skills_dir)
 
     if existing.any?
@@ -26,17 +31,17 @@ module SkillsInjector
     injected = []
 
     unless existing.include?("rails-conventions")
-      write_skill(skills_dir, "rails-conventions.md", rails_conventions_skill(stack))
+      write_skill(skills_dir, "rails-conventions", rails_conventions_skill(stack))
       injected << "rails-conventions"
     end
 
     unless existing.include?("test-patterns")
-      write_skill(skills_dir, "test-patterns.md", test_patterns_skill(stack))
+      write_skill(skills_dir, "test-patterns", test_patterns_skill(stack))
       injected << "test-patterns"
     end
 
     unless existing.include?("database-patterns")
-      write_skill(skills_dir, "database-patterns.md", database_patterns_skill(stack))
+      write_skill(skills_dir, "database-patterns", database_patterns_skill(stack))
       injected << "database-patterns"
     end
 
@@ -553,13 +558,33 @@ module SkillsInjector
   def existing_skills(skills_dir)
     return [] unless Dir.exist?(skills_dir)
 
-    Dir.glob(File.join(skills_dir, "*.md")).map do |f|
-      File.basename(f, ".md")
+    Dir.glob(File.join(skills_dir, "*", "SKILL.md")).map do |f|
+      File.basename(File.dirname(f))
     end
   end
 
-  def write_skill(skills_dir, filename, content)
-    FileUtils.mkdir_p(skills_dir)
-    File.write(File.join(skills_dir, filename), content)
+  # Migrate bare .md files in skills_dir to subdirectory/SKILL.md format.
+  def migrate_legacy_skills(skills_dir)
+    return [] unless Dir.exist?(skills_dir)
+
+    migrated = []
+    Dir.glob(File.join(skills_dir, "*.md")).each do |legacy_path|
+      skill_name = File.basename(legacy_path, ".md")
+      skill_dir = File.join(skills_dir, skill_name)
+      new_path = File.join(skill_dir, "SKILL.md")
+
+      next if File.exist?(new_path) # already migrated
+
+      FileUtils.mkdir_p(skill_dir)
+      FileUtils.mv(legacy_path, new_path)
+      migrated << skill_name
+    end
+    migrated
+  end
+
+  def write_skill(skills_dir, skill_name, content)
+    skill_dir = File.join(skills_dir, skill_name)
+    FileUtils.mkdir_p(skill_dir)
+    File.write(File.join(skill_dir, "SKILL.md"), content)
   end
 end

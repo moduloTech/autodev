@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Skills are now injected as subdirectories with `SKILL.md` files (e.g. `.claude/skills/rails-conventions/SKILL.md`) instead of bare `.md` files. This matches the Claude Code skill format. Existing legacy `.md` skills are automatically migrated to the new format.
 - Jobs with `allow_failure: true` are now excluded from pipeline failure analysis and fix attempts. These jobs don't block the pipeline and should not trigger retriggers or fixes.
 - API rate limit errors ("You've hit your limit") no longer burn retry attempts. Rate limits are detected from danger-claude output and the issue is parked until the reset time without incrementing `retry_count`. Applies to all three processors (IssueProcessor, MrFixer, PipelineMonitor).
 - Deploy jobs (deploy_review, etc.) no longer sent to danger-claude for fixing. Jobs matching deploy/release/provision/terraform/helm/k8s patterns are now classified as infra in pre-triage and skipped during pipeline fix. Previously, a deploy job with `script_failure` would be classified as code, causing a 30-minute timeout with no useful result.
