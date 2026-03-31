@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- Image download errors now include the exception class and message (e.g. `SocketError`, `URI::InvalidURIError`) instead of a generic "download failed", making it possible to diagnose failures from logs.
 - Skills are now injected as subdirectories with `SKILL.md` files (e.g. `.claude/skills/rails-conventions/SKILL.md`) instead of bare `.md` files. This matches the Claude Code skill format. Existing legacy `.md` skills are automatically migrated to the new format.
 - Jobs with `allow_failure: true` are now excluded from pipeline failure analysis and fix attempts. These jobs don't block the pipeline and should not trigger retriggers or fixes.
 - API rate limit errors ("You've hit your limit") no longer burn retry attempts. Rate limits are detected from danger-claude output and the issue is parked until the reset time without incrementing `retry_count`. Applies to all three processors (IssueProcessor, MrFixer, PipelineMonitor).

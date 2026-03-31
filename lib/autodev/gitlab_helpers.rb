@@ -63,8 +63,8 @@ module GitlabHelpers
         else
           "[Image: #{filename} — download failed (#{response.code})]"
         end
-      rescue StandardError
-        "[Image: #{filename} — download failed]"
+      rescue StandardError => e
+        "[Image: #{filename} — download failed: #{e.class}: #{e.message}]"
       end
     end
 
