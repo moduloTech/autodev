@@ -246,6 +246,11 @@ class IssueProcessor
       - Si elle ne l'est pas, liste les problemes specifiques dans "issues"
       - Sois pragmatique : des details mineurs ne doivent pas bloquer l'implementation
       - Concentre-toi sur les ambiguites qui pourraient mener a une implementation incorrecte
+      - Si le ticket contient des URLs de l'application (ex: https://app.example.com/companies/test/drivers/history),
+        extrais le path (ex: /companies/:id/drivers/history), cherche la route correspondante dans config/routes.rb,
+        identifie le controller#action, puis lis le code du controller et de la vue associee.
+        Utilise ces informations pour repondre toi-meme aux questions (colonnes, filtres, logique metier)
+        avant de declarer la spec insuffisante.
     PROMPT
 
     out = danger_claude_prompt(work_dir, prompt)

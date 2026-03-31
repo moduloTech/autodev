@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Spec check now instructs Claude to resolve app URLs from tickets (e.g. `https://app.example.com/companies/test/drivers/history`) by looking up the route in `config/routes.rb`, reading the controller and view code, and using that context to self-answer questions before requesting clarification.
 - `--errors` now includes blocked issues in addition to errored ones, with distinct color coding (yellow for blocked, red for error).
 - New `model` and `effort` config keys (global and per-project) forwarded to `danger-claude` as `--model` and `--effort`. Project-level overrides global.
 - `rails-conventions` skill now requires code comments in English covering WHAT, WHY, and HOW, and commit messages in English using Conventional Commits format (`<type>: <description>`) with a detailed body.
