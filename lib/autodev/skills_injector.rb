@@ -298,9 +298,26 @@ module SkillsInjector
 
       ## Commit Messages
 
-      **Always write commit messages in English.** Use this format:
+      **Always write commit messages in English.** Use the **Conventional Commits** format:
 
-      1. **Summary line** — A concise one-line description of what changed (imperative mood, no period).
+      ```
+      <type>: <description>
+
+      <body>
+      ```
+
+      ### Types
+
+      - `feat` — new feature
+      - `fix` — bug fix
+      - `refactor` — code restructuring with no behavior change
+      - `test` — adding or modifying tests
+      - `docs` — documentation only
+      - `chore` — maintenance tasks (dependencies, CI, tooling)
+
+      ### Rules
+
+      1. **Summary line** — `<type>: <concise description>` (imperative mood, no period, lowercase after colon).
       2. **Blank line**.
       3. **Body** — A detailed explanation of what changed and why. Wrap at 72 characters.
 
@@ -308,7 +325,7 @@ module SkillsInjector
       the reasoning behind the change, not just restate the diff.
 
       ```
-      Add discount expiration check to invoice recalculation
+      fix: check discount expiration during invoice recalculation
 
       Invoices with expired discounts were still applying the reduced rate
       because recalculate_total read the discount amount without checking
