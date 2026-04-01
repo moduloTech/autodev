@@ -4,8 +4,14 @@
 
 ### Added
 
+- New `code-conventions` skill injected into all projects: language-agnostic rules for code comments (WHAT/WHY/HOW) and commit messages (Conventional Commits). Previously these rules were embedded in the Rails-specific skill and ignored for JS/other languages.
+- All prompts (implementation, MR fix, pipeline fix) now explicitly list the skills to load (e.g. `code-conventions`, `rails-conventions`, etc.) before starting work.
 - `--version` / `-v` CLI flag to display the current version.
 - Version tag now appears in every GitLab comment (e.g. `:robot: **autodev** (v0.7.0) : traitement en cours...`).
+
+### Changed
+
+- `rails-conventions` skill no longer contains Code Comments and Commit Messages sections — these are now in the language-agnostic `code-conventions` skill.
 
 ## [0.7.0] - 2026-03-31
 

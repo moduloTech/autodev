@@ -119,7 +119,8 @@ class PipelineMonitor
     work_dir = "/tmp/autodev_pipeline_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
       clone_and_checkout(work_dir, issue.branch_name)
-      SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+      skills_result = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+      @all_skills = skills_result[:all_skills]
 
       log_dir = File.join(work_dir, "tmp", "ci_logs")
       FileUtils.mkdir_p(log_dir)
@@ -373,6 +374,7 @@ class PipelineMonitor
     branch    = issue.branch_name
     fix_round = issue.fix_round
     extra     = @project_config["extra_prompt"]
+    skills_line = SkillsInjector.skills_instruction(@all_skills)
 
     job_entries.each_with_index do |entry, idx|
       category = entry[:category] || :unknown
@@ -416,6 +418,7 @@ class PipelineMonitor
         #{category_instructions.empty? ? "" : "\n## Diagnostic\n\n#{category_instructions}"}
         ## Instructions
 
+        #{skills_line}
         - Analyse le log du job en echec.
         - Corrige le code source pour que ce job passe au vert.
         - Respecte les conventions du projet (voir CLAUDE.md si present).

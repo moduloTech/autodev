@@ -47,7 +47,9 @@ class MrFixer
     work_dir = "/tmp/autodev_mrfix_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
       clone_and_checkout(work_dir, branch)
-      SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+      skills_result = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+      all_skills = skills_result[:all_skills]
+      skills_line = SkillsInjector.skills_instruction(all_skills)
       target_branch = mr_context[:target_branch] || default_branch(work_dir)
 
       # Use mr-fixer agent if available in the project
@@ -76,6 +78,7 @@ class MrFixer
 
           ## Instructions
 
+          #{skills_line}
           - Le diff ci-dessus montre les lignes exactes concernees par le commentaire.
           - Corrige le code pour repondre au commentaire.
           - Respecte les conventions du projet (voir CLAUDE.md si present).

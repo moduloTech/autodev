@@ -73,7 +73,8 @@ class IssueProcessor
         ensure_claude_md(work_dir)
 
         # 6. Inject default skills if project lacks its own
-        SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+        skills_result = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+        @all_skills = skills_result[:all_skills]
 
         # 7. Implement
         implement(work_dir, context, iid)
@@ -447,6 +448,7 @@ class IssueProcessor
   # Run N agents in parallel, each in its own worktree with a specific task.
   def implement_parallel(work_dir, context, iid, tasks)
     extra = @project_config["extra_prompt"]
+    skills_line = SkillsInjector.skills_instruction(@all_skills)
     log "Running #{tasks.size} parallel agents for issue ##{iid}..."
 
     worktrees = []
@@ -484,6 +486,7 @@ class IssueProcessor
 
         ## Instructions
 
+        #{skills_line}
         - N'implemente QUE ta tache. Ne touche PAS aux fichiers hors de ton scope.
         - Respecte les conventions du projet (voir CLAUDE.md si present).
         - Ajoute les tests correspondant a ta tache si elle n'est pas dediee aux tests.
@@ -560,6 +563,7 @@ class IssueProcessor
 
   def implement_single(work_dir, context, iid)
     extra = @project_config["extra_prompt"]
+    skills_line = SkillsInjector.skills_instruction(@all_skills)
     prompt = <<~PROMPT
       Tu dois implementer le ticket GitLab suivant. Lis attentivement le contexte complet ci-dessous,
       puis implemente les changements necessaires dans le code.
@@ -568,6 +572,7 @@ class IssueProcessor
 
       ## Instructions
 
+      #{skills_line}
       - Implemente TOUS les changements decrits dans l'issue.
       - Respecte les conventions du projet (voir CLAUDE.md si present).
       - Ajoute ou modifie les tests si necessaire.
@@ -581,6 +586,7 @@ class IssueProcessor
 
   def implement_split(work_dir, context, iid)
     extra = @project_config["extra_prompt"]
+    skills_line = SkillsInjector.skills_instruction(@all_skills)
     implementer = detect_agent(work_dir, "implementer")
     test_writer = detect_agent(work_dir, "test-writer")
 
@@ -604,6 +610,7 @@ class IssueProcessor
 
       ## Instructions
 
+      #{skills_line}
       - Implemente TOUS les changements decrits dans l'issue.
       - Respecte les conventions du projet (voir CLAUDE.md si present).
       - N'ecris PAS de tests. Les tests seront ecrits en parallele par un autre agent.
@@ -619,6 +626,7 @@ class IssueProcessor
 
       ## Instructions
 
+      #{skills_line}
       - Ecris les tests en te basant sur la specification de l'issue (pas sur le code, il n'est pas encore disponible).
       - Respecte les conventions de test du projet (voir les tests existants).
       - Ne modifie PAS le code source, uniquement les fichiers de test.
