@@ -109,7 +109,7 @@ class MrFixer
       issue.update(fix_round: fix_round + 1, pipeline_retrigger_count: 0,
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
       issue.discussions_fixed! # fixing_discussions → checking_pipeline
-      notify_issue(iid, ":wrench: **autodev** : #{discussions.size} commentaire(s) de review corrige(s) sur #{issue.mr_url} (round #{fix_round + 1})")
+      notify_issue(iid, ":wrench: #{autodev_tag} : #{discussions.size} commentaire(s) de review corrige(s) sur #{issue.mr_url} (round #{fix_round + 1})")
       log "MR !#{mr_iid}: fixed #{discussions.size} discussion(s) (round #{fix_round + 1})"
 
     rescue RateLimitError => e
@@ -135,7 +135,7 @@ class MrFixer
       end
       issue.update(error_message: "MR fix error: #{e.class}: #{e.message}\n  #{bt}",
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
-      notify_issue(iid, ":x: **autodev** : echec correction MR — #{e.class}: #{e.message[0, 200]}")
+      notify_issue(iid, ":x: #{autodev_tag} : echec correction MR — #{e.class}: #{e.message[0, 200]}")
       log_error "MR fix failed: #{e.class}: #{e.message}"
       log_error "  #{bt}" if bt
     ensure

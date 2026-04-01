@@ -45,6 +45,7 @@ Settings are resolved in 4 layers (highest priority wins):
 - `--all` — Include completed (`over`) issues in `--status`
 - `--errors [IID]` — Show details for errored and blocked issues (all or specific)
 - `--reset [IID]` — Reset errored issues to pending (all or specific)
+- `-v` / `--version` — Show version and exit
 - `-h` / `--help` — Show help
 
 ## Architecture

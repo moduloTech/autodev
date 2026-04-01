@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `--version` / `-v` CLI flag to display the current version.
+- Version tag now appears in every GitLab comment (e.g. `:robot: **autodev** (v0.7.0) : traitement en cours...`).
+
 ## [0.7.0] - 2026-03-31
 
 ### Added

@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+module Autodev
+  VERSION = "0.7.0"
+end
+
 require_relative "autodev/errors"
 require_relative "autodev/logger"
 require_relative "autodev/config"

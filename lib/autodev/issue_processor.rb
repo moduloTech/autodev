@@ -25,7 +25,7 @@ class IssueProcessor
       return
     end
 
-    notify_issue(iid, ":robot: **autodev** : traitement en cours...")
+    notify_issue(iid, ":robot: #{autodev_tag} : traitement en cours...")
 
     # Check for partial progress from previous attempt
     previous_branch = issue.branch_name
@@ -106,7 +106,7 @@ class IssueProcessor
         pipeline_retrigger_count: 0,
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
       )
-      notify_issue(iid, ":white_check_mark: **autodev** : MR creee : #{mr.web_url}")
+      notify_issue(iid, ":white_check_mark: #{autodev_tag} : MR creee : #{mr.web_url}")
       log "Issue ##{iid} completed: #{mr.web_url}"
 
     rescue RateLimitError => e
@@ -152,7 +152,7 @@ class IssueProcessor
       end
 
       Issue.where(id: issue.id).update(**fields)
-      notify_issue(iid, ":x: **autodev** : echec — #{e.class}: #{e.message[0, 200]}")
+      notify_issue(iid, ":x: #{autodev_tag} : echec — #{e.class}: #{e.message[0, 200]}")
       log_error "  #{bt}" if bt
     ensure
       FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
@@ -310,7 +310,7 @@ class IssueProcessor
     end
 
     comment = <<~COMMENT
-      :thinking: **autodev** : la specification necessite des precisions avant implementation.
+      :thinking: #{autodev_tag} : la specification necessite des precisions avant implementation.
 
       #{issues_list.map.with_index(1) { |iss, i| "#{i}. #{iss}" }.join("\n")}
 
@@ -347,7 +347,7 @@ class IssueProcessor
     answer = danger_claude_prompt(work_dir, prompt, label: "-p (question investigation)")
 
     comment = <<~COMMENT
-      :mag: **autodev** : reponse a la question
+      :mag: #{autodev_tag} : reponse a la question
 
       #{answer.strip}
 

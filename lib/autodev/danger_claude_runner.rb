@@ -154,6 +154,10 @@ module DangerClaudeRunner
     stderr_r&.close
   end
 
+  def autodev_tag
+    "**autodev** (v#{Autodev::VERSION})"
+  end
+
   def notify_issue(iid, message)
     @client.create_issue_note(@project_path, iid, message)
   rescue Gitlab::Error::ResponseError => e
