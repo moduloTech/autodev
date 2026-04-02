@@ -38,6 +38,8 @@ module Config
         # sparse_checkout:                       # sparse checkout paths (for monorepos)
         #   - "src/"
         #   - "lib/"
+        # post_completion: ["./bin/deploy", "--env", "staging"]  # command run after pipeline green (Docker CMD format)
+        # post_completion_timeout: 300                            # timeout in seconds (default: 300)
   YAML
 
   DEFAULTS = {

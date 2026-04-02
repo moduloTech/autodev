@@ -4,6 +4,7 @@
 
 ### Added
 
+- Per-project `post_completion` hook: configurable command (Docker CMD format, e.g. `["./bin/deploy", "--env", "staging"]`) executed after pipeline green and discussions resolved, just before `over`. New `running_post_completion` state. Non-fatal — errors are logged and visible in `--errors`. Environment variables `AUTODEV_ISSUE_IID`, `AUTODEV_MR_IID`, `AUTODEV_BRANCH_NAME` available. Timeout configurable via `post_completion_timeout` (default 300s).
 - Issue assignment management: autodev assigns itself to the issue when starting work, then reassigns the issue author when reaching `over` (question answered or pipeline green).
 - New `code-conventions` skill injected into all projects: language-agnostic rules for code comments (WHAT/WHY/HOW) and commit messages (Conventional Commits). Previously these rules were embedded in the Rails-specific skill and ignored for JS/other languages.
 - All prompts (implementation, MR fix, pipeline fix) now explicitly list the skills to load (e.g. `code-conventions`, `rails-conventions`, etc.) before starting work.

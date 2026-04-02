@@ -76,6 +76,7 @@ module Database
     @db.run("ALTER TABLE issues ADD COLUMN fix_round INTEGER NOT NULL DEFAULT 0") rescue nil
     @db.run("ALTER TABLE issues ADD COLUMN pipeline_retrigger_count INTEGER NOT NULL DEFAULT 0") rescue nil
     @db.run("ALTER TABLE issues ADD COLUMN issue_author_id INTEGER") rescue nil
+    @db.run("ALTER TABLE issues ADD COLUMN post_completion_error TEXT") rescue nil
   end
 
   # -- Status migration from pre-AASM names --
@@ -105,7 +106,7 @@ module Database
     klass.class_eval do
       include AASM
 
-      attr_writer :_issue_closed, :_skip_to_mr, :_max_fix_rounds, :_unresolved_discussions_empty
+      attr_writer :_issue_closed, :_skip_to_mr, :_max_fix_rounds, :_unresolved_discussions_empty, :_has_post_completion
 
       aasm column: :status, whiny_transitions: false do
         state :pending, initial: true
@@ -119,6 +120,7 @@ module Database
         state :checking_pipeline
         state :fixing_discussions
         state :fixing_pipeline
+        state :running_post_completion
         state :answering_question
         state :needs_clarification
         state :over
@@ -178,9 +180,15 @@ module Database
         # === Pipeline monitoring ===
 
         event :pipeline_green do
+          transitions from: :checking_pipeline, to: :running_post_completion, guard: %i[no_unresolved_discussions? has_post_completion?]
           transitions from: :checking_pipeline, to: :over, guard: :no_unresolved_discussions?
+          transitions from: :checking_pipeline, to: :running_post_completion, guard: %i[max_fix_rounds_reached? has_post_completion?]
           transitions from: :checking_pipeline, to: :over, guard: :max_fix_rounds_reached?
           transitions from: :checking_pipeline, to: :fixing_discussions
+        end
+
+        event :post_completion_done do
+          transitions from: :running_post_completion, to: :over
         end
 
         event :pipeline_failed_code do
@@ -218,7 +226,7 @@ module Database
           transitions from: [:cloning, :checking_spec, :implementing, :committing,
                              :pushing, :creating_mr, :reviewing,
                              :fixing_discussions, :fixing_pipeline,
-                             :answering_question], to: :error
+                             :running_post_completion, :answering_question], to: :error
         end
 
         event :retry_processing do
@@ -248,6 +256,10 @@ module Database
         fix_round < (@_max_fix_rounds || 3)
       end
 
+      def has_post_completion?
+        @_has_post_completion == true
+      end
+
       # -- Persistence callback --
 
       def persist_status_change!
@@ -271,6 +283,10 @@ module Database
       .where(status: "fixing_pipeline")
       .update(status: "checking_pipeline")
 
-    (count || 0) + (count2 || 0)
+    count3 = db[:issues]
+      .where(status: "running_post_completion")
+      .update(status: "over", finished_at: Sequel.lit("datetime('now')"))
+
+    (count || 0) + (count2 || 0) + (count3 || 0)
   end
 end

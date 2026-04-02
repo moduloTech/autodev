@@ -137,9 +137,10 @@ STATUS_COLORS = {
   "creating_mr"          => :cyan,
   "reviewing"            => :cyan,
   "checking_pipeline"    => :cyan,
-  "fixing_discussions"   => :magenta,
-  "fixing_pipeline"      => :magenta,
-  "needs_clarification"  => :yellow,
+  "fixing_discussions"       => :magenta,
+  "fixing_pipeline"          => :magenta,
+  "running_post_completion"  => :cyan,
+  "needs_clarification"      => :yellow,
   "over"                 => :green,
   "blocked"              => :red,
   "error"                => :red,
@@ -148,7 +149,7 @@ STATUS_COLORS = {
 ACTIVE_STATES = %w[
   cloning checking_spec implementing committing pushing
   creating_mr reviewing checking_pipeline
-  fixing_discussions fixing_pipeline
+  fixing_discussions fixing_pipeline running_post_completion
 ].freeze
 
 def status_label(status)
@@ -258,11 +259,6 @@ def show_errors(config)
   dataset = dataset.where(issue_iid: config["errors_iid"]) if config["errors_iid"]
   issues = dataset.order(Sequel.desc(:id)).all
 
-  if issues.empty?
-    puts config["errors_iid"] ? "Issue ##{config["errors_iid"]} non trouvée ou pas en erreur/bloquée." : "Aucune issue en erreur ou bloquée."
-    return
-  end
-
   issues.each_with_index do |row, idx|
     project_short = row[:project_path].to_s.split("/").last
     status_label = row[:status] == "blocked" ? pastel.yellow("blocked") : pastel.red("error")
@@ -280,6 +276,26 @@ def show_errors(config)
       row[:dc_stderr].to_s.lines.each { |l| puts "    #{l}" }
     end
     puts "" if idx < issues.size - 1
+  end
+
+  # Post-completion errors (issues completed but with failed post_completion hook)
+  pc_dataset = Database.db[:issues].exclude(post_completion_error: nil)
+  pc_dataset = pc_dataset.where(issue_iid: config["errors_iid"]) if config["errors_iid"]
+  pc_issues = pc_dataset.order(Sequel.desc(:id)).all
+
+  pc_issues.each do |row|
+    project_short = row[:project_path].to_s.split("/").last
+    puts "" if issues.any?
+    puts pastel.bold("#{pastel.yellow("▲")} Issue ##{row[:issue_iid]}: #{row[:issue_title]} (#{project_short}) [#{pastel.yellow("post_completion")}]")
+    puts "  Branche: #{row[:branch_name]}" if row[:branch_name]
+    puts "  MR: !#{row[:mr_iid]} #{row[:mr_url]}" if row[:mr_iid]
+    puts ""
+    puts pastel.bold("  Post-completion error:")
+    row[:post_completion_error].to_s.lines.each { |l| puts "    #{l}" }
+  end
+
+  if issues.empty? && pc_issues.empty?
+    puts config["errors_iid"] ? "Issue ##{config["errors_iid"]} non trouvée ou pas en erreur/bloquée." : "Aucune issue en erreur ou bloquée."
   end
 end
 

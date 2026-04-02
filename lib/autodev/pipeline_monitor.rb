@@ -58,9 +58,18 @@ class PipelineMonitor
     discussions = fetch_unresolved_discussions(mr_iid)
     issue._unresolved_discussions_empty = discussions.empty?
     issue._max_fix_rounds = max_fix_rounds
-    issue.pipeline_green! # → over or fixing_discussions (via guards)
 
-    if issue.over?
+    post_completion_cmd = @project_config["post_completion"]
+    issue._has_post_completion = post_completion_cmd.is_a?(Array) && post_completion_cmd.any?
+
+    issue.pipeline_green! # → running_post_completion, over, or fixing_discussions (via guards)
+
+    if issue.running_post_completion?
+      run_post_completion(issue, post_completion_cmd)
+      issue.post_completion_done! # running_post_completion → over
+      reassign_to_author(issue)
+      log "Issue ##{iid}: pipeline green, post_completion executed → over"
+    elsif issue.over?
       reassign_to_author(issue)
       if discussions.empty?
         log "Issue ##{iid}: pipeline green, no open conversations → over"
@@ -69,6 +78,81 @@ class PipelineMonitor
       end
     else
       log "Issue ##{iid}: pipeline green, #{discussions.size} unresolved conversation(s) → fixing_discussions"
+    end
+  end
+
+  # Runs a project-configured post_completion command in a temporary clone.
+  # Non-fatal: errors are logged and stored but do not prevent transition to over.
+  def run_post_completion(issue, cmd)
+    iid = issue.issue_iid
+
+    unless cmd.is_a?(Array) && cmd.all? { |c| c.is_a?(String) }
+      error_msg = "post_completion config must be an array of strings, got: #{cmd.inspect}"
+      log_error "Issue ##{iid}: #{error_msg}"
+      Issue.where(id: issue.id).update(post_completion_error: error_msg)
+      return
+    end
+
+    log "Running post_completion for issue ##{iid}: #{cmd.inspect}"
+
+    work_dir = "/tmp/autodev_post_completion_#{@project_path.gsub("/", "_")}_#{iid}"
+    begin
+      clone_and_checkout(work_dir, issue.branch_name)
+
+      env = CLEAN_ENV.merge(
+        "AUTODEV_ISSUE_IID"    => issue.issue_iid.to_s,
+        "AUTODEV_MR_IID"       => issue.mr_iid.to_s,
+        "AUTODEV_BRANCH_NAME"  => issue.branch_name.to_s
+      )
+
+      timeout = (@project_config["post_completion_timeout"] || 300).to_i
+
+      stdout_r, stdout_w = IO.pipe
+      stderr_r, stderr_w = IO.pipe
+
+      pid = Process.spawn(env, *cmd, chdir: work_dir, in: :close, out: stdout_w, err: stderr_w)
+      stdout_w.close
+      stderr_w.close
+
+      out_thread = Thread.new { stdout_r.read }
+      err_thread = Thread.new { stderr_r.read }
+
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      loop do
+        remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if remaining <= 0
+          Process.kill("TERM", pid)
+          sleep 3
+          Process.kill("KILL", pid) rescue nil
+          Process.wait(pid) rescue nil
+          out = out_thread.value
+          err = err_thread.value
+          error_msg = "post_completion timed out after #{timeout}s\nstdout: #{out[0, 1000]}\nstderr: #{err[0, 1000]}"
+          log_error "Issue ##{iid}: #{error_msg}"
+          Issue.where(id: issue.id).update(post_completion_error: error_msg)
+          return
+        end
+
+        _pid, status = Process.wait2(pid, Process::WNOHANG)
+        if status
+          out = out_thread.value
+          err = err_thread.value
+          unless status.success?
+            error_msg = "post_completion exited #{status.exitstatus}\nstdout: #{out[0, 1000]}\nstderr: #{err[0, 1000]}"
+            log_error "Issue ##{iid}: #{error_msg}"
+            Issue.where(id: issue.id).update(post_completion_error: error_msg)
+          else
+            log "Issue ##{iid}: post_completion succeeded"
+          end
+          return
+        end
+
+        sleep 1
+      end
+    ensure
+      stdout_r&.close
+      stderr_r&.close
+      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
     end
   end
 

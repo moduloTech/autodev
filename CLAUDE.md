@@ -69,7 +69,7 @@ Handles `fixing_discussions`: clones the MR branch, fetches unresolved discussio
 
 ### PipelineMonitor
 
-Handles `checking_pipeline`: fetches MR head pipeline via GitLab API. If running → skip. If green → fires `pipeline_green!` (guards decide `over` vs `fixing_discussions`). If red → pre-triage classifies failures. Code failures go straight to fix. Infra/uncertain failures retrigger once, then block or escalate to Claude evaluation. Code-related → fires `pipeline_failed_code!` → `fixing_pipeline` → `pipeline_fix_done!`. Non-code → `pipeline_failed_infra!` → `blocked`.
+Handles `checking_pipeline`: fetches MR head pipeline via GitLab API. If running → skip. If green → fires `pipeline_green!` (guards decide `running_post_completion` vs `over` vs `fixing_discussions`). If `post_completion` is configured and the issue would go to `over`, it goes through `running_post_completion` first: clones the branch, runs the configured command with env vars (`AUTODEV_ISSUE_IID`, `AUTODEV_MR_IID`, `AUTODEV_BRANCH_NAME`), then transitions to `over`. Post-completion errors are non-fatal (stored in `post_completion_error`, visible via `--errors`). If red → pre-triage classifies failures. Code failures go straight to fix. Infra/uncertain failures retrigger once, then block or escalate to Claude evaluation. Code-related → fires `pipeline_failed_code!` → `fixing_pipeline` → `pipeline_fix_done!`. Non-code → `pipeline_failed_infra!` → `blocked`.
 
 Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log` files in the work directory (no truncation). Prompts reference these files by path so danger-claude reads the complete log. Each failed job is fixed in a separate danger-claude call + commit (same pattern as MrFixer's per-discussion approach).
 
@@ -89,12 +89,16 @@ pending → cloning → checking_spec → implementing → committing → pushin
                                                                    (green,           (red,     (red,      │
                                                                     no convos)        code)     infra)    │
                                                                        ↓               ↓         ↓       │
-                                                                     over     fixing_pipeline  blocked    │
-                                                                                    │                     │
-                                                               (green,              │                     │
-                                                                convos)             │                     │
-                                                                  ↓                 │                     │
-                                                          fixing_discussions────────┴─────────────────────┘
+                                                          running_post_completion*   fixing_pipeline  blocked
+                                                                       ↓               │                 │
+                                                                     over              │                 │
+                                                                                       │                 │
+                                                               (green,                 │                 │
+                                                                convos)                │                 │
+                                                                  ↓                    │                 │
+                                                          fixing_discussions────────────┴─────────────────┘
+
+* running_post_completion only when post_completion is configured; otherwise goes directly to over
 
 error (from any active state) → pending (on retry, with backoff)
 needs_clarification (from checking_spec) → pending (when clarification comment posted)
@@ -118,6 +122,8 @@ answering_question (from checking_spec) → over (question answered via codebase
 | Pipeline red (infra/uncertain, after retrigger) | Infra → blocked; uncertain → evaluate via Claude |
 | Pipeline canceled/skipped | `pipeline_canceled!` → blocked |
 | Interrupted fixing_pipeline | Reset to checking_pipeline on startup |
+| Post-completion command fails | Non-fatal: error stored in `post_completion_error`, issue still transitions to `over`, visible via `--errors` |
+| Interrupted running_post_completion | Reset to `over` on startup (non-fatal, not re-executed) |
 
 ## Key Design Decisions
 
