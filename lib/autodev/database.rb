@@ -220,6 +220,16 @@ module Database
           transitions from: :needs_clarification, to: :pending
         end
 
+        # === Resume from over (label workflow) ===
+
+        event :resume_todo do
+          transitions from: :over, to: :pending
+        end
+
+        event :resume_mr do
+          transitions from: :over, to: :fixing_discussions
+        end
+
         # === Error handling ===
 
         event :mark_failed do
@@ -287,6 +297,11 @@ module Database
       .where(status: "running_post_completion")
       .update(status: "over", finished_at: Sequel.lit("datetime('now')"))
 
-    (count || 0) + (count2 || 0) + (count3 || 0)
+    # Reset issues stuck in active processing states (e.g. after crash during label_doing)
+    count4 = db[:issues]
+      .where(status: %w[cloning checking_spec implementing committing pushing creating_mr])
+      .update(status: "pending", started_at: nil)
+
+    (count || 0) + (count2 || 0) + (count3 || 0) + (count4 || 0)
   end
 end

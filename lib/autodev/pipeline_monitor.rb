@@ -36,6 +36,7 @@ class PipelineMonitor
     when "canceled", "skipped"
       log "Pipeline #{status} for MR !#{mr_iid}"
       issue.pipeline_canceled!
+      set_label_blocked(iid)
       notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} est #{status}. Intervention manuelle requise.")
       log "Issue ##{iid}: pipeline #{status} → blocked"
     else
@@ -168,6 +169,7 @@ class PipelineMonitor
     if failed_jobs.empty?
       log "No failed jobs found for pipeline ##{pipeline_id(pipeline)}, marking as blocked"
       issue.pipeline_failed_infra!
+      set_label_blocked(iid)
       notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} a echoue mais aucun job en echec n'a ete trouve. Intervention manuelle requise.")
       return
     end
@@ -194,6 +196,7 @@ class PipelineMonitor
 
     if triage[:verdict] == :infra
       issue.pipeline_failed_infra!
+      set_label_blocked(iid)
       notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} echoue pour une raison d'infrastructure (pre-triage). Intervention manuelle requise.\n\n> #{triage[:explanation]}")
       log "Issue ##{iid}: infra failure detected by pre-triage → blocked (#{triage[:explanation]})"
       return
@@ -226,6 +229,7 @@ class PipelineMonitor
         unless eval_result
           log "Could not parse pipeline evaluation response, marking as blocked"
           issue.pipeline_failed_infra!
+          set_label_blocked(iid)
           notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} a echoue et l'evaluation automatique n'a pas abouti. Intervention manuelle requise.")
           return
         end
@@ -234,6 +238,7 @@ class PipelineMonitor
 
         unless eval_result["code_related"]
           issue.pipeline_failed_infra!
+          set_label_blocked(iid)
           notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} echoue pour une raison hors code. Intervention manuelle requise.\n\n> #{explanation}")
           log "Issue ##{iid}: non-code pipeline failure → blocked (#{explanation})"
           return
@@ -246,6 +251,7 @@ class PipelineMonitor
       issue.pipeline_failed_code!
 
       if issue.blocked?
+        set_label_blocked(iid)
         notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} echoue a cause du code mais le nombre maximum de rounds de fix est atteint. Intervention manuelle requise.\n\n> #{explanation}")
         log "Issue ##{iid}: code-related pipeline failure but max fix rounds reached → blocked"
         return
@@ -461,6 +467,10 @@ class PipelineMonitor
     extra     = @project_config["extra_prompt"]
     skills_line = SkillsInjector.skills_instruction(@all_skills)
 
+    # Fetch full context once for all pipeline fix prompts
+    full_context = GitlabHelpers.fetch_full_context(@client, @project_path, iid,
+                     mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
+
     job_entries.each_with_index do |entry, idx|
       category = entry[:category] || :unknown
       if category == :deploy
@@ -494,25 +504,29 @@ class PipelineMonitor
           ""
         end
 
-      prompt = <<~PROMPT
-        Tu dois corriger le code pour resoudre l'echec du job CI/CD "#{entry[:name]}" (stage: #{entry[:stage]}).
+      with_context_file(work_dir, branch, full_context) do |context_filename|
+        prompt = <<~PROMPT
+          Tu dois corriger le code pour resoudre l'echec du job CI/CD "#{entry[:name]}" (stage: #{entry[:stage]}).
 
-        ## Log du job
+          Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le si necessaire pour comprendre l'objectif du code.
 
-        Le log complet du job est dans le fichier `#{entry[:log_path]}`. Lis-le pour comprendre l'erreur.
-        #{category_instructions.empty? ? "" : "\n## Diagnostic\n\n#{category_instructions}"}
-        ## Instructions
+          ## Log du job
 
-        #{skills_line}
-        - Analyse le log du job en echec.
-        - Corrige le code source pour que ce job passe au vert.
-        - Respecte les conventions du projet (voir CLAUDE.md si present).
-        - Ne modifie que ce qui est necessaire pour corriger l'erreur de ce job.
-        - Ne touche pas aux fichiers de configuration CI/CD sauf si c'est la cause directe de l'echec.
-        #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
-      PROMPT
+          Le log complet du job est dans le fichier `#{entry[:log_path]}`. Lis-le pour comprendre l'erreur.
+          #{category_instructions.empty? ? "" : "\n## Diagnostic\n\n#{category_instructions}"}
+          ## Instructions
 
-      danger_claude_prompt(work_dir, prompt, label: "-p (pipeline fix: #{entry[:name]})")
+          #{skills_line}
+          - Analyse le log du job en echec.
+          - Corrige le code source pour que ce job passe au vert.
+          - Respecte les conventions du projet (voir CLAUDE.md si present).
+          - Ne modifie que ce qui est necessaire pour corriger l'erreur de ce job.
+          - Ne touche pas aux fichiers de configuration CI/CD sauf si c'est la cause directe de l'echec.
+          #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+        PROMPT
+
+        danger_claude_prompt(work_dir, prompt, label: "-p (pipeline fix: #{entry[:name]})")
+      end
       danger_claude_commit(work_dir, label: "-c (pipeline fix: #{entry[:name]})")
     end
 

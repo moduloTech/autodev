@@ -375,6 +375,9 @@ def main
     raise ConfigError, "Set a valid gitlab_url in #{config_path}"
   end
 
+  # Validate label workflow config
+  Config.validate_projects!(config)
+
   # Check danger-claude is available
   _, dc_status = Open3.capture2e("which", "danger-claude")
   raise ConfigError, "danger-claude is not installed or not on PATH" unless dc_status.success?
@@ -425,13 +428,20 @@ def main
       project_path = project_config["path"]
       logger.debug("Polling #{project_path} for label '#{trigger_label}'...", project: project_path)
 
-      # -- New/pending issues --
+      # -- Issue processing (label workflow routing + legacy) --
+      router = PollRouter.new(config: config, project_config: project_config,
+                              logger: logger, token: token, pool: pool)
+
       begin
         issues = GitlabHelpers.fetch_trigger_issues(client, project_path, trigger_label)
 
         issues.each do |gl_issue|
           break if shutdown_requested
 
+          # Label workflow routing (resume, done, blocked). Returns :next or :process.
+          next if router.route(gl_issue, client) == :next
+
+          # -- Legacy and normal processing path --
           existing = Issue.where(project_path: project_path, issue_iid: gl_issue.iid).first
           if existing
             if existing.status == "needs_clarification"

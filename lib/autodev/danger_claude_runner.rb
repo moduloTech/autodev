@@ -181,6 +181,72 @@ module DangerClaudeRunner
     log_error "Failed to post comment on ##{iid}: #{e.message}"
   end
 
+  # -- Context file --
+
+  # Writes the context file, yields, then guarantees cleanup.
+  # Returns the block's return value.
+  def with_context_file(work_dir, branch_name, content)
+    context_file = GitlabHelpers.write_context_file(work_dir, branch_name, content)
+    yield File.basename(context_file)
+  ensure
+    GitlabHelpers.cleanup_context_file(work_dir, branch_name)
+  end
+
+  # -- Label workflow --
+
+  def label_workflow?
+    Config.label_workflow?(@project_config)
+  end
+
+  def set_label_doing(iid)
+    return unless label_workflow?
+
+    remove = @project_config["labels_todo"] + [@project_config["label_mr"], @project_config["label_blocked"]]
+    manage_labels(iid, remove: remove, add: @project_config["label_doing"])
+  end
+
+  def set_label_mr(iid)
+    return unless label_workflow?
+
+    remove = @project_config["labels_todo"] + [@project_config["label_doing"], @project_config["label_blocked"]]
+    manage_labels(iid, remove: remove, add: @project_config["label_mr"])
+  end
+
+  def set_label_todo(iid)
+    return unless label_workflow?
+
+    remove = [@project_config["label_doing"], @project_config["label_mr"], @project_config["label_blocked"]]
+    manage_labels(iid, remove: remove, add: @project_config["labels_todo"].first)
+  end
+
+  def set_label_blocked(iid)
+    return unless label_workflow?
+
+    remove = @project_config["labels_todo"] + [@project_config["label_doing"], @project_config["label_mr"]]
+    manage_labels(iid, remove: remove, add: @project_config["label_blocked"])
+  end
+
+  def cleanup_labels(iid)
+    return unless label_workflow?
+
+    all_labels = @project_config["labels_todo"] +
+      [@project_config["label_doing"], @project_config["label_mr"],
+       @project_config["label_done"], @project_config["label_blocked"]]
+    manage_labels(iid, remove: all_labels.compact, add: nil)
+  end
+
+  def manage_labels(iid, remove:, add:)
+    gi = @client.issue(@project_path, iid)
+    current = gi.labels || []
+    new_labels = current - remove.compact
+    new_labels << add if add && !new_labels.include?(add)
+    @client.edit_issue(@project_path, iid, labels: new_labels.join(","))
+    removed = current & remove.compact
+    log "Labels updated on ##{iid}: removed #{removed}, added #{add}" if removed.any? || add
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to update labels for ##{iid}: #{e.message}"
+  end
+
   def log(msg)
     @logger.info(msg, project: @project_path)
   end

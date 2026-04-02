@@ -40,17 +40,17 @@ class MrFixer
 
     log "Found #{discussions.size} unresolved discussion(s) on MR !#{mr_iid}"
 
-    # Fetch issue and MR context once for all discussions
-    issue_context = fetch_issue_context(iid)
-    mr_context = fetch_mr_context(mr_iid)
-
     work_dir = "/tmp/autodev_mrfix_#{@project_path.gsub("/", "_")}_#{iid}"
     begin
       clone_and_checkout(work_dir, branch)
       skills_result = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
       all_skills = skills_result[:all_skills]
       skills_line = SkillsInjector.skills_instruction(all_skills)
-      target_branch = mr_context[:target_branch] || default_branch(work_dir)
+      target_branch = default_branch(work_dir)
+
+      # Fetch full context once (issue + all MR discussions)
+      full_context = GitlabHelpers.fetch_full_context(@client, @project_path, iid,
+                       mr_iid: mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
 
       # Use mr-fixer agent if available in the project
       agent = detect_agent(work_dir, "mr-fixer")
@@ -60,34 +60,29 @@ class MrFixer
         log "Fixing discussion #{idx + 1}/#{discussions.size}: #{discussion[:title]}"
 
         extra = @project_config["extra_prompt"]
-        prompt = <<~PROMPT
-          Tu dois corriger le code en reponse a un commentaire de review sur une Merge Request.
+        with_context_file(work_dir, branch, full_context) do |context_filename|
+          prompt = <<~PROMPT
+            Tu dois corriger le code en reponse a un commentaire de review sur une Merge Request.
 
-          ## Contexte de l'issue
+            Le contexte complet (issue + discussions MR) est dans le fichier `#{context_filename}`. Lis-le attentivement.
 
-          **##{iid}: #{issue_context[:title]}**
-          #{issue_context[:description]}
+            ## Commentaire de review a traiter
 
-          ## Description de la MR
+            #{thread_context}
 
-          #{mr_context[:description]}
+            ## Instructions
 
-          ## Commentaire de review
+            #{skills_line}
+            - Le diff ci-dessus montre les lignes exactes concernees par le commentaire.
+            - Corrige le code pour repondre au commentaire.
+            - Respecte les conventions du projet (voir CLAUDE.md si present).
+            - Ne modifie que ce qui est necessaire pour repondre au commentaire.
+            - Ne touche pas aux autres parties du code.
+            #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+          PROMPT
 
-          #{thread_context}
-
-          ## Instructions
-
-          #{skills_line}
-          - Le diff ci-dessus montre les lignes exactes concernees par le commentaire.
-          - Corrige le code pour repondre au commentaire.
-          - Respecte les conventions du projet (voir CLAUDE.md si present).
-          - Ne modifie que ce qui est necessaire pour repondre au commentaire.
-          - Ne touche pas aux autres parties du code.
-          #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
-        PROMPT
-
-        danger_claude_prompt(work_dir, prompt, agent: agent)
+          danger_claude_prompt(work_dir, prompt, agent: agent)
+        end
         danger_claude_commit(work_dir)
         resolve_discussion(mr_iid, discussion[:id])
       end
@@ -220,22 +215,6 @@ class MrFixer
     log "Injecting default mr-fixer agent"
     FileUtils.mkdir_p(File.dirname(agent_path))
     File.write(agent_path, DEFAULT_MR_FIXER_AGENT)
-  end
-
-  def fetch_issue_context(iid)
-    gi = @client.issue(@project_path, iid)
-    { title: gi.title.to_s, description: gi.description.to_s }
-  rescue Gitlab::Error::ResponseError => e
-    log_error "Failed to fetch issue ##{iid} context: #{e.message}"
-    { title: "", description: "" }
-  end
-
-  def fetch_mr_context(mr_iid)
-    mr = @client.merge_request(@project_path, mr_iid)
-    { description: mr.description.to_s, target_branch: mr.target_branch }
-  rescue Gitlab::Error::ResponseError => e
-    log_error "Failed to fetch MR !#{mr_iid} context: #{e.message}"
-    { description: "", target_branch: nil }
   end
 
   def default_branch(work_dir)

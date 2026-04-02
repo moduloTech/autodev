@@ -120,6 +120,77 @@ module GitlabHelpers
     lines.join("\n")
   end
 
+  # Fetch all MR discussions (resolved and unresolved) formatted as markdown.
+  def fetch_mr_discussions_context(client, project_path, mr_iid)
+    discussions = client.merge_request_discussions(project_path, mr_iid)
+    return "" if discussions.empty?
+
+    lines = []
+    lines << "## MR Discussions"
+    lines << ""
+
+    discussions.each do |discussion|
+      notes = discussion.notes
+      next unless notes&.any?
+
+      resolvable = notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
+      resolved = resolvable.any? && resolvable.all? { |n| n.respond_to?(:resolved) && n.resolved }
+      status = resolvable.any? ? (resolved ? "resolved" : "unresolved") : "comment"
+
+      notes.each_with_index do |note, idx|
+        author = note.author&.name || "Unknown"
+        prefix = idx.zero? ? "### [#{status}] #{author} (#{note.created_at})" : "#### #{author} (#{note.created_at})"
+        lines << prefix
+
+        if idx.zero? && note.respond_to?(:position) && note.position
+          pos = note.position
+          file_path = pos.respond_to?(:new_path) ? pos.new_path : (pos.is_a?(Hash) ? (pos["new_path"] || pos[:new_path]) : nil)
+          new_line = pos.respond_to?(:new_line) ? pos.new_line : (pos.is_a?(Hash) ? (pos["new_line"] || pos[:new_line]) : nil)
+          lines << "Fichier: `#{file_path}`#{new_line ? " (ligne #{new_line})" : ""}" if file_path
+        end
+
+        lines << ""
+        lines << note.body.to_s
+        lines << ""
+      end
+    end
+
+    lines.join("\n")
+  rescue Gitlab::Error::ResponseError
+    ""
+  end
+
+  # Fetch full context: issue (title, body, comments) + MR discussions (if mr_iid provided).
+  def fetch_full_context(client, project_path, issue_iid, mr_iid: nil, gitlab_url: nil, token: nil, work_dir: nil)
+    context = fetch_issue_context(client, project_path, issue_iid, gitlab_url: gitlab_url, token: token, work_dir: work_dir)
+
+    if mr_iid
+      mr_discussions = fetch_mr_discussions_context(client, project_path, mr_iid)
+      context = "#{context}\n\n#{mr_discussions}" unless mr_discussions.empty?
+    end
+
+    context
+  end
+
+  # Write the context file at the clone root, named after the branch (without autodev/ prefix).
+  def write_context_file(work_dir, branch_name, content)
+    path = context_file_path(work_dir, branch_name)
+    File.write(path, content)
+    path
+  end
+
+  # Returns the context file path for a given branch.
+  def context_file_path(work_dir, branch_name)
+    filename = branch_name.to_s.sub(%r{^autodev/}, "")
+    File.join(work_dir, "#{filename}.md")
+  end
+
+  # Delete the context file if it exists.
+  def cleanup_context_file(work_dir, branch_name)
+    path = context_file_path(work_dir, branch_name)
+    File.delete(path) if File.exist?(path)
+  end
+
   def clarification_answered?(client, project_path, issue_iid, requested_at)
     return true unless requested_at
 

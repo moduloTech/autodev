@@ -4,6 +4,9 @@
 
 ### Added
 
+- **Label-driven workflow**: new per-project config fields `labels_todo` (array), `label_doing`, `label_mr`, `label_done`, `label_blocked` replace `labels_to_remove`/`label_to_add` with a full lifecycle. Labels are set/removed at each state transition: `labels_todo` → `label_doing` (processing) → `label_mr` (MR created, discussion monitoring) → `label_done` (set by reviewer, triggers cleanup). `label_blocked` is set on infra failures or max fix rounds.
+- **Resume from over**: issues in `over` state can be re-activated via labels. Adding a `labels_todo` label triggers full re-processing (spec check → implement → MR). Leaving `label_mr` with unresolved MR discussions triggers automatic discussion fix. New AASM events: `resume_todo!` (over → pending), `resume_mr!` (over → fixing_discussions).
+- **Context file**: issue context (title, body, comments) and all MR discussions (resolved + unresolved) are written to a single markdown file at the clone root (named after the branch, e.g. `123-fix-login.md`). All prompts reference this file instead of embedding context inline. File is deleted after each danger-claude call.
 - Per-project `post_completion` hook: configurable command (Docker CMD format, e.g. `["./bin/deploy", "--env", "staging"]`) executed after pipeline green and discussions resolved, just before `over`. New `running_post_completion` state. Non-fatal — errors are logged and visible in `--errors`. Environment variables `AUTODEV_ISSUE_IID`, `AUTODEV_MR_IID`, `AUTODEV_BRANCH_NAME` available. Timeout configurable via `post_completion_timeout` (default 300s).
 - Issue assignment management: autodev assigns itself to the issue when starting work, then reassigns the issue author when reaching `over` (question answered or pipeline green).
 - New `code-conventions` skill injected into all projects: language-agnostic rules for code comments (WHAT/WHY/HOW) and commit messages (Conventional Commits). Previously these rules were embedded in the Rails-specific skill and ignored for JS/other languages.
@@ -13,7 +16,14 @@
 
 ### Changed
 
+- **`needs_clarification`** now sets the first `labels_todo` label (removing `label_doing`), enabling re-processing when a human responds.
+- **`question_answered`** now removes `label_doing` without adding any label back — the human decides the next step by manually setting a label. This avoids an infinite loop where the question would be re-detected every poll cycle.
+- **Crash recovery**: issues stuck in active processing states (`cloning`, `checking_spec`, `implementing`, etc.) are now reset to `pending` on startup. In label workflow, this means `label_doing` issues are recovered automatically.
 - `rails-conventions` skill no longer contains Code Comments and Commit Messages sections — these are now in the language-agnostic `code-conventions` skill.
+
+### Deprecated
+
+- `labels_to_remove` and `label_to_add` project config fields. Still accepted but emit a deprecation warning to stderr. Use the new label workflow fields instead (`labels_todo`, `label_doing`, `label_mr`, `label_done`, `label_blocked`).
 
 ## [0.7.0] - 2026-03-31
 

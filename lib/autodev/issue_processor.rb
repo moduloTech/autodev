@@ -14,6 +14,7 @@ class IssueProcessor
     log "Processing issue ##{iid}: #{title}"
     issue.start_processing! # pending → cloning
     Issue.where(id: issue.id).update(started_at: Sequel.lit("datetime('now')"))
+    set_label_doing(iid)
 
     # Verify issue is still open
     current = @client.issue(@project_path, iid)
@@ -44,6 +45,7 @@ class IssueProcessor
         clone_repo(work_dir)
         fetch_and_checkout(work_dir, previous_branch)
         branch_name = previous_branch
+        @current_branch_name = branch_name
         issue._skip_to_mr = true
         issue.clone_complete! # cloning → creating_mr
       else
@@ -59,10 +61,12 @@ class IssueProcessor
           branch_name = create_branch(work_dir, iid, title)
         end
         issue.update(branch_name: branch_name)
+        @current_branch_name = branch_name
         issue.clone_complete! # cloning → checking_spec
 
-        # 3. Fetch full issue context
-        context = GitlabHelpers.fetch_issue_context(@client, @project_path, iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
+        # 3. Fetch full issue context (includes MR discussions if MR exists)
+        context = GitlabHelpers.fetch_full_context(@client, @project_path, iid,
+                    mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
 
         # 4. Check specification clarity
         if check_specification(work_dir, context, iid, issue)
@@ -97,7 +101,11 @@ class IssueProcessor
       issue.mr_created! # creating_mr → reviewing
 
       # 11. Labels
-      update_labels(iid)
+      if label_workflow?
+        set_label_mr(iid)
+      else
+        update_labels(iid)
+      end
 
       # 12. Review (non-fatal)
       run_review(mr.web_url)
@@ -230,37 +238,39 @@ class IssueProcessor
   def check_specification(work_dir, context, iid, issue)
     log "Checking specification clarity for ##{iid}..."
 
-    prompt = <<~PROMPT
-      Analyse le ticket GitLab suivant et determine sa nature.
+    out = with_context_file(work_dir, issue.branch_name, context) do |context_filename|
+      prompt = <<~PROMPT
+        Analyse le ticket GitLab suivant et determine sa nature.
 
-      #{context}
+        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement.
 
-      ## Instructions de reponse
+        ## Instructions de reponse
 
-      Reponds UNIQUEMENT avec un objet JSON valide (sans bloc de code markdown), avec cette structure :
-      {
-        "type": "implementation" | "question" | "unclear",
-        "issues": ["description du probleme 1", "description du probleme 2"]
-      }
+        Reponds UNIQUEMENT avec un objet JSON valide (sans bloc de code markdown), avec cette structure :
+        {
+          "type": "implementation" | "question" | "unclear",
+          "issues": ["description du probleme 1", "description du probleme 2"]
+        }
 
-      - `"type": "implementation"` — la specification est suffisamment claire pour etre implementee. `issues` doit etre vide.
-      - `"type": "question"` — le ticket ne demande PAS de modification de code. C'est une question,
-        une investigation, ou une demande d'explication sur le comportement existant
-        (ex: "pourquoi X ?", "est-ce que A et B sont identiques ?", "a quoi sert X ?", "comment fonctionne X ?").
-        `issues` doit etre vide.
-      - `"type": "unclear"` — le ticket demande une implementation mais la specification n'est pas assez precise.
-        Liste les problemes specifiques dans `issues`.
+        - `"type": "implementation"` — la specification est suffisamment claire pour etre implementee. `issues` doit etre vide.
+        - `"type": "question"` — le ticket ne demande PAS de modification de code. C'est une question,
+          une investigation, ou une demande d'explication sur le comportement existant
+          (ex: "pourquoi X ?", "est-ce que A et B sont identiques ?", "a quoi sert X ?", "comment fonctionne X ?").
+          `issues` doit etre vide.
+        - `"type": "unclear"` — le ticket demande une implementation mais la specification n'est pas assez precise.
+          Liste les problemes specifiques dans `issues`.
 
-      - Sois pragmatique : des details mineurs ne doivent pas bloquer l'implementation.
-      - Concentre-toi sur les ambiguites qui pourraient mener a une implementation incorrecte.
-      - Si le ticket contient des URLs de l'application (ex: https://app.example.com/companies/test/drivers/history),
-        extrais le path (ex: /companies/:id/drivers/history), cherche la route correspondante dans config/routes.rb,
-        identifie le controller#action, puis lis le code du controller et de la vue associee.
-        Utilise ces informations pour repondre toi-meme aux questions (colonnes, filtres, logique metier)
-        avant de declarer la spec insuffisante.
-    PROMPT
+        - Sois pragmatique : des details mineurs ne doivent pas bloquer l'implementation.
+        - Concentre-toi sur les ambiguites qui pourraient mener a une implementation incorrecte.
+        - Si le ticket contient des URLs de l'application (ex: https://app.example.com/companies/test/drivers/history),
+          extrais le path (ex: /companies/:id/drivers/history), cherche la route correspondante dans config/routes.rb,
+          identifie le controller#action, puis lis le code du controller et de la vue associee.
+          Utilise ces informations pour repondre toi-meme aux questions (colonnes, filtres, logique metier)
+          avant de declarer la spec insuffisante.
+      PROMPT
 
-    out = danger_claude_prompt(work_dir, prompt)
+      danger_claude_prompt(work_dir, prompt)
+    end
 
     # Try new tri-state format first
     json_match = out.match(/\{[^{}]*"type"\s*:\s*"(implementation|question|unclear)"[^{}]*\}/m)
@@ -321,6 +331,7 @@ class IssueProcessor
 
     notify_issue(iid, comment.strip)
     issue.spec_unclear!
+    set_label_todo(iid)
     Issue.where(id: issue.id).update(clarification_requested_at: Sequel.lit("datetime('now')"))
     log "Issue ##{iid} needs clarification, #{issues_list.size} question(s) posted"
     true
@@ -329,24 +340,26 @@ class IssueProcessor
   def answer_question(work_dir, context, iid, issue)
     log "Investigating question for issue ##{iid}..."
 
-    prompt = <<~PROMPT
-      Le ticket GitLab suivant pose une question ou demande une investigation sur le code existant.
-      Ce n'est PAS une demande d'implementation. Tu dois analyser le codebase pour repondre a la question.
+    answer = with_context_file(work_dir, issue.branch_name, context) do |context_filename|
+      prompt = <<~PROMPT
+        Le ticket GitLab suivant pose une question ou demande une investigation sur le code existant.
+        Ce n'est PAS une demande d'implementation. Tu dois analyser le codebase pour repondre a la question.
 
-      #{context}
+        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement.
 
-      ## Instructions
+        ## Instructions
 
-      - Lis attentivement la question posee dans le ticket.
-      - Explore le codebase pour trouver la reponse (fichiers, modeles, controleurs, vues, routes, migrations, etc.).
-      - Fournis une reponse claire, factuelle et structuree.
-      - Cite les fichiers et lignes pertinents pour appuyer ta reponse.
-      - Si tu ne peux pas repondre avec certitude, indique-le clairement.
-      - Reponds en francais.
-      - Reponds UNIQUEMENT avec ta reponse (pas de JSON, pas de bloc de code englobant).
-    PROMPT
+        - Lis attentivement la question posee dans le ticket.
+        - Explore le codebase pour trouver la reponse (fichiers, modeles, controleurs, vues, routes, migrations, etc.).
+        - Fournis une reponse claire, factuelle et structuree.
+        - Cite les fichiers et lignes pertinents pour appuyer ta reponse.
+        - Si tu ne peux pas repondre avec certitude, indique-le clairement.
+        - Reponds en francais.
+        - Reponds UNIQUEMENT avec ta reponse (pas de JSON, pas de bloc de code englobant).
+      PROMPT
 
-    answer = danger_claude_prompt(work_dir, prompt, label: "-p (question investigation)")
+      danger_claude_prompt(work_dir, prompt, label: "-p (question investigation)")
+    end
 
     comment = <<~COMMENT
       :mag: #{autodev_tag} : reponse a la question
@@ -358,7 +371,15 @@ class IssueProcessor
     COMMENT
 
     notify_issue(iid, comment.strip)
-    update_labels(iid)
+    if label_workflow?
+      # Remove label_doing but don't add any label back — the human decides the next step.
+      # Adding labels_todo would cause an infinite loop (question re-detected every cycle).
+      manage_labels(iid,
+        remove: [@project_config["label_doing"]],
+        add: nil)
+    else
+      update_labels(iid)
+    end
     issue.question_answered!
     reassign_to_author(issue)
     Issue.where(id: issue.id).update(
@@ -394,37 +415,39 @@ class IssueProcessor
   # Returns nil for simple issues (single-agent is fine),
   # or an array of tasks for parallel execution.
   def evaluate_complexity(work_dir, context, iid)
-    prompt = <<~PROMPT
-      Analyse le ticket GitLab suivant et determine si l'implementation necessite plusieurs agents
-      travaillant en parallele, ou si un seul agent suffit.
+    out = with_context_file(work_dir, @current_branch_name, context) do |context_filename|
+      prompt = <<~PROMPT
+        Analyse le ticket GitLab suivant et determine si l'implementation necessite plusieurs agents
+        travaillant en parallele, ou si un seul agent suffit.
 
-      #{context}
+        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement.
 
-      ## Instructions de reponse
+        ## Instructions de reponse
 
-      Reponds UNIQUEMENT avec un objet JSON valide (sans bloc de code markdown), avec cette structure :
-      {
-        "parallel": true/false,
-        "reason": "explication courte",
-        "tasks": [
-          {
-            "name": "nom-court-de-la-tache",
-            "description": "ce que cet agent doit faire",
-            "scope": "fichiers ou repertoires concernes (ex: app/models/, app/controllers/users*)"
-          }
-        ]
-      }
+        Reponds UNIQUEMENT avec un objet JSON valide (sans bloc de code markdown), avec cette structure :
+        {
+          "parallel": true/false,
+          "reason": "explication courte",
+          "tasks": [
+            {
+              "name": "nom-court-de-la-tache",
+              "description": "ce que cet agent doit faire",
+              "scope": "fichiers ou repertoires concernes (ex: app/models/, app/controllers/users*)"
+            }
+          ]
+        }
 
-      - `parallel: false` si l'issue est simple (1-3 fichiers, un seul domaine). `tasks` doit etre vide.
-      - `parallel: true` si l'issue touche plusieurs couches ou domaines independants.
-        Chaque tache doit etre autonome et ne PAS toucher les memes fichiers qu'une autre tache.
-        Ajoute toujours une tache "tests" dediee aux tests.
-      - Maximum 4 taches. Ne cree pas de taches inutiles.
-      - Sois pragmatique : en cas de doute, reponds `parallel: false`.
-    PROMPT
+        - `parallel: false` si l'issue est simple (1-3 fichiers, un seul domaine). `tasks` doit etre vide.
+        - `parallel: true` si l'issue touche plusieurs couches ou domaines independants.
+          Chaque tache doit etre autonome et ne PAS toucher les memes fichiers qu'une autre tache.
+          Ajoute toujours une tache "tests" dediee aux tests.
+        - Maximum 4 taches. Ne cree pas de taches inutiles.
+        - Sois pragmatique : en cas de doute, reponds `parallel: false`.
+      PROMPT
 
-    log "Evaluating issue complexity for ##{iid}..."
-    out = danger_claude_prompt(work_dir, prompt, label: "-p (complexity eval)")
+      log "Evaluating issue complexity for ##{iid}..."
+      danger_claude_prompt(work_dir, prompt, label: "-p (complexity eval)")
+    end
 
     json_match = out.match(/\{[^{}]*"parallel"\s*:\s*(true|false).*\}/m)
     return nil unless json_match
@@ -472,13 +495,15 @@ class IssueProcessor
 
       worktrees << { path: wt_path, task: task }
 
+      # Write context file in each worktree
+      context_file = GitlabHelpers.write_context_file(wt_path, @current_branch_name, context)
+      context_filename = File.basename(context_file)
+
       prompt = <<~PROMPT
         Tu dois implementer UNE PARTIE d'un ticket GitLab. D'autres agents travaillent
         en parallele sur d'autres parties. Ne fais QUE ta tache assignee.
 
-        ## Ticket complet (pour contexte)
-
-        #{context}
+        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement.
 
         ## Ta tache
 
@@ -522,8 +547,9 @@ class IssueProcessor
       raise ImplementationError, "All parallel agents failed: #{errors.map { |e| "#{e[:task]}: #{e[:error].message}" }.join("; ")}"
     end
   ensure
-    # Clean up all worktrees
+    # Clean up all worktrees (and context files within them)
     (worktrees || []).each do |wt|
+      GitlabHelpers.cleanup_context_file(wt[:path], @current_branch_name) if wt[:path]
       if Dir.exist?(wt[:path])
         run_cmd_status(["git", "worktree", "remove", "--force", wt[:path]], chdir: work_dir)
         FileUtils.rm_rf(wt[:path])
@@ -566,24 +592,27 @@ class IssueProcessor
   def implement_single(work_dir, context, iid)
     extra = @project_config["extra_prompt"]
     skills_line = SkillsInjector.skills_instruction(@all_skills)
-    prompt = <<~PROMPT
-      Tu dois implementer le ticket GitLab suivant. Lis attentivement le contexte complet ci-dessous,
-      puis implemente les changements necessaires dans le code.
 
-      #{context}
+    with_context_file(work_dir, @current_branch_name, context) do |context_filename|
+      prompt = <<~PROMPT
+        Tu dois implementer le ticket GitLab suivant. Lis attentivement le contexte complet,
+        puis implemente les changements necessaires dans le code.
 
-      ## Instructions
+        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement avant de commencer.
 
-      #{skills_line}
-      - Implemente TOUS les changements decrits dans l'issue.
-      - Respecte les conventions du projet (voir CLAUDE.md si present).
-      - Ajoute ou modifie les tests si necessaire.
-      - Ne modifie que ce qui est necessaire pour resoudre l'issue.
-      #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
-    PROMPT
+        ## Instructions
 
-    log "Running implementation via danger-claude..."
-    danger_claude_prompt(work_dir, prompt)
+        #{skills_line}
+        - Implemente TOUS les changements decrits dans l'issue.
+        - Respecte les conventions du projet (voir CLAUDE.md si present).
+        - Ajoute ou modifie les tests si necessaire.
+        - Ne modifie que ce qui est necessaire pour resoudre l'issue.
+        #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+      PROMPT
+
+      log "Running implementation via danger-claude..."
+      danger_claude_prompt(work_dir, prompt)
+    end
   end
 
   def implement_split(work_dir, context, iid)
@@ -604,11 +633,16 @@ class IssueProcessor
       FileUtils.cp_r(Dir.glob(File.join(agents_src, "*")), agents_dst)
     end
 
+    # Write context file in both worktrees
+    context_file = GitlabHelpers.write_context_file(work_dir, @current_branch_name, context)
+    context_filename = File.basename(context_file)
+    GitlabHelpers.write_context_file(test_worktree, @current_branch_name, context)
+
     code_prompt = <<~PROMPT
-      Tu dois implementer le ticket GitLab suivant. Lis attentivement le contexte complet ci-dessous,
+      Tu dois implementer le ticket GitLab suivant. Lis attentivement le contexte complet,
       puis implemente les changements necessaires dans le code.
 
-      #{context}
+      Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement avant de commencer.
 
       ## Instructions
 
@@ -624,7 +658,7 @@ class IssueProcessor
       Tu dois ecrire les tests pour le ticket GitLab suivant. Un autre agent implemente
       le code en parallele. Ecris les tests en te basant sur la specification de l'issue.
 
-      #{context}
+      Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement avant de commencer.
 
       ## Instructions
 
@@ -667,9 +701,12 @@ class IssueProcessor
       merge_test_files(test_worktree, work_dir)
     end
   ensure
-    if test_worktree && Dir.exist?(test_worktree)
-      run_cmd_status(["git", "worktree", "remove", "--force", test_worktree], chdir: work_dir)
-      FileUtils.rm_rf(test_worktree) # fallback if worktree remove failed
+    if test_worktree
+      GitlabHelpers.cleanup_context_file(test_worktree, @current_branch_name)
+      if Dir.exist?(test_worktree)
+        run_cmd_status(["git", "worktree", "remove", "--force", test_worktree], chdir: work_dir)
+        FileUtils.rm_rf(test_worktree) # fallback if worktree remove failed
+      end
     end
   end
 

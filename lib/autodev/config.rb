@@ -25,10 +25,20 @@ module Config
     projects:
       - path: group/project-name
         # target_branch: develop                # optional, defaults to project default branch
-        # labels_to_remove:                     # labels to remove after MR creation
+        #
+        # -- Label workflow (all 5 required) --
+        # labels_todo:                           # labels that trigger full processing
         #   - "development::todo"
         #   - "todo"
-        # label_to_add: "Development::Awaiting CR"
+        # label_doing: "Development::Doing"      # set during active processing
+        # label_mr: "Development::Awaiting CR"   # set after MR creation, triggers discussion monitoring
+        # label_done: "Development::Done"         # set by reviewer to signal completion
+        # label_blocked: "Development::Blocked"   # set when issue is blocked
+        #
+        # -- Deprecated (use label workflow instead) --
+        # labels_to_remove: []
+        # label_to_add: ""
+        #
         # extra_prompt: "Use RSpec for tests"   # additional instructions for Claude
         # dc_timeout: 1800                        # danger-claude timeout in seconds (overrides global)
         # max_retries: 3                          # max retries per issue (overrides global)
@@ -89,5 +99,52 @@ module Config
     config["max_fix_rounds"] = config["max_fix_rounds"].to_i
 
     config
+  end
+
+  # Returns true when the project uses the label workflow (all 5 label fields configured).
+  # Only checks labels_todo presence — the other 4 fields are guaranteed by validate_projects!
+  # which must be called at startup before any label_workflow? check.
+  def self.label_workflow?(project_config)
+    project_config["labels_todo"].is_a?(Array) && project_config["labels_todo"].any?
+  end
+
+  # Validate label workflow config for all projects. Called at startup.
+  # Raises ConfigError if config is incomplete.
+  def self.validate_projects!(config)
+    label_fields = %w[labels_todo label_doing label_mr label_done label_blocked]
+
+    (config["projects"] || []).each do |project_config|
+      path = project_config["path"]
+      present = label_fields.select { |f| project_config[f] }
+
+      # Deprecation warnings for old fields
+      if project_config["labels_to_remove"]
+        $stderr.puts "[DEPRECATION] #{path}: 'labels_to_remove' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+      end
+      if project_config["label_to_add"]
+        $stderr.puts "[DEPRECATION] #{path}: 'label_to_add' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+      end
+
+      # If any label workflow field is set, all must be set
+      next if present.empty?
+
+      missing = label_fields - present
+      unless missing.empty?
+        raise ConfigError, "#{path}: incomplete label workflow config. Missing: #{missing.join(", ")}. " \
+                           "All 5 fields are required: #{label_fields.join(", ")}."
+      end
+
+      # Type validation
+      unless project_config["labels_todo"].is_a?(Array) && project_config["labels_todo"].any?
+        raise ConfigError, "#{path}: 'labels_todo' must be a non-empty array."
+      end
+
+      %w[label_doing label_mr label_done label_blocked].each do |field|
+        value = project_config[field]
+        unless value.is_a?(String) && !value.strip.empty?
+          raise ConfigError, "#{path}: '#{field}' must be a non-empty string."
+        end
+      end
+    end
   end
 end
