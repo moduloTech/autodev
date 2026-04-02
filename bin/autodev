@@ -445,7 +445,8 @@ def main
           unless existing
             begin
               Issue.create(project_path: project_path, issue_iid: gl_issue.iid,
-                           issue_title: gl_issue.title, status: "pending")
+                           issue_title: gl_issue.title, status: "pending",
+                           issue_author_id: gl_issue.author&.id)
             rescue Sequel::UniqueConstraintViolation
               # Already tracked
             end

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Issue assignment management: autodev assigns itself to the issue when starting work, then reassigns the issue author when reaching `over` (question answered or pipeline green).
 - New `code-conventions` skill injected into all projects: language-agnostic rules for code comments (WHAT/WHY/HOW) and commit messages (Conventional Commits). Previously these rules were embedded in the Rails-specific skill and ignored for JS/other languages.
 - All prompts (implementation, MR fix, pipeline fix) now explicitly list the skills to load (e.g. `code-conventions`, `rails-conventions`, etc.) before starting work.
 - `--version` / `-v` CLI flag to display the current version.

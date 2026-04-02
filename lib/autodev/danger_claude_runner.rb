@@ -154,6 +154,23 @@ module DangerClaudeRunner
     stderr_r&.close
   end
 
+  def assign_to_self(iid)
+    me = @client.user
+    @client.edit_issue(@project_path, iid, assignee_ids: [me.id])
+    log "Assigned issue ##{iid} to #{me.username}"
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to assign issue ##{iid} to self: #{e.message}"
+  end
+
+  def reassign_to_author(issue)
+    return unless issue.issue_author_id
+
+    @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [issue.issue_author_id])
+    log "Reassigned issue ##{issue.issue_iid} to author (user #{issue.issue_author_id})"
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to reassign issue ##{issue.issue_iid} to author: #{e.message}"
+  end
+
   def autodev_tag
     "**autodev** (v#{Autodev::VERSION})"
   end

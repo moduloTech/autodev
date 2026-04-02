@@ -61,6 +61,7 @@ class PipelineMonitor
     issue.pipeline_green! # → over or fixing_discussions (via guards)
 
     if issue.over?
+      reassign_to_author(issue)
       if discussions.empty?
         log "Issue ##{iid}: pipeline green, no open conversations → over"
       else

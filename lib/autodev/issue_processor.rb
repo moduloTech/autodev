@@ -25,6 +25,7 @@ class IssueProcessor
       return
     end
 
+    assign_to_self(iid)
     notify_issue(iid, ":robot: #{autodev_tag} : traitement en cours...")
 
     # Check for partial progress from previous attempt
@@ -359,6 +360,7 @@ class IssueProcessor
     notify_issue(iid, comment.strip)
     update_labels(iid)
     issue.question_answered!
+    reassign_to_author(issue)
     Issue.where(id: issue.id).update(
       finished_at: Sequel.lit("datetime('now')"),
       dc_stdout: @dc_stdout, dc_stderr: @dc_stderr

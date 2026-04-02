@@ -75,6 +75,7 @@ module Database
     @db.run("ALTER TABLE issues ADD COLUMN clarification_requested_at TEXT") rescue nil
     @db.run("ALTER TABLE issues ADD COLUMN fix_round INTEGER NOT NULL DEFAULT 0") rescue nil
     @db.run("ALTER TABLE issues ADD COLUMN pipeline_retrigger_count INTEGER NOT NULL DEFAULT 0") rescue nil
+    @db.run("ALTER TABLE issues ADD COLUMN issue_author_id INTEGER") rescue nil
   end
 
   # -- Status migration from pre-AASM names --
