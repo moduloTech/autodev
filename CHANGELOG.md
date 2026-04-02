@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-02
+
 ### Added
 
 - **Label-driven workflow**: new per-project config fields `labels_todo` (array), `label_doing`, `label_mr`, `label_done`, `label_blocked` replace `labels_to_remove`/`label_to_add` with a full lifecycle. Labels are set/removed at each state transition: `labels_todo` → `label_doing` (processing) → `label_mr` (MR created, discussion monitoring) → `label_done` (set by reviewer, triggers cleanup). `label_blocked` is set on infra failures or max fix rounds.
