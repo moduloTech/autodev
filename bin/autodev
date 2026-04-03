@@ -539,20 +539,25 @@ def main
       # -- Error retry --
       begin
         max_retries = (project_config["max_retries"] || config["max_retries"]).to_i
-        Issue.where(project_path: project_path, status: "error")
-             .where { retry_count < max_retries }
-             .where { Sequel.lit("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')") }
-             .each do |issue|
+        retryable = Issue.where(project_path: project_path, status: "error")
+                         .where { retry_count < max_retries }
+                         .where { Sequel.lit("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')") }
+                         .all
+
+        if retryable.any? && Config.label_workflow?(project_config)
+          retry_client = GitlabHelpers.build_gitlab_client(config["gitlab_url"], token)
+          retry_helper = MrFixer.new(client: retry_client, config: config, project_config: project_config, logger: logger, token: token)
+        end
+
+        retryable.each do |issue|
           begin
             # Issues with an existing MR resume at checking_pipeline instead of pending
             if issue.mr_iid
               issue.retry_pipeline!
               issue.update(error_message: nil, started_at: nil)
-              if Config.label_workflow?(project_config)
+              if retry_helper
                 begin
-                  worker_client = GitlabHelpers.build_gitlab_client(config["gitlab_url"], token)
-                  helper = MrFixer.new(client: worker_client, config: config, project_config: project_config, logger: logger, token: token)
-                  helper.set_label_mr(issue.issue_iid)
+                  retry_helper.set_label_mr(issue.issue_iid)
                 rescue StandardError => e
                   logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}", project: project_path)
                 end
@@ -561,11 +566,9 @@ def main
             else
               issue.retry_processing!
               issue.update(error_message: nil, started_at: nil)
-              if Config.label_workflow?(project_config)
+              if retry_helper
                 begin
-                  worker_client = GitlabHelpers.build_gitlab_client(config["gitlab_url"], token)
-                  helper = MrFixer.new(client: worker_client, config: config, project_config: project_config, logger: logger, token: token)
-                  helper.set_label_todo(issue.issue_iid)
+                  retry_helper.set_label_todo(issue.issue_iid)
                 rescue StandardError => e
                   logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}", project: project_path)
                 end

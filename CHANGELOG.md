@@ -8,6 +8,10 @@
 - Fix issues stuck on `label_doing` after error retry: when an issue hits a rate limit or error and is later retried back to `pending`, the GitLab label is now restored to `labels_todo` so the polling loop picks it up correctly.
 - Fix issues with existing MRs restarting from scratch after error retry: issues that already have a MR now resume at `checking_pipeline` (with `label_mr` restored) instead of `pending`, so the pipeline monitor retries the fix instead of re-implementing from zero. Applies to both runtime retry and startup recovery.
 
+### Changed
+
+- Hoist GitLab client and `MrFixer` helper instantiation above the error retry loop so they are reused across retried issues in the same poll tick instead of being recreated per issue.
+
 ## [0.8.0] - 2026-04-02
 
 ### Added
