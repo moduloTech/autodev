@@ -24,7 +24,7 @@ class ErrorsTest < Minitest::Test
     assert_equal 3600, err.wait_seconds
   end
 
-  def test_rate_limit_wait_seconds_minimum_60
+  def test_rate_limit_wait_seconds_minimum60
     reset = Time.now.utc + 10 # only 10s away
     err = RateLimitError.new('rate limited', reset_time: reset)
 
