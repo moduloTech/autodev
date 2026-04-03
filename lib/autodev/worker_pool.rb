@@ -19,27 +19,7 @@ class WorkerPool
     @threads = @size.times.map do |i|
       Thread.new do
         Thread.current.name = "worker-#{i}"
-        while @running
-          begin
-            job, issue_iid = @queue.pop(true)
-            @mutex.synchronize do
-              @assignments[i] = issue_iid
-              # iid stays in @queued_iids until the job finishes
-            end
-            persist_assignments
-            job.call
-          rescue ThreadError
-            sleep 0.5
-          rescue StandardError => e
-            @logger.error("[worker-#{i}] Unhandled error: #{e.class}: #{e.message}")
-          ensure
-            @mutex.synchronize do
-              @queued_iids.delete(@assignments[i])
-              @assignments.delete(i)
-            end
-            persist_assignments
-          end
-        end
+        run_worker_loop(i)
       end
     end
   end
@@ -88,6 +68,33 @@ class WorkerPool
   end
 
   private
+
+  def run_worker_loop(index)
+    while @running
+      run_next_job(index)
+    end
+  end
+
+  def run_next_job(index)
+    job, issue_iid = @queue.pop(true)
+    @mutex.synchronize { @assignments[index] = issue_iid }
+    persist_assignments
+    job.call
+  rescue ThreadError
+    sleep 0.5
+  rescue StandardError => e
+    @logger.error("[worker-#{index}] Unhandled error: #{e.class}: #{e.message}")
+  ensure
+    release_worker(index)
+  end
+
+  def release_worker(index)
+    @mutex.synchronize do
+      @queued_iids.delete(@assignments[index])
+      @assignments.delete(index)
+    end
+    persist_assignments
+  end
 
   def persist_assignments
     mapping = @mutex.synchronize { @assignments.dup }
