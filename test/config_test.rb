@@ -3,20 +3,14 @@
 require_relative 'test_helper'
 
 class ConfigValidateTest < Minitest::Test
-  def valid_config
-    {
-      'gitlab_token' => 'glpat-xxxx',
-      'gitlab_url' => 'https://gitlab.example.com',
-      'poll_interval' => 300,
-      'max_workers' => 3,
-      'dc_timeout' => 1800,
-      'max_retries' => 3,
-      'retry_backoff' => 30,
-      'max_fix_rounds' => 3,
-      'log_level' => 'INFO',
-      'projects' => [{ 'path' => 'group/project' }]
-    }
-  end
+  VALID_BASE = {
+    'gitlab_token' => 'glpat-xxxx', 'gitlab_url' => 'https://gitlab.example.com',
+    'poll_interval' => 300, 'max_workers' => 3, 'dc_timeout' => 1800,
+    'max_retries' => 3, 'retry_backoff' => 30, 'max_fix_rounds' => 3,
+    'log_level' => 'INFO', 'projects' => [{ 'path' => 'group/project' }]
+  }.freeze
+
+  def valid_config = VALID_BASE.dup
 
   def test_valid_config_passes
     Config.validate!(valid_config)

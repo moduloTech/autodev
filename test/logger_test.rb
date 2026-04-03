@@ -92,22 +92,27 @@ class LoggerTest < Minitest::Test
     refute_includes out, 'second line'
   end
 
-  def test_file_output_is_jsonl
+  def test_file_output_writes_global_jsonl
     Dir.mktmpdir do |dir|
       @logger.configure(log_dir: dir, level: 'DEBUG')
       @logger.info('test log entry', project: 'g/p')
       @logger.close
 
-      # Check global log
       global_files = Dir.glob(File.join(dir, 'autodev', '*.jsonl'))
 
       refute_empty global_files, 'Expected a .jsonl file in autodev/'
-      line = File.readlines(global_files.first).first
-      entry = JSON.parse(line)
+      entry = JSON.parse(File.readlines(global_files.first).first)
 
       assert_equal 'test log entry', entry['message']
+    end
+  end
 
-      # Check project log
+  def test_file_output_writes_project_jsonl
+    Dir.mktmpdir do |dir|
+      @logger.configure(log_dir: dir, level: 'DEBUG')
+      @logger.info('test log entry', project: 'g/p')
+      @logger.close
+
       project_files = Dir.glob(File.join(dir, 'g_p', '*.jsonl'))
 
       refute_empty project_files, 'Expected a .jsonl file in g_p/'
