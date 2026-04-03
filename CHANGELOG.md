@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-04-03
+
 ### Fixed
 
 - Fix label workflow routing: issues in `pending` state with `label_mr` are now correctly routed to processing instead of being silently skipped. Previously, only `label_todo` triggered processing for pending issues.
