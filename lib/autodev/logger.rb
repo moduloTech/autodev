@@ -19,10 +19,10 @@ class AppLogger
     FileUtils.mkdir_p(File.join(@log_dir, "autodev"))
   end
 
-  def debug(msg, project: nil) = write("DEBUG", msg, project: project)
-  def info(msg, project: nil)  = write("INFO",  msg, project: project)
-  def warn(msg, project: nil)  = write("WARN",  msg, project: project)
-  def error(msg, project: nil) = write("ERROR", msg, project: project)
+  def debug(msg, project: nil, **context) = write("DEBUG", msg, project: project, **context)
+  def info(msg, project: nil, **context)  = write("INFO",  msg, project: project, **context)
+  def warn(msg, project: nil, **context)  = write("WARN",  msg, project: project, **context)
+  def error(msg, project: nil, **context) = write("ERROR", msg, project: project, **context)
 
   def close
     @mutex.synchronize do
@@ -33,16 +33,13 @@ class AppLogger
 
   private
 
-  def write(level, msg, project: nil)
+  def write(level, msg, project: nil, **context)
     return if LEVELS[level] < @level
 
-    timestamp = Time.now.strftime("%Y-%m-%d %H:%M:%S")
-    prefix = project ? "[#{project}]" : "[autodev]"
-    line = "#{timestamp} #{level.ljust(5)} #{prefix} #{msg}"
-
     @mutex.synchronize do
-      # Truncate multiline messages on console (full message goes to log files)
+      # Console: colored, human-readable, multiline truncated
       console_msg = msg.include?("\n") ? msg.lines.first.chomp : msg
+      prefix = project ? "[#{project}]" : "[autodev]"
       console_line = case level
                      when "ERROR" then @pastel.red("  #{prefix} #{console_msg}")
                      when "WARN"  then @pastel.yellow("  #{prefix} #{console_msg}")
@@ -55,24 +52,43 @@ class AppLogger
         $stdout.puts console_line
       end
 
-      write_to_global_file(line) if @log_dir
-      write_to_project_file(project, line) if @log_dir && project
+      # Log files: JSON Lines (LLM-readable)
+      if @log_dir
+        json_line = build_json_line(level, msg, project, context)
+        write_to_global_file(json_line)
+        write_to_project_file(project, json_line) if project
+      end
     end
   end
 
-  def write_to_global_file(line)
+  def build_json_line(level, msg, project, context)
+    entry = {
+      timestamp: Time.now.utc.iso8601,
+      level: level,
+      project: project,
+      issue_iid: context[:issue_iid],
+      state: context[:state],
+      event: context[:event],
+      message: msg
+    }
+    extra = context.except(:issue_iid, :state, :event)
+    entry[:context] = extra unless extra.empty?
+    JSON.generate(entry)
+  end
+
+  def write_to_global_file(json_line)
     today = Time.now.strftime("%Y-%m-%d")
     if @global_date != today
       @global_file&.close
-      path = File.join(@log_dir, "autodev", "#{today}.log")
+      path = File.join(@log_dir, "autodev", "#{today}.jsonl")
       @global_file = File.open(path, "a")
       @global_file.sync = true
       @global_date = today
     end
-    @global_file.puts(line)
+    @global_file.puts(json_line)
   end
 
-  def write_to_project_file(project, line)
+  def write_to_project_file(project, json_line)
     slug = project.gsub("/", "_")
     today = Time.now.strftime("%Y-%m-%d")
     entry = @project_dirs[slug] ||= { file: nil, date: nil }
@@ -81,11 +97,11 @@ class AppLogger
       entry[:file]&.close
       dir = File.join(@log_dir, slug)
       FileUtils.mkdir_p(dir)
-      path = File.join(dir, "#{today}.log")
+      path = File.join(dir, "#{today}.jsonl")
       entry[:file] = File.open(path, "a")
       entry[:file].sync = true
       entry[:date] = today
     end
-    entry[:file].puts(line)
+    entry[:file].puts(json_line)
   end
 end

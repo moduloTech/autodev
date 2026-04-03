@@ -27,7 +27,7 @@ class IssueProcessor
     end
 
     assign_to_self(iid)
-    notify_issue(iid, ":robot: #{autodev_tag} : traitement en cours...")
+    notify_localized(iid, :processing_started)
 
     # Check for partial progress from previous attempt
     previous_branch = issue.branch_name
@@ -116,7 +116,7 @@ class IssueProcessor
         pipeline_retrigger_count: 0,
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
       )
-      notify_issue(iid, ":white_check_mark: #{autodev_tag} : MR creee : #{mr.web_url}")
+      notify_localized(iid, :mr_created, mr_url: mr.web_url)
       log "Issue ##{iid} completed: #{mr.web_url}"
 
     rescue RateLimitError => e
@@ -162,7 +162,7 @@ class IssueProcessor
       end
 
       Issue.where(id: issue.id).update(**fields)
-      notify_issue(iid, ":x: #{autodev_tag} : echec — #{e.class}: #{e.message[0, 200]}")
+      notify_localized(iid, :error_generic, error: "#{e.class}: #{e.message[0, 200]}")
       log_error "  #{bt}" if bt
     ensure
       FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
@@ -321,15 +321,12 @@ class IssueProcessor
       return false
     end
 
-    comment = <<~COMMENT
-      :thinking: #{autodev_tag} : la specification necessite des precisions avant implementation.
-
-      #{issues_list.map.with_index(1) { |iss, i| "#{i}. #{iss}" }.join("\n")}
-
-      Merci de repondre a ces questions dans les commentaires. L'implementation reprendra automatiquement.
-    COMMENT
-
-    notify_issue(iid, comment.strip)
+    issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
+    locale = (issue_record&.locale || "fr").to_sym
+    header = Locales.t(:spec_unclear_header, locale: locale, tag: autodev_tag)
+    footer = Locales.t(:spec_unclear_footer, locale: locale, tag: autodev_tag)
+    numbered = issues_list.map.with_index(1) { |iss, i| "#{i}. #{iss}" }.join("\n")
+    notify_issue(iid, "#{header}\n\n#{numbered}\n\n#{footer}")
     issue.spec_unclear!
     set_label_todo(iid)
     Issue.where(id: issue.id).update(clarification_requested_at: Sequel.lit("datetime('now')"))
@@ -361,16 +358,11 @@ class IssueProcessor
       danger_claude_prompt(work_dir, prompt, label: "-p (question investigation)")
     end
 
-    comment = <<~COMMENT
-      :mag: #{autodev_tag} : reponse a la question
-
-      #{answer.strip}
-
-      ---
-      _Cette reponse a ete generee automatiquement par analyse du codebase. N'hesitez pas a demander des precisions._
-    COMMENT
-
-    notify_issue(iid, comment.strip)
+    issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
+    locale = (issue_record&.locale || "fr").to_sym
+    header = Locales.t(:question_answered_header, locale: locale, tag: autodev_tag)
+    footer = Locales.t(:question_answered_footer, locale: locale, tag: autodev_tag)
+    notify_issue(iid, "#{header}\n\n#{answer.strip}\n\n---\n#{footer}")
     if label_workflow?
       # Remove label_doing but don't add any label back — the human decides the next step.
       # Adding labels_todo would cause an infinite loop (question re-detected every cycle).

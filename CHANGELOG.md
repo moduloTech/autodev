@@ -12,6 +12,8 @@
 ### Added
 
 - Comprehensive config validation (`Config.validate!`) at startup: validates global numeric fields are positive integers, `log_level` is a valid level, `gitlab_token` is present, and per-project fields (`path` required, `post_completion` must be array of strings, `post_completion_timeout` requires `post_completion`, `clone_depth` non-negative, `sparse_checkout` array of strings).
+- Localized GitLab issue comments: language is auto-detected from the issue body (French/English heuristic via function-word frequency) and stored in a `locale` column. All 14 `notify_issue` calls now use locale-aware templates (`Locales.t`).
+- JSON Lines structured log files (`.jsonl`): log files now emit one JSON object per line with `timestamp`, `level`, `project`, `issue_iid`, `state`, `event`, `message`, and `context` fields for LLM consumption. Console output remains human-readable with colors.
 
 ### Changed
 

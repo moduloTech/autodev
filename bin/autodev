@@ -470,9 +470,11 @@ def main
 
           unless existing
             begin
+              locale = LanguageDetector.detect(gl_issue.description.to_s)
               Issue.create(project_path: project_path, issue_iid: gl_issue.iid,
                            issue_title: gl_issue.title, status: "pending",
-                           issue_author_id: gl_issue.author&.id)
+                           issue_author_id: gl_issue.author&.id,
+                           locale: locale.to_s)
             rescue Sequel::UniqueConstraintViolation
               # Already tracked
             end

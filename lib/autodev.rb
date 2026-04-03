@@ -7,6 +7,8 @@ end
 require_relative "autodev/errors"
 require_relative "autodev/logger"
 require_relative "autodev/config"
+require_relative "autodev/language_detector"
+require_relative "autodev/locales"
 require_relative "autodev/shell_helpers"
 require_relative "autodev/gitlab_helpers"
 require_relative "autodev/database"

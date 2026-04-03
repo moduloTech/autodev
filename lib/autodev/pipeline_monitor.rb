@@ -37,7 +37,7 @@ class PipelineMonitor
       log "Pipeline #{status} for MR !#{mr_iid}"
       issue.pipeline_canceled!
       set_label_blocked(iid)
-      notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} est #{status}. Intervention manuelle requise.")
+      notify_localized(iid, :pipeline_canceled, mr_url: issue.mr_url, status: status)
       log "Issue ##{iid}: pipeline #{status} → blocked"
     else
       log "Unknown pipeline status '#{status}' for MR !#{mr_iid}, skipping"
@@ -170,7 +170,7 @@ class PipelineMonitor
       log "No failed jobs found for pipeline ##{pipeline_id(pipeline)}, marking as blocked"
       issue.pipeline_failed_infra!
       set_label_blocked(iid)
-      notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} a echoue mais aucun job en echec n'a ete trouve. Intervention manuelle requise.")
+      notify_localized(iid, :pipeline_no_failed_jobs, mr_url: issue.mr_url)
       return
     end
 
@@ -197,7 +197,7 @@ class PipelineMonitor
     if triage[:verdict] == :infra
       issue.pipeline_failed_infra!
       set_label_blocked(iid)
-      notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} echoue pour une raison d'infrastructure (pre-triage). Intervention manuelle requise.\n\n> #{triage[:explanation]}")
+      notify_localized(iid, :pipeline_infra_pretriage, mr_url: issue.mr_url, explanation: triage[:explanation])
       log "Issue ##{iid}: infra failure detected by pre-triage → blocked (#{triage[:explanation]})"
       return
     end
@@ -230,7 +230,7 @@ class PipelineMonitor
           log "Could not parse pipeline evaluation response, marking as blocked"
           issue.pipeline_failed_infra!
           set_label_blocked(iid)
-          notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} a echoue et l'evaluation automatique n'a pas abouti. Intervention manuelle requise.")
+          notify_localized(iid, :pipeline_eval_failed, mr_url: issue.mr_url)
           return
         end
 
@@ -239,7 +239,7 @@ class PipelineMonitor
         unless eval_result["code_related"]
           issue.pipeline_failed_infra!
           set_label_blocked(iid)
-          notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} echoue pour une raison hors code. Intervention manuelle requise.\n\n> #{explanation}")
+          notify_localized(iid, :pipeline_non_code, mr_url: issue.mr_url, explanation: explanation)
           log "Issue ##{iid}: non-code pipeline failure → blocked (#{explanation})"
           return
         end
@@ -252,7 +252,7 @@ class PipelineMonitor
 
       if issue.blocked?
         set_label_blocked(iid)
-        notify_issue(iid, ":warning: #{autodev_tag} : le pipeline de #{issue.mr_url} echoue a cause du code mais le nombre maximum de rounds de fix est atteint. Intervention manuelle requise.\n\n> #{explanation}")
+        notify_localized(iid, :pipeline_max_rounds, mr_url: issue.mr_url, explanation: explanation)
         log "Issue ##{iid}: code-related pipeline failure but max fix rounds reached → blocked"
         return
       end
@@ -288,7 +288,7 @@ class PipelineMonitor
       end
       issue.update(error_message: "Pipeline fix error: #{e.class}: #{e.message}\n  #{bt}",
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
-      notify_issue(iid, ":x: #{autodev_tag} : echec de la correction du pipeline — #{e.class}: #{e.message[0, 200]}")
+      notify_localized(iid, :pipeline_fix_error, error: "#{e.class}: #{e.message[0, 200]}")
     ensure
       FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
     end
@@ -548,7 +548,7 @@ class PipelineMonitor
     issue.update(fix_round: fix_round + 1, pipeline_retrigger_count: 0,
                  dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
     issue.pipeline_fix_done! # fixing_pipeline → checking_pipeline
-    notify_issue(iid, ":wrench: #{autodev_tag} : correction du pipeline appliquee sur #{issue.mr_url} — #{job_entries.size} job(s) corrige(s) (round #{fix_round + 1})")
+    notify_localized(iid, :pipeline_fix_success, mr_url: issue.mr_url, count: job_entries.size, round: fix_round + 1)
     log "Issue ##{iid}: pipeline fix pushed — #{job_entries.size} job(s) (round #{fix_round + 1})"
   end
 

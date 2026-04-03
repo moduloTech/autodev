@@ -181,6 +181,13 @@ module DangerClaudeRunner
     log_error "Failed to post comment on ##{iid}: #{e.message}"
   end
 
+  def notify_localized(iid, key, **vars)
+    issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
+    locale = (issue_record&.locale || "fr").to_sym
+    message = Locales.t(key, locale: locale, tag: autodev_tag, **vars)
+    notify_issue(iid, message)
+  end
+
   # -- Context file --
 
   # Writes the context file, yields, then guarantees cleanup.

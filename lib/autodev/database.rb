@@ -77,6 +77,7 @@ module Database
     @db.run("ALTER TABLE issues ADD COLUMN pipeline_retrigger_count INTEGER NOT NULL DEFAULT 0") rescue nil
     @db.run("ALTER TABLE issues ADD COLUMN issue_author_id INTEGER") rescue nil
     @db.run("ALTER TABLE issues ADD COLUMN post_completion_error TEXT") rescue nil
+    @db.run("ALTER TABLE issues ADD COLUMN locale TEXT DEFAULT 'fr'") rescue nil
   end
 
   # -- Status migration from pre-AASM names --
