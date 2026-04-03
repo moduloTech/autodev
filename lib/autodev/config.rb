@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 module Config
-  CONFIG_DIR  = File.expand_path("~/.autodev")
-  CONFIG_PATH = File.join(CONFIG_DIR, "config.yml")
-  DEFAULT_DB  = File.join(CONFIG_DIR, "autodev.db")
+  CONFIG_DIR  = File.expand_path('~/.autodev')
+  CONFIG_PATH = File.join(CONFIG_DIR, 'config.yml')
+  DEFAULT_DB  = File.join(CONFIG_DIR, 'autodev.db')
 
   TEMPLATE = <<~YAML
     # autodev configuration
@@ -53,28 +53,28 @@ module Config
   YAML
 
   DEFAULTS = {
-    "gitlab_url"     => nil,
-    "gitlab_token"   => nil,
-    "trigger_label"  => "autodev",
-    "poll_interval"  => 300,
-    "max_workers"    => 3,
-    "dc_timeout"     => 1800,
-    "max_retries"    => 3,
-    "retry_backoff"  => 30,
-    "max_fix_rounds" => 3,
-    "log_dir"        => File.join(CONFIG_DIR, "logs"),
-    "log_level"      => "INFO",
-    "database_url"   => "sqlite://#{DEFAULT_DB}",
-    "projects"       => []
+    'gitlab_url' => nil,
+    'gitlab_token' => nil,
+    'trigger_label' => 'autodev',
+    'poll_interval' => 300,
+    'max_workers' => 3,
+    'dc_timeout' => 1800,
+    'max_retries' => 3,
+    'retry_backoff' => 30,
+    'max_fix_rounds' => 3,
+    'log_dir' => File.join(CONFIG_DIR, 'logs'),
+    'log_level' => 'INFO',
+    'database_url' => "sqlite://#{DEFAULT_DB}",
+    'projects' => []
   }.freeze
 
   ENV_MAPPING = {
-    "GITLAB_API_TOKEN" => "gitlab_token",
-    "GITLAB_URL"       => "gitlab_url"
+    'GITLAB_API_TOKEN' => 'gitlab_token',
+    'GITLAB_URL' => 'gitlab_url'
   }.freeze
 
   def self.load(cli_overrides = {})
-    config_path = cli_overrides.delete("config_path") || CONFIG_PATH
+    config_path = cli_overrides.delete('config_path') || CONFIG_PATH
 
     config = DEFAULTS.dup
 
@@ -89,14 +89,14 @@ module Config
 
     cli_overrides.each { |k, v| config[k] = v unless v.nil? }
 
-    config["_config_path"] = config_path
+    config['_config_path'] = config_path
 
-    config["poll_interval"] = config["poll_interval"].to_i
-    config["max_workers"]   = config["max_workers"].to_i
-    config["dc_timeout"]    = config["dc_timeout"].to_i
-    config["max_retries"]    = config["max_retries"].to_i
-    config["retry_backoff"]  = config["retry_backoff"].to_i
-    config["max_fix_rounds"] = config["max_fix_rounds"].to_i
+    config['poll_interval'] = config['poll_interval'].to_i
+    config['max_workers']   = config['max_workers'].to_i
+    config['dc_timeout']    = config['dc_timeout'].to_i
+    config['max_retries']    = config['max_retries'].to_i
+    config['retry_backoff']  = config['retry_backoff'].to_i
+    config['max_fix_rounds'] = config['max_fix_rounds'].to_i
 
     config
   end
@@ -105,7 +105,7 @@ module Config
   # Only checks labels_todo presence — the other 4 fields are guaranteed by validate_projects!
   # which must be called at startup before any label_workflow? check.
   def self.label_workflow?(project_config)
-    project_config["labels_todo"].is_a?(Array) && project_config["labels_todo"].any?
+    project_config['labels_todo'].is_a?(Array) && project_config['labels_todo'].any?
   end
 
   VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
@@ -114,22 +114,23 @@ module Config
   # Raises ConfigError on invalid values.
   def self.validate!(config)
     # Required fields
-    unless config["gitlab_token"].is_a?(String) && !config["gitlab_token"].strip.empty?
-      raise ConfigError, "gitlab_token is required. Set it in config.yml or via GITLAB_API_TOKEN env var."
+    unless config['gitlab_token'].is_a?(String) && !config['gitlab_token'].strip.empty?
+      raise ConfigError, 'gitlab_token is required. Set it in config.yml or via GITLAB_API_TOKEN env var.'
     end
 
     # Positive integer globals
     %w[poll_interval max_workers dc_timeout max_retries retry_backoff max_fix_rounds].each do |field|
       value = config[field]
-      unless value.is_a?(Integer) && value > 0
+      unless value.is_a?(Integer) && value.positive?
         raise ConfigError, "'#{field}' must be a positive integer, got: #{value.inspect}"
       end
     end
 
     # Log level
-    level = config["log_level"].to_s.upcase
+    level = config['log_level'].to_s.upcase
     unless VALID_LOG_LEVELS.include?(level)
-      raise ConfigError, "'log_level' must be one of #{VALID_LOG_LEVELS.join(", ")}, got: #{config["log_level"].inspect}"
+      raise ConfigError,
+            "'log_level' must be one of #{VALID_LOG_LEVELS.join(', ')}, got: #{config['log_level'].inspect}"
     end
 
     validate_projects!(config)
@@ -138,8 +139,8 @@ module Config
   # Validate per-project config for all projects. Called by validate!.
   # Raises ConfigError if config is incomplete or invalid.
   def self.validate_projects!(config)
-    (config["projects"] || []).each_with_index do |project_config, idx|
-      path = project_config["path"]
+    (config['projects'] || []).each_with_index do |project_config, idx|
+      path = project_config['path']
       unless path.is_a?(String) && !path.strip.empty?
         raise ConfigError, "projects[#{idx}]: 'path' is required and must be a non-empty string."
       end
@@ -156,7 +157,7 @@ module Config
       next unless project_config.key?(field)
 
       value = project_config[field].to_i
-      unless value > 0
+      unless value.positive?
         raise ConfigError, "#{path}: '#{field}' must be a positive integer, got: #{project_config[field].inspect}"
       end
     end
@@ -164,40 +165,42 @@ module Config
   private_class_method :validate_project_numerics!
 
   def self.validate_project_post_completion!(project_config, path)
-    if project_config.key?("post_completion")
-      cmd = project_config["post_completion"]
-      unless cmd.is_a?(Array) && cmd.any? && cmd.all? { |c| c.is_a?(String) }
+    if project_config.key?('post_completion')
+      cmd = project_config['post_completion']
+      unless cmd.is_a?(Array) && cmd.any? && cmd.all?(String)
         raise ConfigError, "#{path}: 'post_completion' must be a non-empty array of strings."
       end
     end
 
-    if project_config.key?("post_completion_timeout")
-      value = project_config["post_completion_timeout"].to_i
-      unless value > 0
-        raise ConfigError, "#{path}: 'post_completion_timeout' must be a positive integer, got: #{project_config["post_completion_timeout"].inspect}"
+    if project_config.key?('post_completion_timeout')
+      value = project_config['post_completion_timeout'].to_i
+      unless value.positive?
+        raise ConfigError,
+              "#{path}: 'post_completion_timeout' must be a positive integer, got: #{project_config['post_completion_timeout'].inspect}"
       end
     end
 
-    if project_config.key?("post_completion_timeout") && !project_config.key?("post_completion")
-      raise ConfigError, "#{path}: 'post_completion_timeout' is set but 'post_completion' is missing."
-    end
+    return unless project_config.key?('post_completion_timeout') && !project_config.key?('post_completion')
+
+    raise ConfigError, "#{path}: 'post_completion_timeout' is set but 'post_completion' is missing."
   end
   private_class_method :validate_project_post_completion!
 
   def self.validate_project_clone_options!(project_config, path)
-    if project_config.key?("clone_depth")
-      value = project_config["clone_depth"].to_i
-      if value < 0
-        raise ConfigError, "#{path}: 'clone_depth' must be a non-negative integer, got: #{project_config["clone_depth"].inspect}"
+    if project_config.key?('clone_depth')
+      value = project_config['clone_depth'].to_i
+      if value.negative?
+        raise ConfigError,
+              "#{path}: 'clone_depth' must be a non-negative integer, got: #{project_config['clone_depth'].inspect}"
       end
     end
 
-    if project_config.key?("sparse_checkout")
-      paths = project_config["sparse_checkout"]
-      unless paths.is_a?(Array) && paths.any? && paths.all? { |p| p.is_a?(String) }
-        raise ConfigError, "#{path}: 'sparse_checkout' must be a non-empty array of strings."
-      end
-    end
+    return unless project_config.key?('sparse_checkout')
+
+    paths = project_config['sparse_checkout']
+    return if paths.is_a?(Array) && paths.any? && paths.all?(String)
+
+    raise ConfigError, "#{path}: 'sparse_checkout' must be a non-empty array of strings."
   end
   private_class_method :validate_project_clone_options!
 
@@ -206,11 +209,11 @@ module Config
     present = label_fields.select { |f| project_config[f] }
 
     # Deprecation warnings for old fields
-    if project_config["labels_to_remove"]
-      $stderr.puts "[DEPRECATION] #{path}: 'labels_to_remove' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+    if project_config['labels_to_remove']
+      warn "[DEPRECATION] #{path}: 'labels_to_remove' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
     end
-    if project_config["label_to_add"]
-      $stderr.puts "[DEPRECATION] #{path}: 'label_to_add' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+    if project_config['label_to_add']
+      warn "[DEPRECATION] #{path}: 'label_to_add' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
     end
 
     # If any label workflow field is set, all must be set
@@ -218,12 +221,12 @@ module Config
 
     missing = label_fields - present
     unless missing.empty?
-      raise ConfigError, "#{path}: incomplete label workflow config. Missing: #{missing.join(", ")}. " \
-                         "All 5 fields are required: #{label_fields.join(", ")}."
+      raise ConfigError, "#{path}: incomplete label workflow config. Missing: #{missing.join(', ')}. " \
+                         "All 5 fields are required: #{label_fields.join(', ')}."
     end
 
     # Type validation
-    unless project_config["labels_todo"].is_a?(Array) && project_config["labels_todo"].any?
+    unless project_config['labels_todo'].is_a?(Array) && project_config['labels_todo'].any?
       raise ConfigError, "#{path}: 'labels_todo' must be a non-empty array."
     end
 

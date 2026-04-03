@@ -8,8 +8,10 @@ module ShellHelpers
     spawn_opts[:chdir] = chdir if chdir
     out, err, status = Open3.capture3(env, *cmd, **spawn_opts)
     unless status.success?
-      raise GitError, "Command failed: #{cmd.is_a?(Array) ? cmd.join(" ") : cmd}\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
+      raise GitError,
+            "Command failed: #{cmd.is_a?(Array) ? cmd.join(' ') : cmd}\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
     end
+
     out.strip
   end
 

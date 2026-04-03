@@ -16,44 +16,45 @@ module SkillsInjector
     stack = detect_stack(work_dir)
     logger.info("Detected stack: #{stack.inspect}", project: project_path)
 
-    skills_dir = File.join(work_dir, ".claude", "skills")
+    skills_dir = File.join(work_dir, '.claude', 'skills')
     migrated = migrate_legacy_skills(skills_dir)
     if migrated.any?
-      logger.info("Migrated #{migrated.size} legacy skill(s) to subdirectory format: #{migrated.join(", ")}", project: project_path)
+      logger.info("Migrated #{migrated.size} legacy skill(s) to subdirectory format: #{migrated.join(', ')}",
+                  project: project_path)
     end
 
     existing = existing_skills(skills_dir)
 
     if existing.any?
-      logger.info("Project already has #{existing.size} skill(s): #{existing.join(", ")}", project: project_path)
+      logger.info("Project already has #{existing.size} skill(s): #{existing.join(', ')}", project: project_path)
     end
 
     injected = []
 
-    unless existing.include?("code-conventions")
-      write_skill(skills_dir, "code-conventions", code_conventions_skill)
-      injected << "code-conventions"
+    unless existing.include?('code-conventions')
+      write_skill(skills_dir, 'code-conventions', code_conventions_skill)
+      injected << 'code-conventions'
     end
 
-    unless existing.include?("rails-conventions")
-      write_skill(skills_dir, "rails-conventions", rails_conventions_skill(stack))
-      injected << "rails-conventions"
+    unless existing.include?('rails-conventions')
+      write_skill(skills_dir, 'rails-conventions', rails_conventions_skill(stack))
+      injected << 'rails-conventions'
     end
 
-    unless existing.include?("test-patterns")
-      write_skill(skills_dir, "test-patterns", test_patterns_skill(stack))
-      injected << "test-patterns"
+    unless existing.include?('test-patterns')
+      write_skill(skills_dir, 'test-patterns', test_patterns_skill(stack))
+      injected << 'test-patterns'
     end
 
-    unless existing.include?("database-patterns")
-      write_skill(skills_dir, "database-patterns", database_patterns_skill(stack))
-      injected << "database-patterns"
+    unless existing.include?('database-patterns')
+      write_skill(skills_dir, 'database-patterns', database_patterns_skill(stack))
+      injected << 'database-patterns'
     end
 
     if injected.any?
-      logger.info("Injected #{injected.size} skill(s): #{injected.join(", ")}", project: project_path)
+      logger.info("Injected #{injected.size} skill(s): #{injected.join(', ')}", project: project_path)
     else
-      logger.info("No skills injection needed", project: project_path)
+      logger.info('No skills injection needed', project: project_path)
     end
 
     all_skills = (existing + injected).uniq.sort
@@ -63,9 +64,9 @@ module SkillsInjector
   # Builds a prompt instruction line listing skills to load.
   # Returns empty string if no skills.
   def skills_instruction(all_skills)
-    return "" if all_skills.nil? || all_skills.empty?
+    return '' if all_skills.nil? || all_skills.empty?
 
-    skill_list = all_skills.map { |s| "`#{s}`" }.join(", ")
+    skill_list = all_skills.map { |s| "`#{s}`" }.join(', ')
     "- Avant de commencer, charge les skills suivants : #{skill_list}."
   end
 
@@ -74,32 +75,32 @@ module SkillsInjector
   # ---------------------------------------------------------------------------
 
   def detect_stack(work_dir)
-    gemfile = read_file(work_dir, "Gemfile")
-    lockfile = read_file(work_dir, "Gemfile.lock")
-    database_yml = read_file(work_dir, "config/database.yml")
+    gemfile = read_file(work_dir, 'Gemfile')
+    lockfile = read_file(work_dir, 'Gemfile.lock')
+    database_yml = read_file(work_dir, 'config/database.yml')
 
     {
       ruby_version: detect_ruby_version(work_dir, gemfile),
       rails_version: detect_rails_version(gemfile, lockfile),
       databases: detect_databases(gemfile, database_yml),
       test_framework: detect_test_framework(work_dir, gemfile),
-      api_only: gemfile&.include?("api_only") || gemfile&.match?(/config\.api_only/),
-      has_sidekiq: gemfile&.include?("sidekiq") || false,
+      api_only: gemfile&.include?('api_only') || gemfile&.match?(/config\.api_only/),
+      has_sidekiq: gemfile&.include?('sidekiq') || false,
       sidekiq_mode: detect_sidekiq_mode(work_dir, gemfile),
-      has_devise: gemfile&.include?("devise") || false,
-      has_pundit: gemfile&.include?("pundit") || false,
-      has_cancancan: gemfile&.include?("cancancan") || false,
-      has_rubocop: gemfile&.include?("rubocop") || false
+      has_devise: gemfile&.include?('devise') || false,
+      has_pundit: gemfile&.include?('pundit') || false,
+      has_cancancan: gemfile&.include?('cancancan') || false,
+      has_rubocop: gemfile&.include?('rubocop') || false
     }
   end
 
   def detect_ruby_version(work_dir, gemfile)
     # .ruby-version takes precedence
-    rv = read_file(work_dir, ".ruby-version")&.strip
+    rv = read_file(work_dir, '.ruby-version')&.strip
     return rv if rv && !rv.empty?
 
     # .tool-versions (mise/asdf)
-    tv = read_file(work_dir, ".tool-versions")
+    tv = read_file(work_dir, '.tool-versions')
     if tv
       match = tv.match(/^ruby\s+(\S+)/)
       return match[1] if match
@@ -140,50 +141,50 @@ module SkillsInjector
     dbs = []
 
     if gemfile
-      dbs << "postgresql" if gemfile.match?(/gem\s+["']pg["']/)
-      dbs << "mysql" if gemfile.match?(/gem\s+["']mysql2["']/)
-      dbs << "sqlite" if gemfile.match?(/gem\s+["']sqlite3["']/)
+      dbs << 'postgresql' if gemfile.match?(/gem\s+["']pg["']/)
+      dbs << 'mysql' if gemfile.match?(/gem\s+["']mysql2["']/)
+      dbs << 'sqlite' if gemfile.match?(/gem\s+["']sqlite3["']/)
     end
 
     # database.yml can reveal DBs not obvious from Gemfile
     if database_yml && dbs.empty?
-      dbs << "postgresql" if database_yml.include?("postgresql")
-      dbs << "mysql" if database_yml.match?(/mysql2?(?:\s|$)/)
-      dbs << "sqlite" if database_yml.include?("sqlite")
+      dbs << 'postgresql' if database_yml.include?('postgresql')
+      dbs << 'mysql' if database_yml.match?(/mysql2?(?:\s|$)/)
+      dbs << 'sqlite' if database_yml.include?('sqlite')
     end
 
     dbs.uniq
   end
 
   def detect_sidekiq_mode(work_dir, gemfile)
-    return nil unless gemfile&.include?("sidekiq")
+    return nil unless gemfile&.include?('sidekiq')
 
-    has_workers = Dir.exist?(File.join(work_dir, "app", "workers"))
-    has_jobs = Dir.exist?(File.join(work_dir, "app", "jobs"))
+    has_workers = Dir.exist?(File.join(work_dir, 'app', 'workers'))
+    has_jobs = Dir.exist?(File.join(work_dir, 'app', 'jobs'))
 
     if has_workers && has_jobs
-      "both"
+      'both'
     elsif has_workers
-      "direct"    # perform_async, app/workers/
+      'direct'    # perform_async, app/workers/
     elsif has_jobs
-      "activejob" # perform_later, app/jobs/
+      'activejob' # perform_later, app/jobs/
     else
-      "activejob" # Rails default since 4.2
+      'activejob' # Rails default since 4.2
     end
   end
 
   def detect_test_framework(work_dir, gemfile)
-    has_rspec = gemfile&.match?(/gem\s+["']rspec/) || Dir.exist?(File.join(work_dir, "spec"))
-    has_minitest = Dir.exist?(File.join(work_dir, "test"))
+    has_rspec = gemfile&.match?(/gem\s+["']rspec/) || Dir.exist?(File.join(work_dir, 'spec'))
+    has_minitest = Dir.exist?(File.join(work_dir, 'test'))
 
     if has_rspec && has_minitest
-      "both"
+      'both'
     elsif has_rspec
-      "rspec"
+      'rspec'
     elsif has_minitest
-      "minitest"
+      'minitest'
     else
-      "unknown"
+      'unknown'
     end
   end
 
@@ -279,7 +280,7 @@ module SkillsInjector
   def rails_conventions_skill(stack)
     rails_v = stack[:rails_version]
     ruby_v = stack[:ruby_version]
-    major = rails_v ? rails_v.split(".").first.to_i : nil
+    major = rails_v ? rails_v.split('.').first.to_i : nil
 
     sections = []
 
@@ -297,7 +298,7 @@ module SkillsInjector
       versions = []
       versions << "Ruby #{ruby_v}" if ruby_v
       versions << "Rails #{rails_v}" if rails_v
-      sections << "This project uses **#{versions.join(" / ")}**."
+      sections << "This project uses **#{versions.join(' / ')}**."
     end
 
     # Version-specific guidance
@@ -402,7 +403,7 @@ module SkillsInjector
 
     if stack[:has_sidekiq]
       case stack[:sidekiq_mode]
-      when "direct"
+      when 'direct'
         sections << <<~SQ
           ## Background Jobs (Sidekiq direct)
 
@@ -411,7 +412,7 @@ module SkillsInjector
           - Enqueue with `MyWorker.perform_async(args)` or `perform_in` / `perform_at`.
           - Do NOT use `perform_later` — that is the ActiveJob API and is not used here.
         SQ
-      when "activejob"
+      when 'activejob'
         sections << <<~SQ
           ## Background Jobs (ActiveJob + Sidekiq)
 
@@ -420,7 +421,7 @@ module SkillsInjector
           - Enqueue with `MyJob.perform_later(args)` or `set(wait: 5.minutes).perform_later`.
           - Do NOT use `perform_async` — that is the direct Sidekiq API and is not used here.
         SQ
-      when "both"
+      when 'both'
         sections << <<~SQ
           ## Background Jobs (Sidekiq + ActiveJob)
 
@@ -458,7 +459,7 @@ module SkillsInjector
   def test_patterns_skill(stack)
     framework = stack[:test_framework]
     rails_v = stack[:rails_version]
-    major = rails_v ? rails_v.split(".").first.to_i : nil
+    major = rails_v ? rails_v.split('.').first.to_i : nil
 
     sections = []
 
@@ -471,7 +472,7 @@ module SkillsInjector
       # Test Patterns
     HEADER
 
-    if framework == "rspec" || framework == "both"
+    if %w[rspec both].include?(framework)
       sections << <<~RSPEC
         ## RSpec
 
@@ -501,7 +502,7 @@ module SkillsInjector
       RSPEC
     end
 
-    if framework == "minitest" || framework == "both"
+    if %w[minitest both].include?(framework)
       sections << <<~MINI
         ## Minitest
 
@@ -560,7 +561,7 @@ module SkillsInjector
   def database_patterns_skill(stack)
     dbs = stack[:databases]
     rails_v = stack[:rails_version]
-    major = rails_v ? rails_v.split(".").first.to_i : nil
+    major = rails_v ? rails_v.split('.').first.to_i : nil
 
     sections = []
 
@@ -577,7 +578,7 @@ module SkillsInjector
     if major
       migration_version = if major >= 8 then "[#{major}.0]"
                           elsif major >= 5 then "[#{major}.0]"
-                          else "" # Rails 4 has no version suffix
+                          else '' # Rails 4 has no version suffix
                           end
 
       sections << <<~MIG
@@ -601,7 +602,7 @@ module SkillsInjector
     end
 
     # DB-specific
-    if dbs.include?("postgresql")
+    if dbs.include?('postgresql')
       sections << <<~PG
         ## PostgreSQL
 
@@ -615,7 +616,7 @@ module SkillsInjector
       PG
     end
 
-    if dbs.include?("mysql")
+    if dbs.include?('mysql')
       sections << <<~MY
         ## MySQL
 
@@ -658,7 +659,7 @@ module SkillsInjector
   def existing_skills(skills_dir)
     return [] unless Dir.exist?(skills_dir)
 
-    Dir.glob(File.join(skills_dir, "*", "SKILL.md")).map do |f|
+    Dir.glob(File.join(skills_dir, '*', 'SKILL.md')).map do |f|
       File.basename(File.dirname(f))
     end
   end
@@ -668,10 +669,10 @@ module SkillsInjector
     return [] unless Dir.exist?(skills_dir)
 
     migrated = []
-    Dir.glob(File.join(skills_dir, "*.md")).each do |legacy_path|
-      skill_name = File.basename(legacy_path, ".md")
+    Dir.glob(File.join(skills_dir, '*.md')).each do |legacy_path|
+      skill_name = File.basename(legacy_path, '.md')
       skill_dir = File.join(skills_dir, skill_name)
-      new_path = File.join(skill_dir, "SKILL.md")
+      new_path = File.join(skill_dir, 'SKILL.md')
 
       next if File.exist?(new_path) # already migrated
 
@@ -685,6 +686,6 @@ module SkillsInjector
   def write_skill(skills_dir, skill_name, content)
     skill_dir = File.join(skills_dir, skill_name)
     FileUtils.mkdir_p(skill_dir)
-    File.write(File.join(skill_dir, "SKILL.md"), content)
+    File.write(File.join(skill_dir, 'SKILL.md'), content)
   end
 end

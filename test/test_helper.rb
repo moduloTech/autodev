@@ -1,26 +1,26 @@
 # frozen_string_literal: true
 
-require "minitest/autorun"
-require "fileutils"
-require "tmpdir"
-require "json"
-require "yaml"
-require "sequel"
-require "aasm"
-require "i18n"
+require 'minitest/autorun'
+require 'fileutils'
+require 'tmpdir'
+require 'json'
+require 'yaml'
+require 'sequel'
+require 'aasm'
+require 'i18n'
 
 I18n.available_locales = [:en]
 I18n.default_locale = :en
 
-$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+$LOAD_PATH.unshift File.expand_path('../lib', __dir__)
 
-require "autodev/errors"
-require "autodev/logger"
-require "autodev/config"
-require "autodev/language_detector"
-require "autodev/locales"
-require "autodev/shell_helpers"
-require "autodev/database"
+require 'autodev/errors'
+require 'autodev/logger'
+require 'autodev/config'
+require 'autodev/language_detector'
+require 'autodev/locales'
+require 'autodev/shell_helpers'
+require 'autodev/database'
 
 # Minimal Pastel stand-in that returns messages unchanged.
 class FakePastel
@@ -37,7 +37,7 @@ module DatabaseTestHelper
 
   def setup_database
     unless @@db_initialized
-      Database.connect("sqlite://:memory:")
+      Database.connect('sqlite://:memory:')
       Database.build_model!
       @@db_initialized = true
     end
@@ -47,21 +47,42 @@ module DatabaseTestHelper
 
   def create_issue(overrides = {})
     @@iid_counter += 1
-    defaults = { project_path: "group/project", issue_iid: @@iid_counter, status: "pending" }
+    defaults = { project_path: 'group/project', issue_iid: @@iid_counter, status: 'pending' }
     Issue.create(defaults.merge(overrides))
   end
 
   # Advance an issue through the happy path up to a target state.
   def advance_to(issue, target_state)
     transitions = {
-      "cloning"             => -> { issue.start_processing! },
-      "checking_spec"       => -> { advance_to(issue, "cloning"); issue.clone_complete! },
-      "implementing"        => -> { advance_to(issue, "checking_spec"); issue.spec_clear! },
-      "committing"          => -> { advance_to(issue, "implementing"); issue.impl_complete! },
-      "pushing"             => -> { advance_to(issue, "committing"); issue.commit_complete! },
-      "creating_mr"         => -> { advance_to(issue, "pushing"); issue.push_complete! },
-      "reviewing"           => -> { advance_to(issue, "creating_mr"); issue.mr_created! },
-      "checking_pipeline"   => -> { advance_to(issue, "reviewing"); issue.review_complete! },
+      'cloning' => -> { issue.start_processing! },
+      'checking_spec' => lambda {
+        advance_to(issue, 'cloning')
+        issue.clone_complete!
+      },
+      'implementing' => lambda {
+        advance_to(issue, 'checking_spec')
+        issue.spec_clear!
+      },
+      'committing' => lambda {
+        advance_to(issue, 'implementing')
+        issue.impl_complete!
+      },
+      'pushing' => lambda {
+        advance_to(issue, 'committing')
+        issue.commit_complete!
+      },
+      'creating_mr' => lambda {
+        advance_to(issue, 'pushing')
+        issue.push_complete!
+      },
+      'reviewing' => lambda {
+        advance_to(issue, 'creating_mr')
+        issue.mr_created!
+      },
+      'checking_pipeline' => lambda {
+        advance_to(issue, 'reviewing')
+        issue.review_complete!
+      }
     }
     transitions[target_state]&.call
   end

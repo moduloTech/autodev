@@ -10,12 +10,12 @@ class PollRouter
     @logger         = logger
     @token          = token
     @pool           = pool
-    @project_path   = project_config["path"]
+    @project_path   = project_config['path']
     @use_labels     = Config.label_workflow?(project_config)
-    @labels_todo    = project_config["labels_todo"] || []
-    @label_mr       = project_config["label_mr"]
-    @label_done     = project_config["label_done"]
-    @label_blocked  = project_config["label_blocked"]
+    @labels_todo    = project_config['labels_todo'] || []
+    @label_mr       = project_config['label_mr']
+    @label_done     = project_config['label_done']
+    @label_blocked  = project_config['label_blocked']
   end
 
   # Route a single GitLab issue. Returns :next (skip to next issue) or :process (continue to legacy path).
@@ -37,12 +37,12 @@ class PollRouter
 
     return :next if has_blocked
 
-    if has_todo && existing&.status == "over"
+    if has_todo && existing&.status == 'over'
       handle_resume_todo(gl_issue, existing)
       return :next
     end
 
-    if has_mr && existing&.status == "over" && existing.mr_iid
+    if has_mr && existing&.status == 'over' && existing.mr_iid
       handle_resume_mr(gl_issue, existing, client)
       return :next
     end
@@ -54,24 +54,26 @@ class PollRouter
 
   private
 
-  def handle_done(gl_issue, existing, client)
-    unless existing.status == "over"
+  def handle_done(gl_issue, existing, _client)
+    unless existing.status == 'over'
       @logger.info("Issue ##{gl_issue.iid}: label_done detected, transitioning to over", project: @project_path)
     end
-    worker_client = GitlabHelpers.build_gitlab_client(@config["gitlab_url"], @token)
-    helper = MrFixer.new(client: worker_client, config: @config, project_config: @project_config, logger: @logger, token: @token)
+    worker_client = GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @token)
+    helper = MrFixer.new(client: worker_client, config: @config, project_config: @project_config, logger: @logger,
+                         token: @token)
     helper.cleanup_labels(gl_issue.iid)
-    existing.update(status: "over", finished_at: Sequel.lit("datetime('now')")) unless existing.status == "over"
+    existing.update(status: 'over', finished_at: Sequel.lit("datetime('now')")) unless existing.status == 'over'
   end
 
   def handle_resume_todo(gl_issue, existing)
-    @logger.info("Issue ##{gl_issue.iid}: labels_todo detected on over issue, resuming full processing", project: @project_path)
-    return if @config["dry_run"]
+    @logger.info("Issue ##{gl_issue.iid}: labels_todo detected on over issue, resuming full processing",
+                 project: @project_path)
+    return if @config['dry_run']
 
     existing.resume_todo! # over → pending
     existing.update(fix_round: 0, error_message: nil, finished_at: nil, started_at: nil)
 
-    worker_client = GitlabHelpers.build_gitlab_client(@config["gitlab_url"], @token)
+    worker_client = GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @token)
     processor = IssueProcessor.new(
       client: worker_client, config: @config, project_config: @project_config,
       logger: @logger, token: @token
@@ -84,18 +86,20 @@ class PollRouter
     mr_discussions = client.merge_request_discussions(@project_path, existing.mr_iid)
     has_unresolved = mr_discussions.any? do |d|
       next false unless d.notes&.any?
+
       resolvable = d.notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
       resolvable.any? && !resolvable.all? { |n| n.respond_to?(:resolved) && n.resolved }
     end
 
     if has_unresolved
-      @logger.info("Issue ##{gl_issue.iid}: label_mr with unresolved discussions, resuming MR fix", project: @project_path)
-      return if @config["dry_run"]
+      @logger.info("Issue ##{gl_issue.iid}: label_mr with unresolved discussions, resuming MR fix",
+                   project: @project_path)
+      return if @config['dry_run']
 
       existing.resume_mr! # over → fixing_discussions
       existing.update(fix_round: 0, pipeline_retrigger_count: 0)
 
-      worker_client = GitlabHelpers.build_gitlab_client(@config["gitlab_url"], @token)
+      worker_client = GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @token)
       fixer = MrFixer.new(
         client: worker_client, config: @config, project_config: @project_config,
         logger: @logger, token: @token

@@ -11,7 +11,7 @@ CLEAN_ENV = %w[
   BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_BIN_PATH BUNDLE_APP_CONFIG
   BUNDLE_ORIG_GEMFILE BUNDLER_VERSION BUNDLER_ORIG_BUNDLER_VERSION
   BUNDLER_SETUP RUBYOPT RUBYLIB
-].each_with_object({}) { |var, h| h[var] = nil }.freeze
+].to_h { |var| [var, nil] }.freeze
 
 module DangerClaudeRunner
   include ShellHelpers
@@ -24,24 +24,24 @@ module DangerClaudeRunner
     @project_config = project_config
     @logger         = logger
     @token          = token
-    @project_path   = project_config["path"]
-    @gitlab_url     = config["gitlab_url"]
-    @dc_stdout      = +""
-    @dc_stderr      = +""
+    @project_path   = project_config['path']
+    @gitlab_url     = config['gitlab_url']
+    @dc_stdout      = +''
+    @dc_stderr      = +''
   end
 
-  RATE_LIMIT_PATTERN = /you've hit your limit|rate limit|usage limit/i
-  RATE_LIMIT_RESET_PATTERN = /resets?\s+(\d{1,2})(am|pm)\s*\(UTC\)/i
+  RATE_LIMIT_PATTERN = /you've hit your limit|rate limit|usage limit/i.freeze
+  RATE_LIMIT_RESET_PATTERN = /resets?\s+(\d{1,2})(am|pm)\s*\(UTC\)/i.freeze
 
-  def danger_claude_prompt(work_dir, prompt, label: "-p", agent: nil)
-    args = dc_global_args + ["-p", prompt]
+  def danger_claude_prompt(work_dir, prompt, label: '-p', agent: nil)
+    args = dc_global_args + ['-p', prompt]
     if agent
-      args.unshift("-a", agent)
+      args.unshift('-a', agent)
       @logger.debug("danger-claude -a #{agent} -p prompt:\n#{prompt}", project: @project_path)
     else
       @logger.debug("danger-claude -p prompt:\n#{prompt}", project: @project_path)
     end
-    out, err, ok = run_with_timeout("danger-claude", args, chdir: work_dir, label: label)
+    out, err, ok = run_with_timeout('danger-claude', args, chdir: work_dir, label: label)
     unless ok
       check_rate_limit!(out, err)
       raise ImplementationError, "danger-claude -p failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
@@ -50,8 +50,8 @@ module DangerClaudeRunner
     out
   end
 
-  def danger_claude_commit(work_dir, label: "-c")
-    out, err, ok = run_with_timeout("danger-claude", dc_global_args + ["-c"], chdir: work_dir, label: label)
+  def danger_claude_commit(work_dir, label: '-c')
+    out, err, ok = run_with_timeout('danger-claude', dc_global_args + ['-c'], chdir: work_dir, label: label)
     unless ok
       check_rate_limit!(out, err)
       raise ImplementationError, "danger-claude -c failed:\nstdout: #{out[0, 500]}\nstderr: #{err[0, 500]}"
@@ -64,7 +64,9 @@ module DangerClaudeRunner
     return unless combined.match?(RATE_LIMIT_PATTERN)
 
     reset_time = parse_reset_time(combined)
-    raise RateLimitError.new("API rate limit reached#{reset_time ? " (resets #{reset_time.strftime("%H:%M UTC")})" : ""}", reset_time: reset_time)
+    raise RateLimitError.new(
+      "API rate limit reached#{" (resets #{reset_time.strftime('%H:%M UTC')})" if reset_time}", reset_time: reset_time
+    )
   end
 
   def parse_reset_time(text)
@@ -73,8 +75,8 @@ module DangerClaudeRunner
 
     hour = match[1].to_i
     ampm = match[2].downcase
-    hour += 12 if ampm == "pm" && hour != 12
-    hour = 0 if ampm == "am" && hour == 12
+    hour += 12 if ampm == 'pm' && hour != 12
+    hour = 0 if ampm == 'am' && hour == 12
 
     now = Time.now.utc
     reset = Time.utc(now.year, now.month, now.day, hour, 0, 0)
@@ -85,31 +87,31 @@ module DangerClaudeRunner
   # Build global danger-claude args from config (project overrides global).
   def dc_global_args
     args = []
-    model = @project_config["model"] || @config["model"]
-    effort = @project_config["effort"] || @config["effort"]
-    args.push("-m", model) if model
-    args.push("-e", effort) if effort
+    model = @project_config['model'] || @config['model']
+    effort = @project_config['effort'] || @config['effort']
+    args.push('-m', model) if model
+    args.push('-e', effort) if effort
     args
   end
 
   def clone_and_checkout(work_dir, branch)
-    FileUtils.rm_rf(work_dir) if Dir.exist?(work_dir)
+    FileUtils.rm_rf(work_dir)
 
     uri = URI.parse(@gitlab_url)
     host_port = uri.port && ![80, 443].include?(uri.port) ? "#{uri.host}:#{uri.port}" : uri.host
     clone_url = "#{uri.scheme}://oauth2:#{@token}@#{host_port}/#{@project_path}.git"
 
-    clone_depth = @project_config["clone_depth"] || 1
-    cmd = ["git", "clone"]
-    cmd += ["--depth", clone_depth.to_s] if clone_depth.positive?
-    cmd += ["--branch", branch]
+    clone_depth = @project_config['clone_depth'] || 1
+    cmd = %w[git clone]
+    cmd += ['--depth', clone_depth.to_s] if clone_depth.positive?
+    cmd += ['--branch', branch]
     cmd += [clone_url, work_dir]
 
     run_cmd(cmd)
   end
 
   def run_with_timeout(cmd, args, chdir:, label: nil)
-    timeout = (@project_config["dc_timeout"] || @config["dc_timeout"] || 1800).to_i
+    timeout = (@project_config['dc_timeout'] || @config['dc_timeout'] || 1800).to_i
     tag = label ? "#{cmd} #{label}" : cmd
 
     stdout_r, stdout_w = IO.pipe
@@ -126,10 +128,18 @@ module DangerClaudeRunner
     loop do
       remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
       if remaining <= 0
-        Process.kill("TERM", -pid)
+        Process.kill('TERM', -pid)
         sleep 5
-        Process.kill("KILL", -pid) rescue nil
-        Process.wait(pid) rescue nil
+        begin
+          Process.kill('KILL', -pid)
+        rescue StandardError
+          nil
+        end
+        begin
+          Process.wait(pid)
+        rescue StandardError
+          nil
+        end
         out = out_thread.value
         err = err_thread.value
         @dc_stdout << "=== #{tag} (TIMEOUT after #{timeout}s) ===\n#{out}\n"
@@ -143,7 +153,8 @@ module DangerClaudeRunner
         err = err_thread.value
         @dc_stdout << "=== #{tag} ===\n#{out}\n"
         @dc_stderr << "=== #{tag} ===\n#{err}\n"
-        raise Interrupt, "#{tag} interrupted by signal" if status.signaled? && status.termsig == Signal.list["INT"]
+        raise Interrupt, "#{tag} interrupted by signal" if status.signaled? && status.termsig == Signal.list['INT']
+
         return [out, err, status.success?]
       end
 
@@ -183,7 +194,7 @@ module DangerClaudeRunner
 
   def notify_localized(iid, key, **vars)
     issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
-    locale = (issue_record&.locale || "fr").to_sym
+    locale = (issue_record&.locale || 'fr').to_sym
     message = Locales.t(key, locale: locale, tag: autodev_tag, **vars)
     notify_issue(iid, message)
   end
@@ -208,37 +219,37 @@ module DangerClaudeRunner
   def set_label_doing(iid)
     return unless label_workflow?
 
-    remove = @project_config["labels_todo"] + [@project_config["label_mr"], @project_config["label_blocked"]]
-    manage_labels(iid, remove: remove, add: @project_config["label_doing"])
+    remove = @project_config['labels_todo'] + [@project_config['label_mr'], @project_config['label_blocked']]
+    manage_labels(iid, remove: remove, add: @project_config['label_doing'])
   end
 
   def set_label_mr(iid)
     return unless label_workflow?
 
-    remove = @project_config["labels_todo"] + [@project_config["label_doing"], @project_config["label_blocked"]]
-    manage_labels(iid, remove: remove, add: @project_config["label_mr"])
+    remove = @project_config['labels_todo'] + [@project_config['label_doing'], @project_config['label_blocked']]
+    manage_labels(iid, remove: remove, add: @project_config['label_mr'])
   end
 
   def set_label_todo(iid)
     return unless label_workflow?
 
-    remove = [@project_config["label_doing"], @project_config["label_mr"], @project_config["label_blocked"]]
-    manage_labels(iid, remove: remove, add: @project_config["labels_todo"].first)
+    remove = [@project_config['label_doing'], @project_config['label_mr'], @project_config['label_blocked']]
+    manage_labels(iid, remove: remove, add: @project_config['labels_todo'].first)
   end
 
   def set_label_blocked(iid)
     return unless label_workflow?
 
-    remove = @project_config["labels_todo"] + [@project_config["label_doing"], @project_config["label_mr"]]
-    manage_labels(iid, remove: remove, add: @project_config["label_blocked"])
+    remove = @project_config['labels_todo'] + [@project_config['label_doing'], @project_config['label_mr']]
+    manage_labels(iid, remove: remove, add: @project_config['label_blocked'])
   end
 
   def cleanup_labels(iid)
     return unless label_workflow?
 
-    all_labels = @project_config["labels_todo"] +
-      [@project_config["label_doing"], @project_config["label_mr"],
-       @project_config["label_done"], @project_config["label_blocked"]]
+    all_labels = @project_config['labels_todo'] +
+                 [@project_config['label_doing'], @project_config['label_mr'],
+                  @project_config['label_done'], @project_config['label_blocked']]
     manage_labels(iid, remove: all_labels.compact, add: nil)
   end
 
@@ -247,7 +258,7 @@ module DangerClaudeRunner
     current = gi.labels || []
     new_labels = current - remove.compact
     new_labels << add if add && !new_labels.include?(add)
-    @client.edit_issue(@project_path, iid, labels: new_labels.join(","))
+    @client.edit_issue(@project_path, iid, labels: new_labels.join(','))
     removed = current & remove.compact
     log "Labels updated on ##{iid}: removed #{removed}, added #{add}" if removed.any? || add
   rescue Gitlab::Error::ResponseError => e

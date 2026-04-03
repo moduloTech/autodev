@@ -18,7 +18,7 @@ class MrFixer
     log "Checking MR !#{mr_iid} for unresolved discussions (round #{fix_round + 1})..."
 
     # Verify the issue still has the trigger label
-    trigger_label = @config["trigger_label"]
+    trigger_label = @config['trigger_label']
     begin
       gi = @client.issue(@project_path, iid)
       unless gi.labels&.include?(trigger_label)
@@ -42,7 +42,7 @@ class MrFixer
 
     log "Found #{discussions.size} unresolved discussion(s) on MR !#{mr_iid}"
 
-    work_dir = "/tmp/autodev_mrfix_#{@project_path.gsub("/", "_")}_#{iid}"
+    work_dir = "/tmp/autodev_mrfix_#{@project_path.gsub('/', '_')}_#{iid}"
     begin
       clone_and_checkout(work_dir, branch)
       skills_result = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
@@ -52,16 +52,16 @@ class MrFixer
 
       # Fetch full context once (issue + all MR discussions)
       full_context = GitlabHelpers.fetch_full_context(@client, @project_path, iid,
-                       mr_iid: mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
+                                                      mr_iid: mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
 
       # Use mr-fixer agent if available in the project
-      agent = detect_agent(work_dir, "mr-fixer")
+      agent = detect_agent(work_dir, 'mr-fixer')
 
       discussions.each_with_index do |discussion, idx|
         thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: target_branch)
         log "Fixing discussion #{idx + 1}/#{discussions.size}: #{discussion[:title]}"
 
-        extra = @project_config["extra_prompt"]
+        extra = @project_config['extra_prompt']
         with_context_file(work_dir, branch, full_context) do |context_filename|
           prompt = <<~PROMPT
             Tu dois corriger le code en reponse a un commentaire de review sur une Merge Request.
@@ -80,7 +80,7 @@ class MrFixer
             - Respecte les conventions du projet (voir CLAUDE.md si present).
             - Ne modifie que ce qui est necessaire pour repondre au commentaire.
             - Ne touche pas aux autres parties du code.
-            #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+            #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
           PROMPT
 
           danger_claude_prompt(work_dir, prompt, agent: agent)
@@ -90,9 +90,9 @@ class MrFixer
       end
 
       # Verify there are new commits
-      _out, _err, ok = run_cmd_status(["git", "log", "origin/#{branch}..HEAD", "--oneline"], chdir: work_dir)
+      _out, _err, ok = run_cmd_status(['git', 'log', "origin/#{branch}..HEAD", '--oneline'], chdir: work_dir)
       unless ok
-        log "No new commits after fixing, skipping push"
+        log 'No new commits after fixing, skipping push'
         issue.update(fix_round: fix_round + 1, pipeline_retrigger_count: 0)
         issue.discussions_fixed!
         return
@@ -100,10 +100,10 @@ class MrFixer
 
       # Push
       log "Pushing fixes to #{branch}..."
-      _out, _err, push_ok = run_cmd_status(["git", "push", "origin", branch], chdir: work_dir)
+      _out, _err, push_ok = run_cmd_status(['git', 'push', 'origin', branch], chdir: work_dir)
       unless push_ok
-        log "Push failed, retrying with --force-with-lease..."
-        run_cmd(["git", "push", "--force-with-lease", "origin", branch], chdir: work_dir)
+        log 'Push failed, retrying with --force-with-lease...'
+        run_cmd(['git', 'push', '--force-with-lease', 'origin', branch], chdir: work_dir)
       end
 
       issue.update(fix_round: fix_round + 1, pipeline_retrigger_count: 0,
@@ -111,27 +111,25 @@ class MrFixer
       issue.discussions_fixed! # fixing_discussions → checking_pipeline
       notify_localized(iid, :mr_fix_success, count: discussions.size, mr_url: issue.mr_url, round: fix_round + 1)
       log "MR !#{mr_iid}: fixed #{discussions.size} discussion(s) (round #{fix_round + 1})"
-
     rescue RateLimitError => e
       wait = e.wait_seconds
       log_error "MR !#{mr_iid}: rate limit hit, parking for #{wait}s"
       begin
         issue.mark_failed!
       rescue AASM::InvalidTransition
-        issue.update(status: "error")
+        issue.update(status: 'error')
       end
       Issue.where(id: issue.id).update(
         error_message: e.message,
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
         next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')")
       )
-
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
       begin
         issue.mark_failed!
       rescue AASM::InvalidTransition
-        issue.update(status: "error")
+        issue.update(status: 'error')
       end
       issue.update(error_message: "MR fix error: #{e.class}: #{e.message}\n  #{bt}",
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
@@ -159,6 +157,7 @@ class MrFixer
   def resolved?(discussion)
     resolvable_notes = discussion.notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
     return true if resolvable_notes.empty?
+
     resolvable_notes.all? { |n| n.respond_to?(:resolved) && n.resolved }
   end
 
@@ -166,11 +165,11 @@ class MrFixer
   # Priority: config override > project agent > injected default.
   def detect_agent(work_dir, default_name)
     # Config override takes precedence
-    config_agent = @project_config["mr_fixer_agent"]
+    config_agent = @project_config['mr_fixer_agent']
     return config_agent if config_agent
 
     # Check if the agent file exists in the cloned repo
-    agent_path = File.join(work_dir, ".claude", "agents", "#{default_name}.md")
+    agent_path = File.join(work_dir, '.claude', 'agents', "#{default_name}.md")
     if File.exist?(agent_path)
       log "Found agent '#{default_name}' in project"
       return default_name
@@ -213,18 +212,18 @@ class MrFixer
     Write concise notes. Focus on what will help you fix faster next time.
   AGENT
 
-  def inject_default_mr_fixer_agent(work_dir, agent_path)
-    log "Injecting default mr-fixer agent"
+  def inject_default_mr_fixer_agent(_work_dir, agent_path)
+    log 'Injecting default mr-fixer agent'
     FileUtils.mkdir_p(File.dirname(agent_path))
     File.write(agent_path, DEFAULT_MR_FIXER_AGENT)
   end
 
   def default_branch(work_dir)
-    out, _err, ok = run_cmd_status(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short"], chdir: work_dir)
+    out, _err, ok = run_cmd_status(['git', 'symbolic-ref', 'refs/remotes/origin/HEAD', '--short'], chdir: work_dir)
     if ok && !out.strip.empty?
-      out.strip.sub("origin/", "")
+      out.strip.sub('origin/', '')
     else
-      "main"
+      'main'
     end
   end
 
@@ -233,7 +232,7 @@ class MrFixer
     diff_shown = false
 
     discussion[:notes].each do |note|
-      author = note.author&.name || "Unknown"
+      author = note.author&.name || 'Unknown'
       lines << "### #{author} (#{note.created_at})"
 
       if note.respond_to?(:position) && note.position
@@ -252,20 +251,20 @@ class MrFixer
           if !diff_shown && work_dir && target_branch
             hunk = extract_diff_hunk(work_dir, target_branch, file_path, new_line || old_line)
             if hunk
-              lines << ""
-              lines << "#### Diff"
-              lines << "```diff"
+              lines << ''
+              lines << '#### Diff'
+              lines << '```diff'
               lines << hunk
-              lines << "```"
+              lines << '```'
               diff_shown = true
             end
           end
         end
       end
 
-      lines << ""
+      lines << ''
       lines << note.body.to_s
-      lines << ""
+      lines << ''
     end
     lines.join("\n")
   end
@@ -273,7 +272,7 @@ class MrFixer
   # Extract the diff hunk containing the given line for a specific file.
   def extract_diff_hunk(work_dir, target_branch, file_path, target_line)
     diff_output, _err, ok = run_cmd_status(
-      ["git", "diff", "origin/#{target_branch}..HEAD", "--", file_path],
+      ['git', 'diff', "origin/#{target_branch}..HEAD", '--', file_path],
       chdir: work_dir
     )
     return nil unless ok && diff_output && !diff_output.strip.empty?
@@ -285,7 +284,7 @@ class MrFixer
     target_line = target_line.to_i
 
     hunks.each do |hunk|
-      next unless hunk.start_with?("@@")
+      next unless hunk.start_with?('@@')
 
       # Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
       match = hunk.match(/^@@ .+\+(\d+)(?:,(\d+))? @@/)
@@ -294,9 +293,7 @@ class MrFixer
       hunk_start = match[1].to_i
       hunk_count = (match[2] || 1).to_i
 
-      if target_line >= hunk_start && target_line <= hunk_start + hunk_count
-        return hunk.strip
-      end
+      return hunk.strip if target_line.between?(hunk_start, hunk_start + hunk_count)
     end
 
     # Fallback: return the full diff if no matching hunk found

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require "set"
+require 'set'
 
 class WorkerPool
-  ASSIGNMENTS_FILE = File.expand_path("~/.autodev/workers.json")
+  ASSIGNMENTS_FILE = File.expand_path('~/.autodev/workers.json')
 
   def initialize(size:, logger:)
     @size    = size
@@ -83,7 +83,7 @@ class WorkerPool
   end
 
   def cleanup
-    File.delete(ASSIGNMENTS_FILE) if File.exist?(ASSIGNMENTS_FILE)
+    FileUtils.rm_f(ASSIGNMENTS_FILE)
   rescue Errno::ENOENT
     # ignore
   end

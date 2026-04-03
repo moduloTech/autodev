@@ -24,36 +24,35 @@
 #   GITLAB_API_TOKEN         Personal Access Token with api scope
 # =============================================================================
 
-require "bundler/inline"
+require 'bundler/inline'
 
 gemfile(true) do
-  source "https://rubygems.org"
-  gem "gitlab",  "~> 5.0"
-  gem "sequel",  "~> 5.0"
-  gem "sqlite3", "~> 2.0"
-  gem "pastel",  "~> 0.8"
-  gem "i18n",    "~> 1.0"
-  gem "aasm",    "~> 5.5"
-  gem "logger"
+  source 'https://rubygems.org'
+  gem 'gitlab',  '~> 5.0'
+  gem 'sequel',  '~> 5.0'
+  gem 'sqlite3', '~> 2.0'
+  gem 'pastel',  '~> 0.8'
+  gem 'i18n',    '~> 1.0'
+  gem 'aasm',    '~> 5.5'
+  gem 'logger'
 end
 
-require "fileutils"
-require "json"
-require "open3"
-require "optparse"
-require "shellwords"
-require "net/http"
-require "uri"
-require "yaml"
-require "thread"
-require "i18n"
-require "securerandom"
+require 'fileutils'
+require 'json'
+require 'open3'
+require 'optparse'
+require 'shellwords'
+require 'net/http'
+require 'uri'
+require 'yaml'
+require 'i18n'
+require 'securerandom'
 
 # Configure I18n transliteration (no locale files needed, just the transliterator)
 I18n.available_locales = [:en]
 I18n.default_locale = :en
 
-require_relative "../lib/autodev"
+require_relative '../lib/autodev'
 
 # == Argument parsing ==========================================================
 
@@ -61,61 +60,62 @@ def parse_args(argv)
   cli_overrides = {}
 
   parser = OptionParser.new do |opts|
-    opts.banner = "Usage: autodev [options]"
+    opts.banner = 'Usage: autodev [options]'
 
-    opts.on("-c", "--config PATH", "Config file (default: ~/.autodev/config.yml)") do |v|
-      cli_overrides["config_path"] = v
+    opts.on('-c', '--config PATH', 'Config file (default: ~/.autodev/config.yml)') do |v|
+      cli_overrides['config_path'] = v
     end
 
-    opts.on("-d", "--database-url URL", "SQLite database URL") do |v|
-      cli_overrides["database_url"] = v
+    opts.on('-d', '--database-url URL', 'SQLite database URL') do |v|
+      cli_overrides['database_url'] = v
     end
 
-    opts.on("-t", "--token TOKEN", "GitLab API token") do |v|
-      cli_overrides["gitlab_token"] = v
+    opts.on('-t', '--token TOKEN', 'GitLab API token') do |v|
+      cli_overrides['gitlab_token'] = v
     end
 
-    opts.on("-n", "--max-workers N", Integer, "Concurrent workers (default: 3)") do |v|
-      cli_overrides["max_workers"] = v
+    opts.on('-n', '--max-workers N', Integer, 'Concurrent workers (default: 3)') do |v|
+      cli_overrides['max_workers'] = v
     end
 
-    opts.on("-i", "--interval SECONDS", Integer, "Poll interval in seconds") do |v|
-      cli_overrides["poll_interval"] = v
+    opts.on('-i', '--interval SECONDS', Integer, 'Poll interval in seconds') do |v|
+      cli_overrides['poll_interval'] = v
     end
 
-    opts.on("--once", "Single poll cycle then exit") do
-      cli_overrides["once"] = true
+    opts.on('--once', 'Single poll cycle then exit') do
+      cli_overrides['once'] = true
     end
 
-    opts.on("--dry-run", "Poll and show what would be processed, no side effects") do
-      cli_overrides["dry_run"] = true
-      cli_overrides["once"] = true
+    opts.on('--dry-run', 'Poll and show what would be processed, no side effects') do
+      cli_overrides['dry_run'] = true
+      cli_overrides['once'] = true
     end
 
-    opts.on("--status", "Show dashboard of active issues and exit") do
-      cli_overrides["status"] = true
+    opts.on('--status', 'Show dashboard of active issues and exit') do
+      cli_overrides['status'] = true
     end
 
-    opts.on("--all", "Include completed (over) issues in --status") do
-      cli_overrides["status_all"] = true
+    opts.on('--all', 'Include completed (over) issues in --status') do
+      cli_overrides['status_all'] = true
     end
 
-    opts.on("--reset [IID]", Integer, "Reset error issues to pending (optionally by issue IID)") do |iid|
-      cli_overrides["reset"] = true
-      cli_overrides["reset_iid"] = iid
+    opts.on('--reset [IID]', Integer, 'Reset error issues to pending (optionally by issue IID)') do |iid|
+      cli_overrides['reset'] = true
+      cli_overrides['reset_iid'] = iid
     end
 
-    opts.on("--errors [IID]", Integer, "Show details for errored and blocked issues (optionally for a specific issue IID)") do |iid|
-      cli_overrides["errors"] = true
-      cli_overrides["errors_iid"] = iid
+    opts.on('--errors [IID]', Integer,
+            'Show details for errored and blocked issues (optionally for a specific issue IID)') do |iid|
+      cli_overrides['errors'] = true
+      cli_overrides['errors_iid'] = iid
     end
 
-    opts.on("-v", "--version", "Show version and exit") do
+    opts.on('-v', '--version', 'Show version and exit') do
       puts "autodev #{Autodev::VERSION}"
       exit 0
     end
 
-    opts.on("-h", "--help", "Show this help") do
+    opts.on('-h', '--help', 'Show this help') do
       puts opts
       exit 0
     end
@@ -128,22 +128,22 @@ end
 # == Dashboard =================================================================
 
 STATUS_COLORS = {
-  "pending"              => :yellow,
-  "cloning"              => :cyan,
-  "checking_spec"        => :cyan,
-  "implementing"         => :cyan,
-  "committing"           => :cyan,
-  "pushing"              => :cyan,
-  "creating_mr"          => :cyan,
-  "reviewing"            => :cyan,
-  "checking_pipeline"    => :cyan,
-  "fixing_discussions"       => :magenta,
-  "fixing_pipeline"          => :magenta,
-  "running_post_completion"  => :cyan,
-  "needs_clarification"      => :yellow,
-  "over"                 => :green,
-  "blocked"              => :red,
-  "error"                => :red,
+  'pending' => :yellow,
+  'cloning' => :cyan,
+  'checking_spec' => :cyan,
+  'implementing' => :cyan,
+  'committing' => :cyan,
+  'pushing' => :cyan,
+  'creating_mr' => :cyan,
+  'reviewing' => :cyan,
+  'checking_pipeline' => :cyan,
+  'fixing_discussions' => :magenta,
+  'fixing_pipeline' => :magenta,
+  'running_post_completion' => :cyan,
+  'needs_clarification' => :yellow,
+  'over' => :green,
+  'blocked' => :red,
+  'error' => :red
 }.freeze
 
 ACTIVE_STATES = %w[
@@ -154,12 +154,12 @@ ACTIVE_STATES = %w[
 
 def status_label(status)
   case status
-  when *ACTIVE_STATES then "En cours"
-  when "pending"              then "En attente"
-  when "needs_clarification"  then "En attente de clarification"
-  when "over"                 then "Terminée"
-  when "blocked"              then "Bloquée"
-  when "error"                then "Erreur"
+  when *ACTIVE_STATES then 'En cours'
+  when 'pending'              then 'En attente'
+  when 'needs_clarification'  then 'En attente de clarification'
+  when 'over'                 then 'Terminée'
+  when 'blocked'              then 'Bloquée'
+  when 'error'                then 'Erreur'
   else status
   end
 end
@@ -167,15 +167,15 @@ end
 def show_dashboard(config)
   pastel = Pastel.new
 
-  Database.connect(config["database_url"])
+  Database.connect(config['database_url'])
   Database.build_model!
 
   dataset = Database.db[:issues].order(Sequel.desc(:id))
-  dataset = dataset.exclude(status: "over") unless config["status_all"]
+  dataset = dataset.exclude(status: 'over') unless config['status_all']
   issues = dataset.all
 
   if issues.empty?
-    puts config["status_all"] ? "Aucune issue suivie." : "Aucune issue active. Utilisez --all pour inclure les issues terminées."
+    puts config['status_all'] ? 'Aucune issue suivie.' : 'Aucune issue active. Utilisez --all pour inclure les issues terminées.'
     return
   end
 
@@ -184,7 +184,7 @@ def show_dashboard(config)
 
   # Build rows
   rows = issues.map do |row|
-    project_short = row[:project_path].to_s.split("/").last
+    project_short = row[:project_path].to_s.split('/').last
     title = row[:issue_title].to_s
     title = "#{title[0, 37]}…" if title.length > 38
     status = row[:status]
@@ -193,23 +193,21 @@ def show_dashboard(config)
     comment << " (#{status})" if ACTIVE_STATES.include?(status)
     worker = worker_map[row[:issue_iid]]
     comment << " [worker-#{worker}]" if worker
-    if row[:mr_url]
-      comment << " — MR !#{row[:mr_iid]}"
-    end
-    if status == "error" && row[:error_message]
+    comment << " — MR !#{row[:mr_iid]}" if row[:mr_url]
+    if status == 'error' && row[:error_message]
       err = row[:error_message].to_s.lines.first.to_s.strip
       err = "#{err[0, 40]}…" if err.length > 41
       comment << " — #{err}"
     end
-    if status == "needs_clarification"
-      comment << " depuis #{row[:clarification_requested_at]}" if row[:clarification_requested_at]
+    if (status == 'needs_clarification') && row[:clarification_requested_at]
+      comment << " depuis #{row[:clarification_requested_at]}"
     end
 
     {
       iid: "##{row[:issue_iid]}",
       title: "#{title} (#{project_short})",
       status: status,
-      comment: comment,
+      comment: comment
     }
   end
 
@@ -219,8 +217,8 @@ def show_dashboard(config)
   w_status  = [rows.map { |r| r[:status].length }.max, 8].max
   w_comment = [rows.map { |r| r[:comment].length }.max, 12].max
 
-  sep  = "+-#{"-" * w_iid}-+-#{"-" * w_title}-+-#{"-" * w_status}-+-#{"-" * w_comment}-+"
-  head = "| #{"#".ljust(w_iid)} | #{"Issue".ljust(w_title)} | #{"État".ljust(w_status)} | #{"Commentaire".ljust(w_comment)} |"
+  sep  = "+-#{'-' * w_iid}-+-#{'-' * w_title}-+-#{'-' * w_status}-+-#{'-' * w_comment}-+"
+  head = "| #{'#'.ljust(w_iid)} | #{'Issue'.ljust(w_title)} | #{'État'.ljust(w_status)} | #{'Commentaire'.ljust(w_comment)} |"
 
   puts sep
   puts pastel.bold(head)
@@ -236,13 +234,13 @@ def show_dashboard(config)
   puts sep
 
   # Summary
-  active  = rows.count { |r| ACTIVE_STATES.include?(r[:status]) || r[:status] == "pending" }
-  done    = rows.count { |r| r[:status] == "over" }
+  active  = rows.count { |r| ACTIVE_STATES.include?(r[:status]) || r[:status] == 'pending' }
+  done    = rows.count { |r| r[:status] == 'over' }
   blocked = rows.count { |r| %w[blocked error needs_clarification].include?(r[:status]) }
   summary = "#{pastel.bold(rows.size.to_s)} issues — #{pastel.cyan("#{active} actives")}, #{pastel.green("#{done} terminées")}, #{pastel.yellow("#{blocked} bloquées")}"
-  unless config["status_all"]
-    hidden = Database.db[:issues].where(status: "over").count
-    summary << " #{pastel.dim("(#{hidden} terminées masquées, --all pour tout voir)")}" if hidden > 0
+  unless config['status_all']
+    hidden = Database.db[:issues].where(status: 'over').count
+    summary << " #{pastel.dim("(#{hidden} terminées masquées, --all pour tout voir)")}" if hidden.positive?
   end
   puts summary
 end
@@ -252,70 +250,70 @@ end
 def show_errors(config)
   pastel = Pastel.new
 
-  Database.connect(config["database_url"])
+  Database.connect(config['database_url'])
   Database.build_model!
 
   dataset = Database.db[:issues].where(status: %w[error blocked])
-  dataset = dataset.where(issue_iid: config["errors_iid"]) if config["errors_iid"]
+  dataset = dataset.where(issue_iid: config['errors_iid']) if config['errors_iid']
   issues = dataset.order(Sequel.desc(:id)).all
 
   issues.each_with_index do |row, idx|
-    project_short = row[:project_path].to_s.split("/").last
-    status_label = row[:status] == "blocked" ? pastel.yellow("blocked") : pastel.red("error")
-    status_icon  = row[:status] == "blocked" ? pastel.yellow("■") : pastel.red("■")
+    project_short = row[:project_path].to_s.split('/').last
+    status_label = row[:status] == 'blocked' ? pastel.yellow('blocked') : pastel.red('error')
+    status_icon  = row[:status] == 'blocked' ? pastel.yellow('■') : pastel.red('■')
     puts pastel.bold("#{status_icon} Issue ##{row[:issue_iid]}: #{row[:issue_title]} (#{project_short}) [#{status_label}]")
-    puts "  Tentative: #{row[:retry_count]}" if row[:status] == "error"
+    puts "  Tentative: #{row[:retry_count]}" if row[:status] == 'error'
     puts "  Branche: #{row[:branch_name]}" if row[:branch_name]
     puts "  MR: !#{row[:mr_iid]} #{row[:mr_url]}" if row[:mr_iid]
-    puts ""
-    puts pastel.bold("  Erreur:")
+    puts ''
+    puts pastel.bold('  Erreur:')
     row[:error_message].to_s.lines.each { |l| puts "    #{l}" }
-    if row[:dc_stderr].to_s.strip.length > 0
-      puts ""
-      puts pastel.bold("  stderr:")
+    if row[:dc_stderr].to_s.strip.length.positive?
+      puts ''
+      puts pastel.bold('  stderr:')
       row[:dc_stderr].to_s.lines.each { |l| puts "    #{l}" }
     end
-    puts "" if idx < issues.size - 1
+    puts '' if idx < issues.size - 1
   end
 
   # Post-completion errors (issues completed but with failed post_completion hook)
   pc_dataset = Database.db[:issues].exclude(post_completion_error: nil)
-  pc_dataset = pc_dataset.where(issue_iid: config["errors_iid"]) if config["errors_iid"]
+  pc_dataset = pc_dataset.where(issue_iid: config['errors_iid']) if config['errors_iid']
   pc_issues = pc_dataset.order(Sequel.desc(:id)).all
 
   pc_issues.each do |row|
-    project_short = row[:project_path].to_s.split("/").last
-    puts "" if issues.any?
-    puts pastel.bold("#{pastel.yellow("▲")} Issue ##{row[:issue_iid]}: #{row[:issue_title]} (#{project_short}) [#{pastel.yellow("post_completion")}]")
+    project_short = row[:project_path].to_s.split('/').last
+    puts '' if issues.any?
+    puts pastel.bold("#{pastel.yellow('▲')} Issue ##{row[:issue_iid]}: #{row[:issue_title]} (#{project_short}) [#{pastel.yellow('post_completion')}]")
     puts "  Branche: #{row[:branch_name]}" if row[:branch_name]
     puts "  MR: !#{row[:mr_iid]} #{row[:mr_url]}" if row[:mr_iid]
-    puts ""
-    puts pastel.bold("  Post-completion error:")
+    puts ''
+    puts pastel.bold('  Post-completion error:')
     row[:post_completion_error].to_s.lines.each { |l| puts "    #{l}" }
   end
 
-  if issues.empty? && pc_issues.empty?
-    puts config["errors_iid"] ? "Issue ##{config["errors_iid"]} non trouvée ou pas en erreur/bloquée." : "Aucune issue en erreur ou bloquée."
-  end
+  return unless issues.empty? && pc_issues.empty?
+
+  puts config['errors_iid'] ? "Issue ##{config['errors_iid']} non trouvée ou pas en erreur/bloquée." : 'Aucune issue en erreur ou bloquée.'
 end
 
 # == Reset =====================================================================
 
 def reset_errors(config, pastel)
-  Database.connect(config["database_url"])
+  Database.connect(config['database_url'])
   Database.build_model!
 
-  dataset = Database.db[:issues].where(status: "error")
-  dataset = dataset.where(issue_iid: config["reset_iid"]) if config["reset_iid"]
+  dataset = Database.db[:issues].where(status: 'error')
+  dataset = dataset.where(issue_iid: config['reset_iid']) if config['reset_iid']
 
   count = dataset.count
-  if count == 0
-    puts config["reset_iid"] ? "Issue ##{config["reset_iid"]} non trouvée ou pas en erreur." : "Aucune issue en erreur."
+  if count.zero?
+    puts config['reset_iid'] ? "Issue ##{config['reset_iid']} non trouvée ou pas en erreur." : 'Aucune issue en erreur.'
     return
   end
 
-  dataset.update(status: "pending", retry_count: 0, error_message: nil, next_retry_at: nil, started_at: nil)
-  label = config["reset_iid"] ? "Issue ##{config["reset_iid"]}" : "#{count} issue(s)"
+  dataset.update(status: 'pending', retry_count: 0, error_message: nil, next_retry_at: nil, started_at: nil)
+  label = config['reset_iid'] ? "Issue ##{config['reset_iid']}" : "#{count} issue(s)"
   puts pastel.green("✓ #{label} remise(s) en pending.")
 end
 
@@ -329,49 +327,50 @@ def main
   config = parse_args(ARGV)
 
   # Handle --status, --errors, --reset early (only need DB, not GitLab or danger-claude)
-  if config["status"]
+  if config['status']
     show_dashboard(config)
     exit 0
   end
 
-  if config["errors"]
+  if config['errors']
     show_errors(config)
     exit 0
   end
 
-  if config["reset"]
+  if config['reset']
     reset_errors(config, pastel)
     exit 0
   end
 
-  logger.info("+=== autodev ================================================+")
+  logger.info('+=== autodev ================================================+')
 
   # 2. Configure logger
-  logger.configure(log_dir: config["log_dir"], level: config["log_level"])
+  logger.configure(log_dir: config['log_dir'], level: config['log_level'])
 
   # 3. Validate — offer to create template config if missing
-  config_path = config["_config_path"] || Config::CONFIG_PATH
+  config_path = config['_config_path'] || Config::CONFIG_PATH
 
   unless File.exist?(config_path)
     logger.warn("No config file found at #{config_path}")
-    print pastel.bold("  Create a template config to edit? [Y/n] ")
+    print pastel.bold('  Create a template config to edit? [Y/n] ')
     answer = $stdin.gets&.strip&.downcase
-    if answer.nil? || answer.empty? || answer == "y"
-      FileUtils.mkdir_p(File.dirname(config_path))
-      File.write(config_path, Config::TEMPLATE)
-      logger.info("Created #{config_path}")
-      logger.info("Edit this file with your GitLab URL, token and projects, then re-run autodev.")
-      exit 0
-    else
+    unless answer.nil? || answer.empty? || answer == 'y'
       raise ConfigError, "No config file at #{config_path}. Create one manually or re-run to generate a template."
     end
+
+    FileUtils.mkdir_p(File.dirname(config_path))
+    File.write(config_path, Config::TEMPLATE)
+    logger.info("Created #{config_path}")
+    logger.info('Edit this file with your GitLab URL, token and projects, then re-run autodev.')
+    exit 0
+
   end
 
-  unless config["projects"].is_a?(Array) && config["projects"].any?
+  unless config['projects'].is_a?(Array) && config['projects'].any?
     raise ConfigError, "No projects configured in #{config_path}. Add at least one entry under 'projects:'."
   end
 
-  unless config["gitlab_url"] && config["gitlab_url"] != "https://gitlab.example.com"
+  unless config['gitlab_url'] && config['gitlab_url'] != 'https://gitlab.example.com'
     raise ConfigError, "Set a valid gitlab_url in #{config_path}"
   end
 
@@ -379,34 +378,30 @@ def main
   Config.validate!(config)
 
   # Check danger-claude is available
-  _, dc_status = Open3.capture2e("which", "danger-claude")
-  raise ConfigError, "danger-claude is not installed or not on PATH" unless dc_status.success?
+  _, dc_status = Open3.capture2e('which', 'danger-claude')
+  raise ConfigError, 'danger-claude is not installed or not on PATH' unless dc_status.success?
 
   # Check mr-review (warning only)
-  _, mr_status = Open3.capture2e("which", "mr-review")
-  unless mr_status.success?
-    logger.warn("mr-review not installed, review step will be skipped")
-  end
+  _, mr_status = Open3.capture2e('which', 'mr-review')
+  logger.warn('mr-review not installed, review step will be skipped') unless mr_status.success?
 
   # 4. Connect SQLite + migrate + build model
-  token = config["gitlab_token"]
-  client = GitlabHelpers.build_gitlab_client(config["gitlab_url"], token)
+  token = config['gitlab_token']
+  client = GitlabHelpers.build_gitlab_client(config['gitlab_url'], token)
 
-  if Database.connect(config["database_url"])
-    Database.build_model!
-    logger.debug("Database connected, Issue model initialized")
-  else
-    raise ConfigError, "Database connection required for autodev"
-  end
+  raise ConfigError, 'Database connection required for autodev' unless Database.connect(config['database_url'])
+
+  Database.build_model!
+  logger.debug('Database connected, Issue model initialized')
 
   # Recover from previous run
-  reset_count = Database.recover_on_startup!(max_retries: config["max_retries"])
-  logger.warn("Recovered #{reset_count} issue(s) on startup") if reset_count > 0
+  reset_count = Database.recover_on_startup!(max_retries: config['max_retries'])
+  logger.warn("Recovered #{reset_count} issue(s) on startup") if reset_count.positive?
 
   # 5. Start WorkerPool
-  pool = WorkerPool.new(size: config["max_workers"], logger: logger)
+  pool = WorkerPool.new(size: config['max_workers'], logger: logger)
   pool.start
-  logger.debug("Worker pool started (#{config["max_workers"]} workers)")
+  logger.debug("Worker pool started (#{config['max_workers']} workers)")
 
   # 6. Trap signals
   shutdown_requested = false
@@ -416,16 +411,16 @@ def main
     end
   end
 
-  trigger_label = config["trigger_label"]
+  trigger_label = config['trigger_label']
 
   # 7. Poll loop
   loop do
     break if shutdown_requested
 
-    config["projects"].each do |project_config|
+    config['projects'].each do |project_config|
       break if shutdown_requested
 
-      project_path = project_config["path"]
+      project_path = project_config['path']
       logger.debug("Polling #{project_path} for label '#{trigger_label}'...", project: project_path)
 
       # -- Issue processing (label workflow routing + legacy) --
@@ -444,26 +439,28 @@ def main
           # -- Legacy and normal processing path --
           existing = Issue.where(project_path: project_path, issue_iid: gl_issue.iid).first
           if existing
-            if existing.status == "needs_clarification"
-              if GitlabHelpers.clarification_answered?(client, project_path, gl_issue.iid, existing.clarification_requested_at)
+            if existing.status == 'needs_clarification'
+              if GitlabHelpers.clarification_answered?(client, project_path, gl_issue.iid,
+                                                       existing.clarification_requested_at)
                 logger.info("Issue ##{gl_issue.iid}: clarification received, re-queuing", project: project_path)
                 existing.clarification_received!
                 existing.update(clarification_requested_at: nil, error_message: nil)
               else
                 next
               end
-            elsif existing.status != "pending"
+            elsif existing.status != 'pending'
               next
             end
           end
 
-          max_retries = (project_config["max_retries"] || config["max_retries"]).to_i
+          max_retries = (project_config['max_retries'] || config['max_retries']).to_i
           if existing && existing.retry_count >= max_retries
-            logger.debug("Issue ##{gl_issue.iid} exceeded max retries (#{max_retries}), skipping", project: project_path)
+            logger.debug("Issue ##{gl_issue.iid} exceeded max retries (#{max_retries}), skipping",
+                         project: project_path)
             next
           end
 
-          if config["dry_run"]
+          if config['dry_run']
             logger.info("[dry-run] Would process issue ##{gl_issue.iid}: #{gl_issue.title}", project: project_path)
             next
           end
@@ -472,7 +469,7 @@ def main
             begin
               locale = LanguageDetector.detect(gl_issue.description.to_s)
               Issue.create(project_path: project_path, issue_iid: gl_issue.iid,
-                           issue_title: gl_issue.title, status: "pending",
+                           issue_title: gl_issue.title, status: 'pending',
                            issue_author_id: gl_issue.author&.id,
                            locale: locale.to_s)
             rescue Sequel::UniqueConstraintViolation
@@ -483,7 +480,7 @@ def main
 
           next unless existing
 
-          worker_client = GitlabHelpers.build_gitlab_client(config["gitlab_url"], token)
+          worker_client = GitlabHelpers.build_gitlab_client(config['gitlab_url'], token)
           processor = IssueProcessor.new(
             client: worker_client, config: config, project_config: project_config,
             logger: logger, token: token
@@ -496,22 +493,23 @@ def main
         logger.error("Error polling #{project_path}: #{e.class}: #{e.message}", project: project_path)
       end
 
-      next if config["dry_run"]
+      next if config['dry_run']
 
       # -- Pipeline monitoring (checking_pipeline) --
       begin
-        Issue.where(project_path: project_path, status: "checking_pipeline")
+        Issue.where(project_path: project_path, status: 'checking_pipeline')
              .exclude(mr_iid: nil).each do |issue|
           break if shutdown_requested
 
-          worker_client = GitlabHelpers.build_gitlab_client(config["gitlab_url"], token)
+          worker_client = GitlabHelpers.build_gitlab_client(config['gitlab_url'], token)
           monitor = PipelineMonitor.new(
             client: worker_client, config: config, project_config: project_config,
             logger: logger, token: token
           )
 
           pool.enqueue(issue_iid: issue.issue_iid) { monitor.check(issue) }
-          logger.info("Enqueued pipeline check for issue ##{issue.issue_iid} (MR !#{issue.mr_iid})", project: project_path)
+          logger.info("Enqueued pipeline check for issue ##{issue.issue_iid} (MR !#{issue.mr_iid})",
+                      project: project_path)
         end
       rescue StandardError => e
         logger.error("Error polling pipeline monitoring for #{project_path}: #{e.message}", project: project_path)
@@ -519,20 +517,21 @@ def main
 
       # -- Discussion fixes (fixing_discussions) --
       begin
-        max_fix_rounds = (project_config["max_fix_rounds"] || config["max_fix_rounds"]).to_i
-        Issue.where(project_path: project_path, status: "fixing_discussions")
+        max_fix_rounds = (project_config['max_fix_rounds'] || config['max_fix_rounds']).to_i
+        Issue.where(project_path: project_path, status: 'fixing_discussions')
              .where { fix_round < max_fix_rounds }
              .exclude(mr_iid: nil).each do |issue|
           break if shutdown_requested
 
-          worker_client = GitlabHelpers.build_gitlab_client(config["gitlab_url"], token)
+          worker_client = GitlabHelpers.build_gitlab_client(config['gitlab_url'], token)
           fixer = MrFixer.new(
             client: worker_client, config: config, project_config: project_config,
             logger: logger, token: token
           )
 
           pool.enqueue(issue_iid: issue.issue_iid) { fixer.fix(issue) }
-          logger.info("Enqueued discussion fix for issue ##{issue.issue_iid} (round #{issue.fix_round + 1})", project: project_path)
+          logger.info("Enqueued discussion fix for issue ##{issue.issue_iid} (round #{issue.fix_round + 1})",
+                      project: project_path)
         end
       rescue StandardError => e
         logger.error("Error polling discussion fixes for #{project_path}: #{e.message}", project: project_path)
@@ -540,35 +539,35 @@ def main
 
       # -- Error retry --
       begin
-        max_retries = (project_config["max_retries"] || config["max_retries"]).to_i
-        retryable = Issue.where(project_path: project_path, status: "error")
+        max_retries = (project_config['max_retries'] || config['max_retries']).to_i
+        retryable = Issue.where(project_path: project_path, status: 'error')
                          .where { retry_count < max_retries }
                          .where { Sequel.lit("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')") }
                          .all
 
         if retryable.any? && Config.label_workflow?(project_config)
-          retry_client = GitlabHelpers.build_gitlab_client(config["gitlab_url"], token)
-          retry_helper = MrFixer.new(client: retry_client, config: config, project_config: project_config, logger: logger, token: token)
+          retry_client = GitlabHelpers.build_gitlab_client(config['gitlab_url'], token)
+          retry_helper = MrFixer.new(client: retry_client, config: config, project_config: project_config,
+                                     logger: logger, token: token)
         end
 
         retryable.each do |issue|
-          begin
-            # Issues with an existing MR resume at checking_pipeline instead of pending
-            has_mr = !issue.mr_iid.nil?
-            has_mr ? issue.retry_pipeline! : issue.retry_processing!
-            issue.update(error_message: nil, started_at: nil)
-            if retry_helper
-              begin
-                has_mr ? retry_helper.set_label_mr(issue.issue_iid) : retry_helper.set_label_todo(issue.issue_iid)
-              rescue StandardError => e
-                logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}", project: project_path)
-              end
+          # Issues with an existing MR resume at checking_pipeline instead of pending
+          has_mr = !issue.mr_iid.nil?
+          has_mr ? issue.retry_pipeline! : issue.retry_processing!
+          issue.update(error_message: nil, started_at: nil)
+          if retry_helper
+            begin
+              has_mr ? retry_helper.set_label_mr(issue.issue_iid) : retry_helper.set_label_todo(issue.issue_iid)
+            rescue StandardError => e
+              logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}", project: project_path)
             end
-            target = has_mr ? "checking_pipeline" : "pending"
-            logger.info("Issue ##{issue.issue_iid} retried → #{target} (attempt #{issue.retry_count + 1})", project: project_path)
-          rescue AASM::InvalidTransition => e
-            logger.error("Could not retry issue ##{issue.issue_iid}: #{e.message}", project: project_path)
           end
+          target = has_mr ? 'checking_pipeline' : 'pending'
+          logger.info("Issue ##{issue.issue_iid} retried → #{target} (attempt #{issue.retry_count + 1})",
+                      project: project_path)
+        rescue AASM::InvalidTransition => e
+          logger.error("Could not retry issue ##{issue.issue_iid}: #{e.message}", project: project_path)
         end
       rescue StandardError => e
         logger.error("Error retrying issues for #{project_path}: #{e.message}", project: project_path)
@@ -576,46 +575,43 @@ def main
     end
 
     # -- Poll status summary (stdout only, not log files) --
-    active_issues = Database.db[:issues].exclude(status: "over").all
+    active_issues = Database.db[:issues].exclude(status: 'over').all
     unless active_issues.empty?
       worker_map = pool.assignments.invert # issue_iid => worker_index
       lines = active_issues.map do |row|
-        project_short = row[:project_path].to_s.split("/").last
+        project_short = row[:project_path].to_s.split('/').last
         worker = worker_map[row[:issue_iid]]
-        worker_tag = worker ? " [worker-#{worker}]" : ""
+        worker_tag = worker ? " [worker-#{worker}]" : ''
         "  ##{row[:issue_iid]} #{row[:status].ljust(21)} #{row[:issue_title]} (#{project_short})#{worker_tag}"
       end
       $stdout.puts pastel.dim("  --- #{active_issues.size} active issue(s) ---")
       lines.each { |l| $stdout.puts pastel.dim(l) }
     end
 
-    break if config["once"]
+    break if config['once']
 
-    config["poll_interval"].times do
+    config['poll_interval'].times do
       break if shutdown_requested
+
       sleep 1
     end
   end
 
   # 8. Graceful shutdown
-  logger.info("Shutting down workers...")
+  logger.info('Shutting down workers...')
   pool.shutdown
   pool.cleanup
-  logger.info("autodev stopped.")
-
+  logger.info('autodev stopped.')
 rescue ConfigError => e
   logger&.error("Config error: #{e.message}") || (warn "Config error: #{e.message}")
   exit 1
-
 rescue Interrupt
-  logger&.warn("Interrupted.") || (warn "Interrupted.")
+  logger&.warn('Interrupted.') || (warn 'Interrupted.')
   exit 130
-
 rescue StandardError => e
   logger&.error("Unexpected error: #{e.class}: #{e.message}") || (warn "Unexpected error: #{e.class}: #{e.message}")
   logger&.error(e.backtrace&.first(5)&.join("\n  ")) if e.backtrace
   exit 1
-
 ensure
   logger&.close
   Database.disconnect

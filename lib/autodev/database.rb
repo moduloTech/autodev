@@ -6,17 +6,17 @@ module Database
   def self.connect(url)
     return unless url
 
-    if url == "sqlite://:memory:"
+    if url == 'sqlite://:memory:'
       @db = Sequel.sqlite(max_connections: 5)
-    elsif url.start_with?("sqlite://")
-      db_path = File.expand_path(url.sub("sqlite://", ""))
+    elsif url.start_with?('sqlite://')
+      db_path = File.expand_path(url.sub('sqlite://', ''))
       FileUtils.mkdir_p(File.dirname(db_path))
       @db = Sequel.connect("sqlite://#{db_path}", max_connections: 5)
     else
       @db = Sequel.connect(url, max_connections: 5)
     end
-    @db.run("PRAGMA journal_mode=WAL")
-    @db.run("PRAGMA busy_timeout=5000")
+    @db.run('PRAGMA journal_mode=WAL')
+    @db.run('PRAGMA busy_timeout=5000')
     migrate!
     migrate_statuses!
     true
@@ -69,31 +69,65 @@ module Database
 
     # Add columns for existing databases
     %w[dc_stdout dc_stderr].each do |col|
-      @db.run("ALTER TABLE issues ADD COLUMN #{col} TEXT") rescue nil
+      @db.run("ALTER TABLE issues ADD COLUMN #{col} TEXT")
+    rescue StandardError
+      nil
     end
-    @db.run("ALTER TABLE issues ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0") rescue nil
-    @db.run("ALTER TABLE issues ADD COLUMN next_retry_at TEXT") rescue nil
-    @db.run("ALTER TABLE issues ADD COLUMN clarification_requested_at TEXT") rescue nil
-    @db.run("ALTER TABLE issues ADD COLUMN fix_round INTEGER NOT NULL DEFAULT 0") rescue nil
-    @db.run("ALTER TABLE issues ADD COLUMN pipeline_retrigger_count INTEGER NOT NULL DEFAULT 0") rescue nil
-    @db.run("ALTER TABLE issues ADD COLUMN issue_author_id INTEGER") rescue nil
-    @db.run("ALTER TABLE issues ADD COLUMN post_completion_error TEXT") rescue nil
-    @db.run("ALTER TABLE issues ADD COLUMN locale TEXT DEFAULT 'fr'") rescue nil
+    begin
+      @db.run('ALTER TABLE issues ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0')
+    rescue StandardError
+      nil
+    end
+    begin
+      @db.run('ALTER TABLE issues ADD COLUMN next_retry_at TEXT')
+    rescue StandardError
+      nil
+    end
+    begin
+      @db.run('ALTER TABLE issues ADD COLUMN clarification_requested_at TEXT')
+    rescue StandardError
+      nil
+    end
+    begin
+      @db.run('ALTER TABLE issues ADD COLUMN fix_round INTEGER NOT NULL DEFAULT 0')
+    rescue StandardError
+      nil
+    end
+    begin
+      @db.run('ALTER TABLE issues ADD COLUMN pipeline_retrigger_count INTEGER NOT NULL DEFAULT 0')
+    rescue StandardError
+      nil
+    end
+    begin
+      @db.run('ALTER TABLE issues ADD COLUMN issue_author_id INTEGER')
+    rescue StandardError
+      nil
+    end
+    begin
+      @db.run('ALTER TABLE issues ADD COLUMN post_completion_error TEXT')
+    rescue StandardError
+      nil
+    end
+    begin
+      @db.run("ALTER TABLE issues ADD COLUMN locale TEXT DEFAULT 'fr'")
+    rescue StandardError
+      nil
+    end
   end
 
   # -- Status migration from pre-AASM names --
 
   def self.migrate_statuses!
     {
-      "mr_pipeline_running" => "checking_pipeline",
-      "mr_fixing"           => "fixing_discussions",
-      "mr_pipeline_fixing"  => "fixing_pipeline"
+      'mr_pipeline_running' => 'checking_pipeline',
+      'mr_fixing' => 'fixing_discussions',
+      'mr_pipeline_fixing' => 'fixing_pipeline'
     }.each do |old_status, new_status|
       @db[:issues].where(status: old_status).update(status: new_status)
     end
 
-    @db[:issues].where(status: %w[done mr_fixed]).exclude(mr_iid: nil).update(status: "checking_pipeline")
-    @db[:issues].where(status: %w[done mr_fixed]).update(status: "over")
+    @db[:issues].where(status: %w[done mr_fixed]).exclude(mr_iid: nil).update(status: 'checking_pipeline')
+    @db[:issues].where(status: %w[done mr_fixed]).update(status: 'over')
   end
 
   # -- Build Issue Sequel::Model with AASM --
@@ -182,9 +216,11 @@ module Database
         # === Pipeline monitoring ===
 
         event :pipeline_green do
-          transitions from: :checking_pipeline, to: :running_post_completion, guard: %i[no_unresolved_discussions? has_post_completion?]
+          transitions from: :checking_pipeline, to: :running_post_completion,
+                      guard: %i[no_unresolved_discussions? has_post_completion?]
           transitions from: :checking_pipeline, to: :over, guard: :no_unresolved_discussions?
-          transitions from: :checking_pipeline, to: :running_post_completion, guard: %i[max_fix_rounds_reached? has_post_completion?]
+          transitions from: :checking_pipeline, to: :running_post_completion,
+                      guard: %i[max_fix_rounds_reached? has_post_completion?]
           transitions from: :checking_pipeline, to: :over, guard: :max_fix_rounds_reached?
           transitions from: :checking_pipeline, to: :fixing_discussions
         end
@@ -235,10 +271,10 @@ module Database
         # === Error handling ===
 
         event :mark_failed do
-          transitions from: [:cloning, :checking_spec, :implementing, :committing,
-                             :pushing, :creating_mr, :reviewing,
-                             :fixing_discussions, :fixing_pipeline,
-                             :running_post_completion, :answering_question], to: :error
+          transitions from: %i[cloning checking_spec implementing committing
+                               pushing creating_mr reviewing
+                               fixing_discussions fixing_pipeline
+                               running_post_completion answering_question], to: :error
         end
 
         event :retry_processing do
@@ -291,33 +327,33 @@ module Database
 
     # Errors with an existing MR resume at checking_pipeline, not pending
     count_mr = db[:issues]
-      .where(status: "error")
-      .where { retry_count < max_retries }
-      .where { Sequel.lit("next_retry_at IS NULL OR next_retry_at <= datetime('now')") }
-      .exclude(mr_iid: nil)
-      .update(status: "checking_pipeline", error_message: nil, started_at: nil)
+               .where(status: 'error')
+               .where { retry_count < max_retries }
+               .where { Sequel.lit("next_retry_at IS NULL OR next_retry_at <= datetime('now')") }
+               .exclude(mr_iid: nil)
+               .update(status: 'checking_pipeline', error_message: nil, started_at: nil)
 
     count_no_mr = db[:issues]
-      .where(status: "error")
-      .where { retry_count < max_retries }
-      .where { Sequel.lit("next_retry_at IS NULL OR next_retry_at <= datetime('now')") }
-      .where(mr_iid: nil)
-      .update(status: "pending", error_message: nil, started_at: nil)
+                  .where(status: 'error')
+                  .where { retry_count < max_retries }
+                  .where { Sequel.lit("next_retry_at IS NULL OR next_retry_at <= datetime('now')") }
+                  .where(mr_iid: nil)
+                  .update(status: 'pending', error_message: nil, started_at: nil)
 
     count = count_mr + count_no_mr
 
     count2 = db[:issues]
-      .where(status: "fixing_pipeline")
-      .update(status: "checking_pipeline")
+             .where(status: 'fixing_pipeline')
+             .update(status: 'checking_pipeline')
 
     count3 = db[:issues]
-      .where(status: "running_post_completion")
-      .update(status: "over", finished_at: Sequel.lit("datetime('now')"))
+             .where(status: 'running_post_completion')
+             .update(status: 'over', finished_at: Sequel.lit("datetime('now')"))
 
     # Reset issues stuck in active processing states (e.g. after crash during label_doing)
     count4 = db[:issues]
-      .where(status: %w[cloning checking_spec implementing committing pushing creating_mr])
-      .update(status: "pending", started_at: nil)
+             .where(status: %w[cloning checking_spec implementing committing pushing creating_mr])
+             .update(status: 'pending', started_at: nil)
 
     (count || 0) + (count2 || 0) + (count3 || 0) + (count4 || 0)
   end

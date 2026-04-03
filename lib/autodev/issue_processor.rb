@@ -18,7 +18,7 @@ class IssueProcessor
 
     # Verify issue is still open
     current = @client.issue(@project_path, iid)
-    if current.state != "opened"
+    if current.state != 'opened'
       log "Issue ##{iid} is no longer open (#{current.state}), skipping"
       issue._issue_closed = true
       issue.clone_complete! # cloning → over
@@ -39,10 +39,10 @@ class IssueProcessor
       skip_to_mr = true if %w[creating_mr reviewing].include?(issue.status)
     end
 
-    work_dir = "/tmp/autodev_#{@project_path.gsub("/", "_")}_#{iid}"
+    work_dir = "/tmp/autodev_#{@project_path.gsub('/', '_')}_#{iid}"
     begin
+      clone_repo(work_dir)
       if skip_to_mr
-        clone_repo(work_dir)
         fetch_and_checkout(work_dir, previous_branch)
         branch_name = previous_branch
         @current_branch_name = branch_name
@@ -50,7 +50,6 @@ class IssueProcessor
         issue.clone_complete! # cloning → creating_mr
       else
         # 1. Clone
-        clone_repo(work_dir)
 
         # 2. Branch — reuse existing remote branch or create a new one
         if reuse_branch
@@ -66,12 +65,13 @@ class IssueProcessor
 
         # 3. Fetch full issue context (includes MR discussions if MR exists)
         context = GitlabHelpers.fetch_full_context(@client, @project_path, iid,
-                    mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
+                                                   mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
 
         # 4. Check specification clarity
         if check_specification(work_dir, context, iid, issue)
           return # spec_unclear! → needs_clarification, or question_detected! → answering_question → over
         end
+
         # spec_clear! was fired → implementing
 
         # 5. Ensure CLAUDE.md exists
@@ -118,14 +118,13 @@ class IssueProcessor
       )
       notify_localized(iid, :mr_created, mr_url: mr.web_url)
       log "Issue ##{iid} completed: #{mr.web_url}"
-
     rescue RateLimitError => e
       wait = e.wait_seconds
       log_error "Issue ##{iid}: rate limit hit, parking for #{wait}s"
       begin
         issue.mark_failed!
       rescue AASM::InvalidTransition
-        issue.update(status: "error")
+        issue.update(status: 'error')
       end
       Issue.where(id: issue.id).update(
         error_message: e.message,
@@ -133,18 +132,17 @@ class IssueProcessor
         next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')"),
         finished_at: Sequel.lit("datetime('now')")
       )
-
     rescue StandardError => e
       bt = e.backtrace&.first(10)&.join("\n  ")
       retry_count = (issue.retry_count || 0) + 1
-      max_retries = (@project_config["max_retries"] || @config["max_retries"] || 3).to_i
-      backoff = (@project_config["retry_backoff"] || @config["retry_backoff"] || 30).to_i
+      max_retries = (@project_config['max_retries'] || @config['max_retries'] || 3).to_i
+      backoff = (@project_config['retry_backoff'] || @config['retry_backoff'] || 30).to_i
       backoff_seconds = backoff * (2**(retry_count - 1))
 
       begin
         issue.mark_failed!
       rescue AASM::InvalidTransition
-        issue.update(status: "error")
+        issue.update(status: 'error')
       end
 
       fields = {
@@ -172,65 +170,63 @@ class IssueProcessor
   private
 
   def clone_repo(work_dir)
-    FileUtils.rm_rf(work_dir) if Dir.exist?(work_dir)
+    FileUtils.rm_rf(work_dir)
 
     uri = URI.parse(@gitlab_url)
     host_port = uri.port && ![80, 443].include?(uri.port) ? "#{uri.host}:#{uri.port}" : uri.host
     clone_url = "#{uri.scheme}://oauth2:#{@token}@#{host_port}/#{@project_path}.git"
 
-    clone_depth = @project_config["clone_depth"] || 1
-    sparse_paths = @project_config["sparse_checkout"]
-    target = @project_config["target_branch"]
+    clone_depth = @project_config['clone_depth'] || 1
+    sparse_paths = @project_config['sparse_checkout']
+    target = @project_config['target_branch']
 
-    cmd = ["git", "clone"]
-    cmd += ["--depth", clone_depth.to_s] if clone_depth.positive?
-    cmd += ["--branch", target] if target
-    if sparse_paths.is_a?(Array) && sparse_paths.any?
-      cmd += ["--filter=blob:none", "--sparse"]
-    end
+    cmd = %w[git clone]
+    cmd += ['--depth', clone_depth.to_s] if clone_depth.positive?
+    cmd += ['--branch', target] if target
+    cmd += ['--filter=blob:none', '--sparse'] if sparse_paths.is_a?(Array) && sparse_paths.any?
     cmd += [clone_url, work_dir]
 
-    log "Cloning #{@project_path} (depth: #{clone_depth.positive? ? clone_depth : "full"})..."
+    log "Cloning #{@project_path} (depth: #{clone_depth.positive? ? clone_depth : 'full'})..."
     run_cmd(cmd)
 
-    if sparse_paths.is_a?(Array) && sparse_paths.any?
-      log "Setting up sparse checkout: #{sparse_paths.join(", ")}"
-      run_cmd(["git", "sparse-checkout", "set"] + sparse_paths, chdir: work_dir)
-    end
+    return unless sparse_paths.is_a?(Array) && sparse_paths.any?
+
+    log "Setting up sparse checkout: #{sparse_paths.join(', ')}"
+    run_cmd(%w[git sparse-checkout set] + sparse_paths, chdir: work_dir)
   end
 
   def fetch_and_checkout(work_dir, branch)
     # --depth implies --single-branch, so the refspec is limited to the cloned
     # branch. We must provide an explicit refspec to fetch other branches.
-    run_cmd(["git", "fetch", "origin", "+refs/heads/#{branch}:refs/remotes/origin/#{branch}"], chdir: work_dir)
-    run_cmd(["git", "checkout", "-b", branch, "origin/#{branch}"], chdir: work_dir)
+    run_cmd(['git', 'fetch', 'origin', "+refs/heads/#{branch}:refs/remotes/origin/#{branch}"], chdir: work_dir)
+    run_cmd(['git', 'checkout', '-b', branch, "origin/#{branch}"], chdir: work_dir)
   end
 
   def create_branch(work_dir, iid, title)
     slug = I18n.transliterate(title)
-                .downcase
-                .gsub(/[^a-z0-9\s-]/, "")
-                .gsub(/\s+/, "-")
-                .gsub(/-+/, "-")
-                .gsub(/^-|-$/, "")[0, 50]
+               .downcase
+               .gsub(/[^a-z0-9\s-]/, '')
+               .gsub(/\s+/, '-')
+               .gsub(/-+/, '-')
+               .gsub(/^-|-$/, '')[0, 50]
     random = SecureRandom.hex(4)
     branch_name = "autodev/#{iid}-#{slug}-#{random}"
 
-    run_cmd(["git", "checkout", "-b", branch_name], chdir: work_dir)
+    run_cmd(['git', 'checkout', '-b', branch_name], chdir: work_dir)
     log "Created branch: #{branch_name}"
     branch_name
   end
 
   def ensure_claude_md(work_dir)
-    claude_md = File.join(work_dir, "CLAUDE.md")
+    claude_md = File.join(work_dir, 'CLAUDE.md')
     return if File.exist?(claude_md)
 
-    log "No CLAUDE.md found, generating..."
+    log 'No CLAUDE.md found, generating...'
     danger_claude_prompt(
       work_dir,
-      "Analyse ce projet (structure, technologies, conventions, tests) et cree un fichier CLAUDE.md " \
-      "a la racine qui documente ces informations pour guider les futurs developpements. " \
-      "Sois concis et factuel."
+      'Analyse ce projet (structure, technologies, conventions, tests) et cree un fichier CLAUDE.md ' \
+      'a la racine qui documente ces informations pour guider les futurs developpements. ' \
+      'Sois concis et factuel.'
     )
     danger_claude_commit(work_dir)
   end
@@ -276,39 +272,39 @@ class IssueProcessor
     json_match = out.match(/\{[^{}]*"type"\s*:\s*"(implementation|question|unclear)"[^{}]*\}/m)
     if json_match
       result = JSON.parse(json_match[0])
-      case result["type"]
-      when "implementation"
-        log "Specification is clear, proceeding"
+      case result['type']
+      when 'implementation'
+        log 'Specification is clear, proceeding'
         issue.spec_clear!
         return false
-      when "question"
+      when 'question'
         log "Issue ##{iid} is a question/investigation, not an implementation request"
         issue.question_detected!
         answer_question(work_dir, context, iid, issue)
         return true
-      when "unclear"
-        return handle_unclear_spec(result["issues"], iid, issue)
+      when 'unclear'
+        return handle_unclear_spec(result['issues'], iid, issue)
       end
     end
 
     # Fallback: try old format { "clear": true/false }
     json_match = out.match(/\{[^{}]*"clear"\s*:\s*(true|false)[^{}]*\}/m)
     unless json_match
-      log "Could not parse spec check response, proceeding with implementation"
+      log 'Could not parse spec check response, proceeding with implementation'
       issue.spec_clear!
       return false
     end
 
     result = JSON.parse(json_match[0])
-    if result["clear"]
-      log "Specification is clear, proceeding"
+    if result['clear']
+      log 'Specification is clear, proceeding'
       issue.spec_clear!
       return false
     end
 
-    handle_unclear_spec(result["issues"], iid, issue)
+    handle_unclear_spec(result['issues'], iid, issue)
   rescue JSON::ParserError
-    log "Could not parse spec check JSON response, proceeding with implementation"
+    log 'Could not parse spec check JSON response, proceeding with implementation'
     issue.spec_clear!
     false
   end
@@ -316,13 +312,13 @@ class IssueProcessor
   def handle_unclear_spec(issues_list, iid, issue)
     issues_list ||= []
     if issues_list.empty?
-      log "Spec check returned unclear but no issues listed, proceeding"
+      log 'Spec check returned unclear but no issues listed, proceeding'
       issue.spec_clear!
       return false
     end
 
     issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
-    locale = (issue_record&.locale || "fr").to_sym
+    locale = (issue_record&.locale || 'fr').to_sym
     header = Locales.t(:spec_unclear_header, locale: locale, tag: autodev_tag)
     footer = Locales.t(:spec_unclear_footer, locale: locale, tag: autodev_tag)
     numbered = issues_list.map.with_index(1) { |iss, i| "#{i}. #{iss}" }.join("\n")
@@ -355,11 +351,11 @@ class IssueProcessor
         - Reponds UNIQUEMENT avec ta reponse (pas de JSON, pas de bloc de code englobant).
       PROMPT
 
-      danger_claude_prompt(work_dir, prompt, label: "-p (question investigation)")
+      danger_claude_prompt(work_dir, prompt, label: '-p (question investigation)')
     end
 
     issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
-    locale = (issue_record&.locale || "fr").to_sym
+    locale = (issue_record&.locale || 'fr').to_sym
     header = Locales.t(:question_answered_header, locale: locale, tag: autodev_tag)
     footer = Locales.t(:question_answered_footer, locale: locale, tag: autodev_tag)
     notify_issue(iid, "#{header}\n\n#{answer.strip}\n\n---\n#{footer}")
@@ -367,8 +363,8 @@ class IssueProcessor
       # Remove label_doing but don't add any label back — the human decides the next step.
       # Adding labels_todo would cause an infinite loop (question re-detected every cycle).
       manage_labels(iid,
-        remove: [@project_config["label_doing"]],
-        add: nil)
+                    remove: [@project_config['label_doing']],
+                    add: nil)
     else
       update_labels(iid)
     end
@@ -382,12 +378,12 @@ class IssueProcessor
   end
 
   def implement(work_dir, context, iid)
-    if @project_config["parallel_agents"]
+    if @project_config['parallel_agents']
       plan = evaluate_complexity(work_dir, context, iid)
       if plan
         implement_parallel(work_dir, context, iid, plan)
       else
-        log "Complexity evaluation returned no plan, falling back"
+        log 'Complexity evaluation returned no plan, falling back'
         implement_fallback(work_dir, context, iid)
       end
     else
@@ -396,7 +392,7 @@ class IssueProcessor
   end
 
   def implement_fallback(work_dir, context, iid)
-    if @project_config["split_implementation"]
+    if @project_config['split_implementation']
       implement_split(work_dir, context, iid)
     else
       implement_single(work_dir, context, iid)
@@ -438,7 +434,7 @@ class IssueProcessor
       PROMPT
 
       log "Evaluating issue complexity for ##{iid}..."
-      danger_claude_prompt(work_dir, prompt, label: "-p (complexity eval)")
+      danger_claude_prompt(work_dir, prompt, label: '-p (complexity eval)')
     end
 
     json_match = out.match(/\{[^{}]*"parallel"\s*:\s*(true|false).*\}/m)
@@ -446,25 +442,25 @@ class IssueProcessor
 
     result = JSON.parse(json_match[0])
 
-    unless result["parallel"] && result["tasks"].is_a?(Array) && result["tasks"].size > 1
-      log "Issue ##{iid} assessed as simple: #{result["reason"]}"
+    unless result['parallel'] && result['tasks'].is_a?(Array) && result['tasks'].size > 1
+      log "Issue ##{iid} assessed as simple: #{result['reason']}"
       return nil
     end
 
-    tasks = result["tasks"].map do |t|
-      { name: t["name"].to_s, description: t["description"].to_s, scope: t["scope"].to_s }
+    tasks = result['tasks'].map do |t|
+      { name: t['name'].to_s, description: t['description'].to_s, scope: t['scope'].to_s }
     end
 
-    log "Issue ##{iid} assessed as complex (#{tasks.size} tasks): #{result["reason"]}"
+    log "Issue ##{iid} assessed as complex (#{tasks.size} tasks): #{result['reason']}"
     tasks
   rescue JSON::ParserError
-    log "Could not parse complexity evaluation, falling back to single agent"
+    log 'Could not parse complexity evaluation, falling back to single agent'
     nil
   end
 
   # Run N agents in parallel, each in its own worktree with a specific task.
   def implement_parallel(work_dir, context, iid, tasks)
-    extra = @project_config["extra_prompt"]
+    extra = @project_config['extra_prompt']
     skills_line = SkillsInjector.skills_instruction(@all_skills)
     log "Running #{tasks.size} parallel agents for issue ##{iid}..."
 
@@ -474,15 +470,15 @@ class IssueProcessor
 
     tasks.each_with_index do |task, idx|
       wt_path = "#{work_dir}_task_#{idx}"
-      run_cmd(["git", "worktree", "add", wt_path, "HEAD"], chdir: work_dir)
+      run_cmd(['git', 'worktree', 'add', wt_path, 'HEAD'], chdir: work_dir)
       SkillsInjector.inject(wt_path, logger: @logger, project_path: @project_path)
 
       # Copy injected agents
-      agents_src = File.join(work_dir, ".claude", "agents")
+      agents_src = File.join(work_dir, '.claude', 'agents')
       if Dir.exist?(agents_src)
-        agents_dst = File.join(wt_path, ".claude", "agents")
+        agents_dst = File.join(wt_path, '.claude', 'agents')
         FileUtils.mkdir_p(agents_dst)
-        FileUtils.cp_r(Dir.glob(File.join(agents_src, "*")), agents_dst)
+        FileUtils.cp_r(Dir.glob(File.join(agents_src, '*')), agents_dst)
       end
 
       worktrees << { path: wt_path, task: task }
@@ -510,7 +506,7 @@ class IssueProcessor
         - Respecte les conventions du projet (voir CLAUDE.md si present).
         - Ajoute les tests correspondant a ta tache si elle n'est pas dediee aux tests.
         - Sois autonome : ne presuppose pas que les autres agents ont deja fait leur travail.
-        #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+        #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
       PROMPT
 
       threads << Thread.new do
@@ -525,7 +521,7 @@ class IssueProcessor
     threads.each(&:join)
 
     if errors.any?
-      error_names = errors.map { |e| e[:task] }.join(", ")
+      error_names = errors.map { |e| e[:task] }.join(', ')
       log_error "#{errors.size} agent(s) failed: #{error_names}"
     end
 
@@ -536,14 +532,16 @@ class IssueProcessor
 
     # If ALL agents failed, raise
     if errors.size == tasks.size
-      raise ImplementationError, "All parallel agents failed: #{errors.map { |e| "#{e[:task]}: #{e[:error].message}" }.join("; ")}"
+      raise ImplementationError, "All parallel agents failed: #{errors.map do |e|
+        "#{e[:task]}: #{e[:error].message}"
+      end.join('; ')}"
     end
   ensure
     # Clean up all worktrees (and context files within them)
     (worktrees || []).each do |wt|
       GitlabHelpers.cleanup_context_file(wt[:path], @current_branch_name) if wt[:path]
       if Dir.exist?(wt[:path])
-        run_cmd_status(["git", "worktree", "remove", "--force", wt[:path]], chdir: work_dir)
+        run_cmd_status(['git', 'worktree', 'remove', '--force', wt[:path]], chdir: work_dir)
         FileUtils.rm_rf(wt[:path])
       end
     end
@@ -552,11 +550,11 @@ class IssueProcessor
   # Copy all modified/new files from a worktree back to work_dir.
   def merge_worktree_files(worktree_path, work_dir, task_name)
     changed, _err, ok = run_cmd_status(
-      ["git", "diff", "--name-only", "HEAD"],
+      ['git', 'diff', '--name-only', 'HEAD'],
       chdir: worktree_path
     )
     untracked, _err, ok2 = run_cmd_status(
-      ["git", "ls-files", "--others", "--exclude-standard"],
+      ['git', 'ls-files', '--others', '--exclude-standard'],
       chdir: worktree_path
     )
 
@@ -581,8 +579,8 @@ class IssueProcessor
     end
   end
 
-  def implement_single(work_dir, context, iid)
-    extra = @project_config["extra_prompt"]
+  def implement_single(work_dir, context, _iid)
+    extra = @project_config['extra_prompt']
     skills_line = SkillsInjector.skills_instruction(@all_skills)
 
     with_context_file(work_dir, @current_branch_name, context) do |context_filename|
@@ -599,30 +597,30 @@ class IssueProcessor
         - Respecte les conventions du projet (voir CLAUDE.md si present).
         - Ajoute ou modifie les tests si necessaire.
         - Ne modifie que ce qui est necessaire pour resoudre l'issue.
-        #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+        #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
       PROMPT
 
-      log "Running implementation via danger-claude..."
+      log 'Running implementation via danger-claude...'
       danger_claude_prompt(work_dir, prompt)
     end
   end
 
-  def implement_split(work_dir, context, iid)
-    extra = @project_config["extra_prompt"]
+  def implement_split(work_dir, context, _iid)
+    extra = @project_config['extra_prompt']
     skills_line = SkillsInjector.skills_instruction(@all_skills)
-    implementer = detect_agent(work_dir, "implementer")
-    test_writer = detect_agent(work_dir, "test-writer")
+    implementer = detect_agent(work_dir, 'implementer')
+    test_writer = detect_agent(work_dir, 'test-writer')
 
     # Create a worktree for the test-writer so both can run in parallel
     test_worktree = "#{work_dir}_tests"
-    run_cmd(["git", "worktree", "add", test_worktree, "HEAD"], chdir: work_dir)
+    run_cmd(['git', 'worktree', 'add', test_worktree, 'HEAD'], chdir: work_dir)
     SkillsInjector.inject(test_worktree, logger: @logger, project_path: @project_path)
     # Copy injected agents to worktree (they were injected in work_dir by detect_agent)
-    agents_src = File.join(work_dir, ".claude", "agents")
+    agents_src = File.join(work_dir, '.claude', 'agents')
     if Dir.exist?(agents_src)
-      agents_dst = File.join(test_worktree, ".claude", "agents")
+      agents_dst = File.join(test_worktree, '.claude', 'agents')
       FileUtils.mkdir_p(agents_dst)
-      FileUtils.cp_r(Dir.glob(File.join(agents_src, "*")), agents_dst)
+      FileUtils.cp_r(Dir.glob(File.join(agents_src, '*')), agents_dst)
     end
 
     # Write context file in both worktrees
@@ -643,7 +641,7 @@ class IssueProcessor
       - Respecte les conventions du projet (voir CLAUDE.md si present).
       - N'ecris PAS de tests. Les tests seront ecrits en parallele par un autre agent.
       - Ne modifie que ce qui est necessaire pour resoudre l'issue.
-      #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+      #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
     PROMPT
 
     test_prompt = <<~PROMPT
@@ -660,22 +658,22 @@ class IssueProcessor
       - Ne modifie PAS le code source, uniquement les fichiers de test.
       - Couvre les cas nominaux et les cas limites importants.
       - Si tu dois creer des factories/fixtures, fais-le dans les fichiers de test appropriés.
-      #{extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ""}
+      #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
     PROMPT
 
     # Run both agents in parallel
-    log "Running implementer + test-writer in parallel..."
+    log 'Running implementer + test-writer in parallel...'
     code_error = nil
     test_error = nil
 
     code_thread = Thread.new do
-      danger_claude_prompt(work_dir, code_prompt, agent: implementer, label: "-p (implement code)")
+      danger_claude_prompt(work_dir, code_prompt, agent: implementer, label: '-p (implement code)')
     rescue StandardError => e
       code_error = e
     end
 
     test_thread = Thread.new do
-      danger_claude_prompt(test_worktree, test_prompt, agent: test_writer, label: "-p (write tests)")
+      danger_claude_prompt(test_worktree, test_prompt, agent: test_writer, label: '-p (write tests)')
     rescue StandardError => e
       test_error = e
     end
@@ -696,7 +694,7 @@ class IssueProcessor
     if test_worktree
       GitlabHelpers.cleanup_context_file(test_worktree, @current_branch_name)
       if Dir.exist?(test_worktree)
-        run_cmd_status(["git", "worktree", "remove", "--force", test_worktree], chdir: work_dir)
+        run_cmd_status(['git', 'worktree', 'remove', '--force', test_worktree], chdir: work_dir)
         FileUtils.rm_rf(test_worktree) # fallback if worktree remove failed
       end
     end
@@ -706,11 +704,11 @@ class IssueProcessor
   def merge_test_files(test_worktree, work_dir)
     # Get list of new/modified files in worktree
     changed, _err, ok = run_cmd_status(
-      ["git", "diff", "--name-only", "HEAD"],
+      ['git', 'diff', '--name-only', 'HEAD'],
       chdir: test_worktree
     )
     untracked, _err, ok2 = run_cmd_status(
-      ["git", "ls-files", "--others", "--exclude-standard"],
+      ['git', 'ls-files', '--others', '--exclude-standard'],
       chdir: test_worktree
     )
 
@@ -720,7 +718,7 @@ class IssueProcessor
     files.uniq!
 
     if files.empty?
-      log "Test-writer produced no changes"
+      log 'Test-writer produced no changes'
       return
     end
 
@@ -733,7 +731,7 @@ class IssueProcessor
       FileUtils.mkdir_p(File.dirname(dst))
       FileUtils.cp(src, dst)
     end
-    log "Merged test files: #{files.join(", ")}"
+    log "Merged test files: #{files.join(', ')}"
   end
 
   IMPLEMENTER_AGENT = <<~AGENT
@@ -776,12 +774,12 @@ class IssueProcessor
 
   def detect_agent(work_dir, agent_name)
     # Config override
-    config_key = "#{agent_name.gsub("-", "_")}_agent"
+    config_key = "#{agent_name.gsub('-', '_')}_agent"
     config_agent = @project_config[config_key]
     return config_agent if config_agent
 
     # Project agent
-    agent_path = File.join(work_dir, ".claude", "agents", "#{agent_name}.md")
+    agent_path = File.join(work_dir, '.claude', 'agents', "#{agent_name}.md")
     if File.exist?(agent_path)
       log "Found agent '#{agent_name}' in project"
       return agent_name
@@ -789,8 +787,8 @@ class IssueProcessor
 
     # Inject default
     template = case agent_name
-               when "implementer" then IMPLEMENTER_AGENT
-               when "test-writer" then TEST_WRITER_AGENT
+               when 'implementer' then IMPLEMENTER_AGENT
+               when 'test-writer' then TEST_WRITER_AGENT
                else return nil
                end
 
@@ -801,64 +799,64 @@ class IssueProcessor
   end
 
   def commit(work_dir)
-    log "Committing changes via danger-claude..."
+    log 'Committing changes via danger-claude...'
     danger_claude_commit(work_dir)
   end
 
   def verify_changes(work_dir, branch_name)
-    target = @project_config["target_branch"] || default_branch(work_dir)
+    target = @project_config['target_branch'] || default_branch(work_dir)
     out, _err, ok = run_cmd_status(
-      ["git", "log", "#{target}..#{branch_name}", "--oneline"],
+      ['git', 'log', "#{target}..#{branch_name}", '--oneline'],
       chdir: work_dir
     )
-    if !ok || out.strip.empty?
-      raise ImplementationError, "No changes produced by implementation"
-    end
+    return unless !ok || out.strip.empty?
+
+    raise ImplementationError, 'No changes produced by implementation'
   end
 
   def default_branch(work_dir)
-    out, _err, ok = run_cmd_status(["git", "symbolic-ref", "refs/remotes/origin/HEAD", "--short"], chdir: work_dir)
+    out, _err, ok = run_cmd_status(['git', 'symbolic-ref', 'refs/remotes/origin/HEAD', '--short'], chdir: work_dir)
     if ok && !out.empty?
-      out.sub("origin/", "")
+      out.sub('origin/', '')
     else
-      "main"
+      'main'
     end
   end
 
   def push(work_dir, branch_name)
     log "Pushing #{branch_name}..."
-    _out, _err, ok = run_cmd_status(["git", "push", "-u", "origin", branch_name], chdir: work_dir)
-    unless ok
-      log "Push failed, retrying with --force-with-lease..."
-      run_cmd(["git", "push", "--force-with-lease", "-u", "origin", branch_name], chdir: work_dir)
-    end
+    _out, _err, ok = run_cmd_status(['git', 'push', '-u', 'origin', branch_name], chdir: work_dir)
+    return if ok
+
+    log 'Push failed, retrying with --force-with-lease...'
+    run_cmd(['git', 'push', '--force-with-lease', '-u', 'origin', branch_name], chdir: work_dir)
   end
 
   def update_labels(iid)
-    labels_to_remove = @project_config["labels_to_remove"] || []
-    label_to_add     = @project_config["label_to_add"]
+    labels_to_remove = @project_config['labels_to_remove'] || []
+    label_to_add     = @project_config['label_to_add']
 
     begin
       gi = @client.issue(@project_path, iid)
       current_labels = gi.labels || []
       new_labels = current_labels - labels_to_remove
       new_labels << label_to_add if label_to_add && !new_labels.include?(label_to_add)
-      @client.edit_issue(@project_path, iid, labels: new_labels.join(","))
+      @client.edit_issue(@project_path, iid, labels: new_labels.join(','))
       log "Labels updated: removed #{labels_to_remove & current_labels}, added #{label_to_add}"
     rescue Gitlab::Error::ResponseError => e
       log_error "Failed to update labels for ##{iid}: #{e.message}"
     end
   end
 
-  def create_merge_request(work_dir, iid, branch_name, issue_title)
-    target = @project_config["target_branch"] || default_branch(work_dir)
-    commit_msg = run_cmd(["git", "log", "-1", "--format=%B"], chdir: work_dir)
-    commit_subject = run_cmd(["git", "log", "-1", "--format=%s"], chdir: work_dir)
+  def create_merge_request(work_dir, iid, branch_name, _issue_title)
+    target = @project_config['target_branch'] || default_branch(work_dir)
+    commit_msg = run_cmd(['git', 'log', '-1', '--format=%B'], chdir: work_dir)
+    commit_subject = run_cmd(['git', 'log', '-1', '--format=%s'], chdir: work_dir)
     mr_title = commit_subject
     mr_description = "#{commit_msg}\n\nFixes ##{iid}"
 
     begin
-      existing_mrs = @client.merge_requests(@project_path, source_branch: branch_name, state: "opened")
+      existing_mrs = @client.merge_requests(@project_path, source_branch: branch_name, state: 'opened')
       if existing_mrs.any?
         mr = existing_mrs.first
         log "MR already exists: !#{mr.iid}"
@@ -876,17 +874,17 @@ class IssueProcessor
   end
 
   def run_review(mr_url)
-    unless command_exists?("mr-review")
-      log "mr-review not installed, skipping review"
+    unless command_exists?('mr-review')
+      log 'mr-review not installed, skipping review'
       return
     end
 
-    log "Waiting 15s for GitLab to compute diff_refs..."
+    log 'Waiting 15s for GitLab to compute diff_refs...'
     sleep 15
     log "Running mr-review on #{mr_url}..."
-    _, err, status = Open3.capture3(CLEAN_ENV, "mr-review", "-H", mr_url)
+    _, err, status = Open3.capture3(CLEAN_ENV, 'mr-review', '-H', mr_url)
     if status.success?
-      log "Review completed successfully"
+      log 'Review completed successfully'
     else
       log_error "mr-review failed (non-fatal): #{err[0, 300]}"
     end
@@ -902,7 +900,7 @@ class IssueProcessor
   end
 
   def command_exists?(cmd)
-    _, status = Open3.capture2e("which", cmd)
+    _, status = Open3.capture2e('which', cmd)
     status.success?
   end
 end
