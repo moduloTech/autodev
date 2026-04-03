@@ -46,9 +46,13 @@ class PollRouter
     return :next if flags[:blocked]
     return :next if resume_todo_if_applicable(gl_issue, existing, flags)
     return :next if resume_mr_if_applicable(gl_issue, existing, client, flags)
-    return :next unless flags[:todo]
+    return :next unless processable_labels?(existing, flags)
 
     :process
+  end
+
+  def processable_labels?(existing, flags)
+    flags[:todo] || (flags[:mr] && (existing.nil? || existing.status == 'pending'))
   end
 
   def resume_todo_if_applicable(gl_issue, existing, flags)
