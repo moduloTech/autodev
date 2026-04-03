@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-
 # Thread pool that distributes issue processing across N concurrent workers.
 class WorkerPool
   ASSIGNMENTS_FILE = File.expand_path('~/.autodev/workers.json')

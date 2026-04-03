@@ -48,7 +48,7 @@ class AppLogger
                      else "  #{@pastel.cyan(prefix)} #{console_msg}"
                      end
       if level == 'ERROR'
-        $stderr.puts console_line
+        warn console_line
       else
         $stdout.puts console_line
       end
