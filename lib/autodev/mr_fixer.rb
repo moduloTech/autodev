@@ -52,8 +52,10 @@ class MrFixer
       target_branch = default_branch(work_dir)
 
       # Fetch full context once (issue + all MR discussions)
-      full_context = GitlabHelpers.fetch_full_context(@client, @project_path, iid,
-                                                      mr_iid: mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
+      full_context = GitlabHelpers.fetch_full_context(
+        @client, @project_path, iid,
+        mr_iid: mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir
+      )
 
       # Use mr-fixer agent if available in the project
       agent = detect_agent(work_dir, 'mr-fixer')

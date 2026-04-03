@@ -65,8 +65,10 @@ class IssueProcessor
         issue.clone_complete! # cloning → checking_spec
 
         # 3. Fetch full issue context (includes MR discussions if MR exists)
-        context = GitlabHelpers.fetch_full_context(@client, @project_path, iid,
-                                                   mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
+        context = GitlabHelpers.fetch_full_context(
+          @client, @project_path, iid,
+          mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir
+        )
 
         # 4. Check specification clarity
         if check_specification(work_dir, context, iid, issue)
@@ -155,9 +157,11 @@ class IssueProcessor
 
       if retry_count < max_retries
         fields[:next_retry_at] = Sequel.lit("datetime('now', '+#{backoff_seconds} seconds')")
-        log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, retry in #{backoff_seconds}s): #{e.class}: #{e.message}"
+        log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, " \
+                  "retry in #{backoff_seconds}s): #{e.class}: #{e.message}"
       else
-        log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, no more retries): #{e.class}: #{e.message}"
+        log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, " \
+                  "no more retries): #{e.class}: #{e.message}"
       end
 
       Issue.where(id: issue.id).update(**fields)

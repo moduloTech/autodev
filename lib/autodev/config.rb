@@ -177,7 +177,8 @@ module Config
       value = project_config['post_completion_timeout'].to_i
       unless value.positive?
         raise ConfigError,
-              "#{path}: 'post_completion_timeout' must be a positive integer, got: #{project_config['post_completion_timeout'].inspect}"
+              "#{path}: 'post_completion_timeout' must be a positive integer, " \
+              "got: #{project_config['post_completion_timeout'].inspect}"
       end
     end
 
@@ -211,10 +212,12 @@ module Config
 
     # Deprecation warnings for old fields
     if project_config['labels_to_remove']
-      warn "[DEPRECATION] #{path}: 'labels_to_remove' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+      warn "[DEPRECATION] #{path}: 'labels_to_remove' is deprecated. " \
+           "Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
     end
     if project_config['label_to_add']
-      warn "[DEPRECATION] #{path}: 'label_to_add' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+      warn "[DEPRECATION] #{path}: 'label_to_add' is deprecated. " \
+           "Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
     end
 
     # If any label workflow field is set, all must be set

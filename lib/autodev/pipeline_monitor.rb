@@ -191,7 +191,8 @@ class PipelineMonitor
       # Infra or uncertain: retrigger once before escalating
       retrigger_count = issue.pipeline_retrigger_count || 0
       if retrigger_count < 1
-        log "Pipeline failed for MR !#{mr_iid} (pre-triage: #{triage[:verdict]}), retriggering (attempt #{retrigger_count + 1})..."
+        log "Pipeline failed for MR !#{mr_iid} (pre-triage: #{triage[:verdict]}), " \
+            "retriggering (attempt #{retrigger_count + 1})..."
         begin
           @client.retry_pipeline(@project_path, pipeline_id(pipeline))
           issue.update(pipeline_retrigger_count: retrigger_count + 1)
@@ -317,7 +318,10 @@ class PipelineMonitor
 
   CODE_FAILURE_REASONS = %w[script_failure].freeze
 
-  DEPLOY_JOB_PATTERN = /\b(deploy|release|publish|rollout|provision|terraform|ansible|helm|k8s|kubernetes|staging|production|review.?app)\b/i.freeze
+  DEPLOY_JOB_PATTERN = %r{
+    \b(deploy|release|publish|rollout|provision|terraform|ansible|
+    helm|k8s|kubernetes|staging|production|review.?app)\b
+  }ix.freeze
 
   def pre_triage(failed_jobs)
     reasons = failed_jobs.map do |job|
@@ -475,8 +479,10 @@ class PipelineMonitor
     skills_line = SkillsInjector.skills_instruction(@all_skills)
 
     # Fetch full context once for all pipeline fix prompts
-    full_context = GitlabHelpers.fetch_full_context(@client, @project_path, iid,
-                                                    mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir)
+    full_context = GitlabHelpers.fetch_full_context(
+      @client, @project_path, iid,
+      mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir
+    )
 
     job_entries.each_with_index do |entry, idx|
       category = entry[:category] || :unknown
