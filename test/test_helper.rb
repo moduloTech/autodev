@@ -32,22 +32,26 @@ end
 # Helper to run database tests with an in-memory SQLite instance.
 # Connects, migrates, builds the Issue model, yields, then tears down.
 module DatabaseTestHelper
-  @@db_initialized = false
-  @@iid_counter = 0
+  @db_initialized = false
+  @iid_counter = 0
+
+  class << self
+    attr_accessor :db_initialized, :iid_counter
+  end
 
   def setup_database
-    unless @@db_initialized
+    unless DatabaseTestHelper.db_initialized
       Database.connect('sqlite://:memory:')
       Database.build_model!
-      @@db_initialized = true
+      DatabaseTestHelper.db_initialized = true
     end
     # Clean slate for each test
     Database.db[:issues].delete
   end
 
   def create_issue(overrides = {})
-    @@iid_counter += 1
-    defaults = { project_path: 'group/project', issue_iid: @@iid_counter, status: 'pending' }
+    DatabaseTestHelper.iid_counter += 1
+    defaults = { project_path: 'group/project', issue_iid: DatabaseTestHelper.iid_counter, status: 'pending' }
     Issue.create(defaults.merge(overrides))
   end
 
