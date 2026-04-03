@@ -1,0 +1,21 @@
+# frozen_string_literal: true
+
+# Raised when the GitLab API rate limit is hit; carries the reset timestamp.
+class RateLimitError < AutodevError
+  attr_reader :reset_time
+
+  # Parse "resets Xpm (UTC)" or "resets Xam (UTC)" from the message
+  def initialize(message, reset_time: nil)
+    @reset_time = reset_time
+    super(message)
+  end
+
+  # Seconds until the rate limit resets (minimum 60s)
+  def wait_seconds
+    return 3600 unless @reset_time
+
+    now = Time.now.utc
+    diff = @reset_time - now
+    diff > 60 ? diff.ceil : 60
+  end
+end
