@@ -11,6 +11,7 @@
 ### Changed
 
 - Hoist GitLab client and `MrFixer` helper instantiation above the error retry loop so they are reused across retried issues in the same poll tick instead of being recreated per issue.
+- Deduplicate error retry branches: the MR vs non-MR paths now share a single code path that selects the transition method, label, and log target based on `mr_iid` presence.
 
 ## [0.8.0] - 2026-04-02
 

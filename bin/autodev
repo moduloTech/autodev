@@ -552,29 +552,18 @@ def main
         retryable.each do |issue|
           begin
             # Issues with an existing MR resume at checking_pipeline instead of pending
-            if issue.mr_iid
-              issue.retry_pipeline!
-              issue.update(error_message: nil, started_at: nil)
-              if retry_helper
-                begin
-                  retry_helper.set_label_mr(issue.issue_iid)
-                rescue StandardError => e
-                  logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}", project: project_path)
-                end
+            has_mr = !issue.mr_iid.nil?
+            has_mr ? issue.retry_pipeline! : issue.retry_processing!
+            issue.update(error_message: nil, started_at: nil)
+            if retry_helper
+              begin
+                has_mr ? retry_helper.set_label_mr(issue.issue_iid) : retry_helper.set_label_todo(issue.issue_iid)
+              rescue StandardError => e
+                logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}", project: project_path)
               end
-              logger.info("Issue ##{issue.issue_iid} retried → checking_pipeline (attempt #{issue.retry_count + 1})", project: project_path)
-            else
-              issue.retry_processing!
-              issue.update(error_message: nil, started_at: nil)
-              if retry_helper
-                begin
-                  retry_helper.set_label_todo(issue.issue_iid)
-                rescue StandardError => e
-                  logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}", project: project_path)
-                end
-              end
-              logger.info("Issue ##{issue.issue_iid} retried (attempt #{issue.retry_count + 1})", project: project_path)
             end
+            target = has_mr ? "checking_pipeline" : "pending"
+            logger.info("Issue ##{issue.issue_iid} retried → #{target} (attempt #{issue.retry_count + 1})", project: project_path)
           rescue AASM::InvalidTransition => e
             logger.error("Could not retry issue ##{issue.issue_iid}: #{e.message}", project: project_path)
           end
