@@ -6,14 +6,15 @@ module Database
   def self.connect(url)
     return unless url
 
-    if url.start_with?("sqlite://")
-      db_path = url.sub("sqlite://", "")
-      db_path = File.expand_path(db_path)
-      url = "sqlite://#{db_path}"
+    if url == "sqlite://:memory:"
+      @db = Sequel.sqlite(max_connections: 5)
+    elsif url.start_with?("sqlite://")
+      db_path = File.expand_path(url.sub("sqlite://", ""))
       FileUtils.mkdir_p(File.dirname(db_path))
+      @db = Sequel.connect("sqlite://#{db_path}", max_connections: 5)
+    else
+      @db = Sequel.connect(url, max_connections: 5)
     end
-
-    @db = Sequel.connect(url, max_connections: 5)
     @db.run("PRAGMA journal_mode=WAL")
     @db.run("PRAGMA busy_timeout=5000")
     migrate!
