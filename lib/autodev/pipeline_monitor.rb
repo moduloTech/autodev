@@ -37,7 +37,7 @@ class PipelineMonitor
     when 'canceled', 'skipped'
       log "Pipeline #{status} for MR !#{mr_iid}"
       issue.pipeline_canceled!
-      set_label_blocked(iid)
+      apply_label_blocked(iid)
       notify_localized(iid, :pipeline_canceled, mr_url: issue.mr_url, status: status)
       log "Issue ##{iid}: pipeline #{status} → blocked"
     else
@@ -99,7 +99,7 @@ class PipelineMonitor
     issue._max_fix_rounds = max_fix_rounds
 
     post_completion_cmd = @project_config['post_completion']
-    issue._has_post_completion = post_completion_cmd.is_a?(Array) && post_completion_cmd.any?
+    issue._post_completion = post_completion_cmd.is_a?(Array) && post_completion_cmd.any?
 
     issue.pipeline_green! # → running_post_completion, over, or fixing_discussions (via guards)
 
@@ -215,7 +215,7 @@ class PipelineMonitor
     if failed_jobs.empty?
       log "No failed jobs found for pipeline ##{pipeline_id(pipeline)}, marking as blocked"
       issue.pipeline_failed_infra!
-      set_label_blocked(iid)
+      apply_label_blocked(iid)
       notify_localized(iid, :pipeline_no_failed_jobs, mr_url: issue.mr_url)
       return
     end
@@ -243,7 +243,7 @@ class PipelineMonitor
 
     if triage[:verdict] == :infra
       issue.pipeline_failed_infra!
-      set_label_blocked(iid)
+      apply_label_blocked(iid)
       notify_localized(iid, :pipeline_infra_pretriage, mr_url: issue.mr_url, explanation: triage[:explanation])
       log "Issue ##{iid}: infra failure detected by pre-triage → blocked (#{triage[:explanation]})"
       return
@@ -276,7 +276,7 @@ class PipelineMonitor
         unless eval_result
           log 'Could not parse pipeline evaluation response, marking as blocked'
           issue.pipeline_failed_infra!
-          set_label_blocked(iid)
+          apply_label_blocked(iid)
           notify_localized(iid, :pipeline_eval_failed, mr_url: issue.mr_url)
           return
         end
@@ -285,7 +285,7 @@ class PipelineMonitor
 
         unless eval_result['code_related']
           issue.pipeline_failed_infra!
-          set_label_blocked(iid)
+          apply_label_blocked(iid)
           notify_localized(iid, :pipeline_non_code, mr_url: issue.mr_url, explanation: explanation)
           log "Issue ##{iid}: non-code pipeline failure → blocked (#{explanation})"
           return
@@ -298,7 +298,7 @@ class PipelineMonitor
       issue.pipeline_failed_code!
 
       if issue.blocked?
-        set_label_blocked(iid)
+        apply_label_blocked(iid)
         notify_localized(iid, :pipeline_max_rounds, mr_url: issue.mr_url, explanation: explanation)
         log "Issue ##{iid}: code-related pipeline failure but max fix rounds reached → blocked"
         return

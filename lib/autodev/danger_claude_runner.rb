@@ -215,28 +215,28 @@ module DangerClaudeRunner
     Config.label_workflow?(@project_config)
   end
 
-  def set_label_doing(iid)
+  def apply_label_doing(iid)
     return unless label_workflow?
 
     remove = @project_config['labels_todo'] + [@project_config['label_mr'], @project_config['label_blocked']]
     manage_labels(iid, remove: remove, add: @project_config['label_doing'])
   end
 
-  def set_label_mr(iid)
+  def apply_label_mr(iid)
     return unless label_workflow?
 
     remove = @project_config['labels_todo'] + [@project_config['label_doing'], @project_config['label_blocked']]
     manage_labels(iid, remove: remove, add: @project_config['label_mr'])
   end
 
-  def set_label_todo(iid)
+  def apply_label_todo(iid)
     return unless label_workflow?
 
     remove = [@project_config['label_doing'], @project_config['label_mr'], @project_config['label_blocked']]
     manage_labels(iid, remove: remove, add: @project_config['labels_todo'].first)
   end
 
-  def set_label_blocked(iid)
+  def apply_label_blocked(iid)
     return unless label_workflow?
 
     remove = @project_config['labels_todo'] + [@project_config['label_doing'], @project_config['label_mr']]

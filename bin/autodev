@@ -503,7 +503,7 @@ def main
             logger: logger, token: token
           )
 
-          pool.enqueue(issue_iid: existing.issue_iid) { processor.process(existing) }
+          pool.enqueue?(issue_iid: existing.issue_iid) { processor.process(existing) }
           logger.info("Enqueued issue ##{gl_issue.iid}: #{gl_issue.title}", project: project_path)
         end
       rescue StandardError => e
@@ -524,7 +524,7 @@ def main
             logger: logger, token: token
           )
 
-          pool.enqueue(issue_iid: issue.issue_iid) { monitor.check(issue) }
+          pool.enqueue?(issue_iid: issue.issue_iid) { monitor.check(issue) }
           logger.info("Enqueued pipeline check for issue ##{issue.issue_iid} (MR !#{issue.mr_iid})",
                       project: project_path)
         end
@@ -546,7 +546,7 @@ def main
             logger: logger, token: token
           )
 
-          pool.enqueue(issue_iid: issue.issue_iid) { fixer.fix(issue) }
+          pool.enqueue?(issue_iid: issue.issue_iid) { fixer.fix(issue) }
           logger.info("Enqueued discussion fix for issue ##{issue.issue_iid} (round #{issue.fix_round + 1})",
                       project: project_path)
         end
@@ -575,7 +575,7 @@ def main
           issue.update(error_message: nil, started_at: nil)
           if retry_helper
             begin
-              has_mr ? retry_helper.set_label_mr(issue.issue_iid) : retry_helper.set_label_todo(issue.issue_iid)
+              has_mr ? retry_helper.apply_label_mr(issue.issue_iid) : retry_helper.apply_label_todo(issue.issue_iid)
             rescue StandardError => e
               logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}", project: project_path)
             end
@@ -627,7 +627,7 @@ rescue Interrupt
   exit 130
 rescue StandardError => e
   logger&.error("Unexpected error: #{e.class}: #{e.message}") || (warn "Unexpected error: #{e.class}: #{e.message}")
-  logger&.error(e.backtrace&.first(5)&.join("\n  ")) if e.backtrace
+  logger&.error(e.backtrace.first(5).join("\n  ")) if e.backtrace
   exit 1
 ensure
   logger&.close

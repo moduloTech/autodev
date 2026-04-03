@@ -15,7 +15,7 @@ class IssueProcessor
     log "Processing issue ##{iid}: #{title}"
     issue.start_processing! # pending → cloning
     Issue.where(id: issue.id).update(started_at: Sequel.lit("datetime('now')"))
-    set_label_doing(iid)
+    apply_label_doing(iid)
 
     # Verify issue is still open
     current = @client.issue(@project_path, iid)
@@ -105,7 +105,7 @@ class IssueProcessor
 
       # 11. Labels
       if label_workflow?
-        set_label_mr(iid)
+        apply_label_mr(iid)
       else
         update_labels(iid)
       end
@@ -326,7 +326,7 @@ class IssueProcessor
         answer_question(work_dir, context, iid, issue)
         return true
       when 'unclear'
-        return handle_unclear_spec(result['issues'], iid, issue)
+        return unclear_spec?(result['issues'], iid, issue)
       end
     end
 
@@ -345,14 +345,14 @@ class IssueProcessor
       return false
     end
 
-    handle_unclear_spec(result['issues'], iid, issue)
+    unclear_spec?(result['issues'], iid, issue)
   rescue JSON::ParserError
     log 'Could not parse spec check JSON response, proceeding with implementation'
     issue.spec_clear!
     false
   end
 
-  def handle_unclear_spec(issues_list, iid, issue)
+  def unclear_spec?(issues_list, iid, issue)
     issues_list ||= []
     if issues_list.empty?
       log 'Spec check returned unclear but no issues listed, proceeding'
@@ -367,7 +367,7 @@ class IssueProcessor
     numbered = issues_list.map.with_index(1) { |iss, i| "#{i}. #{iss}" }.join("\n")
     notify_issue(iid, "#{header}\n\n#{numbered}\n\n#{footer}")
     issue.spec_unclear!
-    set_label_todo(iid)
+    apply_label_todo(iid)
     Issue.where(id: issue.id).update(clarification_requested_at: Sequel.lit("datetime('now')"))
     log "Issue ##{iid} needs clarification, #{issues_list.size} question(s) posted"
     true
