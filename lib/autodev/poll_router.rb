@@ -77,7 +77,7 @@ class PollRouter
       client: worker_client, config: @config, project_config: @project_config,
       logger: @logger, token: @token
     )
-    @pool.enqueue(issue_iid: existing.issue_iid) { processor.process(existing) }
+    @pool.enqueue?(issue_iid: existing.issue_iid) { processor.process(existing) }
     @logger.info("Enqueued resumed issue ##{gl_issue.iid}: #{gl_issue.title}", project: @project_path)
   end
 
@@ -103,7 +103,7 @@ class PollRouter
         client: worker_client, config: @config, project_config: @project_config,
         logger: @logger, token: @token
       )
-      @pool.enqueue(issue_iid: existing.issue_iid) { fixer.fix(existing) }
+      @pool.enqueue?(issue_iid: existing.issue_iid) { fixer.fix(existing) }
       @logger.info("Enqueued MR fix for issue ##{gl_issue.iid}", project: @project_path)
     end
   rescue Gitlab::Error::ResponseError => e

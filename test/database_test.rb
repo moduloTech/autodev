@@ -119,7 +119,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
     issue = create_issue
     advance_to(issue, 'checking_pipeline')
     issue._unresolved_discussions_empty = true
-    issue._has_post_completion = false
+    issue._post_completion = false
     issue.pipeline_green!
 
     assert_equal 'over', issue.status
@@ -129,7 +129,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
     issue = create_issue
     advance_to(issue, 'checking_pipeline')
     issue._unresolved_discussions_empty = true
-    issue._has_post_completion = true
+    issue._post_completion = true
     issue.pipeline_green!
 
     assert_equal 'running_post_completion', issue.status
@@ -140,7 +140,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
     advance_to(issue, 'checking_pipeline')
     issue._unresolved_discussions_empty = false
     issue._max_fix_rounds = 3
-    issue._has_post_completion = false
+    issue._post_completion = false
     issue.pipeline_green!
 
     assert_equal 'fixing_discussions', issue.status
@@ -151,7 +151,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
     advance_to(issue, 'checking_pipeline')
     issue._unresolved_discussions_empty = false
     issue._max_fix_rounds = 3
-    issue._has_post_completion = false
+    issue._post_completion = false
     issue.pipeline_green!
 
     assert_equal 'over', issue.status
@@ -162,7 +162,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
     advance_to(issue, 'checking_pipeline')
     issue._unresolved_discussions_empty = false
     issue._max_fix_rounds = 3
-    issue._has_post_completion = true
+    issue._post_completion = true
     issue.pipeline_green!
 
     assert_equal 'running_post_completion', issue.status
@@ -172,7 +172,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
     issue = create_issue
     advance_to(issue, 'checking_pipeline')
     issue._unresolved_discussions_empty = true
-    issue._has_post_completion = true
+    issue._post_completion = true
     issue.pipeline_green!
 
     assert_equal 'running_post_completion', issue.status
@@ -224,7 +224,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
     advance_to(issue, 'checking_pipeline')
     issue._unresolved_discussions_empty = false
     issue._max_fix_rounds = 3
-    issue._has_post_completion = false
+    issue._post_completion = false
     issue.pipeline_green!
 
     assert_equal 'fixing_discussions', issue.status
@@ -251,7 +251,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
     issue = create_issue
     advance_to(issue, 'checking_pipeline')
     issue._unresolved_discussions_empty = true
-    issue._has_post_completion = false
+    issue._post_completion = false
     issue.pipeline_green!
 
     assert_equal 'over', issue.status
@@ -264,7 +264,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
     issue = create_issue
     advance_to(issue, 'checking_pipeline')
     issue._unresolved_discussions_empty = true
-    issue._has_post_completion = false
+    issue._post_completion = false
     issue.pipeline_green!
 
     assert_equal 'over', issue.status

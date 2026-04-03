@@ -47,7 +47,7 @@ class WorkerPool
   end
 
   # Returns false if the issue is already queued or being processed
-  def enqueue(issue_iid: nil, &block)
+  def enqueue?(issue_iid: nil, &block)
     @mutex.synchronize do
       return false if issue_iid && @queued_iids.include?(issue_iid)
 

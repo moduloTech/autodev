@@ -143,7 +143,7 @@ module Database
     klass.class_eval do
       include AASM
 
-      attr_writer :_issue_closed, :_skip_to_mr, :_max_fix_rounds, :_unresolved_discussions_empty, :_has_post_completion
+      attr_writer :_issue_closed, :_skip_to_mr, :_max_fix_rounds, :_unresolved_discussions_empty, :_post_completion
 
       aasm column: :status, whiny_transitions: false do
         state :pending, initial: true
@@ -218,10 +218,10 @@ module Database
 
         event :pipeline_green do
           transitions from: :checking_pipeline, to: :running_post_completion,
-                      guard: %i[no_unresolved_discussions? has_post_completion?]
+                      guard: %i[no_unresolved_discussions? post_completion?]
           transitions from: :checking_pipeline, to: :over, guard: :no_unresolved_discussions?
           transitions from: :checking_pipeline, to: :running_post_completion,
-                      guard: %i[max_fix_rounds_reached? has_post_completion?]
+                      guard: %i[max_fix_rounds_reached? post_completion?]
           transitions from: :checking_pipeline, to: :over, guard: :max_fix_rounds_reached?
           transitions from: :checking_pipeline, to: :fixing_discussions
         end
@@ -309,8 +309,8 @@ module Database
         fix_round < (@_max_fix_rounds || 3)
       end
 
-      def has_post_completion?
-        @_has_post_completion == true
+      def post_completion?
+        @_post_completion == true
       end
 
       # -- Persistence callback --
