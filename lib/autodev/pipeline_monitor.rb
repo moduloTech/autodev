@@ -51,6 +51,43 @@ class PipelineMonitor
     log_error "  #{bt}" if bt
   end
 
+  INFRA_FAILURE_REASONS = %w[
+    runner_system_failure stuck_or_timeout_failure scheduler_failure
+    data_integrity_failure job_execution_timeout runner_unsupported
+    stale_schedule unmet_prerequisites ci_quota_exceeded
+    no_matching_runner trace_size_exceeded archived_failure
+  ].freeze
+
+  CODE_FAILURE_REASONS = %w[script_failure].freeze
+
+  DEPLOY_JOB_PATTERN = %r{
+    \b(deploy|release|publish|rollout|provision|terraform|ansible|
+    helm|k8s|kubernetes|staging|production|review.?app)\b
+  }ix.freeze
+
+  CATEGORY_PATTERNS = {
+    deploy: {
+      names: DEPLOY_JOB_PATTERN,
+      stages: DEPLOY_JOB_PATTERN,
+      logs: /(?!)/ # never match on logs — name/stage is sufficient
+    },
+    test: {
+      names: /\b(r?spec|test|minitest|cucumber|capybara|cypress|jest|mocha)\b/i,
+      stages: /\btest/i,
+      logs: /\b(failures?|failed examples?|tests?\s+failed|FAILED|assertion|expected\b.*\bgot\b|Error:.*spec)/i
+    },
+    lint: {
+      names: /\b(rubocop|lint|eslint|stylelint|prettier|standardrb|brakeman|bundler.?audit|reek)\b/i,
+      stages: /\blint|quality|static/i,
+      logs: %r{\b(offenses?\s+detected|violations?|warning:.*\[\w+/\w+\]|rubocop)}i
+    },
+    build: {
+      names: /\b(build|compile|assets|webpack|vite|bundle\s+install|yarn|npm)\b/i,
+      stages: /\bbuild|prepare|install/i,
+      logs: /\b(syntax error|cannot find|could not|compilation failed|LoadError|ModuleNotFoundError|gem.*not found)\b/i
+    }
+  }.freeze
+
   private
 
   def handle_green(issue, max_fix_rounds)
@@ -309,20 +346,6 @@ class PipelineMonitor
   # verdict is :infra, :code, or :uncertain.
   # ---------------------------------------------------------------------------
 
-  INFRA_FAILURE_REASONS = %w[
-    runner_system_failure stuck_or_timeout_failure scheduler_failure
-    data_integrity_failure job_execution_timeout runner_unsupported
-    stale_schedule unmet_prerequisites ci_quota_exceeded
-    no_matching_runner trace_size_exceeded archived_failure
-  ].freeze
-
-  CODE_FAILURE_REASONS = %w[script_failure].freeze
-
-  DEPLOY_JOB_PATTERN = %r{
-    \b(deploy|release|publish|rollout|provision|terraform|ansible|
-    helm|k8s|kubernetes|staging|production|review.?app)\b
-  }ix.freeze
-
   def pre_triage(failed_jobs)
     reasons = failed_jobs.map do |job|
       reason = job.respond_to?(:failure_reason) ? job.failure_reason : (job['failure_reason'] if job.is_a?(Hash))
@@ -361,29 +384,6 @@ class PipelineMonitor
   # Job categorization: classify each code failure as test/lint/build/unknown
   # by scanning job name, stage, and the first lines of the log.
   # ---------------------------------------------------------------------------
-
-  CATEGORY_PATTERNS = {
-    deploy: {
-      names: DEPLOY_JOB_PATTERN,
-      stages: DEPLOY_JOB_PATTERN,
-      logs: /(?!)/ # never match on logs — name/stage is sufficient
-    },
-    test: {
-      names: /\b(r?spec|test|minitest|cucumber|capybara|cypress|jest|mocha)\b/i,
-      stages: /\btest/i,
-      logs: /\b(failures?|failed examples?|tests?\s+failed|FAILED|assertion|expected\b.*\bgot\b|Error:.*spec)/i
-    },
-    lint: {
-      names: /\b(rubocop|lint|eslint|stylelint|prettier|standardrb|brakeman|bundler.?audit|reek)\b/i,
-      stages: /\blint|quality|static/i,
-      logs: %r{\b(offenses?\s+detected|violations?|warning:.*\[\w+/\w+\]|rubocop)}i
-    },
-    build: {
-      names: /\b(build|compile|assets|webpack|vite|bundle\s+install|yarn|npm)\b/i,
-      stages: /\bbuild|prepare|install/i,
-      logs: /\b(syntax error|cannot find|could not|compilation failed|LoadError|ModuleNotFoundError|gem.*not found)\b/i
-    }
-  }.freeze
 
   def categorize_jobs!(job_entries, log_dir)
     job_entries.each do |entry|

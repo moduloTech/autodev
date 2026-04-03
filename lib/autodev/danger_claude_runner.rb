@@ -12,6 +12,10 @@ module DangerClaudeRunner
     BUNDLE_ORIG_GEMFILE BUNDLER_VERSION BUNDLER_ORIG_BUNDLER_VERSION
     BUNDLER_SETUP RUBYOPT RUBYLIB
   ].to_h { |var| [var, nil] }.freeze
+
+  RATE_LIMIT_PATTERN = /you've hit your limit|rate limit|usage limit/i.freeze
+  RATE_LIMIT_RESET_PATTERN = /resets?\s+(\d{1,2})(am|pm)\s*\(UTC\)/i.freeze
+
   include ShellHelpers
 
   private
@@ -27,9 +31,6 @@ module DangerClaudeRunner
     @dc_stdout      = +''
     @dc_stderr      = +''
   end
-
-  RATE_LIMIT_PATTERN = /you've hit your limit|rate limit|usage limit/i.freeze
-  RATE_LIMIT_RESET_PATTERN = /resets?\s+(\d{1,2})(am|pm)\s*\(UTC\)/i.freeze
 
   def danger_claude_prompt(work_dir, prompt, label: '-p', agent: nil)
     args = dc_global_args + ['-p', prompt]
