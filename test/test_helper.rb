@@ -16,6 +16,8 @@ $LOAD_PATH.unshift File.expand_path('../lib', __dir__)
 
 require 'autodev/errors'
 require 'autodev/logger'
+require 'autodev/config_validator'
+require 'autodev/project_validator'
 require 'autodev/config'
 require 'autodev/language_detector'
 require 'autodev/locales'
