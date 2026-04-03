@@ -111,7 +111,7 @@ class PipelineMonitor
       stdout_r, stdout_w = IO.pipe
       stderr_r, stderr_w = IO.pipe
 
-      pid = Process.spawn(env, *cmd, chdir: work_dir, in: :close, out: stdout_w, err: stderr_w)
+      pid = Process.spawn(env, *cmd, chdir: work_dir, in: :close, out: stdout_w, err: stderr_w, pgroup: true)
       stdout_w.close
       stderr_w.close
 
@@ -122,9 +122,9 @@ class PipelineMonitor
       loop do
         remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
         if remaining <= 0
-          Process.kill("TERM", pid)
+          Process.kill("TERM", -pid)
           sleep 3
-          Process.kill("KILL", pid) rescue nil
+          Process.kill("KILL", -pid) rescue nil
           Process.wait(pid) rescue nil
           out = out_thread.value
           err = err_thread.value

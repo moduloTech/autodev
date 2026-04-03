@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Use process groups (`pgroup: true`) for subprocess spawning so that timeout kills (`TERM`/`KILL`) reach the entire process tree, not just the direct child. Prevents orphaned grandchild processes (e.g., Docker containers) from lingering after a timeout.
 - Fix `NoMethodError: private method 'cleanup_labels' called for an instance of MrFixer` when polling detects a done label. The method inherited from `DangerClaudeRunner` is now explicitly made public in `MrFixer`.
 - Fix issues stuck on `label_doing` after error retry: when an issue hits a rate limit or error and is later retried back to `pending`, the GitLab label is now restored to `labels_todo` so the polling loop picks it up correctly.
 - Fix issues with existing MRs restarting from scratch after error retry: issues that already have a MR now resume at `checking_pipeline` (with `label_mr` restored) instead of `pending`, so the pipeline monitor retries the fix instead of re-implementing from zero. Applies to both runtime retry and startup recovery.
