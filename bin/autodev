@@ -375,8 +375,8 @@ def main
     raise ConfigError, "Set a valid gitlab_url in #{config_path}"
   end
 
-  # Validate label workflow config
-  Config.validate_projects!(config)
+  # Validate all config (global settings + per-project)
+  Config.validate!(config)
 
   # Check danger-claude is available
   _, dc_status = Open3.capture2e("which", "danger-claude")

@@ -108,43 +108,131 @@ module Config
     project_config["labels_todo"].is_a?(Array) && project_config["labels_todo"].any?
   end
 
-  # Validate label workflow config for all projects. Called at startup.
-  # Raises ConfigError if config is incomplete.
+  VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
+
+  # Validate global config. Called at startup before validate_projects!.
+  # Raises ConfigError on invalid values.
+  def self.validate!(config)
+    # Required fields
+    unless config["gitlab_token"].is_a?(String) && !config["gitlab_token"].strip.empty?
+      raise ConfigError, "gitlab_token is required. Set it in config.yml or via GITLAB_API_TOKEN env var."
+    end
+
+    # Positive integer globals
+    %w[poll_interval max_workers dc_timeout max_retries retry_backoff max_fix_rounds].each do |field|
+      value = config[field]
+      unless value.is_a?(Integer) && value > 0
+        raise ConfigError, "'#{field}' must be a positive integer, got: #{value.inspect}"
+      end
+    end
+
+    # Log level
+    level = config["log_level"].to_s.upcase
+    unless VALID_LOG_LEVELS.include?(level)
+      raise ConfigError, "'log_level' must be one of #{VALID_LOG_LEVELS.join(", ")}, got: #{config["log_level"].inspect}"
+    end
+
+    validate_projects!(config)
+  end
+
+  # Validate per-project config for all projects. Called by validate!.
+  # Raises ConfigError if config is incomplete or invalid.
   def self.validate_projects!(config)
-    label_fields = %w[labels_todo label_doing label_mr label_done label_blocked]
-
-    (config["projects"] || []).each do |project_config|
+    (config["projects"] || []).each_with_index do |project_config, idx|
       path = project_config["path"]
-      present = label_fields.select { |f| project_config[f] }
-
-      # Deprecation warnings for old fields
-      if project_config["labels_to_remove"]
-        $stderr.puts "[DEPRECATION] #{path}: 'labels_to_remove' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
-      end
-      if project_config["label_to_add"]
-        $stderr.puts "[DEPRECATION] #{path}: 'label_to_add' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+      unless path.is_a?(String) && !path.strip.empty?
+        raise ConfigError, "projects[#{idx}]: 'path' is required and must be a non-empty string."
       end
 
-      # If any label workflow field is set, all must be set
-      next if present.empty?
+      validate_project_numerics!(project_config, path)
+      validate_project_post_completion!(project_config, path)
+      validate_project_clone_options!(project_config, path)
+      validate_project_labels!(project_config, path)
+    end
+  end
 
-      missing = label_fields - present
-      unless missing.empty?
-        raise ConfigError, "#{path}: incomplete label workflow config. Missing: #{missing.join(", ")}. " \
-                           "All 5 fields are required: #{label_fields.join(", ")}."
-      end
+  def self.validate_project_numerics!(project_config, path)
+    %w[dc_timeout max_retries retry_backoff max_fix_rounds].each do |field|
+      next unless project_config.key?(field)
 
-      # Type validation
-      unless project_config["labels_todo"].is_a?(Array) && project_config["labels_todo"].any?
-        raise ConfigError, "#{path}: 'labels_todo' must be a non-empty array."
-      end
-
-      %w[label_doing label_mr label_done label_blocked].each do |field|
-        value = project_config[field]
-        unless value.is_a?(String) && !value.strip.empty?
-          raise ConfigError, "#{path}: '#{field}' must be a non-empty string."
-        end
+      value = project_config[field].to_i
+      unless value > 0
+        raise ConfigError, "#{path}: '#{field}' must be a positive integer, got: #{project_config[field].inspect}"
       end
     end
   end
+  private_class_method :validate_project_numerics!
+
+  def self.validate_project_post_completion!(project_config, path)
+    if project_config.key?("post_completion")
+      cmd = project_config["post_completion"]
+      unless cmd.is_a?(Array) && cmd.any? && cmd.all? { |c| c.is_a?(String) }
+        raise ConfigError, "#{path}: 'post_completion' must be a non-empty array of strings."
+      end
+    end
+
+    if project_config.key?("post_completion_timeout")
+      value = project_config["post_completion_timeout"].to_i
+      unless value > 0
+        raise ConfigError, "#{path}: 'post_completion_timeout' must be a positive integer, got: #{project_config["post_completion_timeout"].inspect}"
+      end
+    end
+
+    if project_config.key?("post_completion_timeout") && !project_config.key?("post_completion")
+      raise ConfigError, "#{path}: 'post_completion_timeout' is set but 'post_completion' is missing."
+    end
+  end
+  private_class_method :validate_project_post_completion!
+
+  def self.validate_project_clone_options!(project_config, path)
+    if project_config.key?("clone_depth")
+      value = project_config["clone_depth"].to_i
+      if value < 0
+        raise ConfigError, "#{path}: 'clone_depth' must be a non-negative integer, got: #{project_config["clone_depth"].inspect}"
+      end
+    end
+
+    if project_config.key?("sparse_checkout")
+      paths = project_config["sparse_checkout"]
+      unless paths.is_a?(Array) && paths.any? && paths.all? { |p| p.is_a?(String) }
+        raise ConfigError, "#{path}: 'sparse_checkout' must be a non-empty array of strings."
+      end
+    end
+  end
+  private_class_method :validate_project_clone_options!
+
+  def self.validate_project_labels!(project_config, path)
+    label_fields = %w[labels_todo label_doing label_mr label_done label_blocked]
+    present = label_fields.select { |f| project_config[f] }
+
+    # Deprecation warnings for old fields
+    if project_config["labels_to_remove"]
+      $stderr.puts "[DEPRECATION] #{path}: 'labels_to_remove' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+    end
+    if project_config["label_to_add"]
+      $stderr.puts "[DEPRECATION] #{path}: 'label_to_add' is deprecated. Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+    end
+
+    # If any label workflow field is set, all must be set
+    return if present.empty?
+
+    missing = label_fields - present
+    unless missing.empty?
+      raise ConfigError, "#{path}: incomplete label workflow config. Missing: #{missing.join(", ")}. " \
+                         "All 5 fields are required: #{label_fields.join(", ")}."
+    end
+
+    # Type validation
+    unless project_config["labels_todo"].is_a?(Array) && project_config["labels_todo"].any?
+      raise ConfigError, "#{path}: 'labels_todo' must be a non-empty array."
+    end
+
+    %w[label_doing label_mr label_done label_blocked].each do |field|
+      value = project_config[field]
+      unless value.is_a?(String) && !value.strip.empty?
+        raise ConfigError, "#{path}: '#{field}' must be a non-empty string."
+      end
+    end
+  end
+  private_class_method :validate_project_labels!
 end
