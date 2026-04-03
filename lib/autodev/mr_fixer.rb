@@ -3,7 +3,7 @@
 class MrFixer
   include DangerClaudeRunner
 
-  public :cleanup_labels
+  public :cleanup_labels, :set_label_todo
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)

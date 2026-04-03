@@ -546,6 +546,16 @@ def main
           begin
             issue.retry_processing!
             issue.update(error_message: nil, started_at: nil)
+            # Restore the "To do" label so the issue is picked up cleanly
+            if Config.label_workflow?(project_config)
+              begin
+                worker_client = GitlabHelpers.build_gitlab_client(config["gitlab_url"], token)
+                helper = MrFixer.new(client: worker_client, config: config, project_config: project_config, logger: logger, token: token)
+                helper.set_label_todo(issue.issue_iid)
+              rescue StandardError => e
+                logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}", project: project_path)
+              end
+            end
             logger.info("Issue ##{issue.issue_iid} retried (attempt #{issue.retry_count + 1})", project: project_path)
           rescue AASM::InvalidTransition => e
             logger.error("Could not retry issue ##{issue.issue_iid}: #{e.message}", project: project_path)

@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fix `NoMethodError: private method 'cleanup_labels' called for an instance of MrFixer` when polling detects a done label. The method inherited from `DangerClaudeRunner` is now explicitly made public in `MrFixer`.
+- Fix issues stuck on `label_doing` after error retry: when an issue hits a rate limit or error and is later retried back to `pending`, the GitLab label is now restored to `labels_todo` so the polling loop picks it up correctly.
 
 ## [0.8.0] - 2026-04-02
 
