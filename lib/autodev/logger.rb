@@ -110,7 +110,7 @@ class AppLogger
 
   def open_log_file(dir, date)
     FileUtils.mkdir_p(dir)
-    file = File.open(File.join(dir, "#{date}.jsonl"), 'a')
+    file = File.open(File.join(dir, "#{date}.jsonl"), 'a') # rubocop:disable Style/FileOpen
     file.sync = true
     file
   end

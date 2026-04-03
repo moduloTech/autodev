@@ -38,18 +38,14 @@ class WorkerPoolTest < Minitest::Test
   def test_assignments_tracks_active_workers
     pool = WorkerPool.new(size: 1, logger: @logger)
     pool.start
-    started = Queue.new
-    finish = Queue.new
-    pool.enqueue?(issue_iid: 99) do
-      started.push(true)
-      finish.pop
-    end
-    started.pop # wait for job to start
+    gate = Queue.new
+    pool.enqueue?(issue_iid: 99) { gate.pop }
+    sleep 0.1 # let worker pick up the job
 
     refute_empty pool.assignments
 
-    finish.push(true)
-    sleep 0.2
+    gate.push(true)
+    sleep 0.1
     pool.shutdown
   end
 end
