@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+# Structured logger with per-project and global log files.
 class AppLogger
   LEVELS = { 'DEBUG' => 0, 'INFO' => 1, 'WARN' => 2, 'ERROR' => 3 }.freeze
 

@@ -2,12 +2,15 @@
 
 require 'time'
 
+# Shared helpers for interacting with the GitLab API.
 module GitlabHelpers
   module_function
 
   def build_gitlab_client(gitlab_url, token)
-    raise ConfigError, 
-'Missing GitLab API token (set GITLAB_API_TOKEN, use -t, or add gitlab_token to config)' unless token
+    unless token
+      raise ConfigError,
+            'Missing GitLab API token (set GITLAB_API_TOKEN, use -t, or add gitlab_token to config)'
+    end
     raise ConfigError, 'Missing gitlab_url in config' unless gitlab_url
 
     Gitlab.client(endpoint: "#{gitlab_url}/api/v4", private_token: token)
@@ -23,7 +26,7 @@ module GitlabHelpers
     image_dir = File.join(dest_dir, '.autodev-images')
     downloaded = false
 
-    result = text.gsub(/!\[([^\]]*)\]\((\/uploads\/[^)]+)\)(\{[^}]*\})?/) do
+    text.gsub(%r{!\[([^\]]*)\]\((/uploads/[^)]+)\)(\{[^\}]*\})?}) do
       alt = ::Regexp.last_match(1)
       upload_path = ::Regexp.last_match(2)
       url = "#{gitlab_url}/#{project_path}#{upload_path}"
@@ -46,10 +49,8 @@ module GitlabHelpers
           response = http.request(request)
 
           break unless response.is_a?(Net::HTTPRedirection) && response['location']
-            uri = URI.parse(response['location'])
-          
-            
-          
+
+          uri = URI.parse(response['location'])
         end
 
         if response.is_a?(Net::HTTPSuccess)
@@ -68,11 +69,10 @@ module GitlabHelpers
         "[Image: #{filename} — download failed: #{e.class}: #{e.message}]"
       end
     end
-
-    result
   end
 
-  def fetch_issue_context(client, project_path, issue_iid, gitlab_url: nil, token: nil, work_dir: nil)
+  def fetch_issue_context(client, project_path, issue_iid,
+                          gitlab_url: nil, token: nil, work_dir: nil)
     issue = client.issue(project_path, issue_iid)
     can_download = gitlab_url && token && work_dir
 
@@ -81,8 +81,10 @@ module GitlabHelpers
     lines << ''
     if issue.description && !issue.description.empty?
       desc = issue.description.to_s
-      desc = download_gitlab_images(desc, gitlab_url: gitlab_url, project_path: project_path, token: token, 
-dest_dir: work_dir) if can_download
+      if can_download
+        desc = download_gitlab_images(desc, gitlab_url: gitlab_url, project_path: project_path,
+                                            token: token, dest_dir: work_dir)
+      end
       lines << desc
     end
     lines << ''
@@ -96,8 +98,10 @@ dest_dir: work_dir) if can_download
         user_notes.each do |note|
           lines << "### #{note.author&.name || 'Unknown'} (#{note.created_at})"
           body = note.body.to_s
-          body = download_gitlab_images(body, gitlab_url: gitlab_url, project_path: project_path, token: token, 
-dest_dir: work_dir) if can_download
+          if can_download
+            body = download_gitlab_images(body, gitlab_url: gitlab_url, project_path: project_path,
+                                                token: token, dest_dir: work_dir)
+          end
           lines << body
           lines << ''
         end
@@ -139,10 +143,10 @@ dest_dir: work_dir) if can_download
       resolvable = notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
       resolved = resolvable.any? && resolvable.all? { |n| n.respond_to?(:resolved) && n.resolved }
       status = if resolvable.any?
-resolved ? 'resolved' : 'unresolved'
-else
-'comment'
-end
+                 resolved ? 'resolved' : 'unresolved'
+               else
+                 'comment'
+               end
 
       notes.each_with_index do |note, idx|
         author = note.author&.name || 'Unknown'
@@ -152,15 +156,15 @@ end
         if idx.zero? && note.respond_to?(:position) && note.position
           pos = note.position
           file_path = if pos.respond_to?(:new_path)
-pos.new_path
-else
-(pos.is_a?(Hash) ? (pos['new_path'] || pos[:new_path]) : nil)
-end
+                        pos.new_path
+                      elsif pos.is_a?(Hash)
+                        pos['new_path'] || pos[:new_path]
+                      end
           new_line = if pos.respond_to?(:new_line)
-pos.new_line
-else
-(pos.is_a?(Hash) ? (pos['new_line'] || pos[:new_line]) : nil)
-end
+                       pos.new_line
+                     elsif pos.is_a?(Hash)
+                       pos['new_line'] || pos[:new_line]
+                     end
           lines << "Fichier: `#{file_path}`#{" (ligne #{new_line})" if new_line}" if file_path
         end
 
@@ -176,9 +180,10 @@ end
   end
 
   # Fetch full context: issue (title, body, comments) + MR discussions (if mr_iid provided).
-  def fetch_full_context(client, project_path, issue_iid, mr_iid: nil, gitlab_url: nil, token: nil, work_dir: nil)
-    context = fetch_issue_context(client, project_path, issue_iid, gitlab_url: gitlab_url, token: token, 
-work_dir: work_dir)
+  def fetch_full_context(client, project_path, issue_iid,
+                         mr_iid: nil, gitlab_url: nil, token: nil, work_dir: nil)
+    context = fetch_issue_context(client, project_path, issue_iid,
+                                  gitlab_url: gitlab_url, token: token, work_dir: work_dir)
 
     if mr_iid
       mr_discussions = fetch_mr_discussions_context(client, project_path, mr_iid)
@@ -204,7 +209,7 @@ work_dir: work_dir)
   # Delete the context file if it exists.
   def cleanup_context_file(work_dir, branch_name)
     path = context_file_path(work_dir, branch_name)
-    File.delete(path) if File.exist?(path)
+    FileUtils.rm_f(path)
   end
 
   def clarification_answered?(client, project_path, issue_iid, requested_at)
