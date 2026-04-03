@@ -2,29 +2,28 @@
 
 ## [Unreleased]
 
-### Changed
-
-- Refactor `DangerClaudeRunner` to fix all Metrics RuboCop offenses: extract `LabelManager`, `IssueNotifier`, and `ProcessRunner` modules, decompose `run_with_timeout` into smaller methods, and extract helpers for prompt logging, AM/PM conversion, and process cleanup.
-
-### Fixed
-
-- Write context files to `/tmp` instead of the git work tree so they cannot be accidentally committed by danger-claude. Mount `/tmp` into the container via `-v /tmp`.
-- Use process groups (`pgroup: true`) for subprocess spawning so that timeout kills (`TERM`/`KILL`) reach the entire process tree, not just the direct child. Prevents orphaned grandchild processes (e.g., Docker containers) from lingering after a timeout.
-- Fix `NoMethodError: private method 'cleanup_labels' called for an instance of MrFixer` when polling detects a done label. The method inherited from `DangerClaudeRunner` is now explicitly made public in `MrFixer`.
-- Fix issues stuck on `label_doing` after error retry: when an issue hits a rate limit or error and is later retried back to `pending`, the GitLab label is now restored to `labels_todo` so the polling loop picks it up correctly.
-- Fix issues with existing MRs restarting from scratch after error retry: issues that already have a MR now resume at `checking_pipeline` (with `label_mr` restored) instead of `pending`, so the pipeline monitor retries the fix instead of re-implementing from zero. Applies to both runtime retry and startup recovery.
+## [0.8.1] - 2026-04-03
 
 ### Added
 
 - Comprehensive config validation (`Config.validate!`) at startup: validates global numeric fields are positive integers, `log_level` is a valid level, `gitlab_token` is present, and per-project fields (`path` required, `post_completion` must be array of strings, `post_completion_timeout` requires `post_completion`, `clone_depth` non-negative, `sparse_checkout` array of strings).
 - Localized GitLab issue comments: language is auto-detected from the issue body (French/English heuristic via function-word frequency) and stored in a `locale` column. All 14 `notify_issue` calls now use locale-aware templates (`Locales.t`).
 - JSON Lines structured log files (`.jsonl`): log files now emit one JSON object per line with `timestamp`, `level`, `project`, `issue_iid`, `state`, `event`, `message`, and `context` fields for LLM consumption. Console output remains human-readable with colors.
-- Minitest test suite with 129 tests covering state machine transitions and guards, startup recovery, pipeline pre-triage classification, config validation, language detection, locales, logger JSON output, and error classes. Run with `bundle exec rake test`.
+- Minitest test suite with 278 tests covering state machine transitions and guards, startup recovery, pipeline pre-triage classification, config validation, language detection, locales, logger JSON output, and error classes.
 
 ### Changed
 
+- Refactor all modules to fix Metrics RuboCop offenses: extract `LabelManager`, `IssueNotifier`, and `ProcessRunner` from `DangerClaudeRunner`; decompose `IssueProcessor`, `PipelineMonitor`, `MrFixer`, `SkillsInjector`, `GitlabHelpers`, `Config`, `Database`, and `bin/autodev` into focused sub-modules.
 - Hoist GitLab client and `MrFixer` helper instantiation above the error retry loop so they are reused across retried issues in the same poll tick instead of being recreated per issue.
 - Deduplicate error retry branches: the MR vs non-MR paths now share a single code path that selects the transition method, label, and log target based on `mr_iid` presence.
+
+### Fixed
+
+- Write context files to `/tmp` instead of the git work tree so they cannot be accidentally committed by danger-claude. Mount `/tmp` into the container via `-v /tmp`.
+- Use process groups (`pgroup: true`) for subprocess spawning so that timeout kills (`TERM`/`KILL`) reach the entire process tree, not just the direct child. Prevents orphaned grandchild processes (e.g., Docker containers) from lingering after a timeout.
+- Fix `NoMethodError: private method 'cleanup_labels' called for an instance of MrFixer` when polling detects a done label.
+- Fix issues stuck on `label_doing` after error retry: restore `labels_todo` on retry so the polling loop picks them up correctly.
+- Fix issues with existing MRs restarting from scratch after error retry: resume at `checking_pipeline` instead of `pending`.
 
 ## [0.8.0] - 2026-04-02
 
