@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require 'set'
 
 # Thread pool that distributes issue processing across N concurrent workers.
 class WorkerPool
