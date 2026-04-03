@@ -60,10 +60,10 @@ class PipelineMonitor
 
   CODE_FAILURE_REASONS = %w[script_failure].freeze
 
-  DEPLOY_JOB_PATTERN = %r{
+  DEPLOY_JOB_PATTERN = /
     \b(deploy|release|publish|rollout|provision|terraform|ansible|
     helm|k8s|kubernetes|staging|production|review.?app)\b
-  }ix.freeze
+  /ix
 
   CATEGORY_PATTERNS = {
     deploy: {

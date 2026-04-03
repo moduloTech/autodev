@@ -13,8 +13,8 @@ module DangerClaudeRunner
     BUNDLER_SETUP RUBYOPT RUBYLIB
   ].to_h { |var| [var, nil] }.freeze
 
-  RATE_LIMIT_PATTERN = /you've hit your limit|rate limit|usage limit/i.freeze
-  RATE_LIMIT_RESET_PATTERN = /resets?\s+(\d{1,2})(am|pm)\s*\(UTC\)/i.freeze
+  RATE_LIMIT_PATTERN = /you've hit your limit|rate limit|usage limit/i
+  RATE_LIMIT_RESET_PATTERN = /resets?\s+(\d{1,2})(am|pm)\s*\(UTC\)/i
 
   include ShellHelpers
 
