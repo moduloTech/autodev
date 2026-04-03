@@ -80,7 +80,7 @@ module Config
     config = DEFAULTS.dup
 
     if File.exist?(config_path)
-      yaml = YAML.safe_load(File.read(config_path), permitted_classes: [Symbol]) || {}
+      yaml = YAML.safe_load_file(config_path, permitted_classes: [Symbol]) || {}
       yaml.each { |k, v| config[k] = v unless v.nil? }
     end
 

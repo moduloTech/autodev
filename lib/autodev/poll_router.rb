@@ -24,7 +24,7 @@ class PollRouter
     gl_labels = gl_issue.labels || []
     existing = Issue.where(project_path: @project_path, issue_iid: gl_issue.iid).first
 
-    has_todo    = (gl_labels & @labels_todo).any?
+    has_todo    = gl_labels.intersect?(@labels_todo)
     has_mr      = gl_labels.include?(@label_mr)
     has_done    = gl_labels.include?(@label_done)
     has_blocked = gl_labels.include?(@label_blocked)

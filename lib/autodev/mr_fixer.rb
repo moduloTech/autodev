@@ -245,7 +245,7 @@ class MrFixer
         new_line = pos_field(pos, :new_line)
 
         if file_path
-          location = +"Fichier: `#{file_path}`"
+          location = "Fichier: `#{file_path}`"
           location << " (ligne #{new_line})" if new_line
           location << " (ancienne ligne #{old_line})" if old_line && !new_line
           lines << location
