@@ -32,4 +32,17 @@ class FakePastel
   end
 end
 
+# Stub logger that captures messages.
+class StubLogger
+  attr_reader :messages
+
+  def initialize
+    @messages = []
+  end
+
+  def info(msg, **_opts)
+    @messages << msg
+  end
+end
+
 require_relative 'database_test_helper'
