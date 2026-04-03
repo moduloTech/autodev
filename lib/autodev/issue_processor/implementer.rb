@@ -76,16 +76,23 @@ class IssueProcessor
       return nil unless json_match
 
       result = JSON.parse(json_match[0])
-      unless result['parallel'] && result['tasks'].is_a?(Array) && result['tasks'].size > 1
-        return log_simple(iid,
-                          result)
-      end
+      return log_simple(iid, result) unless parallel_tasks?(result)
 
-      tasks = result['tasks'].map do |t|
-        { name: t['name'].to_s, description: t['description'].to_s, scope: t['scope'].to_s }
-      end
+      extract_tasks(result, iid)
+    end
+
+    def parallel_tasks?(result)
+      result['parallel'] && result['tasks'].is_a?(Array) && result['tasks'].size > 1
+    end
+
+    def extract_tasks(result, iid)
+      tasks = result['tasks'].map { |t| task_hash(t) }
       log "Issue ##{iid} assessed as complex (#{tasks.size} tasks): #{result['reason']}"
       tasks
+    end
+
+    def task_hash(task)
+      { name: task['name'].to_s, description: task['description'].to_s, scope: task['scope'].to_s }
     end
 
     def log_simple(iid, result)

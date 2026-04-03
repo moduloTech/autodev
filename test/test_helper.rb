@@ -32,17 +32,5 @@ class FakePastel
   end
 end
 
-# Stub logger that captures messages.
-class StubLogger
-  attr_reader :messages
-
-  def initialize
-    @messages = []
-  end
-
-  %i[info warn error debug].each do |level|
-    define_method(level) { |msg, **_opts| @messages << msg }
-  end
-end
-
+require_relative 'stub_logger'
 require_relative 'database_test_helper'

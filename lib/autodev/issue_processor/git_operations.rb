@@ -1,8 +1,12 @@
 # frozen_string_literal: true
 
+require_relative 'clone_helpers'
+
 class IssueProcessor
   # Git clone, branch, push, and verification helpers.
   module GitOperations
+    include CloneHelpers
+
     private
 
     def clone_repo(work_dir)
@@ -15,32 +19,6 @@ class IssueProcessor
       run_cmd(cmd)
 
       setup_sparse_checkout(work_dir)
-    end
-
-    def build_clone_url
-      uri = URI.parse(@gitlab_url)
-      host_port = uri.port && ![80, 443].include?(uri.port) ? "#{uri.host}:#{uri.port}" : uri.host
-      "#{uri.scheme}://oauth2:#{@token}@#{host_port}/#{@project_path}.git"
-    end
-
-    def build_clone_cmd(clone_url, work_dir)
-      depth = @project_config['clone_depth'] || 1
-      sparse = @project_config['sparse_checkout']
-      target = @project_config['target_branch']
-
-      cmd = %w[git clone]
-      cmd += ['--depth', depth.to_s] if depth.positive?
-      cmd += ['--branch', target] if target
-      cmd += ['--filter=blob:none', '--sparse'] if sparse.is_a?(Array) && sparse.any?
-      cmd + [clone_url, work_dir]
-    end
-
-    def setup_sparse_checkout(work_dir)
-      sparse = @project_config['sparse_checkout']
-      return unless sparse.is_a?(Array) && sparse.any?
-
-      log "Setting up sparse checkout: #{sparse.join(', ')}"
-      run_cmd(%w[git sparse-checkout set] + sparse, chdir: work_dir)
     end
 
     def fetch_and_checkout(work_dir, branch)
@@ -109,17 +87,21 @@ class IssueProcessor
     end
 
     def setup_branch(issue, work_dir, iid, previous_branch, reuse)
-      branch = if reuse
-                 log "Reusing existing branch: #{previous_branch}"
-                 fetch_and_checkout(work_dir, previous_branch)
-                 previous_branch
-               else
-                 create_branch(work_dir, iid, issue.issue_title)
-               end
+      branch = resolve_branch(work_dir, iid, issue, previous_branch, reuse)
       issue.update(branch_name: branch)
       @current_branch_name = branch
       issue.clone_complete!
       branch
+    end
+
+    def resolve_branch(work_dir, iid, issue, previous_branch, reuse)
+      if reuse
+        log "Reusing existing branch: #{previous_branch}"
+        fetch_and_checkout(work_dir, previous_branch)
+        previous_branch
+      else
+        create_branch(work_dir, iid, issue.issue_title)
+      end
     end
 
     def ensure_claude_md(work_dir)

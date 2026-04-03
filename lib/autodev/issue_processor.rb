@@ -22,23 +22,27 @@ class IssueProcessor
   end
 
   def process(issue)
-    log "Processing issue ##{issue.issue_iid}: #{issue.issue_title}"
     start_processing(issue)
     return if issue_closed?(issue)
 
-    work_dir = "/tmp/autodev_#{@project_path.gsub('/', '_')}_#{issue.issue_iid}"
-    execute_pipeline(issue, work_dir)
+    @work_dir = work_dir_for(issue)
+    execute_pipeline(issue, @work_dir)
   rescue RateLimitError => e
     handle_rate_limit(issue, e)
   rescue StandardError => e
     handle_process_error(issue, e)
   ensure
-    FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
+    FileUtils.rm_rf(@work_dir) if @work_dir && Dir.exist?(@work_dir)
   end
 
   private
 
+  def work_dir_for(issue)
+    "/tmp/autodev_#{@project_path.gsub('/', '_')}_#{issue.issue_iid}"
+  end
+
   def start_processing(issue)
+    log "Processing issue ##{issue.issue_iid}: #{issue.issue_title}"
     issue.start_processing!
     Issue.where(id: issue.id).update(started_at: Sequel.lit("datetime('now')"))
     apply_label_doing(issue.issue_iid)

@@ -51,11 +51,15 @@ class IssueProcessor
 
       log 'Waiting 15s for GitLab to compute diff_refs...'
       sleep 15
+      execute_review(mr_url)
+    rescue StandardError => e
+      log_error "mr-review error (non-fatal): #{e.message}"
+    end
+
+    def execute_review(mr_url)
       log "Running mr-review on #{mr_url}..."
       _, err, status = Open3.capture3(CLEAN_ENV, 'mr-review', '-H', mr_url)
       status.success? ? log('Review completed successfully') : log_error("mr-review failed (non-fatal): #{err[0, 300]}")
-    rescue StandardError => e
-      log_error "mr-review error (non-fatal): #{e.message}"
     end
 
     def command_exists?(cmd)
