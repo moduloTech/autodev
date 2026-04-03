@@ -23,7 +23,7 @@ module GitlabHelpers
     image_dir = File.join(dest_dir, ".autodev-images")
     downloaded = false
 
-    result = text.gsub(%r{!\[([^\]]*)\]\((/uploads/[^)]+)\)(\{[^}]*\})?}) do
+    result = text.gsub(/!\[([^\]]*)\]\((\/uploads\/[^)]+)\)(\{[^}]*\})?/) do
       alt = ::Regexp.last_match(1)
       upload_path = ::Regexp.last_match(2)
       url = "#{gitlab_url}/#{project_path}#{upload_path}"
