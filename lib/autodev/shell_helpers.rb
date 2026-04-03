@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+# Convenience wrappers around Open3 for running shell commands.
 module ShellHelpers
   module_function
 

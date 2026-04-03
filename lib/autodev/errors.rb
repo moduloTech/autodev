@@ -5,6 +5,7 @@ class ConfigError < AutodevError; end
 class GitError < AutodevError; end
 class ImplementationError < AutodevError; end
 
+# Raised when the GitLab API rate limit is hit; carries the reset timestamp.
 class RateLimitError < AutodevError
   attr_reader :reset_time
 

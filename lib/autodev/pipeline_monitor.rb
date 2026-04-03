@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+# Monitors CI pipeline status and triages failures for tracked MRs.
 class PipelineMonitor
   include DangerClaudeRunner
 

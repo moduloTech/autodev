@@ -2,7 +2,6 @@
 
 # Routes GitLab issues to the appropriate processor based on their labels and DB state.
 # Extracts the label-driven routing logic from the polling loop in bin/autodev.
-
 class PollRouter
   def initialize(config:, project_config:, logger:, token:, pool:)
     @config         = config

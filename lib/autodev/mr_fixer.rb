@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+# Fixes unresolved MR discussions and failed pipeline jobs.
 class MrFixer
   include DangerClaudeRunner
 

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+# Configuration loading, validation, and CLI argument parsing for autodev.
 module Config
   CONFIG_DIR  = File.expand_path('~/.autodev')
   CONFIG_PATH = File.join(CONFIG_DIR, 'config.yml')

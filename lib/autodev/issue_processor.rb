@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+# Processes a single GitLab issue through the full implementation lifecycle.
 class IssueProcessor
   include DangerClaudeRunner
 

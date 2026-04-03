@@ -5,15 +5,13 @@
 # issue notification, and logging.
 #
 # Including classes must call `init_runner(...)` in their initialize.
-
-# Env hash that explicitly unsets all Bundler-related vars in child processes.
-CLEAN_ENV = %w[
-  BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_BIN_PATH BUNDLE_APP_CONFIG
-  BUNDLE_ORIG_GEMFILE BUNDLER_VERSION BUNDLER_ORIG_BUNDLER_VERSION
-  BUNDLER_SETUP RUBYOPT RUBYLIB
-].to_h { |var| [var, nil] }.freeze
-
 module DangerClaudeRunner
+  # Env hash that explicitly unsets all Bundler-related vars in child processes.
+  CLEAN_ENV = %w[
+    BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_BIN_PATH BUNDLE_APP_CONFIG
+    BUNDLE_ORIG_GEMFILE BUNDLER_VERSION BUNDLER_ORIG_BUNDLER_VERSION
+    BUNDLER_SETUP RUBYOPT RUBYLIB
+  ].to_h { |var| [var, nil] }.freeze
   include ShellHelpers
 
   private

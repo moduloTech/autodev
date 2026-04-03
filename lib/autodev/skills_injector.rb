@@ -6,7 +6,6 @@
 #
 # Skills are only injected into the temporary clone — the original
 # repo is never modified. Existing skills are always preserved.
-
 module SkillsInjector
   module_function
 

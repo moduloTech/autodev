@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+# SQLite persistence layer with Sequel ORM and AASM state machine for issues.
 module Database
   @db = nil
 
