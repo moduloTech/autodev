@@ -35,11 +35,18 @@ module Database
         .update(status: 'over', finished_at: Sequel.lit("datetime('now')")) || 0
     end
 
-    # Reset issues stuck in active processing states (e.g. after crash during label_doing)
+    # Reset issues stuck in active processing states (e.g. after crash during label_doing).
+    # Issues that already have a MR resume at checking_pipeline instead of pending.
     def self.recover_stuck_processing!(db)
-      db[:issues]
-        .where(status: %w[cloning checking_spec implementing committing pushing creating_mr])
-        .update(status: 'pending', started_at: nil) || 0
+      stuck = db[:issues]
+              .where(status: %w[cloning checking_spec implementing committing pushing creating_mr])
+
+      count_mr = stuck.exclude(mr_iid: nil)
+                      .update(status: 'checking_pipeline', started_at: nil) || 0
+      count_no_mr = stuck.where(mr_iid: nil)
+                         .update(status: 'pending', started_at: nil) || 0
+
+      count_mr + count_no_mr
     end
 
     private_class_method :recover_errored!, :recover_fixing_pipeline!,

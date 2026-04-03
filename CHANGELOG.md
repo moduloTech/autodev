@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix issues with existing MRs reset to `pending` on startup recovery: `recover_stuck_processing!` now resumes at `checking_pipeline` when the issue already has a MR, matching the behaviour of `recover_errored!`.
+
 ## [0.8.1] - 2026-04-03
 
 ### Added
