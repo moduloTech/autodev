@@ -23,106 +23,21 @@ module GitlabHelpers
   end
 
   def download_gitlab_images(text, gitlab_url:, project_path:, token:, dest_dir:)
-    image_dir = File.join(dest_dir, '.autodev-images')
-    downloaded = false
+    state = { image_dir: File.join(dest_dir, '.autodev-images'), downloaded: false }
+    opts = { gitlab_url: gitlab_url, project_path: project_path, token: token }
 
     text.gsub(%r{!\[([^\]]*)\]\((/uploads/[^)]+)\)(\{[^\}]*\})?}) do
-      alt = ::Regexp.last_match(1)
-      upload_path = ::Regexp.last_match(2)
-      url = "#{gitlab_url}/#{project_path}#{upload_path}"
-      filename = File.basename(upload_path)
-      local_path = File.join(image_dir, filename)
-
-      begin
-        unless downloaded
-          FileUtils.mkdir_p(image_dir)
-          downloaded = true
-        end
-
-        uri = URI.parse(url)
-        response = nil
-        3.times do
-          http = Net::HTTP.new(uri.host, uri.port)
-          http.use_ssl = (uri.scheme == 'https')
-          request = Net::HTTP::Get.new(uri.request_uri)
-          request['PRIVATE-TOKEN'] = token
-          response = http.request(request)
-
-          break unless response.is_a?(Net::HTTPRedirection) && response['location']
-
-          uri = URI.parse(response['location'])
-        end
-
-        if response.is_a?(Net::HTTPSuccess)
-          body = response.body
-          content_type = response['content-type'].to_s
-          if body.nil? || body.empty? || !content_type.start_with?('image/')
-            "[Image: #{filename} — format non supporté (#{content_type})]"
-          else
-            File.binwrite(local_path, body)
-            "![#{alt}](#{local_path})"
-          end
-        else
-          "[Image: #{filename} — download failed (#{response.code})]"
-        end
-      rescue StandardError => e
-        "[Image: #{filename} — download failed: #{e.class}: #{e.message}]"
-      end
+      ImageDownloader.replace_reference(::Regexp.last_match(1), ::Regexp.last_match(2), opts, state)
     end
   end
 
-  def fetch_issue_context(client, project_path, issue_iid,
-                          gitlab_url: nil, token: nil, work_dir: nil)
+  def fetch_issue_context(client, project_path, issue_iid, **opts)
     issue = client.issue(project_path, issue_iid)
-    can_download = gitlab_url && token && work_dir
+    img_opts = ImageDownloader.download_opts(opts, project_path)
 
-    lines = []
-    lines << "# Issue ##{issue.iid}: #{issue.title}"
-    lines << ''
-    if issue.description && !issue.description.empty?
-      desc = issue.description.to_s
-      if can_download
-        desc = download_gitlab_images(desc, gitlab_url: gitlab_url, project_path: project_path,
-                                            token: token, dest_dir: work_dir)
-      end
-      lines << desc
-    end
-    lines << ''
-
-    begin
-      notes = client.issue_notes(project_path, issue_iid, per_page: 100)
-      user_notes = notes.select { |n| !n.system && !n.body.to_s.include?('**autodev**') }
-      if user_notes.any?
-        lines << '## Comments'
-        lines << ''
-        user_notes.each do |note|
-          lines << "### #{note.author&.name || 'Unknown'} (#{note.created_at})"
-          body = note.body.to_s
-          if can_download
-            body = download_gitlab_images(body, gitlab_url: gitlab_url, project_path: project_path,
-                                                token: token, dest_dir: work_dir)
-          end
-          lines << body
-          lines << ''
-        end
-      end
-    rescue Gitlab::Error::ResponseError
-      # Non-fatal: proceed without comments
-    end
-
-    begin
-      links = client.issue_links(project_path, issue_iid)
-      if links.any?
-        lines << '## Related issues'
-        lines << ''
-        links.each do |link|
-          lines << "- ##{link.iid}: #{link.title} (#{link.state})"
-        end
-        lines << ''
-      end
-    rescue Gitlab::Error::ResponseError, NoMethodError
-      # Non-fatal: some GitLab versions don't support this
-    end
+    lines = IssueFormatter.build_header(issue, img_opts)
+    IssueFormatter.append_comments(lines, client, project_path, issue_iid, img_opts)
+    IssueFormatter.append_links(lines, client, project_path, issue_iid)
 
     lines.join("\n")
   end
@@ -132,47 +47,8 @@ module GitlabHelpers
     discussions = client.merge_request_discussions(project_path, mr_iid)
     return '' if discussions.empty?
 
-    lines = []
-    lines << '## MR Discussions'
-    lines << ''
-
-    discussions.each do |discussion|
-      notes = discussion.notes
-      next unless notes&.any?
-
-      resolvable = notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
-      resolved = resolvable.any? && resolvable.all? { |n| n.respond_to?(:resolved) && n.resolved }
-      status = if resolvable.any?
-                 resolved ? 'resolved' : 'unresolved'
-               else
-                 'comment'
-               end
-
-      notes.each_with_index do |note, idx|
-        author = note.author&.name || 'Unknown'
-        prefix = idx.zero? ? "### [#{status}] #{author} (#{note.created_at})" : "#### #{author} (#{note.created_at})"
-        lines << prefix
-
-        if idx.zero? && note.respond_to?(:position) && note.position
-          pos = note.position
-          file_path = if pos.respond_to?(:new_path)
-                        pos.new_path
-                      elsif pos.is_a?(Hash)
-                        pos['new_path'] || pos[:new_path]
-                      end
-          new_line = if pos.respond_to?(:new_line)
-                       pos.new_line
-                     elsif pos.is_a?(Hash)
-                       pos['new_line'] || pos[:new_line]
-                     end
-          lines << "Fichier: `#{file_path}`#{" (ligne #{new_line})" if new_line}" if file_path
-        end
-
-        lines << ''
-        lines << note.body.to_s
-        lines << ''
-      end
-    end
+    lines = ['## MR Discussions', '']
+    discussions.each { |d| DiscussionFormatter.format(lines, d) }
 
     lines.join("\n")
   rescue Gitlab::Error::ResponseError
@@ -180,10 +56,9 @@ module GitlabHelpers
   end
 
   # Fetch full context: issue (title, body, comments) + MR discussions (if mr_iid provided).
-  def fetch_full_context(client, project_path, issue_iid,
-                         mr_iid: nil, gitlab_url: nil, token: nil, work_dir: nil)
-    context = fetch_issue_context(client, project_path, issue_iid,
-                                  gitlab_url: gitlab_url, token: token, work_dir: work_dir)
+  def fetch_full_context(client, project_path, issue_iid, **opts)
+    mr_iid = opts.delete(:mr_iid)
+    context = fetch_issue_context(client, project_path, issue_iid, **opts)
 
     if mr_iid
       mr_discussions = fetch_mr_discussions_context(client, project_path, mr_iid)
@@ -224,5 +99,192 @@ module GitlabHelpers
     end
   rescue Gitlab::Error::ResponseError
     false
+  end
+
+  # Image downloading helpers.
+  module ImageDownloader
+    module_function
+
+    # Returns an options hash for image downloading, or nil if not available.
+    def download_opts(opts, project_path)
+      return nil unless opts[:gitlab_url] && opts[:token] && opts[:work_dir]
+
+      { gitlab_url: opts[:gitlab_url], token: opts[:token], project_path: project_path, dest_dir: opts[:work_dir] }
+    end
+
+    # Optionally downloads images in the given text.
+    def maybe_download(text, img_opts)
+      return text unless img_opts
+
+      GitlabHelpers.download_gitlab_images(text, **img_opts)
+    end
+
+    # Replace a single image markdown reference with a local path or error placeholder.
+    def replace_reference(alt, upload_path, opts, state)
+      url = "#{opts[:gitlab_url]}/#{opts[:project_path]}#{upload_path}"
+      filename = File.basename(upload_path)
+      local_path = File.join(state[:image_dir], filename)
+
+      ensure_dir(state)
+      download_and_save(url, opts[:token], local_path, alt, filename)
+    rescue StandardError => e
+      "[Image: #{filename} -- download failed: #{e.class}: #{e.message}]"
+    end
+
+    # Create the image directory on first use.
+    def ensure_dir(state)
+      return if state[:downloaded]
+
+      FileUtils.mkdir_p(state[:image_dir])
+      state[:downloaded] = true
+    end
+
+    # Download an image following redirects, save it, and return the markdown reference.
+    def download_and_save(url, token, local_path, alt, filename)
+      response = http_get_with_redirects(url, token)
+
+      return "[Image: #{filename} -- download failed (#{response.code})]" unless response.is_a?(Net::HTTPSuccess)
+
+      validate_and_write(response, local_path, alt, filename)
+    end
+
+    # Perform an HTTP GET following up to 3 redirects.
+    def http_get_with_redirects(url, token)
+      uri = URI.parse(url)
+      response = nil
+      3.times do
+        response = single_get(uri, token)
+        break unless response.is_a?(Net::HTTPRedirection) && response['location']
+
+        uri = URI.parse(response['location'])
+      end
+      response
+    end
+
+    # Perform a single HTTP GET request.
+    def single_get(uri, token)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = (uri.scheme == 'https')
+      request = Net::HTTP::Get.new(uri.request_uri)
+      request['PRIVATE-TOKEN'] = token
+      http.request(request)
+    end
+
+    # Validate image content type and write to disk.
+    def validate_and_write(response, local_path, alt, filename)
+      body = response.body
+      content_type = response['content-type'].to_s
+      if body.nil? || body.empty? || !content_type.start_with?('image/')
+        return "[Image: #{filename} -- format non support\u00E9 (#{content_type})]"
+      end
+
+      File.binwrite(local_path, body)
+      "![#{alt}](#{local_path})"
+    end
+  end
+
+  # Issue context formatting helpers.
+  module IssueFormatter
+    module_function
+
+    # Build the header section (title + description) for an issue.
+    def build_header(issue, img_opts)
+      lines = ["# Issue ##{issue.iid}: #{issue.title}", '']
+      if issue.description && !issue.description.empty?
+        lines << ImageDownloader.maybe_download(issue.description.to_s, img_opts)
+      end
+      lines << ''
+      lines
+    end
+
+    # Append user comments to the lines array.
+    def append_comments(lines, client, project_path, issue_iid, img_opts)
+      notes = client.issue_notes(project_path, issue_iid, per_page: 100)
+      user_notes = notes.reject { |n| n.system || n.body.to_s.include?('**autodev**') }
+      return unless user_notes.any?
+
+      lines << '## Comments'
+      lines << ''
+      user_notes.each { |note| append_single_comment(lines, note, img_opts) }
+    rescue Gitlab::Error::ResponseError
+      # Non-fatal: proceed without comments
+    end
+
+    # Format and append a single comment note.
+    def append_single_comment(lines, note, img_opts)
+      lines << "### #{note.author&.name || 'Unknown'} (#{note.created_at})"
+      lines << ImageDownloader.maybe_download(note.body.to_s, img_opts)
+      lines << ''
+    end
+
+    # Append related issue links to the lines array.
+    def append_links(lines, client, project_path, issue_iid)
+      links = client.issue_links(project_path, issue_iid)
+      return unless links.any?
+
+      lines << '## Related issues'
+      lines << ''
+      links.each { |link| lines << "- ##{link.iid}: #{link.title} (#{link.state})" }
+      lines << ''
+    rescue Gitlab::Error::ResponseError, NoMethodError
+      # Non-fatal: some GitLab versions don't support this
+    end
+  end
+
+  # MR discussion formatting helpers.
+  module DiscussionFormatter
+    module_function
+
+    # Format a single discussion into markdown lines.
+    def format(lines, discussion)
+      notes = discussion.notes
+      return unless notes&.any?
+
+      status = resolve_status(notes)
+      notes.each_with_index { |note, idx| format_note(lines, note, idx, status) }
+    end
+
+    # Determine the resolution status of a discussion.
+    def resolve_status(notes)
+      resolvable = notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
+      return 'comment' unless resolvable.any?
+
+      resolvable.all? { |n| n.respond_to?(:resolved) && n.resolved } ? 'resolved' : 'unresolved'
+    end
+
+    # Format a single note within a discussion.
+    def format_note(lines, note, idx, status)
+      author = note.author&.name || 'Unknown'
+      lines << if idx.zero?
+                 "### [#{status}] #{author} (#{note.created_at})"
+               else
+                 "#### #{author} (#{note.created_at})"
+               end
+
+      append_position(lines, note) if idx.zero?
+
+      lines << ''
+      lines << note.body.to_s
+      lines << ''
+    end
+
+    # Append file position info for a discussion-starting note.
+    def append_position(lines, note)
+      return unless note.respond_to?(:position) && note.position
+
+      pos = note.position
+      file_path = pos_field(pos, :new_path)
+      new_line = pos_field(pos, :new_line)
+      lines << "Fichier: `#{file_path}`#{" (ligne #{new_line})" if new_line}" if file_path
+    end
+
+    # Extract a field from a position object (supports both method calls and hash access).
+    def pos_field(pos, field)
+      if pos.respond_to?(field)
+        pos.public_send(field)
+      elsif pos.is_a?(Hash)
+        pos[field.to_s] || pos[field]
+      end
+    end
   end
 end
