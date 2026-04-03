@@ -165,10 +165,8 @@ module SkillsInjector
       'both'
     elsif has_workers
       'direct'    # perform_async, app/workers/
-    elsif has_jobs
-      'activejob' # perform_later, app/jobs/
     else
-      'activejob' # Rails default since 4.2
+      'activejob' # perform_later, app/jobs/, or Rails default since 4.2
     end
   end
 
@@ -575,8 +573,7 @@ module SkillsInjector
 
     # Migration version
     if major
-      migration_version = if major >= 8 then "[#{major}.0]"
-                          elsif major >= 5 then "[#{major}.0]"
+      migration_version = if major >= 5 then "[#{major}.0]"
                           else '' # Rails 4 has no version suffix
                           end
 
