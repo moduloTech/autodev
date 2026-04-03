@@ -38,52 +38,55 @@ class AppLogger
     return if LEVELS[level] < @level
 
     @mutex.synchronize do
-      # Console: colored, human-readable, multiline truncated
-      console_msg = msg.include?("\n") ? msg.lines.first.chomp : msg
-      prefix = project ? "[#{project}]" : '[autodev]'
-      console_line = case level
-                     when 'ERROR' then @pastel.red("  #{prefix} #{console_msg}")
-                     when 'WARN'  then @pastel.yellow("  #{prefix} #{console_msg}")
-                     when 'DEBUG' then @pastel.dim("  #{prefix} #{console_msg}")
-                     else "  #{@pastel.cyan(prefix)} #{console_msg}"
-                     end
-      if level == 'ERROR'
-        Kernel.warn console_line
-      else
-        $stdout.puts console_line
-      end
-
-      # Log files: JSON Lines (LLM-readable)
-      if @log_dir
-        json_line = build_json_line(level, msg, project, context)
-        write_to_global_file(json_line)
-        write_to_project_file(project, json_line) if project
-      end
+      print_console(level, msg, project)
+      write_log_files(level, msg, project, context)
     end
   end
 
+  def print_console(level, msg, project)
+    console_msg = msg.include?("\n") ? msg.lines.first.chomp : msg
+    prefix = project ? "[#{project}]" : '[autodev]'
+    line = format_console_line(level, prefix, console_msg)
+    level == 'ERROR' ? Kernel.warn(line) : $stdout.puts(line)
+  end
+
+  def format_console_line(level, prefix, msg)
+    case level
+    when 'ERROR' then @pastel.red("  #{prefix} #{msg}")
+    when 'WARN'  then @pastel.yellow("  #{prefix} #{msg}")
+    when 'DEBUG' then @pastel.dim("  #{prefix} #{msg}")
+    else "  #{@pastel.cyan(prefix)} #{msg}"
+    end
+  end
+
+  def write_log_files(level, msg, project, context)
+    return unless @log_dir
+
+    json_line = build_json_line(level, msg, project, context)
+    write_to_global_file(json_line)
+    write_to_project_file(project, json_line) if project
+  end
+
   def build_json_line(level, msg, project, context)
-    entry = {
-      timestamp: Time.now.utc.iso8601,
-      level: level,
-      project: project,
-      issue_iid: context[:issue_iid],
-      state: context[:state],
-      event: context[:event],
-      message: msg
-    }
+    entry = base_entry(level, msg, project, context)
     extra = context.except(:issue_iid, :state, :event)
     entry[:context] = extra unless extra.empty?
     JSON.generate(entry)
+  end
+
+  def base_entry(level, msg, project, context)
+    {
+      timestamp: Time.now.utc.iso8601, level: level, project: project,
+      issue_iid: context[:issue_iid], state: context[:state],
+      event: context[:event], message: msg
+    }
   end
 
   def write_to_global_file(json_line)
     today = Time.now.strftime('%Y-%m-%d')
     if @global_date != today
       @global_file&.close
-      path = File.join(@log_dir, 'autodev', "#{today}.jsonl")
-      @global_file = File.open(path, 'a')
-      @global_file.sync = true
+      @global_file = open_log_file(File.join(@log_dir, 'autodev'), today)
       @global_date = today
     end
     @global_file.puts(json_line)
@@ -93,16 +96,22 @@ class AppLogger
     slug = project.gsub('/', '_')
     today = Time.now.strftime('%Y-%m-%d')
     entry = @project_dirs[slug] ||= { file: nil, date: nil }
-
-    if entry[:date] != today
-      entry[:file]&.close
-      dir = File.join(@log_dir, slug)
-      FileUtils.mkdir_p(dir)
-      path = File.join(dir, "#{today}.jsonl")
-      entry[:file] = File.open(path, 'a')
-      entry[:file].sync = true
-      entry[:date] = today
-    end
+    rotate_project_log(entry, slug, today)
     entry[:file].puts(json_line)
+  end
+
+  def rotate_project_log(entry, slug, today)
+    return if entry[:date] == today
+
+    entry[:file]&.close
+    entry[:file] = open_log_file(File.join(@log_dir, slug), today)
+    entry[:date] = today
+  end
+
+  def open_log_file(dir, date)
+    FileUtils.mkdir_p(dir)
+    file = File.open(File.join(dir, "#{date}.jsonl"), 'a')
+    file.sync = true
+    file
   end
 end
