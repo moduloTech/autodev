@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Refactor `DangerClaudeRunner` to fix all Metrics RuboCop offenses: extract `LabelManager`, `IssueNotifier`, and `ProcessRunner` modules, decompose `run_with_timeout` into smaller methods, and extract helpers for prompt logging, AM/PM conversion, and process cleanup.
+
 ### Fixed
 
 - Use process groups (`pgroup: true`) for subprocess spawning so that timeout kills (`TERM`/`KILL`) reach the entire process tree, not just the direct child. Prevents orphaned grandchild processes (e.g., Docker containers) from lingering after a timeout.
