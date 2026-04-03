@@ -47,7 +47,7 @@ module IssueNotifier
   # Returns the block's return value.
   def with_context_file(work_dir, branch_name, content)
     context_file = GitlabHelpers.write_context_file(work_dir, branch_name, content)
-    yield File.basename(context_file)
+    yield context_file
   ensure
     GitlabHelpers.cleanup_context_file(work_dir, branch_name)
   end

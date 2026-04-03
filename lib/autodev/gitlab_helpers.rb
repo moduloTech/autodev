@@ -68,22 +68,23 @@ module GitlabHelpers
     context
   end
 
-  # Write the context file at the clone root, named after the branch (without autodev/ prefix).
-  def write_context_file(work_dir, branch_name, content)
-    path = context_file_path(work_dir, branch_name)
+  # Write the context file in /tmp so it stays outside the git work tree
+  # and cannot be accidentally committed by danger-claude.
+  def write_context_file(_work_dir, branch_name, content)
+    path = context_file_path(branch_name)
     File.write(path, content)
     path
   end
 
-  # Returns the context file path for a given branch.
-  def context_file_path(work_dir, branch_name)
+  # Returns the context file path for a given branch (always in /tmp).
+  def context_file_path(branch_name)
     filename = branch_name.to_s.sub(%r{^autodev/}, '')
-    File.join(work_dir, "#{filename}.md")
+    File.join('/tmp', "#{filename}.md")
   end
 
   # Delete the context file if it exists.
-  def cleanup_context_file(work_dir, branch_name)
-    path = context_file_path(work_dir, branch_name)
+  def cleanup_context_file(_work_dir, branch_name)
+    path = context_file_path(branch_name)
     FileUtils.rm_f(path)
   end
 

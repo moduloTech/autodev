@@ -15,9 +15,8 @@ class IssueProcessor
       test_writer = detect_agent(work_dir, 'test-writer')
       test_worktree = setup_test_worktree(work_dir)
 
-      ctx_file = GitlabHelpers.write_context_file(work_dir, @current_branch_name, context)
-      GitlabHelpers.write_context_file(test_worktree, @current_branch_name, context)
-      ctx_name = File.basename(ctx_file)
+      ctx_file = GitlabHelpers.write_context_file(nil, @current_branch_name, context)
+      ctx_name = ctx_file
 
       prompts = build_split_prompts(ctx_name)
       run_split_agents(work_dir, test_worktree, prompts, implementer, test_writer)
@@ -98,7 +97,7 @@ class IssueProcessor
     end
 
     def run_single_parallel_agent(worktree, task, total, skills, errors)
-      ctx_name = File.basename(Dir.glob(File.join(worktree[:path], '.claude', 'context', '*')).first || '')
+      ctx_name = GitlabHelpers.context_file_path(@current_branch_name)
       prompt = parallel_prompt(task, ctx_name, skills)
       log "Agent #{task[:name]} (#{total} total)"
       danger_claude_prompt(worktree[:path], prompt, label: "-p (parallel: #{task[:name]})")

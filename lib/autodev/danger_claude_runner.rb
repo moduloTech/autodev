@@ -97,7 +97,7 @@ module DangerClaudeRunner
 
   # Build global danger-claude args from config (project overrides global).
   def dc_global_args
-    args = []
+    args = ['-v', '/tmp']
     model = @project_config['model'] || @config['model']
     effort = @project_config['effort'] || @config['effort']
     args.push('-m', model) if model

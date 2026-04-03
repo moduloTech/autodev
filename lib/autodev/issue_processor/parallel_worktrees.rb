@@ -19,7 +19,7 @@ class IssueProcessor
         run_cmd(['git', 'worktree', 'add', wt_path, 'HEAD'], chdir: work_dir)
         SkillsInjector.inject(wt_path, logger: @logger, project_path: @project_path)
         copy_agents(work_dir, wt_path)
-        GitlabHelpers.write_context_file(wt_path, @current_branch_name, context)
+        GitlabHelpers.write_context_file(nil, @current_branch_name, context)
         { path: wt_path, task: task }
       end
     end
@@ -36,7 +36,7 @@ class IssueProcessor
     def cleanup_test_worktree(test_worktree, work_dir)
       return unless test_worktree
 
-      GitlabHelpers.cleanup_context_file(test_worktree, @current_branch_name)
+      GitlabHelpers.cleanup_context_file(nil, @current_branch_name)
       return unless Dir.exist?(test_worktree)
 
       run_cmd_status(['git', 'worktree', 'remove', '--force', test_worktree], chdir: work_dir)
@@ -45,8 +45,8 @@ class IssueProcessor
 
     def cleanup_worktrees(worktrees, work_dir)
       worktrees.each do |wt|
-        GitlabHelpers.cleanup_context_file(wt[:path], @current_branch_name) if wt[:path]
-        next unless Dir.exist?(wt[:path])
+        GitlabHelpers.cleanup_context_file(nil, @current_branch_name)
+        next unless wt[:path] && Dir.exist?(wt[:path])
 
         run_cmd_status(['git', 'worktree', 'remove', '--force', wt[:path]], chdir: work_dir)
         FileUtils.rm_rf(wt[:path])

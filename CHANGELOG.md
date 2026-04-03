@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Write context files to `/tmp` instead of the git work tree so they cannot be accidentally committed by danger-claude. Mount `/tmp` into the container via `-v /tmp`.
 - Use process groups (`pgroup: true`) for subprocess spawning so that timeout kills (`TERM`/`KILL`) reach the entire process tree, not just the direct child. Prevents orphaned grandchild processes (e.g., Docker containers) from lingering after a timeout.
 - Fix `NoMethodError: private method 'cleanup_labels' called for an instance of MrFixer` when polling detects a done label. The method inherited from `DangerClaudeRunner` is now explicitly made public in `MrFixer`.
 - Fix issues stuck on `label_doing` after error retry: when an issue hits a rate limit or error and is later retried back to `pending`, the GitLab label is now restored to `labels_todo` so the polling loop picks it up correctly.
