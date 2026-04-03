@@ -175,8 +175,12 @@ def show_dashboard(config)
   issues = dataset.all
 
   if issues.empty?
-    puts config['status_all'] ? 'Aucune issue suivie.' :
-         'Aucune issue active. Utilisez --all pour inclure les issues terminées.'
+    msg = if config['status_all']
+            'Aucune issue suivie.'
+          else
+            'Aucune issue active. Utilisez --all pour inclure les issues terminées.'
+          end
+    puts msg
     return
   end
 
@@ -219,8 +223,8 @@ def show_dashboard(config)
   w_comment = [rows.map { |r| r[:comment].length }.max, 12].max
 
   sep  = "+-#{'-' * w_iid}-+-#{'-' * w_title}-+-#{'-' * w_status}-+-#{'-' * w_comment}-+"
-  head = "| #{'#'.ljust(w_iid)} | #{'Issue'.ljust(w_title)}" \
-         " | #{'État'.ljust(w_status)} | #{'Commentaire'.ljust(w_comment)} |"
+  head = "| #{'#'.ljust(w_iid)} | #{'Issue'.ljust(w_title)} " \
+         "| #{'État'.ljust(w_status)} | #{'Commentaire'.ljust(w_comment)} |"
 
   puts sep
   puts pastel.bold(head)
@@ -229,8 +233,8 @@ def show_dashboard(config)
   rows.each do |row|
     color = STATUS_COLORS[row[:status]] || :white
     colored_status = pastel.send(color, row[:status].ljust(w_status))
-    line = "| #{row[:iid].ljust(w_iid)} | #{row[:title].ljust(w_title)}" \
-           " | #{colored_status} | #{row[:comment].ljust(w_comment)} |"
+    line = "| #{row[:iid].ljust(w_iid)} | #{row[:title].ljust(w_title)} " \
+           "| #{colored_status} | #{row[:comment].ljust(w_comment)} |"
     puts line
   end
 
@@ -240,10 +244,10 @@ def show_dashboard(config)
   active  = rows.count { |r| ACTIVE_STATES.include?(r[:status]) || r[:status] == 'pending' }
   done    = rows.count { |r| r[:status] == 'over' }
   blocked = rows.count { |r| %w[blocked error needs_clarification].include?(r[:status]) }
-  summary = "#{pastel.bold(rows.size.to_s)} issues" \
-            " — #{pastel.cyan("#{active} actives")}" \
-            ", #{pastel.green("#{done} terminées")}" \
-            ", #{pastel.yellow("#{blocked} bloquées")}"
+  summary = "#{pastel.bold(rows.size.to_s)} issues " \
+            "— #{pastel.cyan("#{active} actives")}, " \
+            "#{pastel.green("#{done} terminées")}, " \
+            "#{pastel.yellow("#{blocked} bloquées")}"
   unless config['status_all']
     hidden = Database.db[:issues].where(status: 'over').count
     summary << " #{pastel.dim("(#{hidden} terminées masquées, --all pour tout voir)")}" if hidden.positive?
@@ -268,8 +272,8 @@ def show_errors(config)
     status_label = row[:status] == 'blocked' ? pastel.yellow('blocked') : pastel.red('error')
     status_icon  = row[:status] == 'blocked' ? pastel.yellow('■') : pastel.red('■')
     puts pastel.bold(
-      "#{status_icon} Issue ##{row[:issue_iid]}: #{row[:issue_title]}" \
-      " (#{project_short}) [#{status_label}]"
+      "#{status_icon} Issue ##{row[:issue_iid]}: #{row[:issue_title]} " \
+      "(#{project_short}) [#{status_label}]"
     )
     puts "  Tentative: #{row[:retry_count]}" if row[:status] == 'error'
     puts "  Branche: #{row[:branch_name]}" if row[:branch_name]
@@ -294,8 +298,8 @@ def show_errors(config)
     project_short = row[:project_path].to_s.split('/').last
     puts '' if issues.any?
     puts pastel.bold(
-      "#{pastel.yellow('▲')} Issue ##{row[:issue_iid]}: #{row[:issue_title]}" \
-      " (#{project_short}) [#{pastel.yellow('post_completion')}]"
+      "#{pastel.yellow('▲')} Issue ##{row[:issue_iid]}: #{row[:issue_title]} " \
+      "(#{project_short}) [#{pastel.yellow('post_completion')}]"
     )
     puts "  Branche: #{row[:branch_name]}" if row[:branch_name]
     puts "  MR: !#{row[:mr_iid]} #{row[:mr_url]}" if row[:mr_iid]
