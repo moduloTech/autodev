@@ -242,6 +242,10 @@ module Database
         event :retry_processing do
           transitions from: :error, to: :pending
         end
+
+        event :retry_pipeline do
+          transitions from: :error, to: :checking_pipeline
+        end
       end
 
       # -- Guard methods --
@@ -283,11 +287,22 @@ module Database
   def self.recover_on_startup!(max_retries:)
     return 0 unless connected?
 
-    count = db[:issues]
+    # Errors with an existing MR resume at checking_pipeline, not pending
+    count_mr = db[:issues]
       .where(status: "error")
       .where { retry_count < max_retries }
       .where { Sequel.lit("next_retry_at IS NULL OR next_retry_at <= datetime('now')") }
+      .exclude(mr_iid: nil)
+      .update(status: "checking_pipeline", error_message: nil, started_at: nil)
+
+    count_no_mr = db[:issues]
+      .where(status: "error")
+      .where { retry_count < max_retries }
+      .where { Sequel.lit("next_retry_at IS NULL OR next_retry_at <= datetime('now')") }
+      .where(mr_iid: nil)
       .update(status: "pending", error_message: nil, started_at: nil)
+
+    count = count_mr + count_no_mr
 
     count2 = db[:issues]
       .where(status: "fixing_pipeline")
