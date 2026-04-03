@@ -7,7 +7,7 @@ class WorkerPoolTest < Minitest::Test
   def setup
     @logger = FakePastel.new
     # FakePastel doesn't have #error, add a no-op
-    def @logger.error(msg) = nil
+    def @logger.error(_msg) = nil
   end
 
   def test_enqueue_and_execute

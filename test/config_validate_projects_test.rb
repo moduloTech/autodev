@@ -89,5 +89,4 @@ class ConfigValidateProjectsTest < Minitest::Test
     config = base_config([{ 'path' => 'g/p', 'sparse_checkout' => ['src/', 'lib/'] }])
     Config.validate!(config)
   end
-
 end

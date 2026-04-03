@@ -70,9 +70,7 @@ class WorkerPool
   private
 
   def run_worker_loop(index)
-    while @running
-      run_next_job(index)
-    end
+    run_next_job(index) while @running
   end
 
   def run_next_job(index)
