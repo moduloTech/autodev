@@ -11,7 +11,7 @@ class DatabaseStateTransitionsTest < Minitest::Test
 
   # -- Happy path --
 
-  def test_happy_path_all_transitions
+  def test_happy_path_pending_to_checking_spec
     issue = create_issue
 
     assert_equal 'pending', issue.status
@@ -23,7 +23,11 @@ class DatabaseStateTransitionsTest < Minitest::Test
     issue.clone_complete!
 
     assert_equal 'checking_spec', issue.status
+  end
 
+  def test_happy_path_implementing_to_creating_mr
+    issue = create_issue
+    advance_to(issue, 'checking_spec')
     issue.spec_clear!
 
     assert_equal 'implementing', issue.status
@@ -35,7 +39,11 @@ class DatabaseStateTransitionsTest < Minitest::Test
     issue.commit_complete!
 
     assert_equal 'pushing', issue.status
+  end
 
+  def test_happy_path_pushing_to_checking_pipeline
+    issue = create_issue
+    advance_to(issue, 'pushing')
     issue.push_complete!
 
     assert_equal 'creating_mr', issue.status

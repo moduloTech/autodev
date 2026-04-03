@@ -12,13 +12,31 @@ class LoggerTest < Minitest::Test
     @logger.close
   end
 
-  def test_json_line_has_required_keys
+  def test_json_line_has_timestamp
     json = @logger.send(:build_json_line, 'INFO', 'test message', 'g/p', {})
     entry = JSON.parse(json)
 
     assert entry.key?('timestamp')
+  end
+
+  def test_json_line_has_level
+    json = @logger.send(:build_json_line, 'INFO', 'test message', 'g/p', {})
+    entry = JSON.parse(json)
+
     assert_equal 'INFO', entry['level']
+  end
+
+  def test_json_line_has_project
+    json = @logger.send(:build_json_line, 'INFO', 'test message', 'g/p', {})
+    entry = JSON.parse(json)
+
     assert_equal 'g/p', entry['project']
+  end
+
+  def test_json_line_has_message
+    json = @logger.send(:build_json_line, 'INFO', 'test message', 'g/p', {})
+    entry = JSON.parse(json)
+
     assert_equal 'test message', entry['message']
   end
 

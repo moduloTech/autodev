@@ -3,10 +3,19 @@
 require_relative 'test_helper'
 
 class ErrorsTest < Minitest::Test
-  def test_error_hierarchy
+  def test_config_error_inherits_from_autodev_error
     assert_kind_of AutodevError, ConfigError.new
+  end
+
+  def test_git_error_inherits_from_autodev_error
     assert_kind_of AutodevError, GitError.new
+  end
+
+  def test_implementation_error_inherits_from_autodev_error
     assert_kind_of AutodevError, ImplementationError.new
+  end
+
+  def test_rate_limit_error_inherits_from_autodev_error
     assert_kind_of AutodevError, RateLimitError.new('msg')
   end
 
