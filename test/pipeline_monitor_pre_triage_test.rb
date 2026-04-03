@@ -5,7 +5,7 @@ require 'autodev/danger_claude_runner'
 require 'autodev/pipeline_monitor'
 
 class PipelineMonitorPreTriageTest < Minitest::Test
-  FakeJob = Struct.new(:failure_reason, :name, :stage, keyword_init: true)
+  FakeJob = Struct.new(:failure_reason, :name, :stage)
   def setup
     @monitor = PipelineMonitor.allocate
   end
