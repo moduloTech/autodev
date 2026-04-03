@@ -1,911 +1,106 @@
 # frozen_string_literal: true
 
+require_relative 'issue_processor/git_operations'
+require_relative 'issue_processor/spec_checker'
+require_relative 'issue_processor/implementer'
+require_relative 'issue_processor/parallel_runner'
+require_relative 'issue_processor/mr_manager'
+require_relative 'issue_processor/error_handler'
+
 # Processes a single GitLab issue through the full implementation lifecycle.
 class IssueProcessor
   include DangerClaudeRunner
+  include GitOperations
+  include SpecChecker
+  include Implementer
+  include ParallelRunner
+  include MrManager
+  include ErrorHandler
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)
   end
 
   def process(issue)
-    iid   = issue.issue_iid
-    title = issue.issue_title
+    log "Processing issue ##{issue.issue_iid}: #{issue.issue_title}"
+    start_processing(issue)
+    return if issue_closed?(issue)
 
-    log "Processing issue ##{iid}: #{title}"
-    issue.start_processing! # pending → cloning
-    Issue.where(id: issue.id).update(started_at: Sequel.lit("datetime('now')"))
-    apply_label_doing(iid)
-
-    # Verify issue is still open
-    current = @client.issue(@project_path, iid)
-    if current.state != 'opened'
-      log "Issue ##{iid} is no longer open (#{current.state}), skipping"
-      issue._issue_closed = true
-      issue.clone_complete! # cloning → over
-      Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"))
-      return
-    end
-
-    assign_to_self(iid)
-    notify_localized(iid, :processing_started)
-
-    # Check for partial progress from previous attempt
-    previous_branch = issue.branch_name
-    reuse_branch = previous_branch && branch_exists_on_remote?(previous_branch)
-    skip_to_mr = false
-
-    if reuse_branch
-      log "Branch #{previous_branch} already exists on remote, checking for recovery..."
-      skip_to_mr = true if %w[creating_mr reviewing].include?(issue.status)
-    end
-
-    work_dir = "/tmp/autodev_#{@project_path.gsub('/', '_')}_#{iid}"
-    begin
-      clone_repo(work_dir)
-      if skip_to_mr
-        fetch_and_checkout(work_dir, previous_branch)
-        branch_name = previous_branch
-        @current_branch_name = branch_name
-        issue._skip_to_mr = true
-        issue.clone_complete! # cloning → creating_mr
-      else
-        # 1. Clone
-
-        # 2. Branch — reuse existing remote branch or create a new one
-        if reuse_branch
-          log "Reusing existing branch: #{previous_branch}"
-          fetch_and_checkout(work_dir, previous_branch)
-          branch_name = previous_branch
-        else
-          branch_name = create_branch(work_dir, iid, title)
-        end
-        issue.update(branch_name: branch_name)
-        @current_branch_name = branch_name
-        issue.clone_complete! # cloning → checking_spec
-
-        # 3. Fetch full issue context (includes MR discussions if MR exists)
-        context = GitlabHelpers.fetch_full_context(
-          @client, @project_path, iid,
-          mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir
-        )
-
-        # 4. Check specification clarity
-        if check_specification(work_dir, context, iid, issue)
-          return # spec_unclear! → needs_clarification, or question_detected! → answering_question → over
-        end
-
-        # spec_clear! was fired → implementing
-
-        # 5. Ensure CLAUDE.md exists
-        ensure_claude_md(work_dir)
-
-        # 6. Inject default skills if project lacks its own
-        skills_result = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
-        @all_skills = skills_result[:all_skills]
-
-        # 7. Implement
-        implement(work_dir, context, iid)
-        issue.impl_complete! # implementing → committing
-
-        # 8. Commit
-        commit(work_dir)
-        issue.commit_complete! # committing → pushing
-
-        # 9. Verify changes + Push
-        verify_changes(work_dir, branch_name)
-        push(work_dir, branch_name)
-        issue.push_complete! # pushing → creating_mr
-      end
-
-      # 10. Create MR
-      mr = create_merge_request(work_dir, iid, branch_name, title)
-      issue.update(mr_iid: mr.iid, mr_url: mr.web_url)
-      issue.mr_created! # creating_mr → reviewing
-
-      # 11. Labels
-      if label_workflow?
-        apply_label_mr(iid)
-      else
-        update_labels(iid)
-      end
-
-      # 12. Review (non-fatal)
-      run_review(mr.web_url)
-
-      issue.review_complete! # reviewing → checking_pipeline
-      Issue.where(id: issue.id).update(
-        finished_at: Sequel.lit("datetime('now')"),
-        pipeline_retrigger_count: 0,
-        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
-      )
-      notify_localized(iid, :mr_created, mr_url: mr.web_url)
-      log "Issue ##{iid} completed: #{mr.web_url}"
-    rescue RateLimitError => e
-      wait = e.wait_seconds
-      log_error "Issue ##{iid}: rate limit hit, parking for #{wait}s"
-      begin
-        issue.mark_failed!
-      rescue AASM::InvalidTransition
-        issue.update(status: 'error')
-      end
-      Issue.where(id: issue.id).update(
-        error_message: e.message,
-        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
-        next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')"),
-        finished_at: Sequel.lit("datetime('now')")
-      )
-    rescue StandardError => e
-      bt = e.backtrace&.first(10)&.join("\n  ")
-      retry_count = (issue.retry_count || 0) + 1
-      max_retries = (@project_config['max_retries'] || @config['max_retries'] || 3).to_i
-      backoff = (@project_config['retry_backoff'] || @config['retry_backoff'] || 30).to_i
-      backoff_seconds = backoff * (2**(retry_count - 1))
-
-      begin
-        issue.mark_failed!
-      rescue AASM::InvalidTransition
-        issue.update(status: 'error')
-      end
-
-      fields = {
-        error_message: "#{e.class}: #{e.message}\n  #{bt}",
-        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
-        retry_count: retry_count,
-        finished_at: Sequel.lit("datetime('now')")
-      }
-
-      if retry_count < max_retries
-        fields[:next_retry_at] = Sequel.lit("datetime('now', '+#{backoff_seconds} seconds')")
-        log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, " \
-                  "retry in #{backoff_seconds}s): #{e.class}: #{e.message}"
-      else
-        log_error "Issue ##{iid} failed (attempt #{retry_count}/#{max_retries}, " \
-                  "no more retries): #{e.class}: #{e.message}"
-      end
-
-      Issue.where(id: issue.id).update(**fields)
-      notify_localized(iid, :error_generic, error: "#{e.class}: #{e.message[0, 200]}")
-      log_error "  #{bt}" if bt
-    ensure
-      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
-    end
+    work_dir = "/tmp/autodev_#{@project_path.gsub('/', '_')}_#{issue.issue_iid}"
+    execute_pipeline(issue, work_dir)
+  rescue RateLimitError => e
+    handle_rate_limit(issue, e)
+  rescue StandardError => e
+    handle_process_error(issue, e)
+  ensure
+    FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
   end
-
-  IMPLEMENTER_AGENT = <<~AGENT
-    ---
-    name: implementer
-    description: Implement code changes from issue specifications. Use proactively for implementation tasks.
-    model: sonnet
-    ---
-
-    You are a senior developer implementing code changes from a GitLab issue specification.
-
-    Focus exclusively on production code. Do NOT write or modify tests — a separate agent handles testing.
-
-    When implementing:
-    1. Read the issue context and CLAUDE.md carefully.
-    2. Identify all files that need changes.
-    3. Make minimal, focused changes that satisfy the requirements.
-    4. Follow existing code patterns and conventions.
-  AGENT
-
-  TEST_WRITER_AGENT = <<~AGENT
-    ---
-    name: test-writer
-    description: Write tests from issue specifications. Use proactively for testing tasks.
-    model: sonnet
-    ---
-
-    You are a senior developer writing tests from an issue specification.
-    Another agent is implementing the code in parallel — you do NOT have access to it.
-
-    Focus exclusively on test files. Do NOT modify production code.
-
-    When writing tests:
-    1. Read the issue specification carefully to understand expected behavior.
-    2. Check existing tests for patterns, helpers, factories, and conventions.
-    3. Write tests that verify the specified behavior: nominal cases and edge cases.
-    4. Follow the project's test framework and style exactly.
-    5. Use descriptive test names that reflect the specification, not the implementation.
-  AGENT
 
   private
 
-  def clone_repo(work_dir)
-    FileUtils.rm_rf(work_dir)
-
-    uri = URI.parse(@gitlab_url)
-    host_port = uri.port && ![80, 443].include?(uri.port) ? "#{uri.host}:#{uri.port}" : uri.host
-    clone_url = "#{uri.scheme}://oauth2:#{@token}@#{host_port}/#{@project_path}.git"
-
-    clone_depth = @project_config['clone_depth'] || 1
-    sparse_paths = @project_config['sparse_checkout']
-    target = @project_config['target_branch']
-
-    cmd = %w[git clone]
-    cmd += ['--depth', clone_depth.to_s] if clone_depth.positive?
-    cmd += ['--branch', target] if target
-    cmd += ['--filter=blob:none', '--sparse'] if sparse_paths.is_a?(Array) && sparse_paths.any?
-    cmd += [clone_url, work_dir]
-
-    log "Cloning #{@project_path} (depth: #{clone_depth.positive? ? clone_depth : 'full'})..."
-    run_cmd(cmd)
-
-    return unless sparse_paths.is_a?(Array) && sparse_paths.any?
-
-    log "Setting up sparse checkout: #{sparse_paths.join(', ')}"
-    run_cmd(%w[git sparse-checkout set] + sparse_paths, chdir: work_dir)
+  def start_processing(issue)
+    issue.start_processing!
+    Issue.where(id: issue.id).update(started_at: Sequel.lit("datetime('now')"))
+    apply_label_doing(issue.issue_iid)
   end
 
-  def fetch_and_checkout(work_dir, branch)
-    # --depth implies --single-branch, so the refspec is limited to the cloned
-    # branch. We must provide an explicit refspec to fetch other branches.
-    run_cmd(['git', 'fetch', 'origin', "+refs/heads/#{branch}:refs/remotes/origin/#{branch}"], chdir: work_dir)
-    run_cmd(['git', 'checkout', '-b', branch, "origin/#{branch}"], chdir: work_dir)
-  end
+  def issue_closed?(issue)
+    current = @client.issue(@project_path, issue.issue_iid)
+    return false if current.state == 'opened'
 
-  def create_branch(work_dir, iid, title)
-    slug = I18n.transliterate(title)
-               .downcase
-               .gsub(/[^a-z0-9\s-]/, '')
-               .gsub(/\s+/, '-')
-               .gsub(/-+/, '-')
-               .gsub(/^-|-$/, '')[0, 50]
-    random = SecureRandom.hex(4)
-    branch_name = "autodev/#{iid}-#{slug}-#{random}"
-
-    run_cmd(['git', 'checkout', '-b', branch_name], chdir: work_dir)
-    log "Created branch: #{branch_name}"
-    branch_name
-  end
-
-  def ensure_claude_md(work_dir)
-    claude_md = File.join(work_dir, 'CLAUDE.md')
-    return if File.exist?(claude_md)
-
-    log 'No CLAUDE.md found, generating...'
-    danger_claude_prompt(
-      work_dir,
-      'Analyse ce projet (structure, technologies, conventions, tests) et cree un fichier CLAUDE.md ' \
-      'a la racine qui documente ces informations pour guider les futurs developpements. ' \
-      'Sois concis et factuel.'
-    )
-    danger_claude_commit(work_dir)
-  end
-
-  def check_specification(work_dir, context, iid, issue)
-    log "Checking specification clarity for ##{iid}..."
-
-    out = with_context_file(work_dir, issue.branch_name, context) do |context_filename|
-      prompt = <<~PROMPT
-        Analyse le ticket GitLab suivant et determine sa nature.
-
-        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement.
-
-        ## Instructions de reponse
-
-        Reponds UNIQUEMENT avec un objet JSON valide (sans bloc de code markdown), avec cette structure :
-        {
-          "type": "implementation" | "question" | "unclear",
-          "issues": ["description du probleme 1", "description du probleme 2"]
-        }
-
-        - `"type": "implementation"` — la specification est suffisamment claire pour etre implementee. `issues` doit etre vide.
-        - `"type": "question"` — le ticket ne demande PAS de modification de code. C'est une question,
-          une investigation, ou une demande d'explication sur le comportement existant
-          (ex: "pourquoi X ?", "est-ce que A et B sont identiques ?", "a quoi sert X ?", "comment fonctionne X ?").
-          `issues` doit etre vide.
-        - `"type": "unclear"` — le ticket demande une implementation mais la specification n'est pas assez precise.
-          Liste les problemes specifiques dans `issues`.
-
-        - Sois pragmatique : des details mineurs ne doivent pas bloquer l'implementation.
-        - Concentre-toi sur les ambiguites qui pourraient mener a une implementation incorrecte.
-        - Si le ticket contient des URLs de l'application (ex: https://app.example.com/companies/test/drivers/history),
-          extrais le path (ex: /companies/:id/drivers/history), cherche la route correspondante dans config/routes.rb,
-          identifie le controller#action, puis lis le code du controller et de la vue associee.
-          Utilise ces informations pour repondre toi-meme aux questions (colonnes, filtres, logique metier)
-          avant de declarer la spec insuffisante.
-      PROMPT
-
-      danger_claude_prompt(work_dir, prompt)
-    end
-
-    # Try new tri-state format first
-    json_match = out.match(/\{[^{}]*"type"\s*:\s*"(implementation|question|unclear)"[^{}]*\}/m)
-    if json_match
-      result = JSON.parse(json_match[0])
-      case result['type']
-      when 'implementation'
-        log 'Specification is clear, proceeding'
-        issue.spec_clear!
-        return false
-      when 'question'
-        log "Issue ##{iid} is a question/investigation, not an implementation request"
-        issue.question_detected!
-        answer_question(work_dir, context, iid, issue)
-        return true
-      when 'unclear'
-        return unclear_spec?(result['issues'], iid, issue)
-      end
-    end
-
-    # Fallback: try old format { "clear": true/false }
-    json_match = out.match(/\{[^{}]*"clear"\s*:\s*(true|false)[^{}]*\}/m)
-    unless json_match
-      log 'Could not parse spec check response, proceeding with implementation'
-      issue.spec_clear!
-      return false
-    end
-
-    result = JSON.parse(json_match[0])
-    if result['clear']
-      log 'Specification is clear, proceeding'
-      issue.spec_clear!
-      return false
-    end
-
-    unclear_spec?(result['issues'], iid, issue)
-  rescue JSON::ParserError
-    log 'Could not parse spec check JSON response, proceeding with implementation'
-    issue.spec_clear!
-    false
-  end
-
-  def unclear_spec?(issues_list, iid, issue)
-    issues_list ||= []
-    if issues_list.empty?
-      log 'Spec check returned unclear but no issues listed, proceeding'
-      issue.spec_clear!
-      return false
-    end
-
-    issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
-    locale = (issue_record&.locale || 'fr').to_sym
-    header = Locales.t(:spec_unclear_header, locale: locale, tag: autodev_tag)
-    footer = Locales.t(:spec_unclear_footer, locale: locale, tag: autodev_tag)
-    numbered = issues_list.map.with_index(1) { |iss, i| "#{i}. #{iss}" }.join("\n")
-    notify_issue(iid, "#{header}\n\n#{numbered}\n\n#{footer}")
-    issue.spec_unclear!
-    apply_label_todo(iid)
-    Issue.where(id: issue.id).update(clarification_requested_at: Sequel.lit("datetime('now')"))
-    log "Issue ##{iid} needs clarification, #{issues_list.size} question(s) posted"
+    log "Issue ##{issue.issue_iid} is no longer open (#{current.state}), skipping"
+    issue._issue_closed = true
+    issue.clone_complete!
+    Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"))
     true
   end
 
-  def answer_question(work_dir, context, iid, issue)
-    log "Investigating question for issue ##{iid}..."
+  def execute_pipeline(issue, work_dir)
+    iid = issue.issue_iid
+    assign_to_self(iid)
+    notify_localized(iid, :processing_started)
+    branch = clone_and_prepare(issue, iid, work_dir)
+    finalize(issue, iid, branch, work_dir) unless issue.over? || issue.needs_clarification? || issue.answering_question?
+  end
 
-    answer = with_context_file(work_dir, issue.branch_name, context) do |context_filename|
-      prompt = <<~PROMPT
-        Le ticket GitLab suivant pose une question ou demande une investigation sur le code existant.
-        Ce n'est PAS une demande d'implementation. Tu dois analyser le codebase pour repondre a la question.
+  def run_implementation(issue, work_dir, iid, _branch)
+    context = GitlabHelpers.fetch_full_context(
+      @client, @project_path, iid,
+      mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir
+    )
+    return if check_specification(work_dir, context, iid, issue)
 
-        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement.
+    prepare_and_implement(issue, work_dir, context, iid)
+  end
 
-        ## Instructions
+  def prepare_and_implement(issue, work_dir, context, iid)
+    ensure_claude_md(work_dir)
+    @all_skills = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)[:all_skills]
+    implement(work_dir, context, iid)
+    issue.impl_complete!
+    danger_claude_commit(work_dir)
+    issue.commit_complete!
+    verify_changes(work_dir, @current_branch_name)
+    push(work_dir, @current_branch_name)
+    issue.push_complete!
+  end
 
-        - Lis attentivement la question posee dans le ticket.
-        - Explore le codebase pour trouver la reponse (fichiers, modeles, controleurs, vues, routes, migrations, etc.).
-        - Fournis une reponse claire, factuelle et structuree.
-        - Cite les fichiers et lignes pertinents pour appuyer ta reponse.
-        - Si tu ne peux pas repondre avec certitude, indique-le clairement.
-        - Reponds en francais.
-        - Reponds UNIQUEMENT avec ta reponse (pas de JSON, pas de bloc de code englobant).
-      PROMPT
+  def finalize(issue, iid, branch_name, work_dir)
+    merge_request = create_merge_request(work_dir, iid, branch_name, issue.issue_title)
+    issue.update(mr_iid: merge_request.iid, mr_url: merge_request.web_url)
+    issue.mr_created!
+    label_workflow? ? apply_label_mr(iid) : update_labels(iid)
+    run_review(merge_request.web_url)
+    complete_issue(issue, iid, merge_request)
+  end
 
-      danger_claude_prompt(work_dir, prompt, label: '-p (question investigation)')
-    end
-
-    issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
-    locale = (issue_record&.locale || 'fr').to_sym
-    header = Locales.t(:question_answered_header, locale: locale, tag: autodev_tag)
-    footer = Locales.t(:question_answered_footer, locale: locale, tag: autodev_tag)
-    notify_issue(iid, "#{header}\n\n#{answer.strip}\n\n---\n#{footer}")
-    if label_workflow?
-      # Remove label_doing but don't add any label back — the human decides the next step.
-      # Adding labels_todo would cause an infinite loop (question re-detected every cycle).
-      manage_labels(iid,
-                    remove: [@project_config['label_doing']],
-                    add: nil)
-    else
-      update_labels(iid)
-    end
-    issue.question_answered!
-    reassign_to_author(issue)
+  def complete_issue(issue, iid, merge_request)
+    issue.review_complete!
     Issue.where(id: issue.id).update(
-      finished_at: Sequel.lit("datetime('now')"),
+      finished_at: Sequel.lit("datetime('now')"), pipeline_retrigger_count: 0,
       dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
     )
-    log "Issue ##{iid} answered (question/investigation)"
-  end
-
-  def implement(work_dir, context, iid)
-    if @project_config['parallel_agents']
-      plan = evaluate_complexity(work_dir, context, iid)
-      if plan
-        implement_parallel(work_dir, context, iid, plan)
-      else
-        log 'Complexity evaluation returned no plan, falling back'
-        implement_fallback(work_dir, context, iid)
-      end
-    else
-      implement_fallback(work_dir, context, iid)
-    end
-  end
-
-  def implement_fallback(work_dir, context, iid)
-    if @project_config['split_implementation']
-      implement_split(work_dir, context, iid)
-    else
-      implement_single(work_dir, context, iid)
-    end
-  end
-
-  # Ask Claude to assess complexity and generate a work plan.
-  # Returns nil for simple issues (single-agent is fine),
-  # or an array of tasks for parallel execution.
-  def evaluate_complexity(work_dir, context, iid)
-    out = with_context_file(work_dir, @current_branch_name, context) do |context_filename|
-      prompt = <<~PROMPT
-        Analyse le ticket GitLab suivant et determine si l'implementation necessite plusieurs agents
-        travaillant en parallele, ou si un seul agent suffit.
-
-        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement.
-
-        ## Instructions de reponse
-
-        Reponds UNIQUEMENT avec un objet JSON valide (sans bloc de code markdown), avec cette structure :
-        {
-          "parallel": true/false,
-          "reason": "explication courte",
-          "tasks": [
-            {
-              "name": "nom-court-de-la-tache",
-              "description": "ce que cet agent doit faire",
-              "scope": "fichiers ou repertoires concernes (ex: app/models/, app/controllers/users*)"
-            }
-          ]
-        }
-
-        - `parallel: false` si l'issue est simple (1-3 fichiers, un seul domaine). `tasks` doit etre vide.
-        - `parallel: true` si l'issue touche plusieurs couches ou domaines independants.
-          Chaque tache doit etre autonome et ne PAS toucher les memes fichiers qu'une autre tache.
-          Ajoute toujours une tache "tests" dediee aux tests.
-        - Maximum 4 taches. Ne cree pas de taches inutiles.
-        - Sois pragmatique : en cas de doute, reponds `parallel: false`.
-      PROMPT
-
-      log "Evaluating issue complexity for ##{iid}..."
-      danger_claude_prompt(work_dir, prompt, label: '-p (complexity eval)')
-    end
-
-    json_match = out.match(/\{[^{}]*"parallel"\s*:\s*(true|false).*\}/m)
-    return nil unless json_match
-
-    result = JSON.parse(json_match[0])
-
-    unless result['parallel'] && result['tasks'].is_a?(Array) && result['tasks'].size > 1
-      log "Issue ##{iid} assessed as simple: #{result['reason']}"
-      return nil
-    end
-
-    tasks = result['tasks'].map do |t|
-      { name: t['name'].to_s, description: t['description'].to_s, scope: t['scope'].to_s }
-    end
-
-    log "Issue ##{iid} assessed as complex (#{tasks.size} tasks): #{result['reason']}"
-    tasks
-  rescue JSON::ParserError
-    log 'Could not parse complexity evaluation, falling back to single agent'
-    nil
-  end
-
-  # Run N agents in parallel, each in its own worktree with a specific task.
-  def implement_parallel(work_dir, context, iid, tasks)
-    extra = @project_config['extra_prompt']
-    skills_line = SkillsInjector.skills_instruction(@all_skills)
-    log "Running #{tasks.size} parallel agents for issue ##{iid}..."
-
-    worktrees = []
-    threads = []
-    errors = []
-
-    tasks.each_with_index do |task, idx|
-      wt_path = "#{work_dir}_task_#{idx}"
-      run_cmd(['git', 'worktree', 'add', wt_path, 'HEAD'], chdir: work_dir)
-      SkillsInjector.inject(wt_path, logger: @logger, project_path: @project_path)
-
-      # Copy injected agents
-      agents_src = File.join(work_dir, '.claude', 'agents')
-      if Dir.exist?(agents_src)
-        agents_dst = File.join(wt_path, '.claude', 'agents')
-        FileUtils.mkdir_p(agents_dst)
-        FileUtils.cp_r(Dir.glob(File.join(agents_src, '*')), agents_dst)
-      end
-
-      worktrees << { path: wt_path, task: task }
-
-      # Write context file in each worktree
-      context_file = GitlabHelpers.write_context_file(wt_path, @current_branch_name, context)
-      context_filename = File.basename(context_file)
-
-      prompt = <<~PROMPT
-        Tu dois implementer UNE PARTIE d'un ticket GitLab. D'autres agents travaillent
-        en parallele sur d'autres parties. Ne fais QUE ta tache assignee.
-
-        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement.
-
-        ## Ta tache
-
-        **#{task[:name]}** : #{task[:description]}
-
-        Scope : `#{task[:scope]}`
-
-        ## Instructions
-
-        #{skills_line}
-        - N'implemente QUE ta tache. Ne touche PAS aux fichiers hors de ton scope.
-        - Respecte les conventions du projet (voir CLAUDE.md si present).
-        - Ajoute les tests correspondant a ta tache si elle n'est pas dediee aux tests.
-        - Sois autonome : ne presuppose pas que les autres agents ont deja fait leur travail.
-        #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
-      PROMPT
-
-      threads << Thread.new do
-        log "Agent #{idx + 1}/#{tasks.size}: #{task[:name]} (#{task[:scope]})"
-        danger_claude_prompt(wt_path, prompt, label: "-p (parallel: #{task[:name]})")
-      rescue StandardError => e
-        errors << { task: task[:name], error: e }
-      end
-    end
-
-    # Wait for all agents
-    threads.each(&:join)
-
-    if errors.any?
-      error_names = errors.map { |e| e[:task] }.join(', ')
-      log_error "#{errors.size} agent(s) failed: #{error_names}"
-    end
-
-    # Merge results from all worktrees into work_dir
-    worktrees.each do |wt|
-      merge_worktree_files(wt[:path], work_dir, wt[:task][:name])
-    end
-
-    # If ALL agents failed, raise
-    if errors.size == tasks.size
-      raise ImplementationError, "All parallel agents failed: #{errors.map do |e|
-        "#{e[:task]}: #{e[:error].message}"
-      end.join('; ')}"
-    end
-  ensure
-    # Clean up all worktrees (and context files within them)
-    (worktrees || []).each do |wt|
-      GitlabHelpers.cleanup_context_file(wt[:path], @current_branch_name) if wt[:path]
-      if Dir.exist?(wt[:path])
-        run_cmd_status(['git', 'worktree', 'remove', '--force', wt[:path]], chdir: work_dir)
-        FileUtils.rm_rf(wt[:path])
-      end
-    end
-  end
-
-  # Copy all modified/new files from a worktree back to work_dir.
-  def merge_worktree_files(worktree_path, work_dir, task_name)
-    changed, _err, ok = run_cmd_status(
-      ['git', 'diff', '--name-only', 'HEAD'],
-      chdir: worktree_path
-    )
-    untracked, _err, ok2 = run_cmd_status(
-      ['git', 'ls-files', '--others', '--exclude-standard'],
-      chdir: worktree_path
-    )
-
-    files = []
-    files += changed.split("\n").map(&:strip).reject(&:empty?) if ok
-    files += untracked.split("\n").map(&:strip).reject(&:empty?) if ok2
-    files.uniq!
-
-    if files.empty?
-      log "Agent '#{task_name}' produced no changes"
-      return
-    end
-
-    log "Merging #{files.size} file(s) from agent '#{task_name}'..."
-    files.each do |file|
-      src = File.join(worktree_path, file)
-      dst = File.join(work_dir, file)
-      next unless File.exist?(src)
-
-      FileUtils.mkdir_p(File.dirname(dst))
-      FileUtils.cp(src, dst)
-    end
-  end
-
-  def implement_single(work_dir, context, _iid)
-    extra = @project_config['extra_prompt']
-    skills_line = SkillsInjector.skills_instruction(@all_skills)
-
-    with_context_file(work_dir, @current_branch_name, context) do |context_filename|
-      prompt = <<~PROMPT
-        Tu dois implementer le ticket GitLab suivant. Lis attentivement le contexte complet,
-        puis implemente les changements necessaires dans le code.
-
-        Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement avant de commencer.
-
-        ## Instructions
-
-        #{skills_line}
-        - Implemente TOUS les changements decrits dans l'issue.
-        - Respecte les conventions du projet (voir CLAUDE.md si present).
-        - Ajoute ou modifie les tests si necessaire.
-        - Ne modifie que ce qui est necessaire pour resoudre l'issue.
-        #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
-      PROMPT
-
-      log 'Running implementation via danger-claude...'
-      danger_claude_prompt(work_dir, prompt)
-    end
-  end
-
-  def implement_split(work_dir, context, _iid)
-    extra = @project_config['extra_prompt']
-    skills_line = SkillsInjector.skills_instruction(@all_skills)
-    implementer = detect_agent(work_dir, 'implementer')
-    test_writer = detect_agent(work_dir, 'test-writer')
-
-    # Create a worktree for the test-writer so both can run in parallel
-    test_worktree = "#{work_dir}_tests"
-    run_cmd(['git', 'worktree', 'add', test_worktree, 'HEAD'], chdir: work_dir)
-    SkillsInjector.inject(test_worktree, logger: @logger, project_path: @project_path)
-    # Copy injected agents to worktree (they were injected in work_dir by detect_agent)
-    agents_src = File.join(work_dir, '.claude', 'agents')
-    if Dir.exist?(agents_src)
-      agents_dst = File.join(test_worktree, '.claude', 'agents')
-      FileUtils.mkdir_p(agents_dst)
-      FileUtils.cp_r(Dir.glob(File.join(agents_src, '*')), agents_dst)
-    end
-
-    # Write context file in both worktrees
-    context_file = GitlabHelpers.write_context_file(work_dir, @current_branch_name, context)
-    context_filename = File.basename(context_file)
-    GitlabHelpers.write_context_file(test_worktree, @current_branch_name, context)
-
-    code_prompt = <<~PROMPT
-      Tu dois implementer le ticket GitLab suivant. Lis attentivement le contexte complet,
-      puis implemente les changements necessaires dans le code.
-
-      Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement avant de commencer.
-
-      ## Instructions
-
-      #{skills_line}
-      - Implemente TOUS les changements decrits dans l'issue.
-      - Respecte les conventions du projet (voir CLAUDE.md si present).
-      - N'ecris PAS de tests. Les tests seront ecrits en parallele par un autre agent.
-      - Ne modifie que ce qui est necessaire pour resoudre l'issue.
-      #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
-    PROMPT
-
-    test_prompt = <<~PROMPT
-      Tu dois ecrire les tests pour le ticket GitLab suivant. Un autre agent implemente
-      le code en parallele. Ecris les tests en te basant sur la specification de l'issue.
-
-      Le contexte complet du ticket est dans le fichier `#{context_filename}`. Lis-le attentivement avant de commencer.
-
-      ## Instructions
-
-      #{skills_line}
-      - Ecris les tests en te basant sur la specification de l'issue (pas sur le code, il n'est pas encore disponible).
-      - Respecte les conventions de test du projet (voir les tests existants).
-      - Ne modifie PAS le code source, uniquement les fichiers de test.
-      - Couvre les cas nominaux et les cas limites importants.
-      - Si tu dois creer des factories/fixtures, fais-le dans les fichiers de test appropriés.
-      #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
-    PROMPT
-
-    # Run both agents in parallel
-    log 'Running implementer + test-writer in parallel...'
-    code_error = nil
-    test_error = nil
-
-    code_thread = Thread.new do
-      danger_claude_prompt(work_dir, code_prompt, agent: implementer, label: '-p (implement code)')
-    rescue StandardError => e
-      code_error = e
-    end
-
-    test_thread = Thread.new do
-      danger_claude_prompt(test_worktree, test_prompt, agent: test_writer, label: '-p (write tests)')
-    rescue StandardError => e
-      test_error = e
-    end
-
-    code_thread.join
-    test_thread.join
-
-    # Raise code errors first (tests are useless without code)
-    raise code_error if code_error
-
-    # Merge test files from worktree into work_dir
-    if test_error
-      log_error "Test-writer failed (non-fatal): #{test_error.message}"
-    else
-      merge_test_files(test_worktree, work_dir)
-    end
-  ensure
-    if test_worktree
-      GitlabHelpers.cleanup_context_file(test_worktree, @current_branch_name)
-      if Dir.exist?(test_worktree)
-        run_cmd_status(['git', 'worktree', 'remove', '--force', test_worktree], chdir: work_dir)
-        FileUtils.rm_rf(test_worktree) # fallback if worktree remove failed
-      end
-    end
-  end
-
-  # Copy files modified in the test worktree back to the main work_dir.
-  def merge_test_files(test_worktree, work_dir)
-    # Get list of new/modified files in worktree
-    changed, _err, ok = run_cmd_status(
-      ['git', 'diff', '--name-only', 'HEAD'],
-      chdir: test_worktree
-    )
-    untracked, _err, ok2 = run_cmd_status(
-      ['git', 'ls-files', '--others', '--exclude-standard'],
-      chdir: test_worktree
-    )
-
-    files = []
-    files += changed.split("\n").map(&:strip).reject(&:empty?) if ok
-    files += untracked.split("\n").map(&:strip).reject(&:empty?) if ok2
-    files.uniq!
-
-    if files.empty?
-      log 'Test-writer produced no changes'
-      return
-    end
-
-    log "Merging #{files.size} test file(s) from worktree..."
-    files.each do |file|
-      src = File.join(test_worktree, file)
-      dst = File.join(work_dir, file)
-      next unless File.exist?(src)
-
-      FileUtils.mkdir_p(File.dirname(dst))
-      FileUtils.cp(src, dst)
-    end
-    log "Merged test files: #{files.join(', ')}"
-  end
-
-  def detect_agent(work_dir, agent_name)
-    # Config override
-    config_key = "#{agent_name.gsub('-', '_')}_agent"
-    config_agent = @project_config[config_key]
-    return config_agent if config_agent
-
-    # Project agent
-    agent_path = File.join(work_dir, '.claude', 'agents', "#{agent_name}.md")
-    if File.exist?(agent_path)
-      log "Found agent '#{agent_name}' in project"
-      return agent_name
-    end
-
-    # Inject default
-    template = case agent_name
-               when 'implementer' then IMPLEMENTER_AGENT
-               when 'test-writer' then TEST_WRITER_AGENT
-               else return nil
-               end
-
-    log "Injecting default '#{agent_name}' agent"
-    FileUtils.mkdir_p(File.dirname(agent_path))
-    File.write(agent_path, template)
-    agent_name
-  end
-
-  def commit(work_dir)
-    log 'Committing changes via danger-claude...'
-    danger_claude_commit(work_dir)
-  end
-
-  def verify_changes(work_dir, branch_name)
-    target = @project_config['target_branch'] || default_branch(work_dir)
-    out, _err, ok = run_cmd_status(
-      ['git', 'log', "#{target}..#{branch_name}", '--oneline'],
-      chdir: work_dir
-    )
-    return unless !ok || out.strip.empty?
-
-    raise ImplementationError, 'No changes produced by implementation'
-  end
-
-  def default_branch(work_dir)
-    out, _err, ok = run_cmd_status(['git', 'symbolic-ref', 'refs/remotes/origin/HEAD', '--short'], chdir: work_dir)
-    if ok && !out.empty?
-      out.sub('origin/', '')
-    else
-      'main'
-    end
-  end
-
-  def push(work_dir, branch_name)
-    log "Pushing #{branch_name}..."
-    _out, _err, ok = run_cmd_status(['git', 'push', '-u', 'origin', branch_name], chdir: work_dir)
-    return if ok
-
-    log 'Push failed, retrying with --force-with-lease...'
-    run_cmd(['git', 'push', '--force-with-lease', '-u', 'origin', branch_name], chdir: work_dir)
-  end
-
-  def update_labels(iid)
-    labels_to_remove = @project_config['labels_to_remove'] || []
-    label_to_add     = @project_config['label_to_add']
-
-    begin
-      gi = @client.issue(@project_path, iid)
-      current_labels = gi.labels || []
-      new_labels = current_labels - labels_to_remove
-      new_labels << label_to_add if label_to_add && !new_labels.include?(label_to_add)
-      @client.edit_issue(@project_path, iid, labels: new_labels.join(','))
-      log "Labels updated: removed #{labels_to_remove & current_labels}, added #{label_to_add}"
-    rescue Gitlab::Error::ResponseError => e
-      log_error "Failed to update labels for ##{iid}: #{e.message}"
-    end
-  end
-
-  def create_merge_request(work_dir, iid, branch_name, _issue_title)
-    target = @project_config['target_branch'] || default_branch(work_dir)
-    commit_msg = run_cmd(['git', 'log', '-1', '--format=%B'], chdir: work_dir)
-    commit_subject = run_cmd(['git', 'log', '-1', '--format=%s'], chdir: work_dir)
-    mr_title = commit_subject
-    mr_description = "#{commit_msg}\n\nFixes ##{iid}"
-
-    begin
-      existing_mrs = @client.merge_requests(@project_path, source_branch: branch_name, state: 'opened')
-      if existing_mrs.any?
-        mr = existing_mrs.first
-        log "MR already exists: !#{mr.iid}"
-        return mr
-      end
-    rescue Gitlab::Error::ResponseError
-      # Continue to create
-    end
-
-    log "Creating MR: #{mr_title}"
-    @client.create_merge_request(
-      @project_path, mr_title,
-      source_branch: branch_name, target_branch: target, description: mr_description
-    )
-  end
-
-  def run_review(mr_url)
-    unless command_exists?('mr-review')
-      log 'mr-review not installed, skipping review'
-      return
-    end
-
-    log 'Waiting 15s for GitLab to compute diff_refs...'
-    sleep 15
-    log "Running mr-review on #{mr_url}..."
-    _, err, status = Open3.capture3(CLEAN_ENV, 'mr-review', '-H', mr_url)
-    if status.success?
-      log 'Review completed successfully'
-    else
-      log_error "mr-review failed (non-fatal): #{err[0, 300]}"
-    end
-  rescue StandardError => e
-    log_error "mr-review error (non-fatal): #{e.message}"
-  end
-
-  def branch_exists_on_remote?(branch_name)
-    @client.branch(@project_path, branch_name)
-    true
-  rescue Gitlab::Error::ResponseError
-    false
-  end
-
-  def command_exists?(cmd)
-    _, status = Open3.capture2e('which', cmd)
-    status.success?
+    notify_localized(iid, :mr_created, mr_url: merge_request.web_url)
+    log "Issue ##{iid} completed: #{merge_request.web_url}"
   end
 end

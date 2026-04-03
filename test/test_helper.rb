@@ -40,8 +40,8 @@ class StubLogger
     @messages = []
   end
 
-  def info(msg, **_opts)
-    @messages << msg
+  %i[info warn error debug].each do |level|
+    define_method(level) { |msg, **_opts| @messages << msg }
   end
 end
 
