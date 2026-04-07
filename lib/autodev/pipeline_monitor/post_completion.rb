@@ -25,7 +25,7 @@ class PipelineMonitor
       clone_and_checkout(work_dir, issue.branch_name)
       env = post_completion_env(issue)
       timeout = (@project_config['post_completion_timeout'] || 300).to_i
-      run_with_timeout(issue, cmd, work_dir, env, timeout)
+      run_pc_with_timeout(issue, cmd, work_dir, env, timeout)
     end
 
     def post_completion_env(issue)
@@ -36,7 +36,7 @@ class PipelineMonitor
       )
     end
 
-    def run_with_timeout(issue, cmd, work_dir, env, timeout)
+    def run_pc_with_timeout(issue, cmd, work_dir, env, timeout)
       stdout_r, stdout_w = IO.pipe
       stderr_r, stderr_w = IO.pipe
       pid = Process.spawn(env, *cmd, chdir: work_dir, in: :close, out: stdout_w, err: stderr_w, pgroup: true)
@@ -51,7 +51,7 @@ class PipelineMonitor
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
       loop do
         if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
-          return handle_timeout(issue, pid, threads, timeout)
+          return handle_pc_timeout(issue, pid, threads, timeout)
         end
 
         _pid, status = Process.wait2(pid, Process::WNOHANG)
@@ -61,7 +61,7 @@ class PipelineMonitor
       end
     end
 
-    def handle_timeout(issue, pid, threads, timeout)
+    def handle_pc_timeout(issue, pid, threads, timeout)
       kill_process(pid)
       out, err = threads[:out].value, threads[:err].value # rubocop:disable Style/ParallelAssignment
       store_pc_error(issue,
