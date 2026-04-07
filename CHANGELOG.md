@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix `CLEAN_ENV` constant resolution in `PostCompletion` module — fully qualify as `DangerClaudeRunner::CLEAN_ENV`.
+
 ## [0.8.4] - 2026-04-07
 
 ### Fixed

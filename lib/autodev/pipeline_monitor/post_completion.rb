@@ -29,7 +29,7 @@ class PipelineMonitor
     end
 
     def post_completion_env(issue)
-      CLEAN_ENV.merge(
+      DangerClaudeRunner::CLEAN_ENV.merge(
         'AUTODEV_ISSUE_IID' => issue.issue_iid.to_s,
         'AUTODEV_MR_IID' => issue.mr_iid.to_s,
         'AUTODEV_BRANCH_NAME' => issue.branch_name.to_s
