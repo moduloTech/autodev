@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-04-07
+
 ### Fixed
 
 - Fix `PostCompletion#run_with_timeout` shadowing `ProcessRunner#run_with_timeout`, causing `ArgumentError: wrong number of arguments (given 3, expected 5)` when PipelineMonitor runs danger-claude during pipeline fixes.
