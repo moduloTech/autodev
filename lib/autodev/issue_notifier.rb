@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
+require_relative 'activity_logger'
+
 # Extracted from DangerClaudeRunner to reduce module length.
 # Provides GitLab issue notification, assignment, and context file helpers.
 #
 # Including classes must have @client, @project_config, @project_path, and @logger.
 module IssueNotifier
+  include ActivityLogger
+
   private
 
   def assign_to_self(iid)

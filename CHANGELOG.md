@@ -4,6 +4,7 @@
 
 ### Added
 
+- **GitLab activity log**: each issue now gets a single, continuously updated comment that tracks every autodev action in real time — processing start, clone, spec check, implementation, push, MR creation, review, pipeline checks, discussion fixes, errors, retries, resume events, and polling. Localized in French and English (41 activity templates per locale). Powered by a new `ActivityLogger` module with both instance (`log_activity`) and class (`ActivityLogger.post`) entry points, and `activity_note_id` / `pipeline_poll_since` columns. Pipeline polling lines are compacted: repeated checks update a single line showing the time of the first poll (`🔍 Polling pipeline status since 18:20...`) instead of creating a new line per cycle. Resume events (`resume_todo`, `resume_mr`) are now logged when an issue re-enters the processing pipeline after human intervention.
 - Chrome DevTools MCP support: new `chrome_devtools` config option launches headless Chrome with remote debugging and injects the MCP server config, proxy, and skill into danger-claude containers.
 - `ChromeLauncher` module: detects/launches Chrome with `--remote-debugging-port=9222 --headless=new`.
 - `ChromeDevtoolsInjector` module: injects `mcpServers.chrome-devtools` into the Docker volume's `.claude.json` and provides bind-mount args for proxy scripts and skill.

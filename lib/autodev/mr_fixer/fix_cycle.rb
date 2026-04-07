@@ -20,6 +20,7 @@ class MrFixer
     end
 
     def run_fix_cycle(issue, discussions, work_dir)
+      @fix_issue = issue
       branch = issue.branch_name
       clone_and_checkout(work_dir, branch)
       env = prepare_fix_environment(work_dir, issue.issue_iid, issue.mr_iid)
@@ -47,6 +48,7 @@ class MrFixer
     def fix_each_discussion(discussions, work_dir, branch, mr_iid, env)
       discussions.each_with_index do |discussion, idx|
         log "Fixing discussion #{idx + 1}/#{discussions.size}: #{discussion[:title]}"
+        log_activity(@fix_issue, :discussion_fixing, title: discussion[:title])
         fix_single_discussion(discussion, work_dir, branch, mr_iid, env)
       end
     end
@@ -111,6 +113,8 @@ class MrFixer
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
       issue.discussions_fixed!
       notify_localized(issue.issue_iid, :mr_fix_success, count: discussions.size, mr_url: issue.mr_url, round: round)
+      log_activity(issue, :discussions_fixed, count: discussions.size, round: round)
+      log_activity(issue, :pipeline_watch)
       log "MR !#{issue.mr_iid}: fixed #{discussions.size} discussion(s) (round #{round})"
     end
   end

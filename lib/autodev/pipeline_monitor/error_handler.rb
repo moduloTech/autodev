@@ -13,6 +13,7 @@ class PipelineMonitor
         error_message: error.message, dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
         next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')")
       )
+      log_activity(issue, :rate_limit, wait: wait)
     end
 
     def handle_failure_error(issue, error)
@@ -20,9 +21,15 @@ class PipelineMonitor
       log_error "Pipeline evaluation/fix failed: #{error.class}: #{error.message}"
       log_error "  #{bt}" if bt
       safe_mark_failed!(issue)
-      issue.update(error_message: "Pipeline fix error: #{error.class}: #{error.message}\n  #{bt}",
+      persist_and_notify_failure(issue, error, bt)
+    end
+
+    def persist_and_notify_failure(issue, error, backtrace)
+      issue.update(error_message: "Pipeline fix error: #{error.class}: #{error.message}\n  #{backtrace}",
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
-      notify_localized(issue.issue_iid, :pipeline_fix_error, error: "#{error.class}: #{error.message[0, 200]}")
+      summary = "#{error.class}: #{error.message[0, 200]}"
+      notify_localized(issue.issue_iid, :pipeline_fix_error, error: summary)
+      log_activity(issue, :error, error: summary)
     end
 
     def safe_mark_failed!(issue)

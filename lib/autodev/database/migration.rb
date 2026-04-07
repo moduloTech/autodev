@@ -38,7 +38,9 @@ module Database
       'pipeline_retrigger_count INTEGER NOT NULL DEFAULT 0',
       'issue_author_id INTEGER',
       'post_completion_error TEXT',
-      "locale TEXT DEFAULT 'fr'"
+      "locale TEXT DEFAULT 'fr'",
+      'activity_note_id INTEGER',
+      'pipeline_poll_since TEXT'
     ].freeze
 
     STATUS_RENAMES = {

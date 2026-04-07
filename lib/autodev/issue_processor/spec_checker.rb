@@ -15,6 +15,7 @@ class IssueProcessor
 
     def check_specification(work_dir, context, iid, issue)
       log "Checking specification clarity for ##{iid}..."
+      log_activity(issue, :spec_checking)
       out = with_context_file(work_dir, issue.branch_name, context) do |ctx|
         danger_claude_prompt(work_dir, format(Prompts::SPEC_CHECK, ctx))
       end
@@ -48,12 +49,14 @@ class IssueProcessor
     def mark_spec_clear(issue)
       log 'Specification is clear, proceeding'
       issue.spec_clear!
+      log_activity(issue, :spec_clear)
       nil
     end
 
     def process_question(iid, issue, work_dir, context)
       log "Issue ##{iid} is a question/investigation"
       issue.question_detected!
+      log_activity(issue, :question_detected)
       answer_question(work_dir, context, iid, issue)
       nil
     end
@@ -86,14 +89,19 @@ class IssueProcessor
     end
 
     def post_clarification(issues_list, iid, issue)
+      notify_clarification_questions(issues_list, iid)
+      issue.spec_unclear!
+      apply_label_todo(iid)
+      Issue.where(id: issue.id).update(clarification_requested_at: Sequel.lit("datetime('now')"))
+      log_activity(issue, :spec_unclear, count: issues_list.size)
+    end
+
+    def notify_clarification_questions(issues_list, iid)
       locale = issue_locale(iid)
       header = Locales.t(:spec_unclear_header, locale: locale, tag: autodev_tag)
       footer = Locales.t(:spec_unclear_footer, locale: locale, tag: autodev_tag)
       numbered = issues_list.map.with_index(1) { |iss, i| "#{i}. #{iss}" }.join("\n")
       notify_issue(iid, "#{header}\n\n#{numbered}\n\n#{footer}")
-      issue.spec_unclear!
-      apply_label_todo(iid)
-      Issue.where(id: issue.id).update(clarification_requested_at: Sequel.lit("datetime('now')"))
     end
 
     def issue_locale(iid)

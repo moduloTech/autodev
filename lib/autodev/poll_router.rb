@@ -1,8 +1,12 @@
 # frozen_string_literal: true
 
+require_relative 'poll_router/resume_handler'
+
 # Routes GitLab issues to the appropriate processor based on their labels and DB state.
 # Extracts the label-driven routing logic from the polling loop in bin/autodev.
 class PollRouter
+  include ResumeHandler
+
   def initialize(config:, project_config:, logger:, token:, pool:)
     @config         = config
     @project_config = project_config
@@ -16,8 +20,8 @@ class PollRouter
   def route(gl_issue, client)
     return :process unless @use_labels
 
+    @route_client = client
     existing = Issue.where(project_path: @project_path, issue_iid: gl_issue.iid).first
-
     route_by_labels(gl_issue, existing, client, extract_label_flags(gl_issue))
   end
 
@@ -55,18 +59,6 @@ class PollRouter
     flags[:todo] || (flags[:mr] && (existing.nil? || existing.status == 'pending'))
   end
 
-  def resume_todo_if_applicable(gl_issue, existing, flags)
-    return unless flags[:todo] && existing&.status == 'over'
-
-    handle_resume_todo(gl_issue, existing)
-  end
-
-  def resume_mr_if_applicable(gl_issue, existing, client, flags)
-    return unless flags[:mr] && existing&.status == 'over' && existing.mr_iid
-
-    handle_resume_mr(gl_issue, existing, client)
-  end
-
   def handle_done(gl_issue, existing)
     unless existing.status == 'over'
       @logger.info("Issue ##{gl_issue.iid}: label_done detected, transitioning to over",
@@ -78,16 +70,6 @@ class PollRouter
     existing.update(status: 'over', finished_at: Sequel.lit("datetime('now')")) unless existing.status == 'over'
   end
 
-  def handle_resume_todo(gl_issue, existing)
-    @logger.info("Issue ##{gl_issue.iid}: labels_todo detected on over issue, resuming full processing",
-                 project: @project_path)
-    return if @config['dry_run']
-
-    existing.resume_todo!
-    existing.update(fix_round: 0, error_message: nil, finished_at: nil, started_at: nil)
-    enqueue_issue_processing(gl_issue, existing)
-  end
-
   def enqueue_issue_processing(gl_issue, existing)
     processor = IssueProcessor.new(client: build_worker_client, config: @config,
                                    project_config: @project_config, logger: @logger, token: @token)
@@ -95,34 +77,11 @@ class PollRouter
     @logger.info("Enqueued resumed issue ##{gl_issue.iid}: #{gl_issue.title}", project: @project_path)
   end
 
-  def handle_resume_mr(gl_issue, existing, client)
-    discussions = client.merge_request_discussions(@project_path, existing.mr_iid)
-    return unless discussions.any? { |d| unresolved_discussion?(d) }
-
-    @logger.info("Issue ##{gl_issue.iid}: label_mr with unresolved discussions, resuming MR fix",
-                 project: @project_path)
-    return if @config['dry_run']
-
-    enqueue_mr_fix(gl_issue, existing)
-  rescue Gitlab::Error::ResponseError => e
-    @logger.error("Failed to check MR discussions for ##{gl_issue.iid}: #{e.message}", project: @project_path)
-  end
-
-  def unresolved_discussion?(discussion)
-    resolvable = (discussion.notes || []).select { |n| n.respond_to?(:resolvable) && n.resolvable }
-    resolvable.any? && resolvable.none? { |n| n.respond_to?(:resolved) && n.resolved }
-  end
-
-  def enqueue_mr_fix(gl_issue, existing)
-    existing.resume_mr!
-    existing.update(fix_round: 0, pipeline_retrigger_count: 0)
-    fixer = MrFixer.new(client: build_worker_client, config: @config,
-                        project_config: @project_config, logger: @logger, token: @token)
-    @pool.enqueue?(issue_iid: existing.issue_iid) { fixer.fix(existing) }
-    @logger.info("Enqueued MR fix for issue ##{gl_issue.iid}", project: @project_path)
-  end
-
   def build_worker_client
     GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @token)
+  end
+
+  def log_activity(issue, key)
+    ActivityLogger.post(ActivityLogger::Ctx.new(@route_client, @project_path, @logger), issue, key)
   end
 end

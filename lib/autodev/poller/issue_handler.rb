@@ -58,6 +58,8 @@ class Poller
       @logger.info("Issue ##{gl_issue.iid}: clarification received, re-queuing", project: project_path)
       existing.clarification_received!
       existing.update(clarification_requested_at: nil, error_message: nil)
+      ActivityLogger.post(ActivityLogger::Ctx.new(@client, project_path, @logger),
+                          existing, :clarification_received)
       true
     end
 

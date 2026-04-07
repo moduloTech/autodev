@@ -14,6 +14,7 @@ class IssueProcessor
         next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')"),
         finished_at: Sequel.lit("datetime('now')")
       )
+      log_activity(issue, :rate_limit, wait: wait)
     end
 
     def handle_process_error(issue, error)
@@ -22,8 +23,14 @@ class IssueProcessor
       fields = build_error_fields(issue, error, bt)
       log_retry_info(issue, fields, error)
       Issue.where(id: issue.id).update(**fields)
-      notify_localized(issue.issue_iid, :error_generic, error: "#{error.class}: #{error.message[0, 200]}")
+      notify_error_with_activity(issue, error)
       log_error "  #{bt}" if bt
+    end
+
+    def notify_error_with_activity(issue, error)
+      summary = "#{error.class}: #{error.message[0, 200]}"
+      notify_localized(issue.issue_iid, :error_generic, error: summary)
+      log_activity(issue, :error, error: summary)
     end
 
     def build_error_fields(issue, error, backtrace)

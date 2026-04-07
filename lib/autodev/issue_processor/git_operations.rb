@@ -69,6 +69,8 @@ class IssueProcessor
     def clone_and_prepare(issue, iid, work_dir)
       previous_branch = issue.branch_name
       reuse = previous_branch && branch_exists_on_remote?(previous_branch)
+      depth = @project_config['clone_depth'] || 1
+      log_activity(issue, :cloning, detail: depth.positive? ? "depth: #{depth}" : 'full')
       clone_repo(work_dir)
       return recover_to_mr(issue, work_dir, previous_branch) if reuse && %w[creating_mr
                                                                             reviewing].include?(issue.status)

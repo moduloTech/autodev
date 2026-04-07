@@ -46,6 +46,7 @@ class IssueProcessor
     issue.start_processing!
     Issue.where(id: issue.id).update(started_at: Sequel.lit("datetime('now')"))
     apply_label_doing(issue.issue_iid)
+    log_activity(issue, :started)
   end
 
   def issue_closed?(issue)
@@ -80,6 +81,11 @@ class IssueProcessor
   def prepare_and_implement(issue, work_dir, context, iid)
     ensure_claude_md(work_dir)
     @all_skills = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)[:all_skills]
+    log_activity(issue, :implementing)
+    run_and_push(issue, work_dir, context, iid)
+  end
+
+  def run_and_push(issue, work_dir, context, iid)
     implement(work_dir, context, iid)
     issue.impl_complete!
     danger_claude_commit(work_dir)
@@ -87,13 +93,16 @@ class IssueProcessor
     verify_changes(work_dir, @current_branch_name)
     push(work_dir, @current_branch_name)
     issue.push_complete!
+    log_activity(issue, :changes_pushed, branch: @current_branch_name)
   end
 
   def finalize(issue, iid, branch_name, work_dir)
     merge_request = create_merge_request(work_dir, iid, branch_name, issue.issue_title)
     issue.update(mr_iid: merge_request.iid, mr_url: merge_request.web_url)
     issue.mr_created!
+    log_activity(issue, :mr_created, mr_url: merge_request.web_url)
     label_workflow? ? apply_label_mr(iid) : update_labels(iid)
+    log_activity(issue, :reviewing) if command_exists?('mr-review')
     run_review(merge_request.web_url)
     complete_issue(issue, iid, merge_request)
   end
@@ -105,6 +114,7 @@ class IssueProcessor
       dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
     )
     notify_localized(iid, :mr_created, mr_url: merge_request.web_url)
+    log_activity(issue, :pipeline_watch)
     log "Issue ##{iid} completed: #{merge_request.web_url}"
   end
 end

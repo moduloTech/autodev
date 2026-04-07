@@ -55,8 +55,9 @@ class Poller
       retryable = fetch_retryable(project_config)
       return if retryable.empty?
 
+      max = (project_config['max_retries'] || @config['max_retries']).to_i
       retry_helper = build_retry_helper(project_config) if Config.label_workflow?(project_config)
-      retryable.each { |issue| retry_single_issue(issue, retry_helper, path) }
+      retryable.each { |issue| retry_single_issue(issue, retry_helper, path, max) }
     rescue StandardError => e
       @logger.error("Error retrying issues for #{path}: #{e.message}", project: path)
     end
@@ -73,7 +74,7 @@ class Poller
                   project_config: project_config, logger: @logger, token: @token)
     end
 
-    def retry_single_issue(issue, retry_helper, project_path)
+    def retry_single_issue(issue, retry_helper, project_path, max_retries)
       has_mr = !issue.mr_iid.nil?
       has_mr ? issue.retry_pipeline! : issue.retry_processing!
       issue.update(error_message: nil, started_at: nil)
@@ -81,8 +82,14 @@ class Poller
       target = has_mr ? 'checking_pipeline' : 'pending'
       @logger.info("Issue ##{issue.issue_iid} retried → #{target} (attempt #{issue.retry_count + 1})",
                    project: project_path)
+      log_retry_activity(issue, project_path, max_retries)
     rescue AASM::InvalidTransition => e
       @logger.error("Could not retry issue ##{issue.issue_iid}: #{e.message}", project: project_path)
+    end
+
+    def log_retry_activity(issue, project_path, max_retries)
+      ctx = ActivityLogger::Ctx.new(@client, project_path, @logger)
+      ActivityLogger.post(ctx, issue, :retry, attempt: issue.retry_count + 1, max: max_retries)
     end
 
     def restore_labels(issue, retry_helper, has_mr, project_path)

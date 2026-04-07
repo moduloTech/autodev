@@ -29,6 +29,8 @@ class IssueProcessor
       reassign_to_author(issue)
       Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"),
                                        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
+      log_activity(issue, :question_answered)
+      log_activity(issue, :over)
     end
   end
 end

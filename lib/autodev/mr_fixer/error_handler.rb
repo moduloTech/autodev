@@ -14,16 +14,23 @@ class MrFixer
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
         next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')")
       )
+      log_activity(issue, :rate_limit, wait: wait)
     end
 
     def handle_fix_error(issue, error)
       bt = error.backtrace&.first(10)&.join("\n  ")
       safe_mark_failed!(issue)
-      issue.update(error_message: "MR fix error: #{error.class}: #{error.message}\n  #{bt}",
-                   dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
-      notify_localized(issue.issue_iid, :mr_fix_error, error: "#{error.class}: #{error.message[0, 200]}")
+      persist_and_notify_fix_error(issue, error, bt)
       log_error "MR fix failed: #{error.class}: #{error.message}"
       log_error "  #{bt}" if bt
+    end
+
+    def persist_and_notify_fix_error(issue, error, backtrace)
+      issue.update(error_message: "MR fix error: #{error.class}: #{error.message}\n  #{backtrace}",
+                   dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
+      summary = "#{error.class}: #{error.message[0, 200]}"
+      notify_localized(issue.issue_iid, :mr_fix_error, error: summary)
+      log_activity(issue, :error, error: summary)
     end
 
     def safe_mark_failed!(issue)

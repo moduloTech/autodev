@@ -10,18 +10,24 @@ class PipelineMonitor
     private
 
     def handle_red(issue, pipeline, max_fix_rounds)
+      clear_pipeline_poll_since(issue)
       failed_jobs = fetch_failed_jobs(pipeline)
       return mark_blocked_no_jobs(issue, pipeline) if failed_jobs.empty?
 
+      triage_and_fix(issue, pipeline, failed_jobs, max_fix_rounds)
+    rescue RateLimitError => e
+      handle_rate_limit(issue, e)
+    rescue StandardError => e
+      handle_failure_error(issue, e)
+    end
+
+    def triage_and_fix(issue, pipeline, failed_jobs, max_fix_rounds)
+      log_activity(issue, :pipeline_red, count: failed_jobs.size)
       triage = pre_triage(failed_jobs)
       return if retrigger_if_needed(issue, pipeline, triage)
       return if infra_block?(issue, triage)
 
       clone_and_fix(issue, failed_jobs, triage, max_fix_rounds)
-    rescue RateLimitError => e
-      handle_rate_limit(issue, e)
-    rescue StandardError => e
-      handle_failure_error(issue, e)
     end
 
     def mark_blocked_no_jobs(issue, pipeline)
@@ -29,6 +35,7 @@ class PipelineMonitor
       issue.pipeline_failed_infra!
       apply_label_blocked(issue.issue_iid)
       notify_localized(issue.issue_iid, :pipeline_no_failed_jobs, mr_url: issue.mr_url)
+      log_activity(issue, :pipeline_no_jobs)
     end
 
     def retrigger_if_needed(issue, pipeline, triage)
@@ -38,6 +45,7 @@ class PipelineMonitor
       log "Pipeline failed (pre-triage: #{triage[:verdict]}), retriggering..."
       @client.retry_pipeline(@project_path, pipeline_id(pipeline))
       issue.update(pipeline_retrigger_count: (issue.pipeline_retrigger_count || 0) + 1)
+      log_activity(issue, :pipeline_retrigger, verdict: triage[:verdict])
       true
     rescue Gitlab::Error::ResponseError => e
       log_error "Failed to retrigger pipeline: #{e.message}"
@@ -51,6 +59,7 @@ class PipelineMonitor
       apply_label_blocked(issue.issue_iid)
       notify_localized(issue.issue_iid, :pipeline_infra_pretriage,
                        mr_url: issue.mr_url, explanation: triage[:explanation])
+      log_activity(issue, :pipeline_infra)
       log "Issue ##{issue.issue_iid}: infra failure → blocked (#{triage[:explanation]})"
       true
     end
@@ -91,6 +100,7 @@ class PipelineMonitor
 
     def evaluate_with_claude(issue, work_dir, job_entries)
       log "Issue ##{issue.issue_iid}: pre-triage uncertain, evaluating with Claude..."
+      log_activity(issue, :pipeline_evaluating)
       eval_result = evaluate_code_related(work_dir, build_eval_context(job_entries))
       return block_and_log(issue, :pipeline_eval_failed) unless eval_result
 
@@ -106,21 +116,8 @@ class PipelineMonitor
       opts = { mr_url: issue.mr_url }
       opts[:explanation] = explanation if explanation
       notify_localized(issue.issue_iid, notification, **opts)
+      log_activity(issue, notification)
       nil
-    end
-
-    def dispatch_fix(issue, work_dir, job_entries, explanation, max_fix_rounds)
-      issue._max_fix_rounds = max_fix_rounds
-      issue.pipeline_failed_code!
-
-      if issue.blocked?
-        apply_label_blocked(issue.issue_iid)
-        notify_localized(issue.issue_iid, :pipeline_max_rounds, mr_url: issue.mr_url, explanation: explanation)
-        return
-      end
-
-      log "Issue ##{issue.issue_iid}: fixing #{job_entries.size} job(s)... (#{explanation})"
-      fix_pipeline_failures(work_dir, job_entries, issue)
     end
   end
 end

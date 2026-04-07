@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'mr_fixer/agent_injector'
 require_relative 'mr_fixer/discussion_formatter'
 require_relative 'mr_fixer/error_handler'
 require_relative 'mr_fixer/fix_cycle'
@@ -7,6 +8,7 @@ require_relative 'mr_fixer/fix_cycle'
 # Fixes unresolved MR discussions and failed pipeline jobs.
 class MrFixer
   include DangerClaudeRunner
+  include AgentInjector
   include DiscussionFormatter
   include ErrorHandler
   include FixCycle
@@ -19,48 +21,22 @@ class MrFixer
 
   def fix(issue)
     log "Checking MR !#{issue.mr_iid} for unresolved discussions (round #{issue.fix_round + 1})..."
+    log_activity(issue, :discussions_checking, round: issue.fix_round + 1)
     return unless verify_trigger_label(issue.issue_iid)
 
+    process_discussions(issue)
+  end
+
+  private
+
+  def process_discussions(issue)
     discussions = fetch_unresolved_discussions(issue.mr_iid)
     return transition_no_discussions(issue) if discussions.empty?
 
     log "Found #{discussions.size} unresolved discussion(s) on MR !#{issue.mr_iid}"
+    log_activity(issue, :discussions_found, count: discussions.size)
     execute_fix_cycle(issue, discussions)
   end
-
-  DEFAULT_MR_FIXER_AGENT = <<~AGENT
-    ---
-    name: mr-fixer
-    description: Fix MR review comments. Use proactively when fixing code review discussions.
-    memory: project
-    model: sonnet
-    ---
-
-    You are a senior developer fixing code review comments on a Merge Request.
-
-    ## Behavior
-
-    Before starting, check your agent memory for patterns you have seen before on this project.
-
-    When fixing a review comment:
-    1. Read the diff hunk and the reviewer's comment carefully.
-    2. Understand the intent of the original code (see the issue context).
-    3. Make the minimal change that addresses the comment.
-    4. Do not refactor surrounding code unless the comment explicitly asks for it.
-    5. Do not change tests unless the comment is about tests.
-
-    ## Memory
-
-    After fixing all comments, update your agent memory with:
-    - Recurring reviewer patterns (e.g., "reviewer X always requests guard clauses")
-    - Common mistakes you fixed (e.g., "missing null check on association")
-    - Project conventions you discovered that are not in CLAUDE.md
-    - Patterns that led to incorrect fixes so you can avoid them next time
-
-    Write concise notes. Focus on what will help you fix faster next time.
-  AGENT
-
-  private
 
   def verify_trigger_label(iid)
     trigger_label = @config['trigger_label']
@@ -78,6 +54,8 @@ class MrFixer
     log "No unresolved discussions on MR !#{issue.mr_iid}"
     issue.update(pipeline_retrigger_count: 0)
     issue.discussions_fixed!
+    log_activity(issue, :discussions_none)
+    log_activity(issue, :pipeline_watch)
     log "Issue ##{issue.issue_iid}: no discussions to fix → checking_pipeline"
   end
 
@@ -99,28 +77,6 @@ class MrFixer
     return true if resolvable_notes.empty?
 
     resolvable_notes.all? { |n| n.respond_to?(:resolved) && n.resolved }
-  end
-
-  # Returns the agent name, injecting a default if needed.
-  # Priority: config override > project agent > injected default.
-  def detect_agent(work_dir, default_name)
-    config_agent = @project_config['mr_fixer_agent']
-    return config_agent if config_agent
-
-    agent_path = File.join(work_dir, '.claude', 'agents', "#{default_name}.md")
-    if File.exist?(agent_path)
-      log "Found agent '#{default_name}' in project"
-      return default_name
-    end
-
-    inject_default_mr_fixer_agent(work_dir, agent_path)
-    default_name
-  end
-
-  def inject_default_mr_fixer_agent(_work_dir, agent_path)
-    log 'Injecting default mr-fixer agent'
-    FileUtils.mkdir_p(File.dirname(agent_path))
-    File.write(agent_path, DEFAULT_MR_FIXER_AGENT)
   end
 
   def default_branch(work_dir)
