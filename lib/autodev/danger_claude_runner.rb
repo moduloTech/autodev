@@ -98,6 +98,7 @@ module DangerClaudeRunner
   # Build global danger-claude args from config (project overrides global).
   def dc_global_args
     args = ['-v', '/tmp']
+    ChromeDevtoolsInjector.volume_args.each { |vol| args.push('-v', vol) } if @config['chrome_devtools']
     model = @project_config['model'] || @config['model']
     effort = @project_config['effort'] || @config['effort']
     args.push('-m', model) if model

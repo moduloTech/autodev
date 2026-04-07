@@ -22,6 +22,7 @@ module Config
     log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
     log_level: INFO                                # DEBUG, INFO, WARN, ERROR (default: INFO)
     # database_url: sqlite://~/.autodev/autodev.db  # default
+    # chrome_devtools: false                         # launch Chrome and inject DevTools MCP into containers
 
     projects:
       - path: group/project-name
@@ -66,6 +67,7 @@ module Config
     'log_dir' => File.join(CONFIG_DIR, 'logs'),
     'log_level' => 'INFO',
     'database_url' => "sqlite://#{DEFAULT_DB}",
+    'chrome_devtools' => false,
     'projects' => []
   }.freeze
 

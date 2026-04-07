@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Chrome DevTools MCP support: new `chrome_devtools` config option launches headless Chrome with remote debugging and injects the MCP server config, proxy, and skill into danger-claude containers.
+- `ChromeLauncher` module: detects/launches Chrome with `--remote-debugging-port=9222 --headless=new`.
+- `ChromeDevtoolsInjector` module: injects `mcpServers.chrome-devtools` into the Docker volume's `.claude.json` and provides bind-mount args for proxy scripts and skill.
+
 ## [0.8.5] - 2026-04-07
 
 ### Fixed
