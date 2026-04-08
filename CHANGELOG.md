@@ -5,6 +5,7 @@
 ### Added
 
 - Per-project `app:` config block with optional `setup`, `test`, and `lint` subsections. Each subsection accepts a list of commands (Docker CMD format) that are passed to danger-claude prompts as environment-specific instructions. Validated at boot with clear error messages.
+- `AppInstructions` module: formats `app:` config into a prompt section injected in all danger-claude prompts (implementer, split/parallel, pipeline fixer, MR fixer). Instructions are marked as taking priority over CLAUDE.md and skills.
 
 ## [0.9.0] - 2026-04-07
 

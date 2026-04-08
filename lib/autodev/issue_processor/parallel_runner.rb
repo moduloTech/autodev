@@ -55,23 +55,25 @@ class IssueProcessor
 
     def build_split_prompts(context_filename)
       extra = @project_config['extra_prompt']
+      app_section = AppInstructions.prompt_section(@project_config)
       skills = SkillsInjector.skills_instruction(@all_skills)
       extra_section = extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ''
+      app_block = app_section ? "\n#{app_section}" : ''
       base = "Le contexte est dans `#{context_filename}`. Lis-le attentivement.\n\n## Instructions\n\n#{skills}"
 
-      { code: code_prompt(base, extra_section), test: test_prompt(base, extra_section) }
+      { code: code_prompt(base, app_block, extra_section), test: test_prompt(base, app_block, extra_section) }
     end
 
-    def code_prompt(base, extra_section)
+    def code_prompt(base, app_block, extra_section)
       "Tu dois implementer le ticket GitLab suivant.\n\n#{base}\n" \
         "- Implemente TOUS les changements.\n- N'ecris PAS de tests.\n" \
-        "- Ne modifie que ce qui est necessaire.#{extra_section}\n"
+        "- Ne modifie que ce qui est necessaire.#{app_block}#{extra_section}\n"
     end
 
-    def test_prompt(base, extra_section)
+    def test_prompt(base, app_block, extra_section)
       "Tu dois ecrire les tests pour le ticket GitLab suivant.\n\n#{base}\n" \
         "- Ecris les tests en te basant sur la specification.\n" \
-        "- Ne modifie PAS le code source.\n- Couvre les cas nominaux et limites.#{extra_section}\n"
+        "- Ne modifie PAS le code source.\n- Couvre les cas nominaux et limites.#{app_block}#{extra_section}\n"
     end
 
     def implement_parallel(work_dir, context, iid, tasks)
@@ -107,6 +109,7 @@ class IssueProcessor
 
     def parallel_prompt(task, context_filename, skills)
       extra = @project_config['extra_prompt']
+      app_section = AppInstructions.prompt_section(@project_config)
       <<~PROMPT
         Tu dois implementer UNE PARTIE d'un ticket GitLab.
 
@@ -122,6 +125,7 @@ class IssueProcessor
         #{skills}
         - N'implemente QUE ta tache. Ne touche PAS aux fichiers hors de ton scope.
         - Respecte les conventions du projet.
+        #{"\n#{app_section}" if app_section}
         #{"\n## Instructions supplementaires\n\n#{extra}" if extra}
       PROMPT
     end

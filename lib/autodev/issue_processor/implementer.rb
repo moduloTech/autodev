@@ -34,16 +34,17 @@ class IssueProcessor
 
     def implement_single(work_dir, context, _iid)
       extra = @project_config['extra_prompt']
+      app_section = AppInstructions.prompt_section(@project_config)
       skills_line = SkillsInjector.skills_instruction(@all_skills)
 
       with_context_file(work_dir, @current_branch_name, context) do |ctx|
-        prompt = single_prompt(ctx, skills_line, extra)
+        prompt = single_prompt(ctx, skills_line, extra, app_section)
         log 'Running implementation via danger-claude...'
         danger_claude_prompt(work_dir, prompt)
       end
     end
 
-    def single_prompt(context_filename, skills_line, extra)
+    def single_prompt(context_filename, skills_line, extra, app_section)
       <<~PROMPT
         Tu dois implementer le ticket GitLab suivant.
 
@@ -56,6 +57,7 @@ class IssueProcessor
         - Respecte les conventions du projet (voir CLAUDE.md si present).
         - Ajoute ou modifie les tests si necessaire.
         - Ne modifie que ce qui est necessaire pour resoudre l'issue.
+        #{"\n#{app_section}" if app_section}
         #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
       PROMPT
     end

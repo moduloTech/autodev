@@ -56,16 +56,17 @@ class MrFixer
     def fix_single_discussion(discussion, work_dir, branch, mr_iid, env)
       thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: env[:target_branch])
       extra = @project_config['extra_prompt']
+      app_section = AppInstructions.prompt_section(@project_config)
 
       with_context_file(work_dir, branch, env[:full_context]) do |context_filename|
-        prompt = build_fix_prompt(context_filename, thread_context, env[:skills_line], extra)
+        prompt = build_fix_prompt(context_filename, thread_context, env[:skills_line], extra, app_section)
         danger_claude_prompt(work_dir, prompt, agent: env[:agent])
       end
       danger_claude_commit(work_dir)
       resolve_discussion(mr_iid, discussion[:id])
     end
 
-    def build_fix_prompt(context_filename, thread_context, skills_line, extra)
+    def build_fix_prompt(context_filename, thread_context, skills_line, extra, app_section)
       <<~PROMPT
         Tu dois corriger le code en reponse a un commentaire de review sur une Merge Request.
 
@@ -83,6 +84,7 @@ class MrFixer
         - Respecte les conventions du projet (voir CLAUDE.md si present).
         - Ne modifie que ce qui est necessaire pour repondre au commentaire.
         - Ne touche pas aux autres parties du code.
+        #{"\n#{app_section}" if app_section}
         #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
       PROMPT
     end

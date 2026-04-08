@@ -36,6 +36,7 @@ class PipelineMonitor
       {
         skills_line: SkillsInjector.skills_instruction(@all_skills),
         extra: @project_config['extra_prompt'],
+        app_section: AppInstructions.prompt_section(@project_config),
         full_context: GitlabHelpers.fetch_full_context(
           @client, @project_path, issue.issue_iid,
           mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir
