@@ -7,6 +7,7 @@ module ProjectValidator
     validate_post_completion!(project_config, path)
     validate_clone_options!(project_config, path)
     validate_labels!(project_config, path)
+    AppValidator.validate!(project_config, path)
   end
 
   def self.validate_numerics!(project_config, path)

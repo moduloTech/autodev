@@ -52,6 +52,15 @@ module Config
         #   - "lib/"
         # post_completion: ["./bin/deploy", "--env", "staging"]  # command run after pipeline green (Docker CMD format)
         # post_completion_timeout: 300                            # timeout in seconds (default: 300)
+        #
+        # app:                                    # app environment instructions for danger-claude
+        #   setup:                                # dependency installation commands
+        #     - ["bundle", "install"]
+        #     - ["yarn", "install"]
+        #   test:                                 # test commands
+        #     - ["bin/test"]
+        #   lint:                                 # lint / auto-fix commands
+        #     - ["bundle", "exec", "rubocop", "-A"]
   YAML
 
   DEFAULTS = {
