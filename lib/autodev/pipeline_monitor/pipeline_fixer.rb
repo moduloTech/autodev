@@ -33,9 +33,7 @@ class PipelineMonitor
     end
 
     def fetch_fix_context(work_dir, issue)
-      ss_dir = ScreenshotUploader.screenshot_dir(@project_path, issue.issue_iid)
-      app = AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [],
-                                                            screenshot_dir: ss_dir)
+      app = AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [])
       build_fix_context_hash(work_dir, issue, app)
     end
 
