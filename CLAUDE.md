@@ -48,6 +48,41 @@ Settings are resolved in 4 layers (highest priority wins):
 - `-v` / `--version` — Show version and exit
 - `-h` / `--help` — Show help
 
+### App Environment (`app:`)
+
+Per-project `app:` block provides structured environment instructions injected into all danger-claude prompts (priority over CLAUDE.md and skills). All subsections are optional.
+
+```yaml
+app:
+  setup:                          # dependency installation
+    - ["bundle", "install"]
+    - ["yarn", "install"]
+  test:                           # test commands
+    - ["bin/test"]
+  lint:                           # lint / auto-fix
+    - ["bundle", "exec", "rubocop", "-A"]
+  run:                            # background servers
+    - command: ["bin/rails", "s"]
+      port: 3000                  # exposed to host for Chrome access
+    - command: ["bin/vite", "dev"]  # no port = not exposed
+```
+
+`setup`/`test`/`lint`: lists of commands (Docker CMD format, array of strings).
+`run`: list of `{ command:, port: }` entries. `port` is optional — only entries with `port` get a Docker port mapping.
+
+When any project has `app.run` entries with ports, Chrome DevTools is auto-enabled at startup (Chrome headless + MCP injection). No separate flag needed.
+
+### Screenshot Workflow
+
+When `app.run` is configured with ports, prompts instruct Claude to:
+1. Launch background servers after implementation
+2. Navigate impacted pages via Chrome DevTools MCP
+3. Save PNG screenshots + `index.json` manifest in `/tmp/autodev_screenshots_<project>_<iid>/`
+
+After danger-claude returns, `ScreenshotUploader` reads the manifest, uploads each PNG to GitLab (`client.upload_file`), and posts a formatted comment on the issue. Screenshots from MR discussion fixes are annotated with *(correction suite a review)*.
+
+Screenshot instructions are injected in implementer and MR fixer prompts only (not pipeline fixer).
+
 ## Architecture
 
 ### State Machine (AASM)
