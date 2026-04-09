@@ -95,7 +95,7 @@ module DangerClaudeRunner
   # Build global danger-claude args from config (project overrides global).
   def dc_global_args
     args = ['-v', '/tmp']
-    ChromeDevtoolsInjector.volume_args.each { |vol| args.push('-v', vol) } if @config['chrome_devtools']
+    args.concat(ChromeDevtoolsInjector.dc_args) if Config.project_has_exposed_ports?(@project_config)
     @port_mappings = PortAllocator.allocate(@project_config)
     args.concat(PortAllocator.dc_port_args(@port_mappings))
     model = @project_config['model'] || @config['model']

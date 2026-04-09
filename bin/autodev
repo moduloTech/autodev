@@ -195,7 +195,7 @@ end
 # == Main ======================================================================
 
 def setup_chrome_devtools(config, logger)
-  return unless config['chrome_devtools']
+  return unless Config.chrome_devtools_needed?(config)
 
   ChromeLauncher.ensure_running!(logger: logger)
   ChromeDevtoolsInjector.inject_mcp_config!(logger: logger)

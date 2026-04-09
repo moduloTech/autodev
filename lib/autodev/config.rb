@@ -22,7 +22,7 @@ module Config
     log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
     log_level: INFO                                # DEBUG, INFO, WARN, ERROR (default: INFO)
     # database_url: sqlite://~/.autodev/autodev.db  # default
-    # chrome_devtools: false                         # launch Chrome and inject DevTools MCP into containers
+
 
     projects:
       - path: group/project-name
@@ -80,7 +80,6 @@ module Config
     'log_dir' => File.join(CONFIG_DIR, 'logs'),
     'log_level' => 'INFO',
     'database_url' => "sqlite://#{DEFAULT_DB}",
-    'chrome_devtools' => false,
     'projects' => []
   }.freeze
 
@@ -108,6 +107,18 @@ module Config
   # which must be called at startup before any label_workflow? check.
   def self.label_workflow?(project_config)
     project_config['labels_todo'].is_a?(Array) && project_config['labels_todo'].any?
+  end
+
+  # Returns true when any project has app.run entries with exposed ports,
+  # meaning Chrome DevTools must be launched for screenshot support.
+  def self.chrome_devtools_needed?(config)
+    (config['projects'] || []).any? { |p| project_has_exposed_ports?(p) }
+  end
+
+  # Returns true when this specific project has app.run entries with exposed ports.
+  def self.project_has_exposed_ports?(project_config)
+    entries = project_config.dig('app', 'run')
+    entries.is_a?(Array) && entries.any? { |e| e.is_a?(Hash) && e['port'] }
   end
 
   # Validate global config. Called at startup before validate_projects!.

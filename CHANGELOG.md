@@ -11,6 +11,10 @@
 - `ScreenshotUploader` module: reads screenshot index written by Claude in the shared `/tmp` directory, uploads each PNG to GitLab via `client.upload_file`, and posts a formatted comment on the issue. Supports `mr_fix` context annotation. Integrated after implementation and after MR discussion fixes.
 - Screenshot prompt instructions injected when `app.run` is configured: tells Claude to capture impacted pages after implementation, save PNGs with an `index.json` manifest in a shared directory.
 
+### Changed
+
+- Chrome DevTools is now auto-enabled when any project has `app.run` entries with exposed ports. The `chrome_devtools` config flag has been removed — Chrome and MCP injection are managed automatically.
+
 ## [0.9.0] - 2026-04-07
 
 ### Added

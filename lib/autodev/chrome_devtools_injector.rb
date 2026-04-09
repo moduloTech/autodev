@@ -45,7 +45,12 @@ module ChromeDevtoolsInjector
     logger.info('Injected Chrome DevTools MCP config into danger-claude volume')
   end
 
-  # Returns extra -v args for danger-claude to bind-mount proxy and skill.
+  # Returns danger-claude CLI args to bind-mount proxy and skill.
+  def dc_args
+    volume_args.flat_map { |vol| ['-v', vol] }
+  end
+
+  # Returns volume mount strings for proxy and skill files.
   def volume_args
     args = []
     PROXY_FILES.merge(SKILL_DIR).each do |host_path, container_path|
