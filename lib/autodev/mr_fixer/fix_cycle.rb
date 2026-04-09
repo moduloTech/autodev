@@ -39,9 +39,16 @@ class MrFixer
         @client, @project_path, iid,
         mr_iid: mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir
       )
+      build_fix_env(skills_result, full_context, work_dir, iid)
+    end
+
+    def build_fix_env(skills_result, full_context, work_dir, iid)
+      ss_dir = ScreenshotUploader.screenshot_dir(@project_path, iid)
       { skills_line: SkillsInjector.skills_instruction(skills_result[:all_skills]),
-        target_branch: default_branch(work_dir),
-        full_context: full_context,
+        target_branch: default_branch(work_dir), full_context: full_context,
+        app_section: AppInstructions.prompt_section(
+          @project_config, port_mappings: @port_mappings || [], screenshot_dir: ss_dir
+        ),
         agent: detect_agent(work_dir, 'mr-fixer') }
     end
 
@@ -56,10 +63,9 @@ class MrFixer
     def fix_single_discussion(discussion, work_dir, branch, mr_iid, env)
       thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: env[:target_branch])
       extra = @project_config['extra_prompt']
-      app_section = AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [])
 
       with_context_file(work_dir, branch, env[:full_context]) do |context_filename|
-        prompt = build_fix_prompt(context_filename, thread_context, env[:skills_line], extra, app_section)
+        prompt = build_fix_prompt(context_filename, thread_context, env[:skills_line], extra, env[:app_section])
         danger_claude_prompt(work_dir, prompt, agent: env[:agent])
       end
       danger_claude_commit(work_dir)
@@ -110,6 +116,8 @@ class MrFixer
     end
 
     def finalize_success(issue, discussions)
+      ScreenshotUploader.process(client: @client, project_path: @project_path,
+                                 iid: issue.issue_iid, logger: @logger)
       round = issue.fix_round + 1
       issue.update(fix_round: round, pipeline_retrigger_count: 0,
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)

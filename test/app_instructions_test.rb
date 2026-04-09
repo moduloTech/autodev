@@ -71,6 +71,29 @@ class AppInstructionsTest < Minitest::Test
     assert_includes result, '## Environnement applicatif'
   end
 
+  def test_screenshot_instructions_when_run_and_dir_present
+    config = { 'app' => { 'run' => [{ 'command' => %w[bin/rails s] }] } }
+    result = AppInstructions.prompt_section(config, screenshot_dir: '/tmp/screenshots_test')
+
+    assert_includes result, 'Captures d\'ecran'
+    assert_includes result, '/tmp/screenshots_test/'
+    assert_includes result, 'index.json'
+  end
+
+  def test_no_screenshot_instructions_without_run
+    config = { 'app' => { 'setup' => [%w[bundle install]] } }
+    result = AppInstructions.prompt_section(config, screenshot_dir: '/tmp/screenshots_test')
+
+    refute_includes result, 'Captures'
+  end
+
+  def test_no_screenshot_instructions_without_dir
+    config = { 'app' => { 'run' => [{ 'command' => %w[bin/rails s] }] } }
+    result = AppInstructions.prompt_section(config)
+
+    refute_includes result, 'Captures'
+  end
+
   private
 
   def full_app_config

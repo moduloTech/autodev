@@ -33,10 +33,17 @@ class PipelineMonitor
     end
 
     def fetch_fix_context(work_dir, issue)
+      ss_dir = ScreenshotUploader.screenshot_dir(@project_path, issue.issue_iid)
+      app = AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [],
+                                                            screenshot_dir: ss_dir)
+      build_fix_context_hash(work_dir, issue, app)
+    end
+
+    def build_fix_context_hash(work_dir, issue, app_section)
       {
         skills_line: SkillsInjector.skills_instruction(@all_skills),
         extra: @project_config['extra_prompt'],
-        app_section: AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || []),
+        app_section: app_section,
         full_context: GitlabHelpers.fetch_full_context(
           @client, @project_path, issue.issue_iid,
           mr_iid: issue.mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir

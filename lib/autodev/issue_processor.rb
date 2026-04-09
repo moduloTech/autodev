@@ -87,6 +87,7 @@ class IssueProcessor
 
   def run_and_push(issue, work_dir, context, iid)
     implement(work_dir, context, iid)
+    upload_screenshots(iid)
     issue.impl_complete!
     danger_claude_commit(work_dir)
     issue.commit_complete!
@@ -94,6 +95,10 @@ class IssueProcessor
     push(work_dir, @current_branch_name)
     issue.push_complete!
     log_activity(issue, :changes_pushed, branch: @current_branch_name)
+  end
+
+  def upload_screenshots(iid)
+    ScreenshotUploader.process(client: @client, project_path: @project_path, iid: iid, logger: @logger)
   end
 
   def finalize(issue, iid, branch_name, work_dir)

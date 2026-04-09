@@ -13,6 +13,7 @@ class IssueProcessor
     private
 
     def implement(work_dir, context, iid)
+      @screenshot_dir = ScreenshotUploader.screenshot_dir(@project_path, iid)
       if @project_config['parallel_agents']
         plan = evaluate_complexity(work_dir, context, iid)
         if plan
@@ -34,7 +35,7 @@ class IssueProcessor
 
     def implement_single(work_dir, context, _iid)
       extra = @project_config['extra_prompt']
-      app_section = AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [])
+      app_section = app_section_with_screenshots
       skills_line = SkillsInjector.skills_instruction(@all_skills)
 
       with_context_file(work_dir, @current_branch_name, context) do |ctx|
@@ -100,6 +101,11 @@ class IssueProcessor
     def log_simple(iid, result)
       log "Issue ##{iid} assessed as simple: #{result['reason']}"
       nil
+    end
+
+    def app_section_with_screenshots
+      AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [],
+                                                      screenshot_dir: @screenshot_dir)
     end
   end
 end

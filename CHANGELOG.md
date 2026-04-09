@@ -8,6 +8,8 @@
 - `AppInstructions` module: formats `app:` config into a prompt section injected in all danger-claude prompts (implementer, split/parallel, pipeline fixer, MR fixer). Instructions are marked as taking priority over CLAUDE.md and skills.
 - `app.run` config: list of background server commands with optional `port` for Docker port exposure. Ports are dynamically allocated on the host via `PortAllocator` and mapped to container ports. Resolved URLs (`http://localhost:<host_port>`) are injected into prompts for Chrome DevTools access.
 - `PortAllocator` module: allocates ephemeral host ports via `TCPServer` and generates danger-claude `-P` args for Docker port mappings.
+- `ScreenshotUploader` module: reads screenshot index written by Claude in the shared `/tmp` directory, uploads each PNG to GitLab via `client.upload_file`, and posts a formatted comment on the issue. Supports `mr_fix` context annotation. Integrated after implementation and after MR discussion fixes.
+- Screenshot prompt instructions injected when `app.run` is configured: tells Claude to capture impacted pages after implementation, save PNGs with an `index.json` manifest in a shared directory.
 
 ## [0.9.0] - 2026-04-07
 
