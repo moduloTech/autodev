@@ -34,7 +34,7 @@ class IssueProcessor
 
     def implement_single(work_dir, context, _iid)
       extra = @project_config['extra_prompt']
-      app_section = AppInstructions.prompt_section(@project_config)
+      app_section = AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [])
       skills_line = SkillsInjector.skills_instruction(@all_skills)
 
       with_context_file(work_dir, @current_branch_name, context) do |ctx|

@@ -61,6 +61,10 @@ module Config
         #     - ["bin/test"]
         #   lint:                                 # lint / auto-fix commands
         #     - ["bundle", "exec", "rubocop", "-A"]
+        #   run:                                  # background servers (port exposed to host for Chrome)
+        #     - command: ["bin/rails", "s"]
+        #       port: 3000
+        #     - command: ["bin/vite", "dev"]
   YAML
 
   DEFAULTS = {

@@ -6,6 +6,8 @@
 
 - Per-project `app:` config block with optional `setup`, `test`, and `lint` subsections. Each subsection accepts a list of commands (Docker CMD format) that are passed to danger-claude prompts as environment-specific instructions. Validated at boot with clear error messages.
 - `AppInstructions` module: formats `app:` config into a prompt section injected in all danger-claude prompts (implementer, split/parallel, pipeline fixer, MR fixer). Instructions are marked as taking priority over CLAUDE.md and skills.
+- `app.run` config: list of background server commands with optional `port` for Docker port exposure. Ports are dynamically allocated on the host via `PortAllocator` and mapped to container ports. Resolved URLs (`http://localhost:<host_port>`) are injected into prompts for Chrome DevTools access.
+- `PortAllocator` module: allocates ephemeral host ports via `TCPServer` and generates danger-claude `-P` args for Docker port mappings.
 
 ## [0.9.0] - 2026-04-07
 

@@ -46,6 +46,31 @@ class AppInstructionsTest < Minitest::Test
     assert_includes result, 'prioritaires sur le CLAUDE.md'
   end
 
+  def test_run_section_with_port_mappings
+    config = { 'app' => { 'run' => [{ 'command' => %w[bin/rails s], 'port' => 3000 }] } }
+    mappings = [{ host_port: 49_152, container_port: 3000, command: %w[bin/rails s] }]
+    result = AppInstructions.prompt_section(config, port_mappings: mappings)
+
+    assert_includes result, 'Serveurs applicatifs'
+    assert_includes result, '`bin/rails s`'
+    assert_includes result, 'http://localhost:49152'
+  end
+
+  def test_run_section_without_port
+    config = { 'app' => { 'run' => [{ 'command' => %w[bin/vite dev] }] } }
+    result = AppInstructions.prompt_section(config)
+
+    assert_includes result, '`bin/vite dev`'
+    refute_includes result, 'localhost'
+  end
+
+  def test_run_only_config_produces_section
+    config = { 'app' => { 'run' => [{ 'command' => %w[bin/rails s] }] } }
+    result = AppInstructions.prompt_section(config)
+
+    assert_includes result, '## Environnement applicatif'
+  end
+
   private
 
   def full_app_config

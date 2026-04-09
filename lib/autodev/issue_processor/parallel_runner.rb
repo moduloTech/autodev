@@ -55,7 +55,7 @@ class IssueProcessor
 
     def build_split_prompts(context_filename)
       extra = @project_config['extra_prompt']
-      app_section = AppInstructions.prompt_section(@project_config)
+      app_section = AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [])
       skills = SkillsInjector.skills_instruction(@all_skills)
       extra_section = extra ? "\n## Instructions supplementaires du projet\n\n#{extra}" : ''
       app_block = app_section ? "\n#{app_section}" : ''
@@ -109,7 +109,7 @@ class IssueProcessor
 
     def parallel_prompt(task, context_filename, skills)
       extra = @project_config['extra_prompt']
-      app_section = AppInstructions.prompt_section(@project_config)
+      app_section = AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [])
       <<~PROMPT
         Tu dois implementer UNE PARTIE d'un ticket GitLab.
 

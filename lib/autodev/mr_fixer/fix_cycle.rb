@@ -56,7 +56,7 @@ class MrFixer
     def fix_single_discussion(discussion, work_dir, branch, mr_iid, env)
       thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: env[:target_branch])
       extra = @project_config['extra_prompt']
-      app_section = AppInstructions.prompt_section(@project_config)
+      app_section = AppInstructions.prompt_section(@project_config, port_mappings: @port_mappings || [])
 
       with_context_file(work_dir, branch, env[:full_context]) do |context_filename|
         prompt = build_fix_prompt(context_filename, thread_context, env[:skills_line], extra, app_section)

@@ -52,11 +52,8 @@ module DangerClaudeRunner
   end
 
   def log_dc_prompt(prompt, agent)
-    if agent
-      @logger.debug("danger-claude -a #{agent} -p prompt:\n#{prompt}", project: @project_path)
-    else
-      @logger.debug("danger-claude -p prompt:\n#{prompt}", project: @project_path)
-    end
+    prefix = agent ? "danger-claude -a #{agent} -p" : 'danger-claude -p'
+    @logger.debug("#{prefix} prompt:\n#{prompt}", project: @project_path)
   end
 
   def danger_claude_commit(work_dir, label: '-c')
@@ -99,6 +96,8 @@ module DangerClaudeRunner
   def dc_global_args
     args = ['-v', '/tmp']
     ChromeDevtoolsInjector.volume_args.each { |vol| args.push('-v', vol) } if @config['chrome_devtools']
+    @port_mappings = PortAllocator.allocate(@project_config)
+    args.concat(PortAllocator.dc_port_args(@port_mappings))
     model = @project_config['model'] || @config['model']
     effort = @project_config['effort'] || @config['effort']
     args.push('-m', model) if model
