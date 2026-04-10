@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Pipeline fixer now checks `git log` output content (not just exit status) to detect new commits before pushing, matching the correct pattern already used in MrFixer.
+- Legacy status migration no longer resets legitimately `done` issues with an MR back to `checking_pipeline` on every startup. Only the extinct `mr_fixed` status is migrated.
+- Branch names with slashes no longer create nested subdirectories in `/tmp` for context files.
+
+### Changed
+
+- Extracted `default_branch`, `push_with_lease_fallback`, and `safe_mark_failed!` into `DangerClaudeRunner` to eliminate duplication across `IssueProcessor`, `MrFixer`, and `PipelineMonitor`.
+
 ### Added
 
 - `pickup_delay` config (default 600s): prevents processing issues created less than N seconds ago, giving authors time to finalize specs.
