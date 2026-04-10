@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-04-10
+
 ### Fixed
 
 - Pipeline fixer now checks `git log` output content (not just exit status) to detect new commits before pushing, matching the correct pattern already used in MrFixer.
