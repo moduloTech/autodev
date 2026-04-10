@@ -41,6 +41,7 @@
 ### Fixed
 
 - Fix `new_commits?` in MrFixer always returning true: `git log` exits 0 even with empty output, so the check must verify output is non-empty. Previously `finalize_no_commits` was dead code — the push path was always taken even when discussion fixes produced no changes.
+- Fix misleading log message in `finalize_green_done`: always said "no discussions" regardless of actual discussion count.
 
 ## [0.9.0] - 2026-04-07
 

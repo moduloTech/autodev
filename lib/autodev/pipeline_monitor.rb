@@ -108,7 +108,7 @@ class PipelineMonitor
     reassign_to_author(issue)
     Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"))
     log_activity(issue, discussions.empty? ? :pipeline_green_done : :done, count: discussions.size)
-    log "Issue ##{issue.issue_iid}: pipeline green, no discussions → done"
+    log "Issue ##{issue.issue_iid}: pipeline green, #{discussions.size} discussion(s) → done"
   end
 
   def set_pipeline_green_guards(issue, review_count_zero: false, review_count_over_zero: false,
