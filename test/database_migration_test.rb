@@ -30,11 +30,11 @@ class DatabaseMigrationTest < Minitest::Test
     assert_equal 'fixing_pipeline', raw_status(3003)
   end
 
-  def test_migrate_statuses_done_with_mr_to_checking_pipeline
+  def test_migrate_statuses_done_with_mr_stays_done
     insert_raw(4001, 'done', mr_iid: 42)
     Database.migrate_statuses!
 
-    assert_equal 'checking_pipeline', raw_status(4001)
+    assert_equal 'done', raw_status(4001)
   end
 
   def test_migrate_statuses_done_without_mr_to_done

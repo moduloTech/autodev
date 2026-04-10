@@ -71,8 +71,8 @@ module Database
     end
 
     def self.migrate_legacy_statuses!(db)
-      db[:issues].where(status: %w[done mr_fixed]).exclude(mr_iid: nil).update(status: 'checking_pipeline')
-      db[:issues].where(status: %w[mr_fixed]).update(status: 'done')
+      db[:issues].where(status: 'mr_fixed').exclude(mr_iid: nil).update(status: 'checking_pipeline')
+      db[:issues].where(status: 'mr_fixed').update(status: 'done')
     end
 
     def self.migrate_v010_statuses!(db)
