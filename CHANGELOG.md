@@ -44,6 +44,10 @@
 - Fix misleading log message in `finalize_green_done`: always said "no discussions" regardless of actual discussion count.
 - Fix port allocation TOCTOU race in `PortAllocator`: hold `TCPServer` sockets open until the consuming subprocess has started, preventing the OS from reassigning the port between allocation and Docker bind.
 
+### Changed
+
+- Replace `WorkerPool` busy-polling (`pop(true)` + `sleep 0.5`) with blocking `Queue#pop`. Idle workers now sleep on the queue instead of polling at 2Hz. Shutdown uses `nil` sentinels to unblock threads.
+
 ## [0.9.0] - 2026-04-07
 
 ### Added

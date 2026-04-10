@@ -42,7 +42,7 @@ class WorkerPool
 
   def shutdown(timeout: 30)
     @running = false
-    @size.times { @queue.push(-> {}) }
+    @size.times { @queue.push(nil) }
     @threads.each { |t| t.join(timeout) }
   end
 
@@ -70,16 +70,19 @@ class WorkerPool
   private
 
   def run_worker_loop(index)
-    run_next_job(index) while @running
+    while @running
+      entry = @queue.pop # blocks until work or shutdown sentinel
+      break unless entry
+
+      run_job(index, entry)
+    end
   end
 
-  def run_next_job(index)
-    job, issue_iid = @queue.pop(true)
+  def run_job(index, entry)
+    job, issue_iid = entry
     @mutex.synchronize { @assignments[index] = issue_iid }
     persist_assignments
     job.call
-  rescue ThreadError
-    sleep 0.5
   rescue StandardError => e
     @logger.error("[worker-#{index}] Unhandled error: #{e.class}: #{e.message}")
   ensure
