@@ -14,15 +14,15 @@ module LabelManager
   def apply_label_doing(iid)
     return unless label_workflow?
 
-    remove = (@project_config['labels_todo'] || []) + [@project_config['label_mr']].compact
+    remove = (@project_config['labels_todo'] || []) + [@project_config['label_done']].compact
     manage_labels(iid, remove: remove, add: @project_config['label_doing'])
   end
 
-  def apply_label_mr(iid)
+  def apply_label_done(iid)
     return unless label_workflow?
 
     remove = (@project_config['labels_todo'] || []) + [@project_config['label_doing']].compact
-    manage_labels(iid, remove: remove, add: @project_config['label_mr'])
+    manage_labels(iid, remove: remove, add: @project_config['label_done'])
   end
 
   def manage_labels(iid, remove:, add:)

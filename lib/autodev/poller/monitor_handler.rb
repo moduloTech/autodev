@@ -99,7 +99,7 @@ class Poller
       return unless retry_helper
 
       if has_mr
-        retry_helper.apply_label_mr(issue.issue_iid)
+        retry_helper.apply_label_done(issue.issue_iid)
       else
         retry_helper.apply_label_doing(issue.issue_iid)
       end

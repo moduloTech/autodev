@@ -2,7 +2,7 @@
 
 # Validation helpers for Config. Extracted to keep Config module focused on loading.
 module ConfigValidator
-  LABEL_FIELDS = %w[labels_todo label_doing label_mr].freeze
+  LABEL_FIELDS = %w[labels_todo label_doing label_done].freeze
 
   def self.validate_globals!(config)
     validate_gitlab_token!(config)

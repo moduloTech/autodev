@@ -19,7 +19,7 @@ class ConfigValidateLabelsTest < Minitest::Test
   def test_full_label_config_passes
     config = base_config([{
                            'path' => 'g/p', 'labels_todo' => ['todo'],
-                           'label_doing' => 'doing', 'label_mr' => 'mr'
+                           'label_doing' => 'doing', 'label_done' => 'mr'
                          }])
     Config.validate!(config)
   end
@@ -27,7 +27,7 @@ class ConfigValidateLabelsTest < Minitest::Test
   def test_labels_todo_empty_array_raises
     config = base_config([{
                            'path' => 'g/p', 'labels_todo' => [],
-                           'label_doing' => 'doing', 'label_mr' => 'mr'
+                           'label_doing' => 'doing', 'label_done' => 'mr'
                          }])
     assert_raises(ConfigError) { Config.validate!(config) }
   end
@@ -35,7 +35,7 @@ class ConfigValidateLabelsTest < Minitest::Test
   def test_label_doing_empty_string_raises
     config = base_config([{
                            'path' => 'g/p', 'labels_todo' => ['todo'],
-                           'label_doing' => '', 'label_mr' => 'mr'
+                           'label_doing' => '', 'label_done' => 'mr'
                          }])
     assert_raises(ConfigError) { Config.validate!(config) }
   end
@@ -45,21 +45,21 @@ class ConfigValidateLabelsTest < Minitest::Test
     Config.validate!(config)
   end
 
-  def test_deprecated_label_done_warns
+  def test_deprecated_label_mr_warns
     config = base_config([{
                            'path' => 'g/p', 'labels_todo' => ['todo'],
-                           'label_doing' => 'doing', 'label_mr' => 'mr',
-                           'label_done' => 'done'
+                           'label_doing' => 'doing', 'label_done' => 'done',
+                           'label_mr' => 'mr'
                          }])
     output = capture_io { Config.validate!(config) }[1]
 
-    assert_match(/DEPRECATION.*label_done/, output)
+    assert_match(/DEPRECATION.*label_mr/, output)
   end
 
   def test_deprecated_label_blocked_warns
     config = base_config([{
                            'path' => 'g/p', 'labels_todo' => ['todo'],
-                           'label_doing' => 'doing', 'label_mr' => 'mr',
+                           'label_doing' => 'doing', 'label_done' => 'mr',
                            'label_blocked' => 'blocked'
                          }])
     output = capture_io { Config.validate!(config) }[1]

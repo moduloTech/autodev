@@ -33,7 +33,7 @@ module Config
         #   - "development::todo"
         #   - "todo"
         # label_doing: "Development::Doing"      # set during active processing
-        # label_mr: "Development::Awaiting CR"   # set when issue reaches done state
+        # label_done: "Development::Awaiting CR"  # set when issue reaches done state
         #
         # -- Deprecated (use label workflow instead) --
         # labels_to_remove: []

@@ -28,7 +28,16 @@ module Locales
                            'sur %<mr_url>s. Intervention manuelle requise.',
       stagnation_discussions: ':warning: %<tag>s : stagnation detectee — les memes discussions restent non resolues ' \
                               'sur %<mr_url>s. Intervention manuelle requise.',
-      unassigned_stop: ':stop_sign: %<tag>s : desassigne, arret du travail en cours.'
+      unassigned_stop: ':stop_sign: %<tag>s : desassigne, arret du travail en cours.',
+      done_nominal: ":checkered_flag: %<tag>s : j'ai termine mon travail sur ce ticket !\n\n" \
+                    ':arrow_right: **Vous souhaitez que je corrige ou ameliore quelque chose ?** ' \
+                    'Pas de souci ! Remettez le label _%<label_todo>s_, reassignez-moi sur le ticket, ' \
+                    "et je m'en occupe.\n\n" \
+                    ':arrow_right: **Tout est bon ?** Vous pouvez passer a la suite.',
+      done_question: ":checkered_flag: %<tag>s : j'ai termine mon investigation !\n\n" \
+                     ':arrow_right: **Vous souhaitez creuser davantage ou passer a une implementation ?** ' \
+                     'Laissez un commentaire pour me guider, remettez le label _%<label_todo>s_, reassignez-moi, ' \
+                     "et c'est parti."
     },
     en: {
       processing_started: ':robot: %<tag>s: processing in progress...',
@@ -50,7 +59,16 @@ module Locales
                            'on %<mr_url>s. Manual intervention required.',
       stagnation_discussions: ':warning: %<tag>s: stagnation detected — the same discussions remain unresolved ' \
                               'on %<mr_url>s. Manual intervention required.',
-      unassigned_stop: ':stop_sign: %<tag>s: unassigned, stopping work in progress.'
+      unassigned_stop: ':stop_sign: %<tag>s: unassigned, stopping work in progress.',
+      done_nominal: ":checkered_flag: %<tag>s: I'm done working on this ticket!\n\n" \
+                    ':arrow_right: **Want me to fix or improve something?** ' \
+                    'No problem! Put the _%<label_todo>s_ label back, reassign me to the ticket, ' \
+                    "and I'll take care of it.\n\n" \
+                    ':arrow_right: **Everything looks good?** You can move on to the next step.',
+      done_question: ":checkered_flag: %<tag>s: I've finished my investigation!\n\n" \
+                     ':arrow_right: **Want to dig deeper or move on to an implementation?** ' \
+                     'Leave a comment to guide me, put the _%<label_todo>s_ label back, reassign me, ' \
+                     "and I'm on it."
     }
   }.freeze
 

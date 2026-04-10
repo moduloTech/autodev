@@ -206,7 +206,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 - **Review after pipeline**: `mr-review` runs after the first green pipeline, not immediately after MR creation. This ensures the pipeline is stable before review comments are generated.
 - **Stagnation detection**: Replaces `max_fix_rounds`. SHA256 signatures of failed job names (pipeline) or unresolved discussion IDs (discussions) detect when the same failures repeat consecutively. Configurable threshold (`stagnation_threshold`, default 5).
 - **Polling by assignee**: Issues are discovered by querying GitLab for issues assigned to the autodev user with `labels_todo`, replacing the old `trigger_label`-based approach.
-- **3 labels only**: `labels_todo`, `label_doing`, `label_mr`. Label stays `label_doing` during the entire implementation + pipeline + fix + review cycle, and switches to `label_mr` only when reaching `done`.
+- **3 labels only**: `labels_todo`, `label_doing`, `label_done`. Label stays `label_doing` during the entire implementation + pipeline + fix + review cycle, and switches to `label_done` only when reaching `done`.
 - **Post-completion at unassignment**: The `post_completion` hook triggers when autodev is unassigned from a `done` issue (not immediately after pipeline green).
 - **No blocked state**: Infrastructure failures and canceled pipelines keep the issue in `checking_pipeline` indefinitely until manual intervention or natural resolution.
 - **Single-file CLI**: Same pattern as `mr-review` and `danger-claude` — `bundler/inline` for dependencies.

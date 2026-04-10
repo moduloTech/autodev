@@ -88,7 +88,7 @@ class PipelineMonitor
   def green_done_max_reviews(issue)
     set_pipeline_green_guards(issue, max_review_rounds: true)
     issue.pipeline_green!
-    apply_label_mr(issue.issue_iid)
+    apply_label_done(issue.issue_iid)
     reassign_to_author(issue)
     Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"))
     notify_localized(issue.issue_iid, :review_limit_reached, mr_url: issue.mr_url)
@@ -104,11 +104,13 @@ class PipelineMonitor
   end
 
   def finalize_green_done(issue, discussions)
-    apply_label_mr(issue.issue_iid)
+    iid = issue.issue_iid
+    apply_label_done(iid)
     reassign_to_author(issue)
     Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"))
+    notify_localized(iid, :done_nominal, label_todo: @project_config['labels_todo']&.first)
     log_activity(issue, discussions.empty? ? :pipeline_green_done : :done, count: discussions.size)
-    log "Issue ##{issue.issue_iid}: pipeline green, #{discussions.size} discussion(s) → done"
+    log "Issue ##{iid}: pipeline green, #{discussions.size} discussion(s) → done"
   end
 
   def set_pipeline_green_guards(issue, review_count_zero: false, review_count_over_zero: false,

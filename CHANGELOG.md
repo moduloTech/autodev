@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed `label_mr` config key to `label_done` (internal rename, GitLab label value unchanged). The old `label_mr` key is now deprecated with a warning.
+
+### Added
+
+- Localized notification comment posted on the issue when autodev finishes normally (`done_nominal`): explains how to relaunch autodev or move on.
+- Localized notification comment posted on the issue when a question/investigation is complete (`done_question`): explains how to go further or request an implementation.
+
 ## [0.9.1] - 2026-04-10
 
 ### Fixed

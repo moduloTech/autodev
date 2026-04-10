@@ -13,7 +13,7 @@ class MrFixer
   include ErrorHandler
   include FixCycle
 
-  public :apply_label_mr, :apply_label_doing
+  public :apply_label_done, :apply_label_doing
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)
