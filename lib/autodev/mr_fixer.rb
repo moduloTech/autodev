@@ -65,11 +65,6 @@ class MrFixer
     resolvable_notes.all? { |n| n.respond_to?(:resolved) && n.resolved }
   end
 
-  def default_branch(work_dir)
-    out, _err, ok = run_cmd_status(%w[git symbolic-ref refs/remotes/origin/HEAD --short], chdir: work_dir)
-    ok && !out.strip.empty? ? out.strip.sub('origin/', '') : 'main'
-  end
-
   def resolve_discussion(mr_iid, discussion_id)
     @client.resolve_merge_request_discussion(@project_path, mr_iid, discussion_id, resolved: true)
     log "Resolved discussion #{discussion_id}"

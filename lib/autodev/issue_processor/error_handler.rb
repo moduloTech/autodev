@@ -54,11 +54,5 @@ class IssueProcessor
 
     def max_retries_config = (@project_config['max_retries'] || @config['max_retries'] || 3).to_i
     def retry_backoff_config = (@project_config['retry_backoff'] || @config['retry_backoff'] || 30).to_i
-
-    def safe_mark_failed!(issue)
-      issue.mark_failed!
-    rescue AASM::InvalidTransition
-      issue.update(status: 'error')
-    end
   end
 end

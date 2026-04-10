@@ -92,11 +92,7 @@ class PipelineMonitor
 
     def push_branch(work_dir, branch)
       log "Pushing pipeline fixes to #{branch}..."
-      _out, _err, push_ok = run_cmd_status(['git', 'push', 'origin', branch], chdir: work_dir)
-      return if push_ok
-
-      log 'Push failed, retrying with --force-with-lease...'
-      run_cmd(['git', 'push', '--force-with-lease', 'origin', branch], chdir: work_dir)
+      push_with_lease_fallback(work_dir, branch)
     end
   end
 end

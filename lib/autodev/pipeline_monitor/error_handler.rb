@@ -32,10 +32,5 @@ class PipelineMonitor
       log_activity(issue, :error, error: summary)
     end
 
-    def safe_mark_failed!(issue)
-      issue.mark_failed!
-    rescue AASM::InvalidTransition
-      issue.update(status: 'error')
-    end
   end
 end

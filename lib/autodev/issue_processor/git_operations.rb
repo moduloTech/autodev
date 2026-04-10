@@ -41,22 +41,13 @@ class IssueProcessor
 
     def push(work_dir, branch_name)
       log "Pushing #{branch_name}..."
-      _out, _err, ok = run_cmd_status(['git', 'push', '-u', 'origin', branch_name], chdir: work_dir)
-      return if ok
-
-      log 'Push failed, retrying with --force-with-lease...'
-      run_cmd(['git', 'push', '--force-with-lease', '-u', 'origin', branch_name], chdir: work_dir)
+      push_with_lease_fallback(work_dir, branch_name, upstream: true)
     end
 
     def verify_changes(work_dir, branch_name)
       target = @project_config['target_branch'] || default_branch(work_dir)
       out, _err, ok = run_cmd_status(['git', 'log', "#{target}..#{branch_name}", '--oneline'], chdir: work_dir)
       raise ImplementationError, 'No changes produced by implementation' unless ok && !out.strip.empty?
-    end
-
-    def default_branch(work_dir)
-      out, _err, ok = run_cmd_status(['git', 'symbolic-ref', 'refs/remotes/origin/HEAD', '--short'], chdir: work_dir)
-      ok && !out.empty? ? out.sub('origin/', '') : 'main'
     end
 
     def branch_exists_on_remote?(branch_name)

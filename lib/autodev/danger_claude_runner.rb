@@ -121,6 +121,31 @@ module DangerClaudeRunner
     run_cmd(cmd)
   end
 
+  def default_branch(work_dir)
+    out, _err, ok = run_cmd_status(%w[git symbolic-ref refs/remotes/origin/HEAD --short], chdir: work_dir)
+    ok && !out.strip.empty? ? out.strip.sub('origin/', '') : 'main'
+  end
+
+  def push_with_lease_fallback(work_dir, branch, upstream: false)
+    push_cmd = ['git', 'push']
+    push_cmd << '-u' if upstream
+    push_cmd += ['origin', branch]
+    _out, _err, ok = run_cmd_status(push_cmd, chdir: work_dir)
+    return if ok
+
+    log 'Push failed, retrying with --force-with-lease...'
+    force_cmd = ['git', 'push', '--force-with-lease']
+    force_cmd << '-u' if upstream
+    force_cmd += ['origin', branch]
+    run_cmd(force_cmd, chdir: work_dir)
+  end
+
+  def safe_mark_failed!(issue)
+    issue.mark_failed!
+  rescue AASM::InvalidTransition
+    issue.update(status: 'error')
+  end
+
   def log(msg)
     @logger.info(msg, project: @project_path)
   end

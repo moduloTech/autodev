@@ -111,10 +111,7 @@ class MrFixer
     end
 
     def push_fixes(work_dir, branch)
-      _out, _err, push_ok = run_cmd_status(['git', 'push', 'origin', branch], chdir: work_dir)
-      return if push_ok
-
-      run_cmd(['git', 'push', '--force-with-lease', 'origin', branch], chdir: work_dir)
+      push_with_lease_fallback(work_dir, branch)
     end
 
     def finalize_success(issue, discussions)
