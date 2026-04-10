@@ -12,6 +12,7 @@ module ProcessRunner
     timeout = (@project_config['dc_timeout'] || @config['dc_timeout'] || 1800).to_i
     tag = label ? "#{cmd} #{label}" : cmd
     pid, stdout_r, stderr_r = spawn_process(cmd, args, chdir)
+    PortAllocator.release(@port_mappings) if @port_mappings
     out_thread = Thread.new { stdout_r.read }
     err_thread = Thread.new { stderr_r.read }
     wait_for_completion(pid, tag, timeout, out_thread, err_thread)

@@ -23,12 +23,26 @@ class PortAllocatorTest < Minitest::Test
 
     assert_equal 3000, mappings[0][:container_port]
     assert_equal %w[bin/rails s], mappings[0][:command]
+  ensure
+    PortAllocator.release(mappings) if mappings
   end
 
   def test_allocates_positive_host_port
     mappings = allocate_single_rails
 
     assert_predicate mappings[0][:host_port], :positive?
+  ensure
+    PortAllocator.release(mappings) if mappings
+  end
+
+  def test_server_held_open_until_release
+    mappings = allocate_single_rails
+    server = mappings[0][:server]
+
+    refute_predicate server, :closed?
+    PortAllocator.release(mappings)
+
+    assert_predicate server, :closed?
   end
 
   def test_allocates_unique_ports_for_multiple_entries
@@ -40,6 +54,8 @@ class PortAllocatorTest < Minitest::Test
 
     assert_equal 2, mappings.size
     refute_equal mappings[0][:host_port], mappings[1][:host_port]
+  ensure
+    PortAllocator.release(mappings) if mappings
   end
 
   def test_skips_entries_without_port
@@ -51,6 +67,8 @@ class PortAllocatorTest < Minitest::Test
 
     assert_equal 1, mappings.size
     assert_equal 3000, mappings[0][:container_port]
+  ensure
+    PortAllocator.release(mappings) if mappings
   end
 
   def test_dc_port_args_formats_correctly
@@ -64,6 +82,14 @@ class PortAllocatorTest < Minitest::Test
 
   def test_dc_port_args_empty_for_no_mappings
     assert_equal [], PortAllocator.dc_port_args([])
+  end
+
+  def test_release_tolerates_empty_mappings
+    PortAllocator.release([])
+  end
+
+  def test_release_tolerates_nil_server
+    PortAllocator.release([{ host_port: 1234, container_port: 3000, server: nil }])
   end
 
   private

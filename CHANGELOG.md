@@ -42,6 +42,7 @@
 
 - Fix `new_commits?` in MrFixer always returning true: `git log` exits 0 even with empty output, so the check must verify output is non-empty. Previously `finalize_no_commits` was dead code — the push path was always taken even when discussion fixes produced no changes.
 - Fix misleading log message in `finalize_green_done`: always said "no discussions" regardless of actual discussion count.
+- Fix port allocation TOCTOU race in `PortAllocator`: hold `TCPServer` sockets open until the consuming subprocess has started, preventing the OS from reassigning the port between allocation and Docker bind.
 
 ## [0.9.0] - 2026-04-07
 
