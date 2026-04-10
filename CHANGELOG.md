@@ -38,6 +38,10 @@
 - `resume_todo!` and `resume_mr!` events (replaced by `reenter!`).
 - `review_complete!` event (replaced by `review_done!`).
 
+### Fixed
+
+- Fix `new_commits?` in MrFixer always returning true: `git log` exits 0 even with empty output, so the check must verify output is non-empty. Previously `finalize_no_commits` was dead code — the push path was always taken even when discussion fixes produced no changes.
+
 ## [0.9.0] - 2026-04-07
 
 ### Added

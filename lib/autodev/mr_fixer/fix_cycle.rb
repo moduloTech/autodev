@@ -100,8 +100,8 @@ class MrFixer
     end
 
     def new_commits?(work_dir, branch)
-      _out, _err, ok = run_cmd_status(['git', 'log', "origin/#{branch}..HEAD", '--oneline'], chdir: work_dir)
-      ok
+      out, _err, ok = run_cmd_status(['git', 'log', "origin/#{branch}..HEAD", '--oneline'], chdir: work_dir)
+      ok && !out.empty?
     end
 
     def finalize_no_commits(issue)
