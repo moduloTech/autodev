@@ -62,9 +62,9 @@ class PipelineMonitor
 
     def push_fixes(work_dir, job_entries, issue)
       branch = issue.branch_name
-      _out, _err, has_commits = run_cmd_status(['git', 'log', "origin/#{branch}..HEAD", '--oneline'], chdir: work_dir)
+      out, _err, ok = run_cmd_status(['git', 'log', "origin/#{branch}..HEAD", '--oneline'], chdir: work_dir)
 
-      if has_commits
+      if ok && !out.empty?
         push_branch(work_dir, branch)
         complete_fix_round(issue, job_entries, pushed: true)
       else
