@@ -29,20 +29,6 @@ class IssueProcessor
       nil
     end
 
-    def update_labels(iid)
-      labels_to_remove = @project_config['labels_to_remove'] || []
-      label_to_add     = @project_config['label_to_add']
-
-      gi = @client.issue(@project_path, iid)
-      current_labels = gi.labels || []
-      new_labels = current_labels - labels_to_remove
-      new_labels << label_to_add if label_to_add && !new_labels.include?(label_to_add)
-      @client.edit_issue(@project_path, iid, labels: new_labels.join(','))
-      log "Labels updated: removed #{labels_to_remove & current_labels}, added #{label_to_add}"
-    rescue Gitlab::Error::ResponseError => e
-      log_error "Failed to update labels for ##{iid}: #{e.message}"
-    end
-
     def run_review(mr_url)
       unless command_exists?('mr-review')
         log 'mr-review not installed, skipping review'

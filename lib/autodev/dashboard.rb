@@ -18,9 +18,9 @@ module Dashboard
     'fixing_discussions' => :magenta,
     'fixing_pipeline' => :magenta,
     'running_post_completion' => :cyan,
+    'answering_question' => :cyan,
     'needs_clarification' => :yellow,
-    'over' => :green,
-    'blocked' => :red,
+    'done' => :green,
     'error' => :red
   }.freeze
 
@@ -37,8 +37,7 @@ module Dashboard
     when *ACTIVE_STATES then 'En cours'
     when 'pending'              then 'En attente'
     when 'needs_clarification'  then 'En attente de clarification'
-    when 'over'                 then 'Terminée'
-    when 'blocked'              then 'Bloquée'
+    when 'done'                 then 'Terminée'
     when 'error'                then 'Erreur'
     else status
     end
@@ -89,7 +88,7 @@ module Dashboard
 
   def fetch_issues(config)
     dataset = Database.db[:issues].order(Sequel.desc(:id))
-    dataset = dataset.exclude(status: 'over') unless config['status_all']
+    dataset = dataset.exclude(status: 'done') unless config['status_all']
     dataset.all
   end
 

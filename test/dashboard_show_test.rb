@@ -26,12 +26,8 @@ class DashboardShowTest < Minitest::Test
     assert_equal 'En attente de clarification', Dashboard.status_label('needs_clarification')
   end
 
-  def test_over_label
-    assert_equal 'Terminée', Dashboard.status_label('over')
-  end
-
-  def test_blocked_label
-    assert_equal 'Bloquée', Dashboard.status_label('blocked')
+  def test_done_label
+    assert_equal 'Terminée', Dashboard.status_label('done')
   end
 
   def test_error_label
@@ -73,21 +69,21 @@ class DashboardShowTest < Minitest::Test
     assert_match(/implementing/, out)
   end
 
-  def test_dashboard_excludes_over_by_default
-    create_issue(issue_iid: 200, issue_title: 'Done issue', project_path: 'group/project', status: 'over')
+  def test_dashboard_excludes_done_by_default
+    create_issue(issue_iid: 200, issue_title: 'Done issue', project_path: 'group/project', status: 'done')
 
     out = capture_io { Dashboard.show({ 'database_url' => 'sqlite://:memory:' }) }.first
 
     refute_match(/#200/, out)
   end
 
-  def test_dashboard_includes_over_with_all_flag
-    create_issue(issue_iid: 201, issue_title: 'Done issue', project_path: 'group/project', status: 'over')
+  def test_dashboard_includes_done_with_all_flag
+    create_issue(issue_iid: 201, issue_title: 'Done issue', project_path: 'group/project', status: 'done')
 
     out = capture_io { Dashboard.show({ 'database_url' => 'sqlite://:memory:', 'status_all' => true }) }.first
 
     assert_match(/#201/, out)
-    assert_match(/over/, out)
+    assert_match(/done/, out)
   end
 
   def test_dashboard_shows_error_excerpt
@@ -117,7 +113,7 @@ class DashboardShowTest < Minitest::Test
   end
 
   def test_dashboard_shows_hidden_count
-    create_issue(issue_iid: 600, issue_title: 'Completed', project_path: 'group/project', status: 'over')
+    create_issue(issue_iid: 600, issue_title: 'Completed', project_path: 'group/project', status: 'done')
     create_issue(issue_iid: 601, issue_title: 'Active', status: 'pending')
 
     out = capture_io { Dashboard.show({ 'database_url' => 'sqlite://:memory:' }) }.first
@@ -126,7 +122,7 @@ class DashboardShowTest < Minitest::Test
   end
 
   def test_status_colors_covers_all_states
-    all_states = Dashboard::ACTIVE_STATES + %w[pending needs_clarification over blocked error]
+    all_states = Dashboard::ACTIVE_STATES + %w[pending answering_question needs_clarification done error]
 
     all_states.each do |state|
       assert Dashboard::STATUS_COLORS.key?(state), "STATUS_COLORS missing key '#{state}'"

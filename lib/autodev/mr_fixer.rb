@@ -13,7 +13,7 @@ class MrFixer
   include ErrorHandler
   include FixCycle
 
-  public :cleanup_labels, :apply_label_todo, :apply_label_mr
+  public :apply_label_mr, :apply_label_doing
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)
@@ -22,8 +22,6 @@ class MrFixer
   def fix(issue)
     log "Checking MR !#{issue.mr_iid} for unresolved discussions (round #{issue.fix_round + 1})..."
     log_activity(issue, :discussions_checking, round: issue.fix_round + 1)
-    return unless verify_trigger_label(issue.issue_iid)
-
     process_discussions(issue)
   end
 
@@ -36,18 +34,6 @@ class MrFixer
     log "Found #{discussions.size} unresolved discussion(s) on MR !#{issue.mr_iid}"
     log_activity(issue, :discussions_found, count: discussions.size)
     execute_fix_cycle(issue, discussions)
-  end
-
-  def verify_trigger_label(iid)
-    trigger_label = @config['trigger_label']
-    gi = @client.issue(@project_path, iid)
-    return true if gi.labels&.include?(trigger_label)
-
-    log "Issue ##{iid} no longer has '#{trigger_label}' label, skipping"
-    false
-  rescue Gitlab::Error::ResponseError => e
-    log_error "Cannot fetch issue ##{iid}: #{e.message}"
-    false
   end
 
   def transition_no_discussions(issue)

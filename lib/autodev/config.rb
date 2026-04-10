@@ -12,13 +12,13 @@ module Config
 
     gitlab_url: https://gitlab.example.com
     gitlab_token: glpat-xxxxxxxxxxxxxxxxxxxx   # or set GITLAB_API_TOKEN env var
-    trigger_label: autodev                      # label that triggers processing
     poll_interval: 300                          # seconds between poll cycles
     max_workers: 3                              # concurrent worker threads
     dc_timeout: 1800                              # danger-claude timeout in seconds (default: 1800 = 30min)
     max_retries: 3                                 # max retry attempts per issue (default: 3)
     retry_backoff: 30                              # base backoff in seconds, doubles each retry (default: 30)
-    max_fix_rounds: 3                              # max MR comment fix rounds per issue (default: 3)
+    pickup_delay: 600                               # seconds before processing a new issue (default: 600 = 10min)
+    stagnation_threshold: 5                         # consecutive identical failures before giving up (default: 5)
     log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
     log_level: INFO                                # DEBUG, INFO, WARN, ERROR (default: INFO)
     # database_url: sqlite://~/.autodev/autodev.db  # default
@@ -28,14 +28,12 @@ module Config
       - path: group/project-name
         # target_branch: develop                # optional, defaults to project default branch
         #
-        # -- Label workflow (all 5 required) --
+        # -- Label workflow (all 3 required) --
         # labels_todo:                           # labels that trigger full processing
         #   - "development::todo"
         #   - "todo"
         # label_doing: "Development::Doing"      # set during active processing
-        # label_mr: "Development::Awaiting CR"   # set after MR creation, triggers discussion monitoring
-        # label_done: "Development::Done"         # set by reviewer to signal completion
-        # label_blocked: "Development::Blocked"   # set when issue is blocked
+        # label_mr: "Development::Awaiting CR"   # set when issue reaches done state
         #
         # -- Deprecated (use label workflow instead) --
         # labels_to_remove: []
@@ -45,7 +43,7 @@ module Config
         # dc_timeout: 1800                        # danger-claude timeout in seconds (overrides global)
         # max_retries: 3                          # max retries per issue (overrides global)
         # retry_backoff: 30                       # base backoff seconds (overrides global)
-        # max_fix_rounds: 3                       # max MR comment fix rounds (overrides global)
+        # stagnation_threshold: 5                  # consecutive identical failures threshold (overrides global)
         # clone_depth: 1                         # git clone depth (0 = full clone, default: 1)
         # sparse_checkout:                       # sparse checkout paths (for monorepos)
         #   - "src/"
@@ -70,13 +68,13 @@ module Config
   DEFAULTS = {
     'gitlab_url' => nil,
     'gitlab_token' => nil,
-    'trigger_label' => 'autodev',
     'poll_interval' => 300,
     'max_workers' => 3,
     'dc_timeout' => 1800,
     'max_retries' => 3,
     'retry_backoff' => 30,
-    'max_fix_rounds' => 3,
+    'pickup_delay' => 600,
+    'stagnation_threshold' => 5,
     'log_dir' => File.join(CONFIG_DIR, 'logs'),
     'log_level' => 'INFO',
     'database_url' => "sqlite://#{DEFAULT_DB}",
@@ -88,7 +86,10 @@ module Config
     'GITLAB_URL' => 'gitlab_url'
   }.freeze
 
-  INTEGER_FIELDS = %w[poll_interval max_workers dc_timeout max_retries retry_backoff max_fix_rounds].freeze
+  DEPRECATED_GLOBAL_FIELDS = %w[trigger_label max_fix_rounds].freeze
+
+  INTEGER_FIELDS = %w[poll_interval max_workers dc_timeout max_retries retry_backoff pickup_delay
+                      stagnation_threshold].freeze
   VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
 
   def self.load(cli_overrides = {})
@@ -99,6 +100,7 @@ module Config
     cli_overrides.each { |k, v| config[k] = v unless v.nil? }
     config['_config_path'] = config_path
     coerce_integers!(config)
+    warn_deprecated!(config)
     config
   end
 
@@ -162,4 +164,13 @@ module Config
     INTEGER_FIELDS.each { |f| config[f] = config[f].to_i }
   end
   private_class_method :coerce_integers!
+
+  def self.warn_deprecated!(config)
+    DEPRECATED_GLOBAL_FIELDS.each do |field|
+      next unless config.key?(field) && !DEFAULTS.key?(field)
+
+      warn "[DEPRECATION] '#{field}' is deprecated and will be removed in a future version."
+    end
+  end
+  private_class_method :warn_deprecated!
 end

@@ -82,8 +82,8 @@ module Dashboard
     def count_by_status(rows)
       {
         active: rows.count { |r| ACTIVE_STATES.include?(r[:status]) || r[:status] == 'pending' },
-        done: rows.count { |r| r[:status] == 'over' },
-        blocked: rows.count { |r| %w[blocked error needs_clarification].include?(r[:status]) }
+        done: rows.count { |r| r[:status] == 'done' },
+        blocked: rows.count { |r| %w[error needs_clarification].include?(r[:status]) }
       }
     end
 
@@ -91,13 +91,13 @@ module Dashboard
       "#{pastel.bold(total.to_s)} issues " \
         "— #{pastel.cyan("#{counts[:active]} actives")}, " \
         "#{pastel.green("#{counts[:done]} terminées")}, " \
-        "#{pastel.yellow("#{counts[:blocked]} bloquées")}"
+        "#{pastel.yellow("#{counts[:blocked]} en erreur")}"
     end
 
     def append_hidden_count(summary, config, pastel)
       return if config['status_all']
 
-      hidden = Database.db[:issues].where(status: 'over').count
+      hidden = Database.db[:issues].where(status: 'done').count
       summary << " #{pastel.dim("(#{hidden} terminées masquées, --all pour tout voir)")}" if hidden.positive?
     end
 

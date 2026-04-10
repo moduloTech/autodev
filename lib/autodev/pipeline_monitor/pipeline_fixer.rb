@@ -9,21 +9,12 @@ class PipelineMonitor
 
     private
 
-    def dispatch_fix(issue, work_dir, job_entries, explanation, max_fix_rounds)
-      issue._max_fix_rounds = max_fix_rounds
+    def dispatch_fix(issue, work_dir, job_entries, explanation)
       issue.pipeline_failed_code!
-      return mark_max_rounds(issue, explanation) if issue.blocked?
-
       round = issue.fix_round + 1
       log_activity(issue, :pipeline_fixing, count: job_entries.size, round: round)
       log "Issue ##{issue.issue_iid}: fixing #{job_entries.size} job(s)... (#{explanation})"
       fix_pipeline_failures(work_dir, job_entries, issue)
-    end
-
-    def mark_max_rounds(issue, explanation)
-      apply_label_blocked(issue.issue_iid)
-      notify_localized(issue.issue_iid, :pipeline_max_rounds, mr_url: issue.mr_url, explanation: explanation)
-      log_activity(issue, :pipeline_max_rounds)
     end
 
     def fix_pipeline_failures(work_dir, job_entries, issue)

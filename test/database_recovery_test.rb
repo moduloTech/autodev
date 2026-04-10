@@ -50,14 +50,22 @@ class DatabaseRecoveryTest < Minitest::Test
     assert_equal 'checking_pipeline', Issue.first.status
   end
 
-  def test_recover_running_post_completion_to_over
-    Issue.create(project_path: 'g/p', issue_iid: 1006, status: 'running_post_completion')
+  def test_recover_reviewing_to_checking_pipeline
+    Issue.create(project_path: 'g/p', issue_iid: 1006, status: 'reviewing')
+    count = Database.recover_on_startup!(max_retries: 3)
+
+    assert_equal 1, count
+    assert_equal 'checking_pipeline', Issue.first.status
+  end
+
+  def test_recover_running_post_completion_to_done
+    Issue.create(project_path: 'g/p', issue_iid: 1007, status: 'running_post_completion')
     count = Database.recover_on_startup!(max_retries: 3)
 
     assert_equal 1, count
     issue = Issue.first
 
-    assert_equal 'over', issue.status
+    assert_equal 'done', issue.status
     refute_nil issue.finished_at
   end
 
@@ -71,50 +79,5 @@ class DatabaseRecoveryTest < Minitest::Test
     Issue.all.each do |issue|
       assert_equal 'pending', issue.status
     end
-  end
-
-  def test_migrate_mr_pipeline_running_to_checking_pipeline
-    insert_raw(3001, 'mr_pipeline_running')
-    Database.migrate_statuses!
-
-    assert_equal 'checking_pipeline', raw_status(3001)
-  end
-
-  def test_migrate_mr_fixing_to_fixing_discussions
-    insert_raw(3002, 'mr_fixing')
-    Database.migrate_statuses!
-
-    assert_equal 'fixing_discussions', raw_status(3002)
-  end
-
-  def test_migrate_mr_pipeline_fixing_to_fixing_pipeline
-    insert_raw(3003, 'mr_pipeline_fixing')
-    Database.migrate_statuses!
-
-    assert_equal 'fixing_pipeline', raw_status(3003)
-  end
-
-  def test_migrate_statuses_done_with_mr_to_checking_pipeline
-    insert_raw(4001, 'done', mr_iid: 42)
-    Database.migrate_statuses!
-
-    assert_equal 'checking_pipeline', raw_status(4001)
-  end
-
-  def test_migrate_statuses_done_without_mr_to_over
-    insert_raw(4002, 'done')
-    Database.migrate_statuses!
-
-    assert_equal 'over', raw_status(4002)
-  end
-
-  private
-
-  def insert_raw(iid, status, **extra)
-    Database.db[:issues].insert({ project_path: 'g/p', issue_iid: iid, status: status }.merge(extra))
-  end
-
-  def raw_status(iid)
-    Database.db[:issues].where(issue_iid: iid).first[:status]
   end
 end

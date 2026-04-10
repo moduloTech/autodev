@@ -1,9 +1,13 @@
 # frozen_string_literal: true
 
+require_relative 'stagnation_checker'
+
 class MrFixer
   # Orchestrates the clone-fix-push cycle and error handling for MR discussion fixes.
   # Expects the including class to provide DangerClaudeRunner methods and DiscussionFormatter.
   module FixCycle
+    include StagnationChecker
+
     private
 
     def execute_fix_cycle(issue, discussions)
@@ -107,11 +111,9 @@ class MrFixer
     end
 
     def push_fixes(work_dir, branch)
-      log "Pushing fixes to #{branch}..."
       _out, _err, push_ok = run_cmd_status(['git', 'push', 'origin', branch], chdir: work_dir)
       return if push_ok
 
-      log 'Push failed, retrying with --force-with-lease...'
       run_cmd(['git', 'push', '--force-with-lease', 'origin', branch], chdir: work_dir)
     end
 
@@ -121,6 +123,12 @@ class MrFixer
       round = issue.fix_round + 1
       issue.update(fix_round: round, pipeline_retrigger_count: 0,
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
+      return if discussion_stagnated?(issue, discussions)
+
+      complete_discussion_fix(issue, discussions, round)
+    end
+
+    def complete_discussion_fix(issue, discussions, round)
       issue.discussions_fixed!
       notify_localized(issue.issue_iid, :mr_fix_success, count: discussions.size, mr_url: issue.mr_url, round: round)
       log_activity(issue, :discussions_fixed, count: discussions.size, round: round)

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Dashboard
-  # Formats and prints error/blocked issue details for the --errors command.
+  # Formats and prints error issue details for the --errors command.
   module ErrorDisplay
     module_function
 
@@ -21,7 +21,7 @@ module Dashboard
     # -- Private ---------------------------------------------------------------
 
     def fetch_error_issues(config)
-      dataset = Database.db[:issues].where(status: %w[error blocked])
+      dataset = Database.db[:issues].where(status: 'error')
       dataset = dataset.where(issue_iid: config['errors_iid']) if config['errors_iid']
       dataset.order(Sequel.desc(:id)).all
     end
@@ -34,9 +34,9 @@ module Dashboard
 
     def empty_message(config)
       if config['errors_iid']
-        "Issue ##{config['errors_iid']} non trouvée ou pas en erreur/bloquée."
+        "Issue ##{config['errors_iid']} non trouvée ou pas en erreur."
       else
-        'Aucune issue en erreur ou bloquée.'
+        'Aucune issue en erreur.'
       end
     end
 
@@ -50,9 +50,8 @@ module Dashboard
 
     def print_header(row, pastel)
       project_short = row[:project_path].to_s.split('/').last
-      color = row[:status] == 'blocked' ? :yellow : :red
-      icon = pastel.send(color, '■')
-      label = pastel.send(color, row[:status])
+      icon = pastel.red('■')
+      label = pastel.red(row[:status])
       puts pastel.bold("#{icon} Issue ##{row[:issue_iid]}: #{row[:issue_title]} (#{project_short}) [#{label}]")
       print_metadata(row)
     end

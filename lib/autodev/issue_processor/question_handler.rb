@@ -24,13 +24,13 @@ class IssueProcessor
     end
 
     def finalize_question(iid, issue)
-      label_workflow? ? manage_labels(iid, remove: [@project_config['label_doing']], add: nil) : update_labels(iid)
       issue.question_answered!
+      apply_label_mr(iid)
       reassign_to_author(issue)
       Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"),
                                        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
       log_activity(issue, :question_answered)
-      log_activity(issue, :over)
+      log_activity(issue, :done)
     end
   end
 end

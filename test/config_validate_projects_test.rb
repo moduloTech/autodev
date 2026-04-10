@@ -6,7 +6,7 @@ class ConfigValidateProjectsTest < Minitest::Test
   BASE = {
     'gitlab_token' => 'glpat-xxxx', 'poll_interval' => 300, 'max_workers' => 3,
     'dc_timeout' => 1800, 'max_retries' => 3, 'retry_backoff' => 30,
-    'max_fix_rounds' => 3, 'log_level' => 'INFO'
+    'pickup_delay' => 600, 'stagnation_threshold' => 5, 'log_level' => 'INFO'
   }.freeze
 
   def base_config(projects) = BASE.merge('projects' => projects)

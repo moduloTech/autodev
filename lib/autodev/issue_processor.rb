@@ -65,7 +65,7 @@ class IssueProcessor
     assign_to_self(iid)
     notify_localized(iid, :processing_started)
     branch = clone_and_prepare(issue, iid, work_dir)
-    finalize(issue, iid, branch, work_dir) unless issue.over? || issue.needs_clarification? || issue.answering_question?
+    finalize(issue, iid, branch, work_dir) unless issue.done? || issue.needs_clarification? || issue.answering_question?
   end
 
   def run_implementation(issue, work_dir, iid, _branch)
@@ -105,21 +105,17 @@ class IssueProcessor
     merge_request = create_merge_request(work_dir, iid, branch_name, issue.issue_title)
     issue.update(mr_iid: merge_request.iid, mr_url: merge_request.web_url)
     issue.mr_created!
+    persist_finalize(issue)
     log_activity(issue, :mr_created, mr_url: merge_request.web_url)
-    label_workflow? ? apply_label_mr(iid) : update_labels(iid)
-    log_activity(issue, :reviewing) if command_exists?('mr-review')
-    run_review(merge_request.web_url)
-    complete_issue(issue, iid, merge_request)
+    notify_localized(iid, :mr_created, mr_url: merge_request.web_url)
+    log_activity(issue, :pipeline_watch)
+    log "Issue ##{iid} completed: #{merge_request.web_url}"
   end
 
-  def complete_issue(issue, iid, merge_request)
-    issue.review_complete!
+  def persist_finalize(issue)
     Issue.where(id: issue.id).update(
       finished_at: Sequel.lit("datetime('now')"), pipeline_retrigger_count: 0,
       dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
     )
-    notify_localized(iid, :mr_created, mr_url: merge_request.web_url)
-    log_activity(issue, :pipeline_watch)
-    log "Issue ##{iid} completed: #{merge_request.web_url}"
   end
 end

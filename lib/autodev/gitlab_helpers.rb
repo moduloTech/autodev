@@ -16,10 +16,16 @@ module GitlabHelpers
     Gitlab.client(endpoint: "#{gitlab_url}/api/v4", private_token: token)
   end
 
-  def fetch_trigger_issues(client, project_path, trigger_label)
-    client.issues(project_path, labels: trigger_label, state: 'opened', per_page: 100)
+  def fetch_assignee_issues(client, project_path, labels_todo, assignee_id)
+    issues = client.issues(project_path, assignee_id: assignee_id, state: 'opened', per_page: 100)
+    todo_set = (labels_todo || []).to_set
+    issues.select { |i| (i.labels || []).any? { |l| todo_set.include?(l) } }
   rescue Gitlab::Error::ResponseError => e
     raise AutodevError, "Failed to fetch issues for #{project_path}: #{e.message}"
+  end
+
+  def current_user_id(client)
+    @current_user_id ||= client.user.id
   end
 
   def download_gitlab_images(text, gitlab_url:, project_path:, token:, dest_dir:)

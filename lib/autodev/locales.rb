@@ -19,20 +19,16 @@ module Locales
       mr_fix_success: ':wrench: %<tag>s : %<count>s commentaire(s) de review corrige(s) ' \
                       'sur %<mr_url>s (round %<round>s)',
       mr_fix_error: ':x: %<tag>s : echec correction MR — %<error>s',
-      pipeline_canceled: ':warning: %<tag>s : le pipeline de %<mr_url>s est %<status>s. Intervention manuelle requise.',
-      pipeline_no_failed_jobs: ':warning: %<tag>s : le pipeline de %<mr_url>s a echoue ' \
-                               "mais aucun job en echec n'a ete trouve. Intervention manuelle requise.",
-      pipeline_infra_pretriage: ':warning: %<tag>s : le pipeline de %<mr_url>s echoue pour une raison ' \
-                                "d'infrastructure (pre-triage). Intervention manuelle requise.\n\n> %<explanation>s",
-      pipeline_eval_failed: ':warning: %<tag>s : le pipeline de %<mr_url>s a echoue et ' \
-                            "l'evaluation automatique n'a pas abouti. Intervention manuelle requise.",
-      pipeline_non_code: ':warning: %<tag>s : le pipeline de %<mr_url>s echoue pour une raison ' \
-                         "hors code. Intervention manuelle requise.\n\n> %<explanation>s",
-      pipeline_max_rounds: ':warning: %<tag>s : le pipeline de %<mr_url>s echoue a cause du code mais le nombre ' \
-                           "maximum de rounds de fix est atteint. Intervention manuelle requise.\n\n> %<explanation>s",
       pipeline_fix_error: ':x: %<tag>s : echec de la correction du pipeline — %<error>s',
       pipeline_fix_success: ':wrench: %<tag>s : correction du pipeline appliquee sur ' \
-                            '%<mr_url>s — %<count>s job(s) corrige(s) (round %<round>s)'
+                            '%<mr_url>s — %<count>s job(s) corrige(s) (round %<round>s)',
+      review_limit_reached: ':warning: %<tag>s : la limite de review (3 tours) est atteinte pour %<mr_url>s. ' \
+                            'Les discussions non resolues restantes necessitent une intervention manuelle.',
+      stagnation_pipeline: ':warning: %<tag>s : stagnation detectee — les memes jobs echouent de maniere repetee ' \
+                           'sur %<mr_url>s. Intervention manuelle requise.',
+      stagnation_discussions: ':warning: %<tag>s : stagnation detectee — les memes discussions restent non resolues ' \
+                              'sur %<mr_url>s. Intervention manuelle requise.',
+      unassigned_stop: ':stop_sign: %<tag>s : desassigne, arret du travail en cours.'
     },
     en: {
       processing_started: ':robot: %<tag>s: processing in progress...',
@@ -45,20 +41,16 @@ module Locales
                                 'Feel free to ask for more details._',
       mr_fix_success: ':wrench: %<tag>s: %<count>s review comment(s) fixed on %<mr_url>s (round %<round>s)',
       mr_fix_error: ':x: %<tag>s: MR fix failed — %<error>s',
-      pipeline_canceled: ':warning: %<tag>s: pipeline for %<mr_url>s is %<status>s. Manual intervention required.',
-      pipeline_no_failed_jobs: ':warning: %<tag>s: pipeline for %<mr_url>s failed but no failed jobs ' \
-                               'were found. Manual intervention required.',
-      pipeline_infra_pretriage: ':warning: %<tag>s: pipeline for %<mr_url>s failed due to infrastructure ' \
-                                "(pre-triage). Manual intervention required.\n\n> %<explanation>s",
-      pipeline_eval_failed: ':warning: %<tag>s: pipeline for %<mr_url>s failed and automatic evaluation ' \
-                            'could not determine the cause. Manual intervention required.',
-      pipeline_non_code: ':warning: %<tag>s: pipeline for %<mr_url>s failed for a non-code reason. ' \
-                         "Manual intervention required.\n\n> %<explanation>s",
-      pipeline_max_rounds: ':warning: %<tag>s: pipeline for %<mr_url>s failed due to code but the maximum ' \
-                           "number of fix rounds has been reached. Manual intervention required.\n\n> %<explanation>s",
       pipeline_fix_error: ':x: %<tag>s: pipeline fix failed — %<error>s',
       pipeline_fix_success: ':wrench: %<tag>s: pipeline fix applied on %<mr_url>s — ' \
-                            '%<count>s job(s) fixed (round %<round>s)'
+                            '%<count>s job(s) fixed (round %<round>s)',
+      review_limit_reached: ':warning: %<tag>s: review limit (3 rounds) reached for %<mr_url>s. ' \
+                            'Remaining unresolved discussions require manual intervention.',
+      stagnation_pipeline: ':warning: %<tag>s: stagnation detected — the same jobs keep failing ' \
+                           'on %<mr_url>s. Manual intervention required.',
+      stagnation_discussions: ':warning: %<tag>s: stagnation detected — the same discussions remain unresolved ' \
+                              'on %<mr_url>s. Manual intervention required.',
+      unassigned_stop: ':stop_sign: %<tag>s: unassigned, stopping work in progress.'
     }
   }.freeze
 

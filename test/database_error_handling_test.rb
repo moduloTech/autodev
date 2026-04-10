@@ -51,32 +51,18 @@ class DatabaseErrorHandlingTest < Minitest::Test
     assert_equal 'pending', issue.status
   end
 
-  # -- Guard boundary: can_fix? --
+  # -- Mark failed from reviewing --
 
-  def test_can_fix_boundary
-    issue = create_issue(fix_round: 2)
+  def test_mark_failed_from_reviewing
+    issue = create_issue
     advance_to(issue, 'checking_pipeline')
-    issue._max_fix_rounds = 3
+    issue._review_count_zero = true
+    issue.pipeline_green!
 
-    assert_predicate issue, :can_fix?
-    refute_predicate issue, :max_fix_rounds_reached?
+    assert_equal 'reviewing', issue.status
+    issue.mark_failed!
 
-    issue.pipeline_failed_code!
-
-    assert_equal 'fixing_pipeline', issue.status
-  end
-
-  def test_cannot_fix_at_max
-    issue = create_issue(fix_round: 3)
-    advance_to(issue, 'checking_pipeline')
-    issue._max_fix_rounds = 3
-
-    refute_predicate issue, :can_fix?
-    assert_predicate issue, :max_fix_rounds_reached?
-
-    issue.pipeline_failed_code!
-
-    assert_equal 'blocked', issue.status
+    assert_equal 'error', issue.status
   end
 
   # -- Persistence callback --

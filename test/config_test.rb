@@ -6,7 +6,7 @@ class ConfigValidateTest < Minitest::Test
   VALID_BASE = {
     'gitlab_token' => 'glpat-xxxx', 'gitlab_url' => 'https://gitlab.example.com',
     'poll_interval' => 300, 'max_workers' => 3, 'dc_timeout' => 1800,
-    'max_retries' => 3, 'retry_backoff' => 30, 'max_fix_rounds' => 3,
+    'max_retries' => 3, 'retry_backoff' => 30, 'pickup_delay' => 600, 'stagnation_threshold' => 5,
     'log_level' => 'INFO', 'projects' => [{ 'path' => 'group/project' }]
   }.freeze
 

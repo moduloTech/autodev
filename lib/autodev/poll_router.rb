@@ -16,58 +16,31 @@ class PollRouter
     init_project_settings(project_config)
   end
 
-  # Route a single GitLab issue. Returns :next (skip to next issue) or :process (continue to legacy path).
+  # Route a single GitLab issue. Returns :next (skip to next issue) or :process (continue to processing).
   def route(gl_issue, client)
     return :process unless @use_labels
 
     @route_client = client
     existing = Issue.where(project_path: @project_path, issue_iid: gl_issue.iid).first
-    route_by_labels(gl_issue, existing, client, extract_label_flags(gl_issue))
+    route_by_state(gl_issue, existing)
   end
 
   private
 
   def init_project_settings(project_config)
-    @project_path  = project_config['path']
-    @use_labels    = Config.label_workflow?(project_config)
-    @labels_todo   = project_config['labels_todo'] || []
-    @label_mr      = project_config['label_mr']
-    @label_done    = project_config['label_done']
-    @label_blocked = project_config['label_blocked']
+    @project_path = project_config['path']
+    @use_labels   = Config.label_workflow?(project_config)
   end
 
-  def extract_label_flags(gl_issue)
-    gl_labels = gl_issue.labels || []
-    { todo: gl_labels.intersect?(@labels_todo), mr: gl_labels.include?(@label_mr),
-      done: gl_labels.include?(@label_done), blocked: gl_labels.include?(@label_blocked) }
-  end
+  def route_by_state(gl_issue, existing)
+    return :process unless existing
 
-  def route_by_labels(gl_issue, existing, client, flags)
-    if flags[:done] && existing
-      handle_done(gl_issue, existing)
+    if existing.status == 'done'
+      handle_reenter(gl_issue, existing)
       return :next
     end
-    return :next if flags[:blocked]
-    return :next if resume_todo_if_applicable(gl_issue, existing, flags)
-    return :next if resume_mr_if_applicable(gl_issue, existing, client, flags)
-    return :next unless processable_labels?(existing, flags)
 
-    :process
-  end
-
-  def processable_labels?(existing, flags)
-    flags[:todo] || (flags[:mr] && (existing.nil? || existing.status == 'pending'))
-  end
-
-  def handle_done(gl_issue, existing)
-    unless existing.status == 'over'
-      @logger.info("Issue ##{gl_issue.iid}: label_done detected, transitioning to over",
-                   project: @project_path)
-    end
-    helper = MrFixer.new(client: build_worker_client, config: @config,
-                         project_config: @project_config, logger: @logger, token: @token)
-    helper.cleanup_labels(gl_issue.iid)
-    existing.update(status: 'over', finished_at: Sequel.lit("datetime('now')")) unless existing.status == 'over'
+    existing.status == 'pending' ? :process : :next
   end
 
   def enqueue_issue_processing(gl_issue, existing)

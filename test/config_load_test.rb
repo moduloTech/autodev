@@ -6,20 +6,26 @@ class ConfigLoadTest < Minitest::Test
   def test_defaults_applied
     config = Config.load('config_path' => '/nonexistent/path.yml')
 
-    assert_equal 'autodev', config['trigger_label']
     assert_equal 300, config['poll_interval']
     assert_equal 3, config['max_workers']
+  end
+
+  def test_new_defaults_applied
+    config = Config.load('config_path' => '/nonexistent/path.yml')
+
+    assert_equal 600, config['pickup_delay']
+    assert_equal 5, config['stagnation_threshold']
   end
 
   def test_yaml_overrides_defaults
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'config.yml')
-      File.write(path, YAML.dump('trigger_label' => 'custom', 'poll_interval' => 60,
+      File.write(path, YAML.dump('poll_interval' => 60, 'pickup_delay' => 120,
                                  'projects' => [{ 'path' => 'g/p' }]))
       config = Config.load('config_path' => path)
 
-      assert_equal 'custom', config['trigger_label']
       assert_equal 60, config['poll_interval']
+      assert_equal 120, config['pickup_delay']
     end
   end
 

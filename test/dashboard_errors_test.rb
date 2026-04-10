@@ -46,17 +46,6 @@ class DashboardErrorsTest < Minitest::Test
     assert_match(%r{autodev/fix-700}, out)
   end
 
-  def test_shows_blocked_issue
-    create_issue(issue_iid: 701, issue_title: 'Blocked thing', project_path: 'group/proj',
-                 status: 'blocked', error_message: 'Pipeline infra failure')
-
-    out = capture_io { Dashboard.show_errors({ 'database_url' => 'sqlite://:memory:' }) }.first
-
-    assert_match(/#701/, out)
-    assert_match(/blocked/, out)
-    refute_match(/Tentative/, out)
-  end
-
   def test_shows_stderr
     create_issue(issue_iid: 702, issue_title: 'With stderr', project_path: 'group/proj',
                  status: 'error', error_message: 'Failed', dc_stderr: "warning: something\nerror line")
@@ -81,7 +70,7 @@ class DashboardErrorsTest < Minitest::Test
 
   def test_shows_post_completion_errors
     create_issue(issue_iid: 720, issue_title: 'PC error', project_path: 'group/proj',
-                 status: 'over', post_completion_error: 'deploy script failed')
+                 status: 'done', post_completion_error: 'deploy script failed')
 
     out = capture_io { Dashboard.show_errors({ 'database_url' => 'sqlite://:memory:' }) }.first
 

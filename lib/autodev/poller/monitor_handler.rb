@@ -1,8 +1,12 @@
 # frozen_string_literal: true
 
+require_relative 'unassignment_handler'
+
 class Poller
   # Pipeline monitoring, discussion fixes, and error retry for the poll loop.
   module MonitorHandler
+    include UnassignmentHandler
+
     private
 
     def poll_pipelines(project_config)
@@ -29,9 +33,8 @@ class Poller
 
     def poll_discussions(project_config)
       path = project_config['path']
-      max_rounds = (project_config['max_fix_rounds'] || @config['max_fix_rounds']).to_i
       Issue.where(project_path: path, status: 'fixing_discussions')
-           .where { fix_round < max_rounds }.exclude(mr_iid: nil).each do |issue|
+           .exclude(mr_iid: nil).each do |issue|
         break if @shutdown
 
         enqueue_discussion_fix(issue, project_config)
@@ -98,7 +101,7 @@ class Poller
       if has_mr
         retry_helper.apply_label_mr(issue.issue_iid)
       else
-        retry_helper.apply_label_todo(issue.issue_iid)
+        retry_helper.apply_label_doing(issue.issue_iid)
       end
     rescue StandardError => e
       @logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.message}",

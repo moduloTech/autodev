@@ -50,22 +50,18 @@ class DatabaseStateTransitionsTest < Minitest::Test
 
     issue.mr_created!
 
-    assert_equal 'reviewing', issue.status
-
-    issue.review_complete!
-
     assert_equal 'checking_pipeline', issue.status
   end
 
   # -- Clone guards --
 
-  def test_clone_complete_with_issue_closed_goes_to_over
+  def test_clone_complete_with_issue_closed_goes_to_done
     issue = create_issue
     advance_to(issue, 'cloning')
     issue._issue_closed = true
     issue.clone_complete!
 
-    assert_equal 'over', issue.status
+    assert_equal 'done', issue.status
   end
 
   def test_clone_complete_with_skip_to_mr_goes_to_creating_mr
@@ -112,12 +108,12 @@ class DatabaseStateTransitionsTest < Minitest::Test
     assert_equal 'answering_question', issue.status
   end
 
-  def test_question_answered_to_over
+  def test_question_answered_to_done
     issue = create_issue
     advance_to(issue, 'checking_spec')
     issue.question_detected!
     issue.question_answered!
 
-    assert_equal 'over', issue.status
+    assert_equal 'done', issue.status
   end
 end

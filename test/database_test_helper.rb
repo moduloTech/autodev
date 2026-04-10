@@ -14,8 +14,7 @@ module DatabaseTestHelper
     ['committing',         :impl_complete!],
     ['pushing',            :commit_complete!],
     ['creating_mr',        :push_complete!],
-    ['reviewing',          :mr_created!],
-    ['checking_pipeline',  :review_complete!]
+    ['checking_pipeline',  :mr_created!]
   ].freeze
 
   class << self

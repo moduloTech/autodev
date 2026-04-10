@@ -4,6 +4,14 @@
 
 ### Added
 
+- `pickup_delay` config (default 600s): prevents processing issues created less than N seconds ago, giving authors time to finalize specs.
+- `stagnation_threshold` config (default 5): consecutive identical failures before marking an issue as done with an alert.
+- `Reviewer` module in PipelineMonitor: runs `mr-review` after the first green pipeline instead of immediately after MR creation. Review count incremented only on successful execution. Hard limit of 3 review rounds.
+- Stagnation detection for both pipeline failures (SHA256 of failed job names) and unresolved discussions (SHA256 of discussion IDs). Replaces `max_fix_rounds`.
+- Unassignment detection: active issues no longer assigned to autodev transition to `done` at the next poll cycle.
+- `post_completion` now triggers when autodev is unassigned from a `done` issue (instead of immediately after pipeline green). Skipped if MR is already merged or closed.
+- Reentry: `done` issues with `label_todo` detected at poll time transition back to `pending` via `reenter!`, resetting stagnation signatures and review count.
+- New DB columns: `review_count` (INTEGER DEFAULT 0), `stagnation_signatures` (TEXT, JSON).
 - Per-project `app:` config block with optional `setup`, `test`, and `lint` subsections. Each subsection accepts a list of commands (Docker CMD format) that are passed to danger-claude prompts as environment-specific instructions. Validated at boot with clear error messages.
 - `AppInstructions` module: formats `app:` config into a prompt section injected in all danger-claude prompts (implementer, split/parallel, pipeline fixer, MR fixer). Instructions are marked as taking priority over CLAUDE.md and skills.
 - `app.run` config: list of background server commands with optional `port` for Docker port exposure. Ports are dynamically allocated on the host via `PortAllocator` and mapped to container ports. Resolved URLs (`http://localhost:<host_port>`) are injected into prompts for Chrome DevTools access.
@@ -13,7 +21,22 @@
 
 ### Changed
 
+- **State machine overhaul (v0.10)**: terminal state renamed from `over` to `done`. `blocked` state removed entirely — infrastructure failures and canceled pipelines now stay in `checking_pipeline` until manual intervention or natural resolution.
+- **Review after pipeline**: `mr-review` now runs after the first green pipeline instead of immediately after MR creation. `mr_created!` transitions directly to `checking_pipeline` (no intermediate `reviewing` step).
+- **Polling by assignee**: replaced `trigger_label`-based polling with `assignee_id`-based polling filtered by `labels_todo`.
+- **3 labels only**: simplified label workflow to `labels_todo`, `label_doing`, `label_mr`. Label stays `label_doing` during the entire cycle and switches to `label_mr` only on `done`.
 - Chrome DevTools is now auto-enabled when any project has `app.run` entries with exposed ports. The `chrome_devtools` config flag has been removed — Chrome and MCP injection are managed automatically.
+
+### Removed
+
+- `blocked` state and all associated label management (`label_blocked`, `apply_label_blocked`).
+- `trigger_label` config (replaced by assignee-based polling).
+- `max_fix_rounds` config (replaced by stagnation detection).
+- `label_done` and `label_blocked` config fields (deprecated with warnings).
+- `labels_to_remove` / `label_to_add` deprecated config fields.
+- `pipeline_failed_infra!` and `pipeline_canceled!` events.
+- `resume_todo!` and `resume_mr!` events (replaced by `reenter!`).
+- `review_complete!` event (replaced by `review_done!`).
 
 ## [0.9.0] - 2026-04-07
 

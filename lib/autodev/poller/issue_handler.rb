@@ -8,15 +8,30 @@ class Poller
     def poll_issues(project_config)
       router = PollRouter.new(config: @config, project_config: project_config,
                               logger: @logger, token: @token, pool: @pool)
-      GitlabHelpers.fetch_trigger_issues(@client, project_config['path'], @config['trigger_label']).each do |gl_issue|
+      fetch_and_route_issues(router, project_config)
+    rescue StandardError => e
+      @logger.error("Error polling #{project_config['path']}: #{e.class}: #{e.message}",
+                    project: project_config['path'])
+    end
+
+    def fetch_and_route_issues(router, project_config)
+      labels_todo = project_config['labels_todo'] || []
+      GitlabHelpers.fetch_assignee_issues(@client, project_config['path'], labels_todo,
+                                          GitlabHelpers.current_user_id(@client)).each do |gl_issue|
         break if @shutdown
+        next if too_recent?(gl_issue)
         next if router.route(gl_issue, @client) == :next
 
         process_issue(gl_issue, project_config)
       end
-    rescue StandardError => e
-      @logger.error("Error polling #{project_config['path']}: #{e.class}: #{e.message}",
-                    project: project_config['path'])
+    end
+
+    def too_recent?(gl_issue)
+      delay = @config['pickup_delay']
+      return false if delay.zero?
+
+      created = Time.parse(gl_issue.created_at.to_s)
+      Time.now.utc - created < delay
     end
 
     def process_issue(gl_issue, project_config)

@@ -2,10 +2,8 @@
 
 class PipelineMonitor
   # Runs a project-configured post_completion command in a temporary clone.
-  # Non-fatal: errors are logged and stored but do not prevent transition to over.
+  # Non-fatal: errors are logged and stored but do not prevent transition to done.
   module PostCompletion
-    private
-
     def run_post_completion(issue, cmd)
       iid = issue.issue_iid
 

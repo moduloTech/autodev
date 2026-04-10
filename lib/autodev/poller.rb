@@ -53,12 +53,14 @@ class Poller
 
   def poll_project(project_config)
     path = project_config['path']
-    @logger.debug("Polling #{path} for label '#{@config['trigger_label']}'...", project: path)
+    @logger.debug("Polling #{path} for assigned issues...", project: path)
     poll_issues(project_config)
     return if @config['dry_run']
 
     poll_pipelines(project_config)
     poll_discussions(project_config)
+    poll_unassignment(project_config)
+    poll_done_unassigned(project_config)
     poll_retries(project_config)
   end
 
@@ -67,7 +69,7 @@ class Poller
   end
 
   def print_poll_summary
-    active_issues = Database.db[:issues].exclude(status: 'over').all
+    active_issues = Database.db[:issues].exclude(status: 'done').all
     return if active_issues.empty?
 
     worker_map = @pool.assignments.invert

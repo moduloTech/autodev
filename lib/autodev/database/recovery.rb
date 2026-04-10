@@ -6,6 +6,7 @@ module Database
     def self.run(db, max_retries)
       count = recover_errored!(db, max_retries)
       count += recover_fixing_pipeline!(db)
+      count += recover_reviewing!(db)
       count += recover_post_completion!(db)
       count + recover_stuck_processing!(db)
     end
@@ -32,11 +33,15 @@ module Database
     def self.recover_post_completion!(db)
       db[:issues]
         .where(status: 'running_post_completion')
-        .update(status: 'over', finished_at: Sequel.lit("datetime('now')")) || 0
+        .update(status: 'done', finished_at: Sequel.lit("datetime('now')")) || 0
     end
 
     # Reset issues stuck in active processing states (e.g. after crash during label_doing).
     # Issues that already have a MR resume at checking_pipeline instead of pending.
+    def self.recover_reviewing!(db)
+      db[:issues].where(status: 'reviewing').update(status: 'checking_pipeline') || 0
+    end
+
     def self.recover_stuck_processing!(db)
       stuck = db[:issues]
               .where(status: %w[cloning checking_spec implementing committing pushing creating_mr])
@@ -49,7 +54,7 @@ module Database
       count_mr + count_no_mr
     end
 
-    private_class_method :recover_errored!, :recover_fixing_pipeline!,
+    private_class_method :recover_errored!, :recover_fixing_pipeline!, :recover_reviewing!,
                          :recover_post_completion!, :recover_stuck_processing!
   end
 end

@@ -11,7 +11,7 @@ module ProjectValidator
   end
 
   def self.validate_numerics!(project_config, path)
-    %w[dc_timeout max_retries retry_backoff max_fix_rounds].each do |field|
+    %w[dc_timeout max_retries retry_backoff stagnation_threshold].each do |field|
       next unless project_config.key?(field)
 
       value = project_config[field].to_i
@@ -91,11 +91,10 @@ module ProjectValidator
   private_class_method :validate_labels!
 
   def self.warn_deprecated_label_fields!(project_config, path)
-    %w[labels_to_remove label_to_add].each do |field|
+    %w[labels_to_remove label_to_add label_done label_blocked max_fix_rounds].each do |field|
       next unless project_config[field]
 
-      warn "[DEPRECATION] #{path}: '#{field}' is deprecated. " \
-           "Use 'labels_todo', 'label_doing', 'label_mr', 'label_done', 'label_blocked' instead."
+      warn "[DEPRECATION] #{path}: '#{field}' is deprecated and will be removed in a future version."
     end
   end
   private_class_method :warn_deprecated_label_fields!
@@ -114,7 +113,7 @@ module ProjectValidator
       raise ConfigError, "#{path}: 'labels_todo' must be a non-empty array."
     end
 
-    %w[label_doing label_mr label_done label_blocked].each do |field|
+    %w[label_doing label_mr].each do |field|
       value = project_config[field]
       unless value.is_a?(String) && !value.strip.empty?
         raise ConfigError, "#{path}: '#{field}' must be a non-empty string."

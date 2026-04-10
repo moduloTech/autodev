@@ -91,7 +91,6 @@ class IssueProcessor
     def post_clarification(issues_list, iid, issue)
       notify_clarification_questions(issues_list, iid)
       issue.spec_unclear!
-      apply_label_todo(iid)
       Issue.where(id: issue.id).update(clarification_requested_at: Sequel.lit("datetime('now')"))
       log_activity(issue, :spec_unclear, count: issues_list.size)
     end

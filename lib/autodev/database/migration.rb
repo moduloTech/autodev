@@ -40,7 +40,9 @@ module Database
       'post_completion_error TEXT',
       "locale TEXT DEFAULT 'fr'",
       'activity_note_id INTEGER',
-      'pipeline_poll_since TEXT'
+      'pipeline_poll_since TEXT',
+      'review_count INTEGER NOT NULL DEFAULT 0',
+      'stagnation_signatures TEXT'
     ].freeze
 
     STATUS_RENAMES = {
@@ -63,12 +65,19 @@ module Database
     end
 
     def self.migrate_statuses!(db)
-      STATUS_RENAMES.each do |old_status, new_status|
-        db[:issues].where(status: old_status).update(status: new_status)
-      end
+      STATUS_RENAMES.each { |old_status, new_status| db[:issues].where(status: old_status).update(status: new_status) }
+      migrate_legacy_statuses!(db)
+      migrate_v010_statuses!(db)
+    end
 
+    def self.migrate_legacy_statuses!(db)
       db[:issues].where(status: %w[done mr_fixed]).exclude(mr_iid: nil).update(status: 'checking_pipeline')
-      db[:issues].where(status: %w[done mr_fixed]).update(status: 'over')
+      db[:issues].where(status: %w[mr_fixed]).update(status: 'done')
+    end
+
+    def self.migrate_v010_statuses!(db)
+      db[:issues].where(status: 'over').update(status: 'done')
+      db[:issues].where(status: 'blocked').update(status: 'pending')
     end
 
     private_class_method :add_missing_columns!
