@@ -83,8 +83,9 @@ module GitlabHelpers
   end
 
   # Returns the context file path for a given branch (always in /tmp).
+  # Slashes in branch names are replaced with underscores to avoid creating subdirectories.
   def context_file_path(branch_name)
-    filename = branch_name.to_s.sub(%r{^autodev/}, '')
+    filename = branch_name.to_s.sub(%r{^autodev/}, '').tr('/', '_')
     File.join('/tmp', "#{filename}.md")
   end
 
