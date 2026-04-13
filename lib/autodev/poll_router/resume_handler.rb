@@ -13,7 +13,7 @@ class PollRouter
       existing.reenter!
       existing.update(review_count: 0, stagnation_signatures: nil, fix_round: 0,
                       error_message: nil, finished_at: nil, started_at: nil,
-                      pipeline_retrigger_count: 0)
+                      pipeline_retrigger_count: 0, activity_note_id: nil)
       log_activity(existing, :reenter)
       enqueue_issue_processing(gl_issue, existing)
     end

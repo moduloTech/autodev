@@ -33,7 +33,7 @@ class PipelineMonitor
 
     def run_mr_review_command(mr_url)
       log "Running mr-review on #{mr_url}..."
-      _, err, status = Open3.capture3(CLEAN_ENV, 'mr-review', '-H', mr_url)
+      _, err, status = Open3.capture3(DangerClaudeRunner::CLEAN_ENV, 'mr-review', '-H', mr_url)
       return log('Review completed successfully') || true if status.success?
 
       log_error "mr-review failed (non-fatal): #{err[0, 300]}"

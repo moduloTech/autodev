@@ -10,7 +10,7 @@ class PipelineMonitor
     private
 
     def log_pipeline_poll(issue)
-      now = Time.now.utc.strftime('%H:%M')
+      now = Time.now.strftime('%m-%d %H:%M')
       since = issue.pipeline_poll_since || now
       issue.update(pipeline_poll_since: since) unless issue.pipeline_poll_since
       log_activity(issue, :pipeline_checking, since: since, replace_pattern: POLL_LINE_PATTERN)

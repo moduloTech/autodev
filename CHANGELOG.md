@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-04-13
+
+### Fixed
+
+- Fix `CLEAN_ENV` constant resolution in `PipelineMonitor::Reviewer` and `IssueProcessor::MrManager` — fully qualify as `DangerClaudeRunner::CLEAN_ENV` (same bug previously fixed in `PostCompletion`). Was causing non-fatal `uninitialized constant PipelineMonitor::Reviewer::CLEAN_ENV` errors that skipped mr-review on every green pipeline.
+- Activity log timestamps now include the date (`MM-DD HH:MM`) and use the host's local timezone instead of UTC. Previously logs spanning multiple days were ambiguous (just `HH:MM`) and times were displayed in UTC even though the autodev host runs in CEST.
+- On reentry (`done` → `pending` when `label_todo` is re-applied), the `activity_note_id` is now reset so a fresh activity log comment is created at the bottom of the issue thread. Previously the existing activity log was edited in place, leaving it stranded above any user comments posted between the two runs and giving the impression that autodev was idle.
+
 ## [0.10.0] - 2026-04-10
 
 ### Changed

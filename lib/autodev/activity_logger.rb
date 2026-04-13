@@ -27,7 +27,7 @@ module ActivityLogger
   def self.build_entry(issue, key, **vars)
     locale = (issue.locale || 'fr').to_sym
     message = Locales.t(:"activity_#{key}", locale: locale, tag: tag, **vars)
-    "- `#{Time.now.utc.strftime('%H:%M')}` — #{message}"
+    "- `#{Time.now.strftime('%m-%d %H:%M')}` — #{message}"
   end
 
   def self.create(ctx, issue, first_entry)
