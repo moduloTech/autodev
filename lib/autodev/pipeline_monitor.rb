@@ -10,6 +10,7 @@ require_relative 'pipeline_monitor/fix_prompts'
 require_relative 'pipeline_monitor/failure_handler'
 require_relative 'pipeline_monitor/pipeline_fixer'
 require_relative 'pipeline_monitor/reviewer'
+require_relative 'pipeline_monitor/mr_state_checker'
 
 # Monitors CI pipeline status and triages failures for tracked MRs.
 class PipelineMonitor
@@ -22,6 +23,7 @@ class PipelineMonitor
   include FailureHandler
   include PipelineFixer
   include Reviewer
+  include MrStateChecker
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)
@@ -30,7 +32,10 @@ class PipelineMonitor
   def check(issue)
     log "Checking pipeline for MR !#{issue.mr_iid} (issue ##{issue.issue_iid})..."
     log_pipeline_poll(issue)
-    pipeline = @client.merge_request(@project_path, issue.mr_iid).head_pipeline
+    mr = @client.merge_request(@project_path, issue.mr_iid)
+    return handle_mr_closed(issue, mr) if mr.state != 'opened'
+
+    pipeline = mr.head_pipeline
     pipeline ? dispatch_status(issue, pipeline) : handle_no_pipeline(issue)
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to check pipeline for MR !#{issue.mr_iid}: #{e.message}"

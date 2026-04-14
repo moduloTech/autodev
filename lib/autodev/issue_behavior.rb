@@ -136,6 +136,7 @@ module IssueBehavior
         event(:start_post_completion) { transitions from: :done, to: :running_post_completion }
         event(:review_done) { transitions from: :reviewing, to: :checking_pipeline }
         event(:pipeline_failed_code) { transitions from: :checking_pipeline, to: :fixing_pipeline }
+        event(:mr_closed) { transitions from: :checking_pipeline, to: :done }
       end
     end
 

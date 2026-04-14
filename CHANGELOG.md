@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-04-14
+
+### Fixed
+
+- Pipeline monitor now checks MR state before dispatching — if the MR is merged or closed, the issue transitions to `done` immediately instead of attempting mr-review on a branch that no longer exists.
+
 ## [0.10.1] - 2026-04-13
 
 ### Fixed
