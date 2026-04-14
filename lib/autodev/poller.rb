@@ -40,7 +40,7 @@ class Poller
     loop do
       break if @shutdown
 
-      poll_all_projects unless @usage_checker&.available? == false
+      poll_all_projects if @usage_checker.available?
       print_poll_summary
       break if @config['once']
 
@@ -74,11 +74,7 @@ class Poller
   end
 
   def build_usage_checker
-    api_key = @config['anthropic_api_key']
-    return nil unless api_key
-
-    @logger.info('Anthropic API key configured — usage will be checked before each poll cycle')
-    UsageChecker.new(api_key: api_key, logger: @logger)
+    UsageChecker.new(logger: @logger)
   end
 
   def print_poll_summary

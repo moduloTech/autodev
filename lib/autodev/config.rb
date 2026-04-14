@@ -12,7 +12,6 @@ module Config
 
     gitlab_url: https://gitlab.example.com
     gitlab_token: glpat-xxxxxxxxxxxxxxxxxxxx   # or set GITLAB_API_TOKEN env var
-    # anthropic_api_key: sk-ant-xxx              # or set ANTHROPIC_API_KEY env var (enables proactive usage check)
     poll_interval: 300                          # seconds between poll cycles
     max_workers: 3                              # concurrent worker threads
     dc_timeout: 1800                              # danger-claude timeout in seconds (default: 1800 = 30min)
@@ -84,8 +83,7 @@ module Config
 
   ENV_MAPPING = {
     'GITLAB_API_TOKEN' => 'gitlab_token',
-    'GITLAB_URL' => 'gitlab_url',
-    'ANTHROPIC_API_KEY' => 'anthropic_api_key'
+    'GITLAB_URL' => 'gitlab_url'
   }.freeze
 
   DEPRECATED_GLOBAL_FIELDS = %w[trigger_label max_fix_rounds].freeze
