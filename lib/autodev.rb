@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Autodev
-  VERSION = '0.10.2'
+  VERSION = '0.11.0'
 end
 
 require_relative 'autodev/errors'
@@ -31,6 +31,7 @@ require_relative 'autodev/issue_processor'
 require_relative 'autodev/mr_fixer'
 require_relative 'autodev/pipeline_monitor'
 require_relative 'autodev/worker_pool'
+require_relative 'autodev/usage_checker'
 require_relative 'autodev/poll_router'
 require_relative 'autodev/dashboard'
 require_relative 'autodev/poller'

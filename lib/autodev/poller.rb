@@ -15,6 +15,7 @@ class Poller
     @token = config['gitlab_token']
     @client = GitlabHelpers.build_gitlab_client(config['gitlab_url'], @token)
     @pool = WorkerPool.new(size: config['max_workers'], logger: logger)
+    @usage_checker = build_usage_checker
     @shutdown = false
   end
 
@@ -39,15 +40,19 @@ class Poller
     loop do
       break if @shutdown
 
-      @config['projects'].each do |project_config|
-        break if @shutdown
-
-        poll_project(project_config)
-      end
+      poll_all_projects unless @usage_checker&.available? == false
       print_poll_summary
       break if @config['once']
 
       @config['poll_interval'].times { break if @shutdown; sleep 1 } # rubocop:disable Style/Semicolon
+    end
+  end
+
+  def poll_all_projects
+    @config['projects'].each do |project_config|
+      break if @shutdown
+
+      poll_project(project_config)
     end
   end
 
@@ -66,6 +71,14 @@ class Poller
 
   def build_worker_client
     GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @token)
+  end
+
+  def build_usage_checker
+    api_key = @config['anthropic_api_key']
+    return nil unless api_key
+
+    @logger.info('Anthropic API key configured — usage will be checked before each poll cycle')
+    UsageChecker.new(api_key: api_key, logger: @logger)
   end
 
   def print_poll_summary

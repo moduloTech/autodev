@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-14
+
+### Added
+
+- Proactive Claude API usage check before each poll cycle. When `anthropic_api_key` is configured (or `ANTHROPIC_API_KEY` env var), autodev sends a lightweight probe to the Anthropic API and skips the cycle if the account is rate-limited (429). Result is cached for 5 minutes.
+
 ## [0.10.2] - 2026-04-14
 
 ### Fixed
