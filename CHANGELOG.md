@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-04-20
+
+### Fixed
+
+- Follow-up on the v0.11.2 SQLite lock fix: 5s `busy_timeout` was still being exceeded under real-world contention (3 workers + poller all writing). Bump to 30s and add a Ruby-side `busy_handler` as a safety net in case the PRAGMA is silently ignored on some connection. Also log the effective `busy_timeout` at startup so the applied value is verifiable from the autodev output.
+
 ## [0.11.2] - 2026-04-20
 
 ### Fixed

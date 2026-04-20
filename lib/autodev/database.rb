@@ -4,12 +4,15 @@
 module Database
   @db = nil
 
+  BUSY_TIMEOUT_MS = 30_000
+
   def self.connect(url)
     return unless url
 
     @db = open_connection(url)
     migrate!
     migrate_statuses!
+    log_sqlite_pragmas if sqlite_url?(url)
     true
   rescue Sequel::DatabaseConnectionError, Sequel::DatabaseError => e
     warn "  Database connection failed: #{e.message}"
@@ -64,12 +67,40 @@ module Database
   # Applied to every pooled connection. `busy_timeout` is per-connection in
   # SQLite, so setting it once on the pool is not enough — without this, only
   # the first connection waits on the writer lock and the rest raise
-  # SQLite3::BusyException immediately under worker contention.
+  # SQLite3::BusyException immediately under worker contention. The Ruby
+  # `busy_handler` is a defense-in-depth net in case the PRAGMA is silently
+  # ignored or exceeded: it retries for up to ~BUSY_TIMEOUT_MS before giving up.
   def self.sqlite_after_connect
     lambda do |conn|
       conn.execute('PRAGMA journal_mode=WAL')
-      conn.execute('PRAGMA busy_timeout=5000')
+      conn.execute("PRAGMA busy_timeout=#{BUSY_TIMEOUT_MS}")
+      install_busy_handler(conn)
     end
+  end
+
+  def self.install_busy_handler(conn)
+    deadline_s = BUSY_TIMEOUT_MS / 1000.0
+    conn.busy_handler do |count|
+      sleep_s = [0.05 * (count + 1), 0.5].min
+      next 0 if (count * sleep_s) >= deadline_s
+
+      sleep(sleep_s)
+      1
+    end
+  rescue NoMethodError
+    # sqlite3 gem without busy_handler support — PRAGMA busy_timeout still applies.
+  end
+
+  def self.log_sqlite_pragmas
+    row = @db['PRAGMA busy_timeout'].first
+    effective = row.is_a?(Hash) ? row.values.first : row
+    warn "  Database pragmas: journal_mode=WAL, busy_timeout=#{effective}ms"
+  rescue StandardError
+    # best-effort diagnostic — never fail startup on this
+  end
+
+  def self.sqlite_url?(url)
+    url.is_a?(String) && url.start_with?('sqlite://')
   end
 
   def self.migrate!
@@ -80,7 +111,8 @@ module Database
     Migration.migrate_statuses!(@db)
   end
 
-  private_class_method :open_connection, :sqlite_after_connect, :migrate!
+  private_class_method :open_connection, :sqlite_after_connect, :install_busy_handler,
+                       :log_sqlite_pragmas, :sqlite_url?, :migrate!
 end
 
 require_relative 'database/migration'
