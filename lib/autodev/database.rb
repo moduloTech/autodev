@@ -67,13 +67,22 @@ module Database
   # workload like ours (small, fast statements; no long transactions).
   # This is also why we don't need Sequel's `after_connect` here — PRAGMAs
   # set via `@db.run` apply to the only connection that ever exists.
+  #
+  # `pool_timeout: 60` (default is 5s): with a single connection, callers
+  # queue up for a Ruby mutex. 5s is tight if a caller is mid-iteration
+  # on a dataset (SQLite holds the cursor through `.each`); 60s leaves
+  # comfortable headroom. Call sites that mix iteration with slow
+  # external I/O should still materialize (`.all.each`) to free the
+  # connection before the loop body runs.
+  SQLITE_POOL_OPTS = { max_connections: 1, pool_timeout: 60 }.freeze
+
   def self.open_connection(url)
     if url == 'sqlite://:memory:'
-      Sequel.sqlite(max_connections: 1)
+      Sequel.sqlite(**SQLITE_POOL_OPTS)
     elsif url.start_with?('sqlite://')
       db_path = File.expand_path(url.sub('sqlite://', ''))
       FileUtils.mkdir_p(File.dirname(db_path))
-      Sequel.connect("sqlite://#{db_path}", max_connections: 1)
+      Sequel.connect("sqlite://#{db_path}", **SQLITE_POOL_OPTS)
     else
       Sequel.connect(url)
     end
@@ -87,7 +96,9 @@ module Database
   def self.log_sqlite_pragmas
     journal_mode = scalar_pragma('journal_mode')
     busy_timeout = scalar_pragma('busy_timeout')
-    warn "  Database pragmas: journal_mode=#{journal_mode}, busy_timeout=#{busy_timeout}ms, max_connections=1"
+    warn "  Database pragmas: journal_mode=#{journal_mode}, busy_timeout=#{busy_timeout}ms, " \
+         "max_connections=#{SQLITE_POOL_OPTS[:max_connections]}, " \
+         "pool_timeout=#{SQLITE_POOL_OPTS[:pool_timeout]}s"
   rescue StandardError
     # best-effort diagnostic — never fail startup on this
   end

@@ -12,7 +12,7 @@ class Poller
     def poll_pipelines(project_config)
       path = project_config['path']
       Issue.where(project_path: path, status: 'checking_pipeline')
-           .exclude(mr_iid: nil).each do |issue|
+           .exclude(mr_iid: nil).all.each do |issue|
         break if @shutdown
 
         enqueue_pipeline_check(issue, project_config)
@@ -34,7 +34,7 @@ class Poller
     def poll_discussions(project_config)
       path = project_config['path']
       Issue.where(project_path: path, status: 'fixing_discussions')
-           .exclude(mr_iid: nil).each do |issue|
+           .exclude(mr_iid: nil).all.each do |issue|
         break if @shutdown
 
         enqueue_discussion_fix(issue, project_config)

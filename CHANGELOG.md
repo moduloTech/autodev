@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.11.6] - 2026-04-20
+
+### Fixed
+
+- Follow-up on the v0.11.5 single-connection switch: workers were hitting `Sequel::PoolTimeout: timeout: 5.0` because Sequel's default pool timeout is 5s. With `max_connections: 1`, any caller mid-iteration on a dataset holds the connection through the entire loop (SQLite keeps the cursor open across `.each`), and if the loop body does slow external I/O — as `poll_unassignment` and `poll_done_unassigned` do, with GitLab API calls per issue — workers waiting for the connection blow through 5s.
+  - Raised `pool_timeout` to 60s for SQLite.
+  - Materialized the two `poll_unassignment`/`poll_done_unassigned` iterations with `.all.each` so the DB connection is released before GitLab calls run. Applied the same shape defensively to `poll_pipelines` / `poll_discussions` for consistency, though their loop bodies only enqueue (fast).
+- Startup log now includes `pool_timeout` alongside `journal_mode`/`busy_timeout`/`max_connections` so the effective pool config is visible without re-instrumenting.
+
 ## [0.11.5] - 2026-04-20
 
 ### Fixed

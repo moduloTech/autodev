@@ -9,7 +9,10 @@ class Poller
       path = project_config['path']
       active_statuses = %w[cloning checking_spec implementing committing pushing creating_mr
                            checking_pipeline reviewing fixing_discussions fixing_pipeline]
-      Issue.where(project_path: path, status: active_statuses).each do |issue|
+      # .all materializes the result and releases the DB connection before
+      # the loop body runs external GitLab calls per issue — important when
+      # the Sequel pool is single-connection (see lib/autodev/database.rb).
+      Issue.where(project_path: path, status: active_statuses).all.each do |issue|
         break if @shutdown
 
         check_still_assigned(issue, project_config)
@@ -35,7 +38,7 @@ class Poller
       return unless pc_cmd.is_a?(Array) && pc_cmd.any?
 
       path = project_config['path']
-      Issue.where(project_path: path, status: 'done').exclude(mr_iid: nil).each do |issue|
+      Issue.where(project_path: path, status: 'done').exclude(mr_iid: nil).all.each do |issue|
         break if @shutdown
 
         check_post_completion_needed(issue, project_config)
