@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-04-20
+
+### Added
+
+- SQLite `busy_handler` now dumps all thread backtraces to stderr after 20 retries on the same contention episode (prefixed `[DB-LOCK]`). Since the handler runs in the thread that is waiting for the lock, the dump captures what every other thread is doing at the exact moment of contention — making it possible to identify which operation is holding the write lock. Diagnostic only; does not change the retry policy.
+
 ## [0.11.3] - 2026-04-20
 
 ### Fixed
