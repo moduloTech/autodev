@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.11.5] - 2026-04-20
+
+### Fixed
+
+- SQLite `database is locked` errors are finally gone. The v0.11.2–v0.11.4 attempts relied on Sequel's `after_connect` hook to apply per-connection PRAGMAs/busy_handler to every pooled connection; in practice the hook did not fire in our setup (confirmed in logs: `busy_timeout=0ms` at startup, no `[DB-LOCK]` dumps under contention), which is why increasing timeouts and adding defensive handlers changed nothing. Switched to `max_connections: 1` so Sequel's `ThreadedConnectionPool` serializes all DB access through a Ruby mutex. For SQLite this is strictly better: writes are already serialized at the file level, so multiple pool connections only add contention (and trigger `BusyException` when writers collide). `journal_mode=WAL` and `busy_timeout=30000` are now applied directly to the single connection via `@db.run`. Startup logs the effective values so they're visible without re-instrumenting.
+- Dropped the unused `after_connect`, `busy_handler`, and thread-backtrace dump code added in v0.11.3–v0.11.4 — the root-cause fix makes them moot.
+
 ## [0.11.4] - 2026-04-20
 
 ### Added
