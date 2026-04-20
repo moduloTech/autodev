@@ -8,7 +8,6 @@ module Database
     return unless url
 
     @db = open_connection(url)
-    configure_pragmas!
     migrate!
     migrate_statuses!
     true
@@ -52,19 +51,25 @@ module Database
 
   def self.open_connection(url)
     if url == 'sqlite://:memory:'
-      Sequel.sqlite(max_connections: 5)
+      Sequel.sqlite(max_connections: 5, after_connect: sqlite_after_connect)
     elsif url.start_with?('sqlite://')
       db_path = File.expand_path(url.sub('sqlite://', ''))
       FileUtils.mkdir_p(File.dirname(db_path))
-      Sequel.connect("sqlite://#{db_path}", max_connections: 5)
+      Sequel.connect("sqlite://#{db_path}", max_connections: 5, after_connect: sqlite_after_connect)
     else
       Sequel.connect(url, max_connections: 5)
     end
   end
 
-  def self.configure_pragmas!
-    @db.run('PRAGMA journal_mode=WAL')
-    @db.run('PRAGMA busy_timeout=5000')
+  # Applied to every pooled connection. `busy_timeout` is per-connection in
+  # SQLite, so setting it once on the pool is not enough — without this, only
+  # the first connection waits on the writer lock and the rest raise
+  # SQLite3::BusyException immediately under worker contention.
+  def self.sqlite_after_connect
+    lambda do |conn|
+      conn.execute('PRAGMA journal_mode=WAL')
+      conn.execute('PRAGMA busy_timeout=5000')
+    end
   end
 
   def self.migrate!
@@ -75,7 +80,7 @@ module Database
     Migration.migrate_statuses!(@db)
   end
 
-  private_class_method :open_connection, :configure_pragmas!, :migrate!
+  private_class_method :open_connection, :sqlite_after_connect, :migrate!
 end
 
 require_relative 'database/migration'

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- SQLite `busy_timeout=5000` PRAGMA is now applied to every connection in the pool via Sequel's `after_connect` hook, not just the first one. `busy_timeout` is per-connection, so under worker contention the other pool connections were falling back to the default (0) and raising `SQLite3::BusyException: database is locked` immediately instead of waiting for the writer lock.
+
 ## [0.11.1] - 2026-04-14
 
 ### Changed
