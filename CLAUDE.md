@@ -237,3 +237,48 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 - **Thread pool over processes**: Simpler resource management, shared Queue, per-worker GitLab clients for thread safety.
 - **danger-claude as implementation engine**: Leverages the existing Docker-based Claude CLI wrapper for sandboxed code generation.
 - **Reactive shutdown**: Sleep loop checks shutdown flag every 1 second.
+
+## Localization (i18n)
+
+**Rule: every user-facing string — CLI output, GitLab notes, web UI — must go through `Locales.t` / `t_web`. Never write a literal user-facing string in code or templates, in any language.**
+
+This applies to all future work, both CLI and web. Hardcoded literals are the source of every "why doesn't EN work?" bug we've already paid for once (`Dashboard.status_label` ignored the cookie until 51f0b0e).
+
+### Where templates live
+
+All under `lib/autodev/locales/`:
+
+| File | Constant | Purpose |
+|---|---|---|
+| `notifications.rb` (in `locales.rb`) | `NOTIFICATION_TEMPLATES` | One-off GitLab issue comments (errors, MR links, completion, stagnation, etc.) |
+| `activity.rb` | `ACTIVITY_TEMPLATES` | Per-issue activity-log entries (the single updated comment) |
+| `web.rb` | `WEB_TEMPLATES` | Every string rendered by the embedded web UI |
+
+They are merged at boot in `lib/autodev/locales.rb` into a single `TEMPLATES` hash. Each must declare both `:fr` and `:en` for every key; missing keys silently fall back to FR via `Locales.t`.
+
+### How to add a new string
+
+1. Pick a key with the right prefix: `notify_*`, `activity_*`, `web_*`. Keep them flat (no nesting).
+2. Add it to the matching `<AREA>_TEMPLATES` hash **in both `:fr` and `:en`**, with the same `%<var>s` placeholders in each.
+3. Use the right helper at the call site:
+   - **Ruby code (CLI, processors, services)**: `Locales.t(:my_key, locale: <locale>, **vars)`. The `locale` argument is mandatory in this layer — pick from `issue.locale`, a config field, or default to `:fr`.
+   - **ERB views**: `<%= h(t_web(:my_key, **vars)) %>`. `t_web` resolves the active locale automatically (cookie > config > default).
+4. If the string represents a status label or any web concept derived from a Ruby value (not a literal in the template), wire it into `STATUS_LABEL_KEYS` in `lib/autodev/web/i18n_helpers.rb` rather than inlining a `case`.
+
+### Locale resolution per layer
+
+| Layer | Source | Helper |
+|---|---|---|
+| Web UI | cookie `locale` > config `web.locale` > `:fr` | `Web::I18nHelpers#web_locale` + `t_web` |
+| GitLab activity log / notifications | `issue.locale` column (per-issue, set on creation, default `:fr`) | `Locales.t(..., locale: issue.locale.to_sym)` |
+| CLI dashboard / `--status` / `--errors` | `:fr` for now (no flag) | `Locales.t(..., locale: :fr)` — still go through it so adding `--locale en` later is a one-line change |
+
+### What NOT to do
+
+- Hardcode user-visible literals in ERB. The only allowed bare strings are pure structural HTML, code/paths/URLs, punctuation, and technical tokens that aren't translated (e.g. AASM state names, `JSON`, `MR`).
+- Translate FR but skip EN (or vice versa). Both keys must exist or `Locales.t` falls back silently and you get mixed-language output.
+- Add a new helper that returns French verbatim (e.g. `def label_for_X; 'Terminée'; end`). If the helper produces text shown to a user, it must take a locale and call `Locales.t`.
+
+### Migrating existing FR-only helpers
+
+Two hardcoded-FR helpers remain on purpose: `Dashboard.status_label` (CLI table) and the CLI summary lines in `Poller#print_issue_line`. They are FR-only because the CLI doesn't have a locale flag yet. If you add `--locale`, migrate these to `Locales.t` rather than duplicating the case-block.
