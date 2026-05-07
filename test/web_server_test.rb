@@ -3,7 +3,7 @@
 require_relative 'test_helper'
 require_relative 'web_test_helper'
 
-class WebServerTest < Minitest::Test
+class WebServerTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include Rack::Test::Methods
   include DatabaseTestHelper
   include WebServerTestSetup
@@ -13,7 +13,7 @@ class WebServerTest < Minitest::Test
     get '/'
 
     assert_predicate last_response, :ok?
-    assert_includes last_response.body, 'Dashboard'
+    assert_includes last_response.body, 'Bonjour'
   end
 
   def test_root_lists_active_issues
@@ -21,7 +21,6 @@ class WebServerTest < Minitest::Test
     get '/'
 
     assert_includes last_response.body, 'Hello'
-    assert_includes last_response.body, 'cloning'
   end
 
   def test_dashboard_groups_by_project
@@ -124,11 +123,11 @@ class WebServerTest < Minitest::Test
     refute_includes last_response.body, 'Error one'
   end
 
-  def test_dashboard_counters_link_to_list
-    create_issue(status: 'done')
+  def test_dashboard_renders_kpi_grid
+    create_issue(status: 'cloning')
     get '/'
 
-    assert_includes last_response.body, 'href="/list/done"'
+    assert_includes last_response.body, 'kpi-grid'
   end
 
   def test_dashboard_by_project_includes_done_issues
@@ -136,5 +135,12 @@ class WebServerTest < Minitest::Test
     get '/'
 
     assert_includes last_response.body, 'a/b'
+  end
+
+  def test_dashboard_renders_active_requests_section
+    create_issue(status: 'cloning', issue_title: 'WIP')
+    get '/'
+
+    assert_includes last_response.body, 'Demandes en cours'
   end
 end

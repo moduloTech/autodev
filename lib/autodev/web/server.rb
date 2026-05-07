@@ -41,11 +41,14 @@ module Web
     end
 
     # Stylesheets — only files under public/css/ matching [a-z0-9_-]+.css.
+    # `no-cache` means the browser must revalidate every load (cheap 304),
+    # so dev edits always pick up without manual cache-busts.
     get %r{/assets/css/([a-z0-9_-]+\.css)} do |name|
       content_type 'text/css'
       path = File.join(settings.public_folder, 'css', name)
       halt 404 unless File.file?(path)
 
+      cache_control :no_cache
       send_file path
     end
 
@@ -80,10 +83,12 @@ module Web
     end
 
     get '/' do
-      active = active_issues
+      errored = issues_dataset.where(status: %w[error needs_clarification])
+                              .or(Sequel.~(post_completion_error: nil))
+                              .order(Sequel.desc(:id)).all
       Web::Views::Dashboard.new(
-        counts: status_counts, active: active,
-        grouped: issues_grouped_by_status(active),
+        active: active_issues, errored: errored,
+        kpis: dashboard_kpis, weekly_activity: weekly_activity_counts,
         by_project: project_breakdown, **view_context
       ).call
     end

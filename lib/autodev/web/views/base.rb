@@ -26,8 +26,11 @@ module Web
       end
 
       # Wrap content with the shared Layout.
-      def with_layout(&)
-        render(Layout.new(locale: @locale, request_path: @request_path), &)
+      # - `nav: false` skips the top nav (used by views with their own chrome).
+      # - `shell: false` skips the centered .page-shell wrapper (used by views
+      #   that render a full-width app shell, e.g. dashboard).
+      def with_layout(nav: true, shell: true, &)
+        render(Layout.new(locale: @locale, request_path: @request_path, nav: nav, shell: shell), &)
       end
     end
   end

@@ -34,23 +34,23 @@ class WebLocaleTest < Minitest::Test
     Web::Server.configure_with('web' => { 'locale' => 'en' })
     get '/'
 
-    assert_includes last_response.body, 'All issues'
-    assert_includes last_response.body, 'By project'
+    assert_includes last_response.body, 'Hello'
+    assert_includes last_response.body, 'Active requests'
   end
 
   def test_french_dashboard_uses_french_nav
     Web::Server.configure_with('web' => { 'locale' => 'fr' })
     get '/'
 
-    assert_includes last_response.body, 'Toutes les issues'
-    assert_includes last_response.body, 'Par projet'
+    assert_includes last_response.body, 'Bonjour'
+    assert_includes last_response.body, 'Demandes en cours'
   end
 
   def test_invalid_locale_falls_back_to_french
     Web::Server.configure_with('web' => { 'locale' => 'klingon' })
     get '/'
 
-    assert_includes last_response.body, 'Toutes les issues'
+    assert_includes last_response.body, 'Bonjour'
   end
 
   def test_locale_validator_rejects_unknown
@@ -84,7 +84,7 @@ class WebLocaleTest < Minitest::Test
     set_cookie 'locale=en'
     get '/'
 
-    assert_includes last_response.body, 'All issues'
+    assert_includes last_response.body, 'Hello'
   end
 
   def test_invalid_locale_in_cookie_falls_back_to_config
@@ -92,7 +92,7 @@ class WebLocaleTest < Minitest::Test
     set_cookie 'locale=klingon'
     get '/'
 
-    assert_includes last_response.body, 'Toutes les issues'
+    assert_includes last_response.body, 'Bonjour'
   end
 
   def test_locale_switcher_rejects_unknown_lang_and_clears_cookie

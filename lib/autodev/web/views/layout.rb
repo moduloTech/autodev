@@ -57,22 +57,30 @@ module Web
         });
       JS
 
-      def initialize(locale: :fr, request_path: '/') # rubocop:disable Lint/MissingSuper
+      def initialize(locale: :fr, request_path: '/', nav: true, shell: true) # rubocop:disable Lint/MissingSuper
         @locale = locale
         @request_path = request_path
+        @nav = nav
+        @shell = shell
       end
 
       def web_locale
         @locale
       end
 
-      def view_template(&)
+      def view_template(&) # rubocop:disable Metrics/MethodLength
         doctype
         html(lang: @locale.to_s) do
           render_head
           body do
-            render_nav
-            yield
+            if @shell
+              div(class: 'page-shell') do
+                render_nav if @nav
+                yield
+              end
+            else
+              yield
+            end
           end
         end
       end
@@ -147,7 +155,7 @@ module Web
       end
 
       def render_theme_toggle
-        button(type: 'button', 'data-action' => 'toggle-theme',
+        button(type: 'button', class: 'icon-btn', 'data-action' => 'toggle-theme',
                'aria-label' => t_web(:web_theme_toggle), style: THEME_BTN_STYLE) do
           # Both icons rendered; CSS hides the inactive one via data-theme.
           raw safe(SUN_ICON_SVG)

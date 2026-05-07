@@ -8,7 +8,7 @@ require_relative 'i18n_helpers'
 
 module Web
   # View helpers exposed to ERB templates and route blocks.
-  module Helpers
+  module Helpers # rubocop:disable Metrics/ModuleLength
     include TurboStreamHelpers
     include IssuesFilter
     include I18nHelpers
@@ -67,6 +67,29 @@ module Web
 
     def project_for(project_path)
       Array(app_config['projects']).find { |p| p['path'] == project_path } || {}
+    end
+
+    # Counts used by the dashboard KPI cards.
+    def dashboard_kpis
+      counts = issues_dataset.group_and_count(:status).to_hash(:status, :count)
+      active = Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 }
+      delivered_week = issues_dataset.where(status: 'done')
+                                     .where { created_at >= (Date.today - 7).to_s }.count
+      { active: active, errors: counts['error'] || 0,
+        awaiting: counts['needs_clarification'] || 0,
+        delivered_week: delivered_week }
+    end
+
+    # Activity counts per day for the past 7 days, oldest first.
+    # Used by the dashboard sparkline.
+    def weekly_activity_counts # rubocop:disable Metrics/AbcSize
+      since = (Date.today - 6).to_s
+      rows = activity_events_dataset
+             .where { created_at >= since }
+             .select_group(Sequel.function(:date, :created_at).as(:day))
+             .select_append { count.function.* }
+             .to_hash(:day, :count)
+      (0..6).map { |offset| rows[(Date.today - 6 + offset).to_s] || 0 }
     end
 
     def gitlab_issue_url(issue)
