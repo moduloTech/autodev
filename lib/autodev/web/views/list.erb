@@ -1,12 +1,18 @@
-<h1>Issues — <span class="<%= status_class(@status) %>"><%= h(@status) %></span> <span class="muted"><%= h(status_label(@status)) %></span></h1>
+<h1><%= h(t_web(:web_list_title)) %><span class="<%= status_class(@status) %>"><%= h(@status) %></span> <span class="muted"><%= h(status_label(@status)) %></span></h1>
 
-<p class="muted"><%= @issues.size %> issue(s)<%= ' (limité aux 500 dernières)' if @issues.size == 500 %>.</p>
+<p class="muted">
+  <% if @issues.size == 500 %>
+    <%= h(t_web(:web_list_count_capped, count: @issues.size)) %>
+  <% else %>
+    <%= h(t_web(:web_list_count, count: @issues.size)) %>
+  <% end %>
+</p>
 
 <% if @issues.empty? %>
-  <p class="muted">Aucune issue dans cet état.</p>
+  <p class="muted"><%= h(t_web(:web_list_none)) %></p>
 <% else %>
   <table>
-    <tr><th>Projet</th><th>IID</th><th>Titre</th><th>Branche</th><th>MR</th></tr>
+    <tr><th><%= h(t_web(:web_col_project)) %></th><th><%= h(t_web(:web_col_iid)) %></th><th><%= h(t_web(:web_col_title)) %></th><th><%= h(t_web(:web_col_branch)) %></th><th><%= h(t_web(:web_col_mr)) %></th></tr>
     <% @issues.each do |row| %>
       <tr>
         <td><a href="/projects/<%= h(project_slug(row[:project_path])) %>"><%= h(row[:project_path]) %></a></td>
@@ -19,4 +25,4 @@
   </table>
 <% end %>
 
-<p><a href="/">← Dashboard</a></p>
+<p><a href="/"><%= h(t_web(:web_list_back)) %></a></p>

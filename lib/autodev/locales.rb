@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'locales/activity'
+require_relative 'locales/web'
 
 # Locale-aware message templates for GitLab issue comments.
 # Each key maps to one notify_issue call site across the processors.
@@ -72,7 +73,8 @@ module Locales
     }
   }.freeze
 
-  TEMPLATES = NOTIFICATION_TEMPLATES.merge(ACTIVITY_TEMPLATES) { |_key, notif, act| notif.merge(act) }.freeze
+  MERGED = NOTIFICATION_TEMPLATES.merge(ACTIVITY_TEMPLATES) { |_key, a, b| a.merge(b) }
+  TEMPLATES = MERGED.merge(WEB_TEMPLATES) { |_key, a, b| a.merge(b) }.freeze
 
   def self.t(key, locale: :fr, **vars)
     template = TEMPLATES.dig(locale, key) || TEMPLATES.dig(:fr, key) || key.to_s

@@ -45,17 +45,28 @@ module ConfigValidator
 
   def self.validate_web!(config)
     web = config['web']
-    return if web.nil? # optional block; absence == disabled
+    return if web.nil?
 
     raise ConfigError, "'web' must be a hash, got: #{web.inspect}" unless web.is_a?(Hash)
     raise ConfigError, "'web.enabled' must be true or false" unless [true, false].include?(web['enabled'])
-
     return unless web['enabled']
 
-    port = web['port']
+    validate_web_port!(web['port'])
+    validate_web_locale!(web['locale'])
+  end
+  private_class_method :validate_web!
+
+  def self.validate_web_port!(port)
     return if port.is_a?(Integer) && port.between?(1024, 65_535)
 
     raise ConfigError, "'web.port' must be an integer between 1024 and 65535, got: #{port.inspect}"
   end
-  private_class_method :validate_web!
+  private_class_method :validate_web_port!
+
+  def self.validate_web_locale!(locale)
+    return if locale.nil? || %w[fr en].include?(locale.to_s)
+
+    raise ConfigError, "'web.locale' must be 'fr' or 'en', got: #{locale.inspect}"
+  end
+  private_class_method :validate_web_locale!
 end

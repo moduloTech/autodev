@@ -1,18 +1,18 @@
-<h1>Projet — <%= h(@project_path) %></h1>
+<h1><%= h(t_web(:web_project_title, path: @project_path)) %></h1>
 
-<h2>Configuration <code>app:</code></h2>
+<h2><%= t_web(:web_project_config) %></h2>
 <% if @project_config.empty? %>
-  <p class="muted">Projet non listé dans la config courante.</p>
+  <p class="muted"><%= h(t_web(:web_project_no_config)) %></p>
 <% else %>
   <pre><%= h(YAML.dump(@project_config)) %></pre>
 <% end %>
 
-<h2>Issues récentes (<%= @project_issues.size %>)</h2>
+<h2><%= h(t_web(:web_project_recent, count: @project_issues.size)) %></h2>
 <% if @project_issues.empty? %>
-  <p class="muted">Aucune issue suivie pour ce projet.</p>
+  <p class="muted"><%= h(t_web(:web_project_no_issues)) %></p>
 <% else %>
   <table>
-    <tr><th>IID</th><th>Status</th><th>Titre</th><th>Branche</th><th>MR</th></tr>
+    <tr><th><%= h(t_web(:web_col_iid)) %></th><th><%= h(t_web(:web_col_status)) %></th><th><%= h(t_web(:web_col_title)) %></th><th><%= h(t_web(:web_col_branch)) %></th><th><%= h(t_web(:web_col_mr)) %></th></tr>
     <% @project_issues.each do |row| %>
       <tr>
         <td><a href="/issues/<%= row[:id] %>">#<%= row[:issue_iid] %></a></td>

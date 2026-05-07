@@ -17,14 +17,8 @@ module Web
     set :static, false
     # Bind is always 127.0.0.1; host authorization adds no security and breaks Rack::Test.
     set :host_authorization, { permitted_hosts: [] }
-    set :app_config, {} # populated by Server.configure_with(config) at startup
 
     helpers Web::Helpers
-
-    # Wire the loaded autodev config into the app. Called once at boot.
-    def self.configure_with(config)
-      set :app_config, config || {}
-    end
 
     # Vendored Turbo (no CDN). Served only via this explicit route.
     get '/assets/turbo.js' do

@@ -1,0 +1,182 @@
+# frozen_string_literal: true
+
+module Locales # rubocop:disable Metrics/ModuleLength
+  # All user-facing strings rendered in the embedded web UI views.
+  # Keys are flat (no nesting) to match the existing TEMPLATES merge logic.
+  WEB_TEMPLATES = {
+    fr: {
+      # Navigation
+      web_nav_dashboard: 'Dashboard',
+      web_nav_errors: 'Erreurs',
+      web_nav_all_issues: 'Toutes les issues',
+
+      # Common columns
+      web_col_project: 'Projet',
+      web_col_iid: 'IID',
+      web_col_status: 'Status',
+      web_col_title: 'Titre',
+      web_col_branch: 'Branche',
+      web_col_mr: 'MR',
+      web_col_created_at: 'Créée le',
+      web_col_total: 'Total',
+      web_col_active: 'Actives',
+      web_col_done: 'Terminées',
+      web_col_error: 'Erreur',
+      web_col_message: 'Message',
+
+      # Dashboard
+      web_dashboard_title: 'autodev — Dashboard',
+      web_dashboard_counters: 'Compteurs',
+      web_dashboard_active_issues: 'Issues actives (%<count>s)',
+      web_dashboard_no_active: 'Aucune issue active.',
+      web_dashboard_by_project: 'Par projet',
+      web_dashboard_no_project: 'Aucun projet avec des issues suivies.',
+
+      # Issue detail
+      web_issue_title: 'Issue #%<iid>s — %<project>s',
+      web_issue_links: 'Liens',
+      web_issue_link_gitlab: 'Issue GitLab',
+      web_issue_link_mr: 'Merge Request !%<iid>s',
+      web_issue_metadata: 'Métadonnées',
+      web_issue_locale: 'Locale',
+      web_issue_retry_count: 'Retry count',
+      web_issue_review_count: 'Review count',
+      web_issue_pipeline_retriggers: 'Pipeline retriggers',
+      web_issue_started_at: 'Démarrée le',
+      web_issue_post_completion_error: 'Erreur post-completion',
+      web_issue_actions: 'Actions',
+      web_issue_reset: 'Reset',
+      web_issue_confirm_reset: 'Reset cette issue à pending ?',
+      web_issue_force_transition: 'Forcer la transition',
+      web_issue_confirm_transition_prefix: 'Forcer la transition ',
+      web_issue_confirm_transition_suffix: ' ?',
+      web_issue_no_transitions: 'Aucune transition AASM permise depuis',
+      web_issue_activity: 'Activity (%<count>s)',
+      web_issue_no_activity: 'Aucun événement enregistré.',
+      web_activity_col_date: 'Date',
+      web_activity_col_kind: 'Type',
+      web_activity_col_level: 'Niveau',
+      web_activity_col_detail: 'Détail',
+      web_issue_screenshots: 'Screenshots (%<count>s)',
+      web_issue_screenshots_dir: 'Stockés dans',
+      web_issue_raw_data: 'Données brutes',
+
+      # Errors page
+      web_errors_title: 'autodev — Erreurs',
+      web_errors_none: 'Aucune issue en erreur.',
+      web_errors_confirm_reset: 'Reset #%<iid>s à pending ?',
+
+      # Project page
+      web_project_title: 'Projet — %<path>s',
+      web_project_config: 'Configuration <code>app:</code>',
+      web_project_no_config: 'Projet non listé dans la config courante.',
+      web_project_recent: 'Issues récentes (%<count>s)',
+      web_project_no_issues: 'Aucune issue suivie pour ce projet.',
+
+      # /list/:status (single-status browse)
+      web_list_title: 'Issues — ',
+      web_list_count: '%<count>s issue(s)',
+      web_list_count_capped: '%<count>s issue(s) (limité aux 500 dernières)',
+      web_list_none: 'Aucune issue dans cet état.',
+      web_list_back: '← Dashboard',
+
+      # /issues (full filtered list)
+      web_issues_title: 'Toutes les issues',
+      web_issues_search: 'Recherche',
+      web_issues_search_placeholder: 'mot-clé dans le titre',
+      web_issues_from: 'Du',
+      web_issues_to: 'Au',
+      web_issues_per_page: 'Par page',
+      web_issues_filter: 'Filtrer',
+      web_issues_reset: 'Réinitialiser',
+      web_issues_count_paginated: '%<count>s issue(s) — page %<page>s / %<total>s',
+      web_issues_no_match: 'Aucune issue ne correspond à ces filtres.',
+      web_issues_prev: '← Précédent',
+      web_issues_next: 'Suivant →',
+      web_issues_page_indicator: 'Page %<page>s / %<total>s'
+    },
+    en: {
+      web_nav_dashboard: 'Dashboard',
+      web_nav_errors: 'Errors',
+      web_nav_all_issues: 'All issues',
+
+      web_col_project: 'Project',
+      web_col_iid: 'IID',
+      web_col_status: 'Status',
+      web_col_title: 'Title',
+      web_col_branch: 'Branch',
+      web_col_mr: 'MR',
+      web_col_created_at: 'Created at',
+      web_col_total: 'Total',
+      web_col_active: 'Active',
+      web_col_done: 'Done',
+      web_col_error: 'Error',
+      web_col_message: 'Message',
+
+      web_dashboard_title: 'autodev — Dashboard',
+      web_dashboard_counters: 'Counters',
+      web_dashboard_active_issues: 'Active issues (%<count>s)',
+      web_dashboard_no_active: 'No active issue.',
+      web_dashboard_by_project: 'By project',
+      web_dashboard_no_project: 'No project with tracked issues.',
+
+      web_issue_title: 'Issue #%<iid>s — %<project>s',
+      web_issue_links: 'Links',
+      web_issue_link_gitlab: 'GitLab issue',
+      web_issue_link_mr: 'Merge Request !%<iid>s',
+      web_issue_metadata: 'Metadata',
+      web_issue_locale: 'Locale',
+      web_issue_retry_count: 'Retry count',
+      web_issue_review_count: 'Review count',
+      web_issue_pipeline_retriggers: 'Pipeline retriggers',
+      web_issue_started_at: 'Started at',
+      web_issue_post_completion_error: 'Post-completion error',
+      web_issue_actions: 'Actions',
+      web_issue_reset: 'Reset',
+      web_issue_confirm_reset: 'Reset this issue to pending?',
+      web_issue_force_transition: 'Force transition',
+      web_issue_confirm_transition_prefix: 'Force transition ',
+      web_issue_confirm_transition_suffix: '?',
+      web_issue_no_transitions: 'No AASM transition allowed from',
+      web_issue_activity: 'Activity (%<count>s)',
+      web_issue_no_activity: 'No event recorded.',
+      web_activity_col_date: 'Date',
+      web_activity_col_kind: 'Type',
+      web_activity_col_level: 'Level',
+      web_activity_col_detail: 'Detail',
+      web_issue_screenshots: 'Screenshots (%<count>s)',
+      web_issue_screenshots_dir: 'Stored in',
+      web_issue_raw_data: 'Raw data',
+
+      web_errors_title: 'autodev — Errors',
+      web_errors_none: 'No errored issue.',
+      web_errors_confirm_reset: 'Reset #%<iid>s to pending?',
+
+      web_project_title: 'Project — %<path>s',
+      web_project_config: 'Configuration <code>app:</code>',
+      web_project_no_config: 'Project not listed in the current config.',
+      web_project_recent: 'Recent issues (%<count>s)',
+      web_project_no_issues: 'No issue tracked for this project.',
+
+      web_list_title: 'Issues — ',
+      web_list_count: '%<count>s issue(s)',
+      web_list_count_capped: '%<count>s issue(s) (capped at 500 most recent)',
+      web_list_none: 'No issue in this state.',
+      web_list_back: '← Dashboard',
+
+      web_issues_title: 'All issues',
+      web_issues_search: 'Search',
+      web_issues_search_placeholder: 'keyword in title',
+      web_issues_from: 'From',
+      web_issues_to: 'To',
+      web_issues_per_page: 'Per page',
+      web_issues_filter: 'Filter',
+      web_issues_reset: 'Reset',
+      web_issues_count_paginated: '%<count>s issue(s) — page %<page>s / %<total>s',
+      web_issues_no_match: 'No issue matches these filters.',
+      web_issues_prev: '← Previous',
+      web_issues_next: 'Next →',
+      web_issues_page_indicator: 'Page %<page>s / %<total>s'
+    }
+  }.freeze
+end

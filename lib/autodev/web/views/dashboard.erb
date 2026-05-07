@@ -1,9 +1,9 @@
-<h1>autodev — Dashboard</h1>
+<h1><%= h(t_web(:web_dashboard_title)) %></h1>
 
-<h2>Compteurs</h2>
+<h2><%= h(t_web(:web_dashboard_counters)) %></h2>
 <table>
   <tr>
-    <th>Status</th><th>Total</th>
+    <th><%= h(t_web(:web_col_status)) %></th><th><%= h(t_web(:web_col_total)) %></th>
   </tr>
   <% Dashboard::STATUS_COLORS.keys.each do |status| %>
     <% count = @counts[status] || 0 %>
@@ -15,14 +15,14 @@
   <% end %>
 </table>
 
-<h2>Issues actives (<%= @active.size %>)</h2>
+<h2><%= h(t_web(:web_dashboard_active_issues, count: @active.size)) %></h2>
 <% if @active.empty? %>
-  <p class="muted">Aucune issue active.</p>
+  <p class="muted"><%= h(t_web(:web_dashboard_no_active)) %></p>
 <% else %>
   <% @grouped.each do |status, rows| %>
     <h3><span class="<%= status_class(status) %>"><%= h(status) %></span> <span class="muted"><%= h(status_label(status)) %></span> (<%= rows.size %>)</h3>
     <table>
-      <tr><th>Projet</th><th>IID</th><th>Titre</th><th>Branche</th><th>MR</th></tr>
+      <tr><th><%= h(t_web(:web_col_project)) %></th><th><%= h(t_web(:web_col_iid)) %></th><th><%= h(t_web(:web_col_title)) %></th><th><%= h(t_web(:web_col_branch)) %></th><th><%= h(t_web(:web_col_mr)) %></th></tr>
       <% rows.each do |row| %>
         <tr>
           <td><a href="/projects/<%= h(project_slug(row[:project_path])) %>"><%= h(row[:project_path]) %></a></td>
@@ -36,12 +36,12 @@
   <% end %>
 <% end %>
 
-<h2>Par projet</h2>
+<h2><%= h(t_web(:web_dashboard_by_project)) %></h2>
 <% if @by_project.empty? %>
-  <p class="muted">Aucun projet avec des issues suivies.</p>
+  <p class="muted"><%= h(t_web(:web_dashboard_no_project)) %></p>
 <% else %>
   <table>
-    <tr><th>Projet</th><th>Total</th><th>Actives</th><th>Terminées</th><th>Erreur</th></tr>
+    <tr><th><%= h(t_web(:web_col_project)) %></th><th><%= h(t_web(:web_col_total)) %></th><th><%= h(t_web(:web_col_active)) %></th><th><%= h(t_web(:web_col_done)) %></th><th><%= h(t_web(:web_col_error)) %></th></tr>
     <% @by_project.each do |stats| %>
       <tr>
         <td><a href="/projects/<%= h(project_slug(stats[:path])) %>"><%= h(stats[:path]) %></a></td>

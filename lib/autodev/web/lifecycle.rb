@@ -7,6 +7,13 @@ module Web
     DEFAULT_PORT = 4567
     JOIN_TIMEOUT = 5
 
+    attr_accessor :app_config
+
+    # Wire the loaded autodev config into the app. Called once at boot.
+    def configure_with(config)
+      @app_config = config || {}
+    end
+
     # Boot a background Puma server bound to 127.0.0.1.
     # Returns the chosen port if started, nil if disabled or already running.
     def start(config, logger: nil)

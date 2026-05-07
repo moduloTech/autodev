@@ -1,4 +1,4 @@
-<h1>Issue #<%= @issue[:issue_iid] %> — <%= h(@issue[:project_path]) %></h1>
+<h1><%= h(t_web(:web_issue_title, iid: @issue[:issue_iid], project: @issue[:project_path])) %></h1>
 
 <p>
   <span id="status_<%= @issue[:id] %>" class="<%= status_class(@issue[:status]) %>"><%= h(@issue[:status]) %></span>
@@ -7,49 +7,49 @@
 
 <p><%= h(@issue[:issue_title]) %></p>
 
-<h2>Liens</h2>
+<h2><%= h(t_web(:web_issue_links)) %></h2>
 <ul>
-  <% if (url = gitlab_issue_url(@issue)) %><li><a href="<%= h(url) %>" target="_blank">Issue GitLab</a></li><% end %>
-  <% if (url = gitlab_mr_url(@issue)) %><li><a href="<%= h(url) %>" target="_blank">Merge Request !<%= @issue[:mr_iid] %></a></li><% end %>
+  <% if (url = gitlab_issue_url(@issue)) %><li><a href="<%= h(url) %>" target="_blank"><%= h(t_web(:web_issue_link_gitlab)) %></a></li><% end %>
+  <% if (url = gitlab_mr_url(@issue)) %><li><a href="<%= h(url) %>" target="_blank"><%= h(t_web(:web_issue_link_mr, iid: @issue[:mr_iid])) %></a></li><% end %>
 </ul>
 
-<h2>Métadonnées</h2>
+<h2><%= h(t_web(:web_issue_metadata)) %></h2>
 <table>
-  <tr><td>Branche</td><td><code><%= h(@issue[:branch_name]) %></code></td></tr>
-  <tr><td>Locale</td><td><%= h(@issue[:locale] || 'fr') %></td></tr>
-  <tr><td>Retry count</td><td><%= @issue[:retry_count] %></td></tr>
-  <tr><td>Review count</td><td><%= @issue[:review_count] %></td></tr>
-  <tr><td>Pipeline retriggers</td><td><%= @issue[:pipeline_retrigger_count] %></td></tr>
-  <tr><td>Started at</td><td><%= h(@issue[:started_at]) %></td></tr>
-  <tr><td>Created at</td><td><%= h(@issue[:created_at]) %></td></tr>
-  <% if @issue[:error_message] %><tr><td>Erreur</td><td><pre><%= h(@issue[:error_message]) %></pre></td></tr><% end %>
-  <% if @issue[:post_completion_error] %><tr><td>Post-completion erreur</td><td><pre><%= h(@issue[:post_completion_error]) %></pre></td></tr><% end %>
+  <tr><td><%= h(t_web(:web_col_branch)) %></td><td><code><%= h(@issue[:branch_name]) %></code></td></tr>
+  <tr><td><%= h(t_web(:web_issue_locale)) %></td><td><%= h(@issue[:locale] || 'fr') %></td></tr>
+  <tr><td><%= h(t_web(:web_issue_retry_count)) %></td><td><%= @issue[:retry_count] %></td></tr>
+  <tr><td><%= h(t_web(:web_issue_review_count)) %></td><td><%= @issue[:review_count] %></td></tr>
+  <tr><td><%= h(t_web(:web_issue_pipeline_retriggers)) %></td><td><%= @issue[:pipeline_retrigger_count] %></td></tr>
+  <tr><td><%= h(t_web(:web_issue_started_at)) %></td><td><%= h(@issue[:started_at]) %></td></tr>
+  <tr><td><%= h(t_web(:web_col_created_at)) %></td><td><%= h(@issue[:created_at]) %></td></tr>
+  <% if @issue[:error_message] %><tr><td><%= h(t_web(:web_col_error)) %></td><td><pre><%= h(@issue[:error_message]) %></pre></td></tr><% end %>
+  <% if @issue[:post_completion_error] %><tr><td><%= h(t_web(:web_issue_post_completion_error)) %></td><td><pre><%= h(@issue[:post_completion_error]) %></pre></td></tr><% end %>
 </table>
 
-<h2>Actions</h2>
-<form method="post" action="/issues/<%= @issue[:id] %>/reset" onsubmit="return confirm('Reset cette issue à pending ?');" style="display: inline">
-  <button type="submit">Reset</button>
+<h2><%= h(t_web(:web_issue_actions)) %></h2>
+<form method="post" action="/issues/<%= @issue[:id] %>/reset" onsubmit="return confirm('<%= t_web(:web_issue_confirm_reset) %>');" style="display: inline">
+  <button type="submit"><%= h(t_web(:web_issue_reset)) %></button>
 </form>
 
 <% events = permitted_events_for(@issue_model) %>
 <% if events.any? %>
-  <form method="post" action="/issues/<%= @issue[:id] %>/transition" onsubmit="return confirm('Forcer la transition ' + this.event.value + ' ?');" style="display: inline">
+  <form method="post" action="/issues/<%= @issue[:id] %>/transition" onsubmit="return confirm('<%= t_web(:web_issue_confirm_transition_prefix) %>' + this.event.value + '<%= t_web(:web_issue_confirm_transition_suffix) %>');" style="display: inline">
     <select name="event">
       <% events.each do |ev| %><option value="<%= h(ev) %>"><%= h(ev) %></option><% end %>
     </select>
-    <button type="submit">Forcer la transition</button>
+    <button type="submit"><%= h(t_web(:web_issue_force_transition)) %></button>
   </form>
 <% else %>
-  <p class="muted">Aucune transition AASM permise depuis <code><%= h(@issue[:status]) %></code>.</p>
+  <p class="muted"><%= h(t_web(:web_issue_no_transitions)) %> <code><%= h(@issue[:status]) %></code>.</p>
 <% end %>
 
-<h2>Activity (<%= @events.size %>)</h2>
+<h2><%= h(t_web(:web_issue_activity, count: @events.size)) %></h2>
 <% if @events.empty? %>
-  <p class="muted">Aucun événement enregistré.</p>
+  <p class="muted"><%= h(t_web(:web_issue_no_activity)) %></p>
 <% else %>
   <table>
     <thead>
-      <tr><th>Date</th><th>Type</th><th>Niveau</th><th>Détail</th></tr>
+      <tr><th><%= h(t_web(:web_activity_col_date)) %></th><th><%= h(t_web(:web_activity_col_kind)) %></th><th><%= h(t_web(:web_activity_col_level)) %></th><th><%= h(t_web(:web_activity_col_detail)) %></th></tr>
     </thead>
     <tbody id="events_<%= @issue[:id] %>">
       <% @events.each do |ev| %>
@@ -66,14 +66,14 @@
 
 <% screenshots = screenshot_files(@issue) %>
 <% if screenshots.any? %>
-  <h2>Screenshots (<%= screenshots.size %>)</h2>
+  <h2><%= h(t_web(:web_issue_screenshots, count: screenshots.size)) %></h2>
   <ul>
     <% screenshots.each do |path| %><li><code><%= h(path) %></code></li><% end %>
   </ul>
-  <p class="muted">Stockés dans <code><%= h(screenshot_dir_for(@issue)) %></code>.</p>
+  <p class="muted"><%= h(t_web(:web_issue_screenshots_dir)) %> <code><%= h(screenshot_dir_for(@issue)) %></code>.</p>
 <% end %>
 
-<h2>Données brutes</h2>
+<h2><%= h(t_web(:web_issue_raw_data)) %></h2>
 <details>
   <summary>JSON</summary>
   <pre><%= h(JSON.pretty_generate(@issue)) %></pre>

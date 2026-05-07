@@ -22,7 +22,7 @@ module Config
     log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
     log_level: INFO                                # DEBUG, INFO, WARN, ERROR (default: INFO)
     # database_url: sqlite://~/.autodev/autodev.db  # default
-    web: { enabled: true, port: 4567 }              # embedded web UI on http://127.0.0.1:<port> (set enabled:false to disable)
+    web: { enabled: true, port: 4567, locale: fr }  # embedded web UI on http://127.0.0.1:<port>; locale: 'fr' or 'en'
 
 
     projects:
@@ -80,7 +80,7 @@ module Config
     'log_level' => 'INFO',
     'database_url' => "sqlite://#{DEFAULT_DB}",
     'projects' => [],
-    'web' => { 'enabled' => true, 'port' => 4567 }
+    'web' => { 'enabled' => true, 'port' => 4567, 'locale' => 'fr' }
   }.freeze
 
   ENV_MAPPING = {

@@ -34,9 +34,9 @@
 </head>
 <body>
   <nav>
-    <a href="/">Dashboard</a>
-    <a href="/errors">Erreurs</a>
-    <a href="/issues">Toutes les issues</a>
+    <a href="/"><%= h(t_web(:web_nav_dashboard)) %></a>
+    <a href="/errors"><%= h(t_web(:web_nav_errors)) %></a>
+    <a href="/issues"><%= h(t_web(:web_nav_all_issues)) %></a>
   </nav>
   <%= yield %>
 </body>

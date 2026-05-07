@@ -4,15 +4,17 @@ require 'cgi'
 
 require_relative 'turbo_stream_helpers'
 require_relative 'issues_filter'
+require_relative 'i18n_helpers'
 
 module Web
   # View helpers exposed to ERB templates and route blocks.
   module Helpers
     include TurboStreamHelpers
     include IssuesFilter
+    include I18nHelpers
 
     def app_config
-      settings.app_config || {}
+      Web::Server.app_config || {}
     end
 
     def issues_dataset
