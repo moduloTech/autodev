@@ -9,6 +9,7 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_nav_dashboard: 'Dashboard',
       web_nav_errors: 'Erreurs',
       web_nav_all_issues: 'Toutes les issues',
+      web_theme_toggle: 'Changer le thème',
 
       # Common columns
       web_col_project: 'Projet',
@@ -106,6 +107,7 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_nav_dashboard: 'Dashboard',
       web_nav_errors: 'Errors',
       web_nav_all_issues: 'All issues',
+      web_theme_toggle: 'Toggle theme',
 
       web_col_project: 'Project',
       web_col_iid: 'IID',

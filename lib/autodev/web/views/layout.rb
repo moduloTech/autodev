@@ -3,37 +3,36 @@
 module Web
   module Views
     # Wraps page content with the shared HTML head, nav, and locale switcher.
-    class Layout < Phlex::HTML
+    class Layout < Phlex::HTML # rubocop:disable Metrics/ClassLength
       include Web::I18nHelpers
 
-      CSS = <<~CSS
-        :root { color-scheme: light dark; }
-        body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; }
-        nav a { margin-right: 1rem; }
-        h1 { font-size: 1.4rem; margin: 0 0 1rem; }
-        h2 { font-size: 1.1rem; margin-top: 1.5rem; }
-        table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
-        th, td { border-bottom: 1px solid #8884; padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
-        .badge { display: inline-block; padding: 0.05rem 0.5rem; border-radius: 0.5rem; font-size: 0.8rem; }
-        .badge-active { background: #08f3; }
-        .badge-error { background: #f444; }
-        .badge-done { background: #0a73; }
-        .badge-pending { background: #fc04; }
-        .muted { opacity: 0.7; }
-        code, pre { font-family: ui-monospace, monospace; }
-        pre { background: #8881; padding: 0.5rem; overflow-x: auto; }
-        button { font: inherit; padding: 0.3rem 0.7rem; cursor: pointer; }
-      CSS
+      # Reads localStorage and applies data-theme on <html> BEFORE the body
+      # paints, to avoid a flash of the wrong theme. Must run synchronously
+      # in <head> — no defer, no DOMContentLoaded.
+      THEME_BOOTSTRAP_JS = <<~JS
+        (function () {
+          try {
+            var t = localStorage.getItem('autodev-theme');
+            if (t === 'light' || t === 'dark') {
+              document.documentElement.dataset.theme = t;
+            } else {
+              document.documentElement.dataset.theme =
+                window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+          } catch (e) { /* localStorage unavailable, fall back to CSS default */ }
+        })();
+      JS
 
-      SSE_PUMP_JS = <<~JS
+      APP_JS = <<~JS
+        // SSE → Turbo Stream pump.
         document.addEventListener('turbo:load', () => {
           if (window.__autodevSSE) return;
           const es = new EventSource('/stream');
           es.onmessage = (e) => Turbo.renderStreamMessage(e.data);
           window.__autodevSSE = es;
         });
-        // Generic confirm-on-submit: forms can opt in via data-confirm="..."
-        // or data-confirm-template="...$event..." (interpolates select[name=event].value).
+
+        // Delegated confirm-on-submit (Phlex 2 forbids inline onsubmit).
         document.addEventListener('submit', (e) => {
           const f = e.target;
           let msg = f.getAttribute('data-confirm');
@@ -46,6 +45,16 @@ module Web
           }
           if (msg && !confirm(msg)) e.preventDefault();
         });
+
+        // Theme toggle — wired via data-action="toggle-theme".
+        document.addEventListener('click', (e) => {
+          const btn = e.target.closest('[data-action="toggle-theme"]');
+          if (!btn) return;
+          const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+          document.documentElement.dataset.theme = next;
+          try { localStorage.setItem('autodev-theme', next); } catch (_) {}
+          btn.setAttribute('aria-pressed', next === 'dark');
+        });
       JS
 
       def initialize(locale: :fr, request_path: '/') # rubocop:disable Lint/MissingSuper
@@ -57,16 +66,10 @@ module Web
         @locale
       end
 
-      def view_template(&) # rubocop:disable Metrics/MethodLength
+      def view_template(&)
         doctype
         html(lang: @locale.to_s) do
-          head do
-            meta(charset: 'utf-8')
-            title { 'autodev' }
-            style { raw(safe(CSS)) }
-            script(src: '/assets/turbo.js', defer: true)
-            script { raw(safe(SSE_PUMP_JS)) }
-          end
+          render_head
           body do
             render_nav
             yield
@@ -74,19 +77,60 @@ module Web
         end
       end
 
+      THEME_BTN_STYLE = 'width: 30px; height: 30px; border-radius: var(--r-sm); ' \
+                        'display: inline-flex; align-items: center; justify-content: center; ' \
+                        'border: 1px solid var(--border); background: var(--paper);'
+
+      SVG_ATTRS = 'width="16" height="16" viewBox="0 0 24 24" fill="none" ' \
+                  'stroke="currentColor" stroke-width="1.6" ' \
+                  'stroke-linecap="round" stroke-linejoin="round"'
+
+      SUN_ICON_SVG = <<~SVG.freeze
+        <svg #{SVG_ATTRS} class="theme-icon theme-icon-sun">
+          <circle cx="12" cy="12" r="4"/>
+          <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6 19 19M5 19l1.4-1.4M17.6 6.4 19 5"/>
+        </svg>
+      SVG
+
+      MOON_ICON_SVG = <<~SVG.freeze
+        <svg #{SVG_ATTRS} class="theme-icon theme-icon-moon">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+        </svg>
+      SVG
+
       private
 
-      def render_nav
-        nav(style: 'display: flex; justify-content: space-between; align-items: baseline') do
-          span do
-            a(href: '/') { t_web(:web_nav_dashboard) }
-            plain ' '
-            a(href: '/errors') { t_web(:web_nav_errors) }
-            plain ' '
-            a(href: '/issues') { t_web(:web_nav_all_issues) }
-          end
-          render_lang_switcher
+      def render_head # rubocop:disable Metrics/MethodLength
+        head do
+          meta(charset: 'utf-8')
+          meta(name: 'viewport', content: 'width=device-width, initial-scale=1')
+          title { 'autodev' }
+          # Theme bootstrap MUST come before stylesheets to avoid FOUC.
+          script { raw(safe(THEME_BOOTSTRAP_JS)) }
+          link(rel: 'stylesheet', href: '/assets/css/tokens.css')
+          link(rel: 'stylesheet', href: '/assets/css/fonts.css')
+          link(rel: 'stylesheet', href: '/assets/css/app.css')
+          script(src: '/assets/turbo.js', defer: true)
+          script { raw(safe(APP_JS)) }
         end
+      end
+
+      def render_nav
+        nav(style: 'display: flex; justify-content: space-between; align-items: center; gap: 1rem;') do
+          span { render_nav_links }
+          span(style: 'display: flex; align-items: center; gap: 0.6rem;') do
+            render_lang_switcher
+            render_theme_toggle
+          end
+        end
+      end
+
+      def render_nav_links
+        a(href: '/') { t_web(:web_nav_dashboard) }
+        plain ' '
+        a(href: '/errors') { t_web(:web_nav_errors) }
+        plain ' '
+        a(href: '/issues') { t_web(:web_nav_all_issues) }
       end
 
       def render_lang_switcher
@@ -99,6 +143,15 @@ module Web
               a(href: "/locale/#{lang}?back=#{CGI.escape(@request_path)}") { lang.upcase }
             end
           end
+        end
+      end
+
+      def render_theme_toggle
+        button(type: 'button', 'data-action' => 'toggle-theme',
+               'aria-label' => t_web(:web_theme_toggle), style: THEME_BTN_STYLE) do
+          # Both icons rendered; CSS hides the inactive one via data-theme.
+          raw safe(SUN_ICON_SVG)
+          raw safe(MOON_ICON_SVG)
         end
       end
     end

@@ -1,0 +1,70 @@
+/* App-shell + transitional styles.
+ *
+ * tokens.css holds the design system. This file holds shell rules
+ * (max-width, padding) plus a temporary bridge for the old .badge-*
+ * classes so pages keep working until the StatusPill component is
+ * introduced. Both will shrink as Tasks 3-8 land.
+ */
+
+body {
+  max-width: 1100px;
+  margin: 1.5rem auto;
+  padding: 0 1rem;
+}
+
+nav { font-size: 0.95rem; }
+nav a { margin-right: 1rem; color: var(--text); }
+nav a:hover { color: var(--accent-fg); }
+
+h1 { font-size: 1.4rem; margin: 0 0 1rem; color: var(--text-strong); }
+h2 { font-size: 1.1rem; margin-top: 1.5rem; color: var(--text-strong); }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { border-bottom: 1px solid var(--divider); padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+th { color: var(--text-muted); font-weight: 500; }
+
+a { color: var(--accent-fg); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+a:hover { color: var(--accent-solid-hover); }
+
+button {
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--text);
+}
+button:hover { background: var(--paper-2); }
+
+input[type="text"], input[type="date"], select {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+  color: var(--text);
+}
+input:focus, select:focus { outline: 2px solid var(--accent-solid); outline-offset: -1px; border-color: transparent; }
+
+.muted { color: var(--text-muted); }
+
+code { background: var(--paper-2); padding: 0.05rem 0.3rem; border-radius: var(--r-xs); font-size: 0.85em; }
+pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border-radius: var(--r-md); overflow-x: auto; font-size: 0.85em; }
+
+/* Legacy badge classes — superseded by StatusPill in Task 2 but still used
+ * by helpers.rb#status_class until each view is refactored. */
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--r-pill);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.badge-active  { background: var(--work-bg); color: var(--work-fg); }
+.badge-error   { background: var(--err-bg);  color: var(--err-fg); }
+.badge-done    { background: var(--ok-bg);   color: var(--ok-fg); }
+.badge-pending { background: var(--paper-2); color: var(--text-muted); }
+
+/* Theme toggle: show only the icon for the *opposite* of the current theme,
+ * since clicking flips to that mode. */
+.theme-icon { color: var(--text-muted); }
+[data-theme="light"] .theme-icon-sun  { display: none; }
+[data-theme="dark"]  .theme-icon-moon { display: none; }

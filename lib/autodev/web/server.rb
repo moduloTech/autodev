@@ -40,6 +40,26 @@ module Web
       send_file File.join(settings.public_folder, 'turbo.js')
     end
 
+    # Stylesheets — only files under public/css/ matching [a-z0-9_-]+.css.
+    get %r{/assets/css/([a-z0-9_-]+\.css)} do |name|
+      content_type 'text/css'
+      path = File.join(settings.public_folder, 'css', name)
+      halt 404 unless File.file?(path)
+
+      send_file path
+    end
+
+    # Vendored web fonts (Inter, JetBrains Mono). Names are opaque hashes
+    # from Google Fonts; restrict to [A-Za-z0-9_-]+.woff2 to be safe.
+    get %r{/assets/vendor/fonts/([A-Za-z0-9_-]+\.woff2)} do |name|
+      content_type 'font/woff2'
+      path = File.join(settings.public_folder, 'vendor', 'fonts', name)
+      halt 404 unless File.file?(path)
+
+      cache_control :public, max_age: 31_536_000, immutable: true
+      send_file path
+    end
+
     # Server-Sent Events endpoint. One open connection per browser tab.
     # Each event published to Web::EventBus is encoded as a single SSE frame.
     get '/stream' do
