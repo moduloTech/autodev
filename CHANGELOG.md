@@ -29,6 +29,7 @@
 - `CLAUDE.md` gains a Web UI section documenting routes, lifecycle, EventBus, and the persistence wiring. `bin/autodev` help text and the YAML config template are updated with the new `web:` block. The CLI flags `--status`, `--errors`, `--reset` are kept as-is for headless / SSH / CI use.
 - Web UI: dashboard counters are now clickable links to a generic `GET /list/:status` route (limit 500, ordered by id desc). Mirrors `--status --all` for any single AASM state — particularly useful for browsing `done` history, which had no UI entry point before.
 - Web UI: the dashboard's "Par projet" section now lists every project with any tracked issue (active or done), with per-status counts (Total / Actives / Terminées / Erreur). Previously only projects with at least one *active* issue showed up — useless once everything was finished.
+- Web UI: new `GET /issues` page (linked from the nav next to Dashboard / Erreurs) listing every tracked issue regardless of status, with: case-insensitive keyword search on title (SQL `%`/`_` escaped), `from`/`to` date filter on `created_at` (end-of-day inclusive), and pagination with user-selectable page size (20/50/100, default 50). Filter logic extracted to `Web::IssuesFilter` so it's testable without Sinatra. Pagination clamps an out-of-range `page` to the last available page.
 
 ## [0.11.6] - 2026-04-20
 

@@ -65,6 +65,15 @@ module Web
       erb :list
     end
 
+    get '/issues' do
+      @per_page = per_page_for(params)
+      @page = page_for(params)
+      ds = filter_issues(params)
+      @issues, @total, @total_pages, @page = paginate(ds, @page, @per_page)
+      @filters = { q: params[:q], from: params[:from], to: params[:to] }
+      erb :issues
+    end
+
     get %r{/issues/(\d+)\.json} do |id|
       issue = find_issue(id)
       halt 404 unless issue

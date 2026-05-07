@@ -3,11 +3,13 @@
 require 'cgi'
 
 require_relative 'turbo_stream_helpers'
+require_relative 'issues_filter'
 
 module Web
   # View helpers exposed to ERB templates and route blocks.
   module Helpers
     include TurboStreamHelpers
+    include IssuesFilter
 
     def app_config
       settings.app_config || {}
