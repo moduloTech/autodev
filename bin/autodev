@@ -43,6 +43,7 @@ gemfile(true) do
   gem 'rack',    '~> 3.0'
   gem 'sinatra', '~> 4.0'
   gem 'puma',    '~> 6.0'
+  gem 'phlex',   '~> 2.4', '>= 2.4.1'
 end
 
 require 'fileutils'

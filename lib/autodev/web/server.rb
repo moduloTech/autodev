@@ -5,11 +5,10 @@ require_relative 'lifecycle'
 
 module Web
   # Sinatra app exposing live views and actions over the autodev SQLite DB.
-  class Server < Sinatra::Base
+  class Server < Sinatra::Base # rubocop:disable Metrics/ClassLength
     extend Lifecycle
 
     set :root, File.expand_path('..', __dir__)
-    set :views, File.expand_path('views', __dir__)
     set :public_folder, File.expand_path('public', __dir__)
     set :show_exceptions, false
     set :raise_errors, false
@@ -19,6 +18,14 @@ module Web
     set :host_authorization, { permitted_hosts: [] }
 
     helpers Web::Helpers
+
+    helpers do
+      # Common kwargs passed to every Phlex view: locale + the path the user
+      # came from (for the locale switcher's `back=` query).
+      def view_context
+        { locale: web_locale, request_path: request.fullpath }
+      end
+    end
 
     # Per-browser locale override (cookie). Falls through to the
     # config-defined locale when no cookie is set.
@@ -53,26 +60,30 @@ module Web
     end
 
     get '/' do
-      @counts = status_counts
-      @active = active_issues
-      @grouped = issues_grouped_by_status(@active)
-      @by_project = project_breakdown
-      erb :dashboard
+      active = active_issues
+      Web::Views::Dashboard.new(
+        counts: status_counts, active: active,
+        grouped: issues_grouped_by_status(active),
+        by_project: project_breakdown, **view_context
+      ).call
     end
 
     get '/list/:status' do
-      @status = params[:status]
-      @issues = issues_dataset.where(status: @status).order(Sequel.desc(:id)).limit(500).all
-      erb :list
+      issues = issues_dataset.where(status: params[:status]).order(Sequel.desc(:id)).limit(500).all
+      Web::Views::List.new(status: params[:status], issues: issues, **view_context).call
     end
 
     get '/issues' do
-      @per_page = per_page_for(params)
-      @page = page_for(params)
+      per_page = per_page_for(params)
+      page = page_for(params)
       ds = filter_issues(params)
-      @issues, @total, @total_pages, @page = paginate(ds, @page, @per_page)
-      @filters = { q: params[:q], from: params[:from], to: params[:to] }
-      erb :issues
+      issues, total, total_pages, page = paginate(ds, page, per_page)
+      Web::Views::Issues.new(
+        issues: issues, total: total, total_pages: total_pages,
+        page: page, per_page: per_page,
+        filters: { q: params[:q], from: params[:from], to: params[:to] },
+        **view_context
+      ).call
     end
 
     get %r{/issues/(\d+)\.json} do |id|
@@ -84,13 +95,13 @@ module Web
     end
 
     get %r{/issues/(\d+)} do |id|
-      @issue_model = find_issue(id)
-      halt 404, 'Issue not found' unless @issue_model
+      issue_model = find_issue(id)
+      halt 404, 'Issue not found' unless issue_model
 
-      @issue = @issue_model.values
-      @events = activity_events_dataset.where(issue_id: @issue[:id])
-                                       .reverse_order(:created_at, :id).limit(200).all
-      erb :issue_show
+      issue = issue_model.values
+      events = activity_events_dataset.where(issue_id: issue[:id])
+                                      .reverse_order(:created_at, :id).limit(200).all
+      Web::Views::IssueShow.new(issue: issue, issue_model: issue_model, events: events, **view_context).call
     end
 
     post %r{/issues/(\d+)/reset} do |id|
@@ -118,18 +129,21 @@ module Web
     end
 
     get '/errors' do
-      @errored = issues_dataset.where(status: %w[error needs_clarification])
-                               .or(Sequel.~(post_completion_error: nil))
-                               .order(Sequel.desc(:id)).all
-      erb :errors
+      errored = issues_dataset.where(status: %w[error needs_clarification])
+                              .or(Sequel.~(post_completion_error: nil))
+                              .order(Sequel.desc(:id)).all
+      Web::Views::Errors.new(errored: errored, **view_context).call
     end
 
     get '/projects/:slug' do
-      @project_path = project_unslug(params[:slug])
-      @project_config = project_for(@project_path)
-      @project_issues = issues_dataset.where(project_path: @project_path)
-                                      .order(Sequel.desc(:id)).limit(100).all
-      erb :project_show
+      project_path = project_unslug(params[:slug])
+      Web::Views::ProjectShow.new(
+        project_path: project_path,
+        project_config: project_for(project_path),
+        project_issues: issues_dataset.where(project_path: project_path)
+                        .order(Sequel.desc(:id)).limit(100).all,
+        **view_context
+      ).call
     end
   end
 end

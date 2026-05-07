@@ -64,7 +64,7 @@ Routes:
 - `GET /assets/turbo.js` — vendored `@hotwired/turbo` UMD build.
 
 Implementation:
-- `Web::Server` is a `Sinatra::Base` subclass under `lib/autodev/web/`, started from `Poller#run` via `Web::Server.start(config)` (a Puma instance bound to 127.0.0.1 in a background thread, threads `0..8`).
+- `Web::Server` is a `Sinatra::Base` subclass under `lib/autodev/web/`, started from `Poller#run` via `Web::Server.start(config)` (a Puma instance bound to 127.0.0.1 in a background thread, threads `0..8`). Routes render Phlex views (`Web::Views::*`); each view is a Phlex::HTML subclass that takes its data via kwargs and is invoked with `Views::Foo.new(**kwargs).call`.
 - `Web::Lifecycle` (mixed in via `extend`) owns the start/stop cycle.
 - `Web::EventBus` is an in-process pub/sub: a Mutex around an `Array<Queue>`. `ActivityEvent.after_create` publishes, `/stream` subscribes. Backpressure drops oldest events past 100. `shutdown!` pushes a sentinel that lets `/stream` loops exit.
 - Persistence: every AASM transition + every `ActivityLogger.post` writes an `activity_events` row (kind: `transition` or `danger_claude`). Hooks live in `IssueBehavior#emit_activity_event!` and `ActivityLogger.persist_event!`, both wrapped in `rescue StandardError` so DB failures never break the workflow.
@@ -262,7 +262,7 @@ They are merged at boot in `lib/autodev/locales.rb` into a single `TEMPLATES` ha
 2. Add it to the matching `<AREA>_TEMPLATES` hash **in both `:fr` and `:en`**, with the same `%<var>s` placeholders in each.
 3. Use the right helper at the call site:
    - **Ruby code (CLI, processors, services)**: `Locales.t(:my_key, locale: <locale>, **vars)`. The `locale` argument is mandatory in this layer — pick from `issue.locale`, a config field, or default to `:fr`.
-   - **ERB views**: `<%= h(t_web(:my_key, **vars)) %>`. `t_web` resolves the active locale automatically (cookie > config > default).
+   - **Phlex views**: `t_web(:my_key, **vars)` (auto-escaped, no `h()` wrapper needed). `t_web` resolves the active locale automatically (cookie > config > default).
 4. If the string represents a status label or any web concept derived from a Ruby value (not a literal in the template), wire it into `STATUS_LABEL_KEYS` in `lib/autodev/web/i18n_helpers.rb` rather than inlining a `case`.
 
 ### Locale resolution per layer
@@ -275,7 +275,7 @@ They are merged at boot in `lib/autodev/locales.rb` into a single `TEMPLATES` ha
 
 ### What NOT to do
 
-- Hardcode user-visible literals in ERB. The only allowed bare strings are pure structural HTML, code/paths/URLs, punctuation, and technical tokens that aren't translated (e.g. AASM state names, `JSON`, `MR`).
+- Hardcode user-visible literals in Phlex views. The only allowed bare strings are pure structural markup, code/paths/URLs, punctuation, and technical tokens that aren't translated (e.g. AASM state names, `JSON`, `MR`).
 - Translate FR but skip EN (or vice versa). Both keys must exist or `Locales.t` falls back silently and you get mixed-language output.
 - Add a new helper that returns French verbatim (e.g. `def label_for_X; 'Terminée'; end`). If the helper produces text shown to a user, it must take a locale and call `Locales.t`.
 
