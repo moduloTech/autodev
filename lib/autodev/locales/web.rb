@@ -14,6 +14,8 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_nav_conversations: 'Conversations',
       web_nav_projects: 'Projets',
       web_theme_toggle: 'Changer le thème',
+      web_coming_soon: 'Bientôt',
+      web_coming_soon_tooltip: 'Bientôt disponible',
       # Sidebar
       web_sidebar_search: 'Rechercher…',
       web_sidebar_cta_title: 'Nouveau ticket',
@@ -165,6 +167,8 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_nav_conversations: 'Conversations',
       web_nav_projects: 'Projects',
       web_theme_toggle: 'Toggle theme',
+      web_coming_soon: 'Soon',
+      web_coming_soon_tooltip: 'Coming soon',
       web_sidebar_search: 'Search…',
       web_sidebar_cta_title: 'New ticket',
       web_sidebar_cta_body: 'Describe your need to Autodev, it handles the rest.',

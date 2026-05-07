@@ -57,6 +57,22 @@ button:hover { background: var(--paper-2); }
 button.icon-btn, .icon-btn { padding: 0; }
 .icon-btn svg { flex: 0 0 auto; }
 
+/* Visual treatment for nav items / buttons / inputs that point at
+ * features the app doesn't ship yet. The element is still in the DOM
+ * (so the layout matches the final design) but is dimmed and unclickable. */
+.coming-soon {
+  opacity: 0.45;
+  cursor: not-allowed !important;
+  pointer-events: none;
+}
+.coming-soon a, .coming-soon button { pointer-events: none; }
+.coming-soon-badge {
+  font-size: 9px; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; padding: 1px 6px; border-radius: var(--r-pill);
+  background: var(--paper-2); color: var(--text-subtle);
+  margin-left: auto;
+}
+
 input[type="text"], input[type="date"], select {
   padding: 0.3rem 0.5rem;
   border: 1px solid var(--border);

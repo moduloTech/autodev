@@ -143,4 +143,16 @@ class WebServerTest < Minitest::Test # rubocop:disable Metrics/ClassLength
 
     assert_includes last_response.body, 'Demandes en cours'
   end
+
+  def test_dashboard_marks_unimplemented_features_coming_soon
+    get '/'
+    body = last_response.body
+
+    # Conversations + Projets sidebar items, search bar, bell, CTA, "Nouvelle
+    # demande" topbar button all sit under elements carrying the coming-soon
+    # class so they're visually dimmed and unclickable.
+    assert_includes body, 'class="coming-soon-badge"'
+    # At least one element has the disabled visual treatment.
+    assert_operator body.scan('coming-soon').size, :>=, 5, 'expected several coming-soon markers'
+  end
 end

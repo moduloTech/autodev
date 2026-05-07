@@ -39,14 +39,17 @@ module Web
             'flex: 0 0 240px; height: 100vh; position: sticky; top: 0;'
         end
 
-        def render_top_row
+        def render_top_row # rubocop:disable Metrics/MethodLength
           div(style: 'padding: 4px 8px 14px; display: flex; align-items: center; ' \
                      'justify-content: space-between;') do
             render Logo.new(size: 24)
             div(style: 'display: flex; gap: 2px; align-items: center;') do
               render_lang_switcher
               render_theme_toggle
-              render IconButton.new(icon: Icon.new(name: 'bell', size: 15), label: 'Notifications', size: 28)
+              span(class: 'coming-soon', title: @t.call(:web_coming_soon_tooltip)) do
+                render IconButton.new(icon: Icon.new(name: 'bell', size: 15),
+                                      label: 'Notifications', size: 28)
+              end
             end
           end
         end
@@ -92,7 +95,8 @@ module Web
 
         def render_search
           div(style: 'padding: 4px 6px 10px;') do
-            div(style: search_style) do
+            div(class: 'coming-soon', title: @t.call(:web_coming_soon_tooltip),
+                style: search_style) do
               render Icon.new(name: 'search', size: 14)
               span { @t.call(:web_sidebar_search) }
               span(style: kbd_style) { '⌘K' }
@@ -118,8 +122,9 @@ module Web
           { id: 'errors',    label_key: :web_nav_to_watch,     icon: 'alert-tri', href: '/errors',
             count_key: :errors, tone: :err },
           { id: 'chat',      label_key: :web_nav_conversations, icon: 'messages', href: '#',
-            count_key: :chat },
-          { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '#' }
+            count_key: :chat, coming_soon: true },
+          { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '#',
+            coming_soon: true }
         ].freeze
         private_constant :ITEMS
 
@@ -127,14 +132,21 @@ module Web
           ITEMS.each { |item| render_nav_item(item) }
         end
 
-        def render_nav_item(item) # rubocop:disable Metrics/AbcSize
+        def render_nav_item(item) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
           is_active = @active == item[:id]
           count = item[:count_key] ? @counts[item[:count_key]] : nil
-          a(href: item[:href], style: nav_item_style(is_active)) do
+          klass = item[:coming_soon] ? 'coming-soon' : nil
+          attrs = { href: item[:href], style: nav_item_style(is_active), class: klass }
+          attrs[:title] = @t.call(:web_coming_soon_tooltip) if item[:coming_soon]
+          a(**attrs) do
             render Icon.new(name: item[:icon], size: 16,
                             color: nav_icon_color(is_active, item[:tone]))
             span(style: 'flex: 1;') { @t.call(item[:label_key]) }
-            render_count_badge(count, is_active, item[:tone]) unless count.nil?
+            if item[:coming_soon]
+              span(class: 'coming-soon-badge') { @t.call(:web_coming_soon) }
+            elsif !count.nil?
+              render_count_badge(count, is_active, item[:tone])
+            end
           end
         end
 
@@ -181,8 +193,9 @@ module Web
             div(style: 'color: var(--text-muted); line-height: 1.45; font-size: 12px;') do
               @t.call(:web_sidebar_cta_body)
             end
-            div(style: 'margin-top: 10px;') do
-              render Button.new(kind: :primary, size: :sm, full: true, href: '/issues',
+            div(class: 'coming-soon', title: @t.call(:web_coming_soon_tooltip),
+                style: 'margin-top: 10px;') do
+              render Button.new(kind: :primary, size: :sm, full: true, href: '#',
                                 icon: Icon.new(name: 'plus', size: 13)) { @t.call(:web_sidebar_cta_button) }
             end
           end
