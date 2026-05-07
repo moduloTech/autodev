@@ -24,14 +24,21 @@ module Web
       Locales.t(key, locale: web_locale, **vars)
     end
 
-    STATUS_LABEL_KEYS = { 'pending' => :web_status_pending, 'done' => :web_status_done,
-                          'error' => :web_status_error,
-                          'needs_clarification' => :web_status_needs_clarification }.freeze
-
-    # Localized human-readable label for an AASM status.
+    # Localized human-readable label for an AASM status. Reads from the
+    # canonical mapping in Web::Views::Components::StatusPill::STATUS_DATA.
     def status_label(status)
-      key = STATUS_LABEL_KEYS[status] || (Dashboard::ACTIVE_STATES.include?(status) ? :web_status_active : nil)
-      key ? t_web(key) : status.to_s
+      data = Web::Views::Components::StatusPill::STATUS_DATA[status.to_s]
+      return status.to_s unless data
+
+      t_web(data[:label_key])
+    end
+
+    # Build a StatusPill component ready for `render`. Resolves the
+    # localized label here so the component itself stays presentation-only.
+    def status_pill(status, size: :md, with_dot: true)
+      Web::Views::Components::StatusPill.new(
+        status: status, label: status_label(status), size: size, with_dot: with_dot
+      )
     end
 
     # Set or clear the locale cookie based on `lang`. Used by /locale/:lang.

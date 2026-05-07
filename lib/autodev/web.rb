@@ -5,6 +5,7 @@ require 'phlex'
 
 require_relative 'web/event_bus'
 require_relative 'web/helpers'
+require_relative 'web/views/components/status_pill'
 require_relative 'web/views/base'
 require_relative 'web/views/layout'
 require_relative 'web/views/dashboard'

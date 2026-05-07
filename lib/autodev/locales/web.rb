@@ -25,12 +25,25 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_col_error: 'Erreur',
       web_col_message: 'Message',
 
-      # Status labels (mirror Dashboard.status_label, used by both CLI and web)
-      web_status_active: 'En cours',
+      # Status labels — one per AASM state. Vocabulary from
+      # design_handoff_autodev/primitives.jsx (preferred over STATES.md
+      # where they differ — JSX is the implementation reference).
       web_status_pending: 'En attente',
-      web_status_needs_clarification: 'En attente de clarification',
-      web_status_done: 'Terminée',
-      web_status_error: 'Erreur',
+      web_status_cloning: 'Préparation',
+      web_status_checking_spec: 'Lecture du besoin',
+      web_status_implementing: 'Développement en cours',
+      web_status_committing: 'Sauvegarde du travail',
+      web_status_pushing: 'Envoi sur GitLab',
+      web_status_creating_mr: 'Création de la demande',
+      web_status_reviewing: 'Relecture automatique',
+      web_status_checking_pipeline: 'Vérifications auto.',
+      web_status_fixing_discussions: 'Corrections après revue',
+      web_status_fixing_pipeline: 'Correction des tests',
+      web_status_running_post_completion: 'Finalisation',
+      web_status_answering_question: 'Réponse en préparation',
+      web_status_needs_clarification: 'Question pour vous',
+      web_status_done: 'Terminé',
+      web_status_error: 'Échec — action requise',
 
       # Dashboard
       web_dashboard_title: 'autodev — Dashboard',
@@ -122,11 +135,22 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_col_error: 'Error',
       web_col_message: 'Message',
 
-      web_status_active: 'In progress',
       web_status_pending: 'Pending',
-      web_status_needs_clarification: 'Awaiting clarification',
+      web_status_cloning: 'Setting up',
+      web_status_checking_spec: 'Reading spec',
+      web_status_implementing: 'Developing',
+      web_status_committing: 'Saving work',
+      web_status_pushing: 'Pushing to GitLab',
+      web_status_creating_mr: 'Opening request',
+      web_status_reviewing: 'Auto-review',
+      web_status_checking_pipeline: 'Auto checks',
+      web_status_fixing_discussions: 'Fixing review comments',
+      web_status_fixing_pipeline: 'Fixing failing tests',
+      web_status_running_post_completion: 'Finalizing',
+      web_status_answering_question: 'Drafting answer',
+      web_status_needs_clarification: 'Question for you',
       web_status_done: 'Done',
-      web_status_error: 'Error',
+      web_status_error: 'Failed — needs attention',
 
       web_dashboard_title: 'autodev — Dashboard',
       web_dashboard_counters: 'Counters',

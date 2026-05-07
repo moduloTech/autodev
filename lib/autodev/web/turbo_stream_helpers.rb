@@ -34,8 +34,9 @@ module Web
     def status_badge_stream(event)
       target = "status_#{event[:issue_id]}"
       to = event_payload(event)['to'].to_s
-      badge = %(<span id="#{target}" class="#{status_class(to)}">#{h(to)}</span>)
-      %(<turbo-stream action="replace" target="#{target}"><template>#{badge}</template></turbo-stream>)
+      pill_html = status_pill(to).call
+      wrapped = %(<span id="#{target}" style="display: inline-flex">#{pill_html}</span>)
+      %(<turbo-stream action="replace" target="#{target}"><template>#{wrapped}</template></turbo-stream>)
     end
   end
 end

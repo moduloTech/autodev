@@ -26,9 +26,10 @@ module Web
       def render_header
         h1 { t_web(:web_issue_title, iid: @issue[:issue_iid], project: @issue[:project_path]) }
         p do
-          span(id: "status_#{@issue[:id]}", class: status_class(@issue[:status])) { @issue[:status] }
-          plain ' '
-          span(class: 'muted') { status_label(@issue[:status]) }
+          # The id wrapper is the Turbo Stream target updated on transitions.
+          span(id: "status_#{@issue[:id]}", style: 'display: inline-flex') do
+            render status_pill(@issue[:status])
+          end
         end
         p { @issue[:issue_title] }
       end

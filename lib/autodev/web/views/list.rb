@@ -30,9 +30,7 @@ module Web
       def render_header
         h1 do
           plain t_web(:web_list_title)
-          span(class: status_class(@status)) { @status }
-          plain ' '
-          span(class: 'muted') { status_label(@status) }
+          render status_pill(@status)
         end
       end
 

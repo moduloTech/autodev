@@ -52,10 +52,10 @@ module Web
         end
       end
 
-      def render_row(row) # rubocop:disable Metrics/AbcSize
+      def render_row(row)
         tr do
           td { a(href: "/issues/#{row[:id]}") { plain "##{row[:issue_iid]}" } }
-          td { span(class: status_class(row[:status])) { row[:status] } }
+          td { render status_pill(row[:status]) }
           td { row[:issue_title] }
           td { code { row[:branch_name] } }
           td { render_mr_link(row) }

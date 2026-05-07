@@ -95,7 +95,7 @@ module Web
         tr do
           td { a(href: "/projects/#{project_slug(row[:project_path])}") { row[:project_path] } }
           td { a(href: "/issues/#{row[:id]}") { plain "##{row[:issue_iid]}" } }
-          td { span(class: status_class(row[:status])) { row[:status] } }
+          td { render status_pill(row[:status]) }
           td { row[:issue_title] }
           td(class: 'muted') { row[:created_at] }
           td { render_mr_link(row) }

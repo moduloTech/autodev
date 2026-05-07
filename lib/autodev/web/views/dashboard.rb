@@ -3,7 +3,7 @@
 module Web
   module Views
     # GET / — counters per status, active issues grouped by status, project breakdown.
-    class Dashboard < Base # rubocop:disable Metrics/ClassLength
+    class Dashboard < Base
       def initialize(counts:, active:, grouped:, by_project:, **)
         super(**)
         @counts = counts
@@ -35,18 +35,10 @@ module Web
             next if count.zero?
 
             tr do
-              td { render_status_link(status, count, label: true) }
+              td { a(href: "/list/#{status}") { render status_pill(status) } }
               td { a(href: "/list/#{status}") { plain count } }
             end
           end
-        end
-      end
-
-      def render_status_link(status, _count, label:)
-        a(href: "/list/#{status}") do
-          span(class: status_class(status)) { status }
-          plain ' '
-          span(class: 'muted') { status_label(status) } if label
         end
       end
 
@@ -61,9 +53,7 @@ module Web
 
       def render_active_group(status, rows) # rubocop:disable Metrics/MethodLength
         h3 do
-          span(class: status_class(status)) { status }
-          plain ' '
-          span(class: 'muted') { status_label(status) }
+          render status_pill(status)
           plain " (#{rows.size})"
         end
         table do

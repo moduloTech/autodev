@@ -37,7 +37,7 @@ module Web
         tr do
           td { a(href: "/projects/#{project_slug(row[:project_path])}") { row[:project_path] } }
           td { a(href: "/issues/#{row[:id]}") { plain "##{row[:issue_iid]}" } }
-          td { span(class: status_class(row[:status])) { row[:status] } }
+          td { render status_pill(row[:status]) }
           td { render_message(row) }
           td { render_reset_form(row) }
         end

@@ -49,19 +49,14 @@ input:focus, select:focus { outline: 2px solid var(--accent-solid); outline-offs
 code { background: var(--paper-2); padding: 0.05rem 0.3rem; border-radius: var(--r-xs); font-size: 0.85em; }
 pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border-radius: var(--r-md); overflow-x: auto; font-size: 0.85em; }
 
-/* Legacy badge classes — superseded by StatusPill in Task 2 but still used
- * by helpers.rb#status_class until each view is refactored. */
-.badge {
-  display: inline-block;
-  padding: 0.1rem 0.5rem;
-  border-radius: var(--r-pill);
-  font-size: 0.8rem;
-  font-weight: 500;
+/* StatusPill animated dot. Used when the pill's tone is `working`
+ * to convey that Autodev is actively making progress. */
+@keyframes pulse {
+  0%   { opacity: 1; transform: scale(1); }
+  70%  { opacity: 0.5; transform: scale(1.4); }
+  100% { opacity: 1; transform: scale(1); }
 }
-.badge-active  { background: var(--work-bg); color: var(--work-fg); }
-.badge-error   { background: var(--err-bg);  color: var(--err-fg); }
-.badge-done    { background: var(--ok-bg);   color: var(--ok-fg); }
-.badge-pending { background: var(--paper-2); color: var(--text-muted); }
+.pill-dot-pulse { animation: pulse 1.6s ease-out infinite; }
 
 /* Theme toggle: show only the icon for the *opposite* of the current theme,
  * since clicking flips to that mode. */

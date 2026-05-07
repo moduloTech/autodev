@@ -65,15 +65,6 @@ module Web
       slug.to_s.gsub('__', '/')
     end
 
-    def status_class(status)
-      case status
-      when *Dashboard::ACTIVE_STATES then 'badge badge-active'
-      when 'error' then 'badge badge-error'
-      when 'done' then 'badge badge-done'
-      else 'badge badge-pending'
-      end
-    end
-
     def project_for(project_path)
       Array(app_config['projects']).find { |p| p['path'] == project_path } || {}
     end

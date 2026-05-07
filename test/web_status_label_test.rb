@@ -22,22 +22,29 @@ class WebStatusLabelTest < Minitest::Test
     get "/issues/#{issue.id}"
 
     assert_includes last_response.body, 'Done'
-    refute_includes last_response.body, 'Terminée'
+    refute_includes last_response.body, 'Terminé'
   end
 
-  def test_french_default_renders_terminee
+  def test_french_default_renders_done
     issue = create_issue(status: 'done', issue_title: 'Anything')
     get "/issues/#{issue.id}"
 
-    assert_includes last_response.body, 'Terminée'
+    assert_includes last_response.body, 'Terminé'
   end
 
-  def test_active_state_translates_to_in_progress
+  def test_cloning_uses_per_state_english_label
     issue = create_issue(status: 'cloning', issue_title: 'Anything')
     set_cookie 'locale=en'
     get "/issues/#{issue.id}"
 
-    assert_includes last_response.body, 'In progress'
+    assert_includes last_response.body, 'Setting up'
+  end
+
+  def test_implementing_uses_per_state_french_label
+    issue = create_issue(status: 'implementing', issue_title: 'Anything')
+    get "/issues/#{issue.id}"
+
+    assert_includes last_response.body, 'Développement en cours'
   end
 
   def test_pending_translates
@@ -53,6 +60,6 @@ class WebStatusLabelTest < Minitest::Test
     set_cookie 'locale=en'
     get "/issues/#{issue.id}"
 
-    assert_includes last_response.body, 'Error'
+    assert_includes last_response.body, 'Failed'
   end
 end
