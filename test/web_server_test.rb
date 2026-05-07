@@ -40,6 +40,49 @@ class WebServerTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     assert_includes last_response.body, 'boom'
   end
 
+  def test_errors_renders_business_cause_for_failure
+    create_issue(status: 'error', error_message: 'whatever', issue_title: 'X')
+    get '/errors'
+
+    assert_includes last_response.body, 'Échec technique'
+  end
+
+  def test_errors_renders_clarification_cause_for_question
+    create_issue(status: 'needs_clarification', issue_title: 'X')
+    get '/errors'
+
+    assert_includes last_response.body, 'Question en attente'
+  end
+
+  def test_errors_banner_shows_count_when_non_empty
+    2.times { |i| create_issue(status: 'error', issue_title: "X#{i}") }
+    get '/errors'
+
+    assert_includes last_response.body, '2 demandes ont besoin de vous'
+  end
+
+  def test_errors_renders_technical_details_in_pre
+    create_issue(status: 'error', error_message: 'stack trace lines\n2nd line', issue_title: 'X')
+    get '/errors'
+
+    assert_includes last_response.body, '<details'
+    assert_includes last_response.body, '<pre'
+  end
+
+  def test_errors_clarification_uses_view_question_action
+    create_issue(status: 'needs_clarification', issue_title: 'X')
+    get '/errors'
+
+    assert_includes last_response.body, 'Voir la question'
+  end
+
+  def test_errors_failure_uses_retry_action
+    create_issue(status: 'error', error_message: 'x', issue_title: 'X')
+    get '/errors'
+
+    assert_includes last_response.body, 'Réessayer maintenant'
+  end
+
   def test_issue_show_renders_metadata
     issue = create_issue(issue_title: 'Test issue', branch_name: 'feat/x')
     get "/issues/#{issue.id}"

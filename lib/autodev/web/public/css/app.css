@@ -185,3 +185,82 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
 
 .issues-pager { margin-top: 16px; display: flex; align-items: center; gap: 12px; }
 .empty-state { padding: 48px 24px; text-align: center; }
+
+/* /errors page */
+.errors-content { padding: 28px; }
+.errors-banner {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; margin-bottom: 22px;
+  background: var(--err-bg); border: 1px solid var(--err-200);
+  border-radius: var(--r-md); color: var(--err-fg);
+}
+.errors-banner strong { color: var(--err-fg); }
+.errors-cards { display: flex; flex-direction: column; gap: 14px; }
+
+.error-card-body { padding: 18px 22px; }
+.error-card-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.error-card-header .iid-mono {
+  font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);
+}
+.error-card-header .project-meta { font-size: 11px; color: var(--text-muted); }
+.error-card-header .when-meta { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.error-card-title {
+  margin: 0 0 14px; font-size: 17px; font-weight: 600;
+  color: var(--text-strong); line-height: 1.35;
+}
+
+.cause-panel {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px; background: var(--err-bg);
+  border-radius: var(--r-md); margin-bottom: 14px;
+}
+.cause-icon-box {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: var(--paper); color: var(--err-fg); flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cause-title { font-size: 13px; font-weight: 600; color: var(--err-fg); margin-bottom: 4px; }
+.cause-body { font-size: 13px; color: var(--text); line-height: 1.55; }
+
+.technical-details summary {
+  font-size: 12px; color: var(--text-muted); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  list-style: none; padding: 0;
+}
+.technical-details summary::-webkit-details-marker { display: none; }
+.technical-details[open] summary { margin-bottom: 10px; }
+.technical-details[open] summary svg { transform: rotate(0deg); }
+.technical-details:not([open]) summary svg { transform: rotate(-90deg); }
+.technical-details summary svg { transition: transform 0.15s ease; }
+.technical-pre {
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+  color: var(--code-fg); background: var(--code-bg);
+  padding: 14px; border-radius: var(--r-sm); margin: 0;
+  overflow: auto; white-space: pre-wrap;
+}
+
+.error-card-footer {
+  padding: 12px 18px; border-top: 1px solid var(--divider);
+  background: var(--paper-2);
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.error-card-footer .avatar-strip { display: flex; align-items: center; gap: 8px; }
+.error-card-footer .avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%; background: var(--accent-solid);
+  color: white; font-size: 9px; font-weight: 600;
+}
+.error-card-footer .requester-text { font-size: 12px; color: var(--text-muted); }
+.error-card-footer .footer-actions {
+  margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap;
+}
+
+@media (max-width: 639px) {
+  .errors-content { padding: 14px; }
+  .errors-banner { flex-direction: column; align-items: flex-start; padding: 14px; margin-bottom: 14px; }
+  .error-card-body { padding: 16px; }
+  .error-card-title { font-size: 15px; }
+}

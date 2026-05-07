@@ -175,7 +175,7 @@ module Web
       errored = issues_dataset.where(status: %w[error needs_clarification])
                               .or(Sequel.~(post_completion_error: nil))
                               .order(Sequel.desc(:id)).all
-      Web::Views::Errors.new(errored: errored, **view_context).call
+      Web::Views::Errors.new(errored: errored, kpis: dashboard_kpis, **view_context).call
     end
 
     get '/projects/:slug' do

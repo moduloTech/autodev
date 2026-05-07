@@ -125,9 +125,30 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_issue_raw_data: 'Données brutes',
 
       # Errors page
-      web_errors_title: 'autodev — Erreurs',
-      web_errors_none: 'Aucune issue en erreur.',
+      web_errors_title: 'À surveiller',
+      web_errors_subtitle: 'Demandes qui ont échoué ou attendent une intervention humaine.',
+      web_errors_none: 'Aucune demande à surveiller pour le moment.',
       web_errors_confirm_reset: 'Reset #%<iid>s à pending ?',
+      web_errors_banner_one: 'Une demande a besoin de vous.',
+      web_errors_banner_many: '%<count>s demandes ont besoin de vous.',
+      web_errors_banner_body: "Autodev s'arrête et vous appelle quand il rencontre un blocage qu'il " \
+                              'ne peut pas résoudre seul.',
+      web_errors_mark_all_read: 'Tout marquer comme lu',
+      web_errors_cause_failure: 'Échec technique',
+      web_errors_cause_clarification: 'Question en attente',
+      web_errors_cause_post_completion: 'Erreur post-completion',
+      web_errors_explain_failure: 'Une erreur a empêché autodev de continuer son travail. ' \
+                                  'Consultez les détails techniques pour comprendre la cause.',
+      web_errors_explain_clarification: 'Autodev a posé une question pour préciser la demande et ' \
+                                        'attend une réponse pour reprendre.',
+      web_errors_explain_post_completion: 'Le hook de finalisation a échoué après la livraison. ' \
+                                          'La demande est terminée mais la commande post-completion ' \
+                                          'a renvoyé une erreur.',
+      web_errors_show_technical: 'Afficher les détails techniques',
+      web_errors_view_detail: 'Voir le détail',
+      web_errors_action_retry: 'Réessayer maintenant',
+      web_errors_action_view_question: 'Voir la question',
+      web_errors_requester: 'Demandé par #%<iid>s',
 
       # Project page
       web_project_title: 'Projet — %<path>s',
@@ -283,9 +304,30 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_issue_screenshots_dir: 'Stored in',
       web_issue_raw_data: 'Raw data',
 
-      web_errors_title: 'autodev — Errors',
-      web_errors_none: 'No errored issue.',
+      web_errors_title: 'To watch',
+      web_errors_subtitle: 'Requests that failed or are waiting for a human.',
+      web_errors_none: 'Nothing to watch right now.',
       web_errors_confirm_reset: 'Reset #%<iid>s to pending?',
+      web_errors_banner_one: 'One request needs your attention.',
+      web_errors_banner_many: '%<count>s requests need your attention.',
+      web_errors_banner_body: "Autodev pauses and pings you whenever it hits a blocker it can't " \
+                              'work around on its own.',
+      web_errors_mark_all_read: 'Mark all as read',
+      web_errors_cause_failure: 'Technical failure',
+      web_errors_cause_clarification: 'Awaiting answer',
+      web_errors_cause_post_completion: 'Post-completion error',
+      web_errors_explain_failure: 'An error stopped autodev from making progress. ' \
+                                  'Check the technical details for the root cause.',
+      web_errors_explain_clarification: 'Autodev asked a question to refine the request and is ' \
+                                        'waiting on a reply before resuming.',
+      web_errors_explain_post_completion: 'The post-completion hook failed after delivery. ' \
+                                          'The request is done but the follow-up command exited ' \
+                                          'with an error.',
+      web_errors_show_technical: 'Show technical details',
+      web_errors_view_detail: 'See details',
+      web_errors_action_retry: 'Retry now',
+      web_errors_action_view_question: 'See the question',
+      web_errors_requester: 'Requested by #%<iid>s',
 
       web_project_title: 'Project — %<path>s',
       web_project_config: 'Configuration <code>app:</code>',

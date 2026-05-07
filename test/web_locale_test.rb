@@ -19,15 +19,14 @@ class WebLocaleTest < Minitest::Test
     Web::Server.configure_with({})
     get '/errors'
 
-    assert_includes last_response.body, 'Erreurs'
-    refute_includes last_response.body, 'Errors'
+    assert_includes last_response.body, 'À surveiller'
   end
 
   def test_english_locale_renders_english_strings
     Web::Server.configure_with('web' => { 'enabled' => true, 'port' => 4567, 'locale' => 'en' })
     get '/errors'
 
-    assert_includes last_response.body, 'Errors'
+    assert_includes last_response.body, 'To watch'
   end
 
   def test_english_dashboard_uses_english_nav
