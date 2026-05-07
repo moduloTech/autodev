@@ -48,6 +48,28 @@ Settings are resolved in 4 layers (highest priority wins):
 - `-v` / `--version` — Show version and exit
 - `-h` / `--help` — Show help
 
+### Web UI
+
+When the poller is running (i.e. not `--once` and `web.enabled: true` in config — the default), autodev exposes an embedded Sinatra app on `http://127.0.0.1:<web.port>` (default 4567). It mirrors the data the CLI flags print (`--status`, `--errors`, `--reset`) but live-updates as transitions and activity events fire.
+
+Routes:
+- `GET /` — dashboard: status counters, active issues grouped by AASM state, project breakdown.
+- `GET /issues/:id` — detail: status badge, GitLab/MR links, metadata, activity timeline (paginated to 200), screenshots, raw JSON, action forms.
+- `GET /issues/:id.json` — raw row.
+- `GET /errors` — `error` + `needs_clarification` + non-null `post_completion_error`, with reset buttons.
+- `GET /projects/:slug` — project's `app:` config + 100 most recent issues. Slug encoding: `group/project` ↔ `group__project`.
+- `POST /issues/:id/reset` — equivalent of `--reset` for a single issue.
+- `POST /issues/:id/transition` (param `event`) — fires an AASM event; rejects 422 if not in `issue.aasm.events(permitted: true)`.
+- `GET /stream` — SSE feed; emits Turbo Stream HTML for each `activity_events` row (timeline prepend + status badge replace on transitions).
+- `GET /assets/turbo.js` — vendored `@hotwired/turbo` UMD build.
+
+Implementation:
+- `Web::Server` is a `Sinatra::Base` subclass under `lib/autodev/web/`, started from `Poller#run` via `Web::Server.start(config)` (a Puma instance bound to 127.0.0.1 in a background thread, threads `0..8`).
+- `Web::Lifecycle` (mixed in via `extend`) owns the start/stop cycle.
+- `Web::EventBus` is an in-process pub/sub: a Mutex around an `Array<Queue>`. `ActivityEvent.after_create` publishes, `/stream` subscribes. Backpressure drops oldest events past 100. `shutdown!` pushes a sentinel that lets `/stream` loops exit.
+- Persistence: every AASM transition + every `ActivityLogger.post` writes an `activity_events` row (kind: `transition` or `danger_claude`). Hooks live in `IssueBehavior#emit_activity_event!` and `ActivityLogger.persist_event!`, both wrapped in `rescue StandardError` so DB failures never break the workflow.
+- Localhost only; no auth. Disable via `web: { enabled: false }` in `~/.autodev/config.yml`.
+
 ### App Environment (`app:`)
 
 Per-project `app:` block provides structured environment instructions injected into all danger-claude prompts (priority over CLAUDE.md and skills). All subsections are optional.

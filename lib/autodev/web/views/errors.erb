@@ -1,0 +1,25 @@
+<h1>autodev — Erreurs</h1>
+
+<% if @errored.empty? %>
+  <p class="muted">Aucune issue en erreur.</p>
+<% else %>
+  <table>
+    <tr><th>Projet</th><th>IID</th><th>Status</th><th>Message</th><th></th></tr>
+    <% @errored.each do |row| %>
+      <tr>
+        <td><a href="/projects/<%= h(project_slug(row[:project_path])) %>"><%= h(row[:project_path]) %></a></td>
+        <td><a href="/issues/<%= row[:id] %>">#<%= row[:issue_iid] %></a></td>
+        <td><span class="<%= status_class(row[:status]) %>"><%= h(row[:status]) %></span></td>
+        <td>
+          <% msg = row[:error_message] || row[:post_completion_error] %>
+          <% if msg %><pre><%= h(msg.to_s[0, 400]) %></pre><% end %>
+        </td>
+        <td>
+          <form method="post" action="/issues/<%= row[:id] %>/reset" onsubmit="return confirm('Reset ##<%= row[:issue_iid] %> à pending ?');">
+            <button type="submit">Reset</button>
+          </form>
+        </td>
+      </tr>
+    <% end %>
+  </table>
+<% end %>

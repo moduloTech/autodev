@@ -8,6 +8,7 @@ module ConfigValidator
     validate_gitlab_token!(config)
     validate_positive_integers!(config)
     validate_log_level!(config)
+    validate_web!(config)
   end
 
   def self.validate_project!(project_config, path)
@@ -41,4 +42,20 @@ module ConfigValidator
           "'log_level' must be one of #{Config::VALID_LOG_LEVELS.join(', ')}, got: #{config['log_level'].inspect}"
   end
   private_class_method :validate_log_level!
+
+  def self.validate_web!(config)
+    web = config['web']
+    return if web.nil? # optional block; absence == disabled
+
+    raise ConfigError, "'web' must be a hash, got: #{web.inspect}" unless web.is_a?(Hash)
+    raise ConfigError, "'web.enabled' must be true or false" unless [true, false].include?(web['enabled'])
+
+    return unless web['enabled']
+
+    port = web['port']
+    return if port.is_a?(Integer) && port.between?(1024, 65_535)
+
+    raise ConfigError, "'web.port' must be an integer between 1024 and 65535, got: #{port.inspect}"
+  end
+  private_class_method :validate_web!
 end

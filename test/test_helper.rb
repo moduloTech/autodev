@@ -28,6 +28,7 @@ require 'autodev/language_detector'
 require 'autodev/locales'
 require 'autodev/shell_helpers'
 require 'autodev/issue_behavior'
+require 'autodev/activity_event'
 require 'autodev/database'
 
 # Minimal Pastel stand-in that returns messages unchanged.

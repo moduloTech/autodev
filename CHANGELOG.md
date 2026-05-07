@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Added
+
+- New `activity_events` table (id, issue_id, created_at, kind, level, payload_json) with indexes on `(issue_id, created_at)` and `(kind, created_at)`. Foundation for the upcoming embedded web UI: structured per-issue activity log persisted alongside the existing GitLab note posted by `ActivityLogger`. `ActivityEvent` Sequel model exposes JSON payload helpers; built dynamically in `Database.build_model!` like `Issue`.
+- `ActivityLogger.post` now also persists each entry to `activity_events` (kind: `danger_claude`, payload includes the i18n key, interpolation vars, and the rendered message). DB write happens before the GitLab API call and is wrapped in its own rescue so a DB failure never breaks the existing GitLab activity-log behavior.
+- Every AASM transition on `Issue` now writes an `activity_events` row (kind: `transition`, payload: `{from, to, event}`). Wired via a new `emit_activity_event!` callback registered alongside `persist_status_change!` in the global `after_all_transitions`. Best-effort: any DB failure is swallowed to keep the state machine intact.
+- New `Web::Server` Sinatra app (`lib/autodev/web/`) with full views and POST actions:
+  - `/` dashboard: counters per AASM status, active issues grouped by status, breakdown per project.
+  - `/issues/:id` detail: status badge, GitLab/MR links, metadata, activity timeline (200 most recent rows from `activity_events`), screenshots, raw JSON dump, plus inline action forms.
+  - `/issues/:id.json` raw JSON of the row.
+  - `/errors` lists `error` + `needs_clarification` + any issue with `post_completion_error`, each row with a Reset button.
+  - `/projects/:slug` shows the project's `app:` config block plus its 100 most recent issues (slug encoding: `group/project` ↔ `group__project`).
+  - `POST /issues/:id/reset` mirrors `--reset` for one issue.
+  - `POST /issues/:id/transition` accepts only events from `issue.aasm.events(permitted: true)`; rejects unknown or non-permitted events with 422.
+  - View helpers extracted to `Web::Helpers` module (status badge classes, GitLab URL builders, payload formatting, etc.).
+  - Adds runtime deps `sinatra ~> 4.0`, `puma ~> 6.0`, `rack ~> 3.0`, and test-only `rack-test ~> 2.1`. Sinatra 4's host authorization is disabled because the server only ever binds to `127.0.0.1`.
+- New `Web::EventBus` module: thread-safe in-process pub/sub used to fan ActivityEvent rows out to live SSE subscribers. Subscribers each get their own `Queue`; `publish` snapshots the subscriber list under a mutex so iteration doesn't block other publishers. Backpressure: queues over 100 events drop the oldest. `shutdown!` pushes a sentinel to every subscriber so `/stream` loops exit cleanly. `ActivityEvent.after_create` publishes the row to the bus (best-effort, swallowed if the bus isn't loaded).
+- New `GET /stream` SSE endpoint on `Web::Server` (requires Puma's evented streaming, which is why we chose Puma in the previous step). One open connection per browser tab; each event is encoded as `event: <kind>\ndata: <json>\n\n`. The `data` payload is `{id, issue_id, kind, level, created_at, text}` — `text` is the human-readable rendering used by the activity timeline.
+- `Web::Server` lifecycle: `Server.start(config)` boots a background Puma instance bound to `127.0.0.1`, threads `0..8`, returning the chosen port (or `nil` if disabled / `--once` / already running). `Server.stop` pushes the EventBus shutdown sentinel so `/stream` loops exit, then `Puma::Server#stop(true)` and `thread.join(5s)`. Lifecycle code lives in `Web::Lifecycle` (mixed in via `extend`) so the Sinatra class stays under the RuboCop length cap.
+- `Poller#run` now starts the web server before entering the poll loop and stops it on shutdown — same SIGINT/SIGTERM handler, no extra trap.
+- Config: new `web` block in `DEFAULTS` (`enabled: true`, `port: 4567`). `ConfigValidator.validate_web!` rejects non-hash blocks, non-boolean `enabled`, ports outside `[1024, 65535]`, and non-integer ports. The block is optional — its absence behaves like `enabled: false`.
+- Live updates: SSE messages now ship Turbo Stream HTML instead of opaque JSON. Each `activity_events` row produces a `prepend` to the `events_<issue_id>` timeline. Transitions additionally emit a `replace` on `status_<issue_id>` so the badge on the issue detail page flips in real time. Targets that don't exist on the current page are silently ignored by Turbo — the same SSE feed can serve every browser tab.
+- Vendored `@hotwired/turbo` (~217 KB UMD build) at `lib/autodev/web/public/turbo.js`, served via `GET /assets/turbo.js`. The layout pulls Turbo with `defer` and a tiny inline script subscribes to `/stream` with `EventSource` and forwards every message to `Turbo.renderStreamMessage`. No CDN, no extra build step.
+- Issue detail page now wraps the activity table body in `id="events_<id>"` and the status badge in `id="status_<id>"` so Turbo Stream targets resolve.
+- End-to-end integration test (`test/web_integration_test.rb`) boots the real Puma server on a free port, drives an issue through transitions, and asserts dashboard/timeline/reset all work over real HTTP. Plus per-step suites: `activity_event_test.rb`, `activity_logger_test.rb`, `issue_behavior_emit_event_test.rb`, `config_validate_web_test.rb`, `web_server_test.rb`, `web_actions_test.rb`, `web_event_bus_test.rb`, `web_sse_test.rb`, `web_lifecycle_test.rb`. Total: +43 new tests.
+- `CLAUDE.md` gains a Web UI section documenting routes, lifecycle, EventBus, and the persistence wiring. `bin/autodev` help text and the YAML config template are updated with the new `web:` block. The CLI flags `--status`, `--errors`, `--reset` are kept as-is for headless / SSH / CI use.
+- Web UI: dashboard counters are now clickable links to a generic `GET /list/:status` route (limit 500, ordered by id desc). Mirrors `--status --all` for any single AASM state — particularly useful for browsing `done` history, which had no UI entry point before.
+- Web UI: the dashboard's "Par projet" section now lists every project with any tracked issue (active or done), with per-status counts (Total / Actives / Terminées / Erreur). Previously only projects with at least one *active* issue showed up — useless once everything was finished.
+
 ## [0.11.6] - 2026-04-20
 
 ### Fixed

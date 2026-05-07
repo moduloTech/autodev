@@ -18,10 +18,26 @@ module ActivityLogger
   # the note is replaced instead of appended if it matches the pattern.
   def self.post(ctx, issue, key, replace_pattern: nil, **vars)
     entry = build_entry(issue, key, **vars)
+    persist_event!(issue, key, entry, vars)
     note_id = issue.activity_note_id
     note_id ? upsert(ctx, issue, note_id, entry, replace_pattern) : create(ctx, issue, entry)
   rescue StandardError => e
     ctx.logger&.error("Activity log update failed: #{e.message}", project: ctx.project_path)
+  end
+
+  # Best-effort persistence to the activity_events table. Failures here must
+  # never abort the GitLab note update — they are logged and swallowed.
+  def self.persist_event!(issue, key, entry, vars)
+    return unless Object.const_defined?(:ActivityEvent)
+
+    ActivityEvent.create(
+      issue_id: issue.id,
+      kind: 'danger_claude',
+      level: 'info',
+      payload_json: JSON.generate(key: key.to_s, vars: vars, message: entry)
+    )
+  rescue StandardError
+    nil
   end
 
   def self.build_entry(issue, key, **vars)
@@ -55,7 +71,7 @@ module ActivityLogger
     end
   end
 
-  private_class_method :build_entry, :create, :upsert, :replace_or_append
+  private_class_method :build_entry, :create, :upsert, :replace_or_append, :persist_event!
 
   # Instance method for processors (uses @client, @project_path from DangerClaudeRunner).
   private

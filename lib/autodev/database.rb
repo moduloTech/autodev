@@ -49,6 +49,15 @@ module Database
     klass = Class.new(Sequel::Model(db[:issues]))
     Object.const_set(:Issue, klass)
     klass.include(IssueBehavior)
+    build_activity_event_model!
+  end
+
+  def self.build_activity_event_model!
+    return if Object.const_defined?(:ActivityEvent)
+
+    klass = Class.new(Sequel::Model(db[:activity_events]))
+    Object.const_set(:ActivityEvent, klass)
+    klass.include(ActivityEventBehavior)
   end
 
   # -- Startup recovery --

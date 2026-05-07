@@ -19,6 +19,11 @@
 #   autodev --reset 15712                    # Reset a specific errored issue to pending
 #   autodev -c ~/.autodev/custom.yml --once  # Custom config, single cycle
 #
+# Embedded web UI:
+#   When `web.enabled: true` (default) and not running with --once, autodev
+#   exposes a live monitoring UI on http://127.0.0.1:<web.port> (default 4567).
+#   Disable via `web: { enabled: false }` in config.yml.
+#
 # Configuration (priority: defaults < config.yml < env vars < CLI flags):
 #   ~/.autodev/config.yml    Central config file
 #   GITLAB_API_TOKEN         Personal Access Token with api scope
@@ -35,6 +40,9 @@ gemfile(true) do
   gem 'i18n',    '~> 1.0'
   gem 'aasm',    '~> 5.5'
   gem 'logger'
+  gem 'rack',    '~> 3.0'
+  gem 'sinatra', '~> 4.0'
+  gem 'puma',    '~> 6.0'
 end
 
 require 'fileutils'

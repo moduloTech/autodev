@@ -54,6 +54,18 @@ module IssueBehavior
     save_changes
   end
 
+  # Best-effort: record every AASM transition as an activity_event row.
+  # Failures must never break the state machine, so any error is swallowed.
+  def emit_activity_event!
+    return unless Object.const_defined?(:ActivityEvent)
+
+    payload = JSON.generate(from: aasm.from_state.to_s, to: aasm.to_state.to_s,
+                            event: aasm.current_event.to_s.delete_suffix('!'))
+    ActivityEvent.create(issue_id: id, kind: 'transition', level: 'info', payload_json: payload)
+  rescue StandardError
+    nil
+  end
+
   # State definitions and global after_all_transitions callback.
   module States
     def self.included(klass)
@@ -65,7 +77,7 @@ module IssueBehavior
         state :answering_question, :needs_clarification
         state :done, :error
 
-        after_all_transitions :persist_status_change!
+        after_all_transitions :persist_status_change!, :emit_activity_event!
       end
     end
   end

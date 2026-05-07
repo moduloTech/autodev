@@ -28,6 +28,7 @@ module DatabaseTestHelper
       DatabaseTestHelper.db_initialized = true
     end
     Database.db[:issues].delete
+    Database.db[:activity_events].delete if Database.db.table_exists?(:activity_events)
   end
 
   def create_issue(overrides = {})

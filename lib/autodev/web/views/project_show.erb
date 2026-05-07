@@ -1,0 +1,26 @@
+<h1>Projet — <%= h(@project_path) %></h1>
+
+<h2>Configuration <code>app:</code></h2>
+<% if @project_config.empty? %>
+  <p class="muted">Projet non listé dans la config courante.</p>
+<% else %>
+  <pre><%= h(YAML.dump(@project_config)) %></pre>
+<% end %>
+
+<h2>Issues récentes (<%= @project_issues.size %>)</h2>
+<% if @project_issues.empty? %>
+  <p class="muted">Aucune issue suivie pour ce projet.</p>
+<% else %>
+  <table>
+    <tr><th>IID</th><th>Status</th><th>Titre</th><th>Branche</th><th>MR</th></tr>
+    <% @project_issues.each do |row| %>
+      <tr>
+        <td><a href="/issues/<%= row[:id] %>">#<%= row[:issue_iid] %></a></td>
+        <td><span class="<%= status_class(row[:status]) %>"><%= h(row[:status]) %></span></td>
+        <td><%= h(row[:issue_title]) %></td>
+        <td><code><%= h(row[:branch_name]) %></code></td>
+        <td><% if row[:mr_url] && !row[:mr_url].empty? %><a href="<%= h(row[:mr_url]) %>" target="_blank">!<%= row[:mr_iid] %></a><% end %></td>
+      </tr>
+    <% end %>
+  </table>
+<% end %>

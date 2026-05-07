@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>autodev</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; }
+    nav a { margin-right: 1rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 1rem; }
+    h2 { font-size: 1.1rem; margin-top: 1.5rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+    th, td { border-bottom: 1px solid #8884; padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+    .badge { display: inline-block; padding: 0.05rem 0.5rem; border-radius: 0.5rem; font-size: 0.8rem; }
+    .badge-active { background: #08f3; }
+    .badge-error { background: #f444; }
+    .badge-done { background: #0a73; }
+    .badge-pending { background: #fc04; }
+    .muted { opacity: 0.7; }
+    code, pre { font-family: ui-monospace, monospace; }
+    pre { background: #8881; padding: 0.5rem; overflow-x: auto; }
+    button { font: inherit; padding: 0.3rem 0.7rem; cursor: pointer; }
+  </style>
+  <script src="/assets/turbo.js" defer></script>
+  <script>
+    // SSE → Turbo Stream pump. One EventSource per tab; reconnects automatically.
+    document.addEventListener('turbo:load', () => {
+      if (window.__autodevSSE) return;
+      const es = new EventSource('/stream');
+      es.onmessage = (e) => Turbo.renderStreamMessage(e.data);
+      window.__autodevSSE = es;
+    });
+  </script>
+</head>
+<body>
+  <nav>
+    <a href="/">Dashboard</a>
+    <a href="/errors">Erreurs</a>
+  </nav>
+  <%= yield %>
+</body>
+</html>

@@ -8,12 +8,16 @@ gem 'i18n',    '~> 1.0'
 gem 'logger'
 gem 'ostruct'
 gem 'pastel', '~> 0.8'
+gem 'puma',   '~> 6.0'
+gem 'rack',   '~> 3.0'
 gem 'sequel', '~> 5.0'
+gem 'sinatra', '~> 4.0'
 gem 'sqlite3', '~> 2.0'
 
 # Test dependencies
 gem 'minitest', '~> 5.0'
-gem 'rake',     '~> 13.0'
+gem 'rack-test', '~> 2.1'
+gem 'rake', '~> 13.0'
 
 gem 'rubocop', '~> 1.86'
 

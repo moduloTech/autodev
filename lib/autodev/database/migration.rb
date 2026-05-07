@@ -3,6 +3,22 @@
 module Database
   # Schema creation and column migrations for the issues table.
   module Migration
+    CREATE_ACTIVITY_EVENTS_SQL = <<~SQL
+      CREATE TABLE IF NOT EXISTS activity_events (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        issue_id      INTEGER NOT NULL,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+        kind          TEXT NOT NULL,
+        level         TEXT NOT NULL DEFAULT 'info',
+        payload_json  TEXT NOT NULL DEFAULT '{}'
+      );
+    SQL
+
+    CREATE_ACTIVITY_EVENTS_INDEXES_SQL = [
+      'CREATE INDEX IF NOT EXISTS idx_ae_issue ON activity_events(issue_id, created_at);',
+      'CREATE INDEX IF NOT EXISTS idx_ae_kind  ON activity_events(kind, created_at);'
+    ].freeze
+
     CREATE_TABLE_SQL = <<~SQL
       CREATE TABLE IF NOT EXISTS issues (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +70,12 @@ module Database
     def self.run(db)
       db.run(CREATE_TABLE_SQL)
       add_missing_columns!(db)
+      create_activity_events!(db)
+    end
+
+    def self.create_activity_events!(db)
+      db.run(CREATE_ACTIVITY_EVENTS_SQL)
+      CREATE_ACTIVITY_EVENTS_INDEXES_SQL.each { |sql| db.run(sql) }
     end
 
     def self.add_missing_columns!(db)

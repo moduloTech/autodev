@@ -22,9 +22,11 @@ class Poller
   def run
     @pool.start
     @logger.debug("Worker pool started (#{@config['max_workers']} workers)")
+    Web::Server.start(@config, logger: @logger)
     trap_signals
     poll_loop
     @logger.info('Shutting down workers...')
+    Web::Server.stop
     @pool.shutdown
     @pool.cleanup
     @logger.info('autodev stopped.')

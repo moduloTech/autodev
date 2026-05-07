@@ -1,0 +1,55 @@
+<h1>autodev — Dashboard</h1>
+
+<h2>Compteurs</h2>
+<table>
+  <tr>
+    <th>Status</th><th>Total</th>
+  </tr>
+  <% Dashboard::STATUS_COLORS.keys.each do |status| %>
+    <% count = @counts[status] || 0 %>
+    <% next if count.zero? %>
+    <tr>
+      <td><a href="/list/<%= h(status) %>"><span class="<%= status_class(status) %>"><%= h(status) %></span> <span class="muted"><%= h(status_label(status)) %></span></a></td>
+      <td><a href="/list/<%= h(status) %>"><%= count %></a></td>
+    </tr>
+  <% end %>
+</table>
+
+<h2>Issues actives (<%= @active.size %>)</h2>
+<% if @active.empty? %>
+  <p class="muted">Aucune issue active.</p>
+<% else %>
+  <% @grouped.each do |status, rows| %>
+    <h3><span class="<%= status_class(status) %>"><%= h(status) %></span> <span class="muted"><%= h(status_label(status)) %></span> (<%= rows.size %>)</h3>
+    <table>
+      <tr><th>Projet</th><th>IID</th><th>Titre</th><th>Branche</th><th>MR</th></tr>
+      <% rows.each do |row| %>
+        <tr>
+          <td><a href="/projects/<%= h(project_slug(row[:project_path])) %>"><%= h(row[:project_path]) %></a></td>
+          <td><a href="/issues/<%= row[:id] %>">#<%= row[:issue_iid] %></a></td>
+          <td><%= h(row[:issue_title]) %></td>
+          <td><code><%= h(row[:branch_name]) %></code></td>
+          <td><% if row[:mr_url] && !row[:mr_url].empty? %><a href="<%= h(row[:mr_url]) %>" target="_blank">!<%= row[:mr_iid] %></a><% end %></td>
+        </tr>
+      <% end %>
+    </table>
+  <% end %>
+<% end %>
+
+<h2>Par projet</h2>
+<% if @by_project.empty? %>
+  <p class="muted">Aucun projet avec des issues suivies.</p>
+<% else %>
+  <table>
+    <tr><th>Projet</th><th>Total</th><th>Actives</th><th>Terminées</th><th>Erreur</th></tr>
+    <% @by_project.each do |stats| %>
+      <tr>
+        <td><a href="/projects/<%= h(project_slug(stats[:path])) %>"><%= h(stats[:path]) %></a></td>
+        <td><%= stats[:total] %></td>
+        <td><%= stats[:active] %></td>
+        <td><%= stats[:done] %></td>
+        <td><%= stats[:error] %></td>
+      </tr>
+    <% end %>
+  </table>
+<% end %>

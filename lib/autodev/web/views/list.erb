@@ -1,0 +1,22 @@
+<h1>Issues — <span class="<%= status_class(@status) %>"><%= h(@status) %></span> <span class="muted"><%= h(status_label(@status)) %></span></h1>
+
+<p class="muted"><%= @issues.size %> issue(s)<%= ' (limité aux 500 dernières)' if @issues.size == 500 %>.</p>
+
+<% if @issues.empty? %>
+  <p class="muted">Aucune issue dans cet état.</p>
+<% else %>
+  <table>
+    <tr><th>Projet</th><th>IID</th><th>Titre</th><th>Branche</th><th>MR</th></tr>
+    <% @issues.each do |row| %>
+      <tr>
+        <td><a href="/projects/<%= h(project_slug(row[:project_path])) %>"><%= h(row[:project_path]) %></a></td>
+        <td><a href="/issues/<%= row[:id] %>">#<%= row[:issue_iid] %></a></td>
+        <td><%= h(row[:issue_title]) %></td>
+        <td><code><%= h(row[:branch_name]) %></code></td>
+        <td><% if row[:mr_url] && !row[:mr_url].empty? %><a href="<%= h(row[:mr_url]) %>" target="_blank">!<%= row[:mr_iid] %></a><% end %></td>
+      </tr>
+    <% end %>
+  </table>
+<% end %>
+
+<p><a href="/">← Dashboard</a></p>

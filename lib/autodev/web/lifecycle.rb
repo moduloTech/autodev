@@ -1,0 +1,44 @@
+# frozen_string_literal: true
+
+module Web
+  # Encapsulates Puma server boot/teardown for the embedded Web::Server.
+  # Mixed into Web::Server as class methods.
+  module Lifecycle
+    DEFAULT_PORT = 4567
+    JOIN_TIMEOUT = 5
+
+    # Boot a background Puma server bound to 127.0.0.1.
+    # Returns the chosen port if started, nil if disabled or already running.
+    def start(config, logger: nil)
+      return nil if @puma_server
+      return nil if config['once']
+      return nil unless config.dig('web', 'enabled')
+
+      configure_with(config)
+      port = config.dig('web', 'port') || DEFAULT_PORT
+      logger&.info("Web UI listening on http://127.0.0.1:#{port}")
+      boot_puma!(port)
+      port
+    end
+
+    def stop
+      return unless @puma_server
+
+      Web::EventBus.shutdown!
+      @puma_server.stop(true)
+      @puma_thread&.join(JOIN_TIMEOUT)
+      @puma_server = nil
+      @puma_thread = nil
+    end
+
+    private
+
+    def boot_puma!(port)
+      require 'puma'
+
+      @puma_server = Puma::Server.new(self, nil, min_threads: 0, max_threads: 8)
+      @puma_server.add_tcp_listener('127.0.0.1', port)
+      @puma_thread = Thread.new { @puma_server.run.join }
+    end
+  end
+end
