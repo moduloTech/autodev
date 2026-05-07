@@ -24,6 +24,13 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_col_error: 'Erreur',
       web_col_message: 'Message',
 
+      # Status labels (mirror Dashboard.status_label, used by both CLI and web)
+      web_status_active: 'En cours',
+      web_status_pending: 'En attente',
+      web_status_needs_clarification: 'En attente de clarification',
+      web_status_done: 'Terminée',
+      web_status_error: 'Erreur',
+
       # Dashboard
       web_dashboard_title: 'autodev — Dashboard',
       web_dashboard_counters: 'Compteurs',
@@ -112,6 +119,12 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_col_done: 'Done',
       web_col_error: 'Error',
       web_col_message: 'Message',
+
+      web_status_active: 'In progress',
+      web_status_pending: 'Pending',
+      web_status_needs_clarification: 'Awaiting clarification',
+      web_status_done: 'Done',
+      web_status_error: 'Error',
 
       web_dashboard_title: 'autodev — Dashboard',
       web_dashboard_counters: 'Counters',

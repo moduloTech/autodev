@@ -20,6 +20,13 @@ module Web
 
     helpers Web::Helpers
 
+    # Per-browser locale override (cookie). Falls through to the
+    # config-defined locale when no cookie is set.
+    get '/locale/:lang' do
+      apply_locale_cookie!(params[:lang])
+      redirect safe_back_path(params[:back])
+    end
+
     # Vendored Turbo (no CDN). Served only via this explicit route.
     get '/assets/turbo.js' do
       content_type 'application/javascript'

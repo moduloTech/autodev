@@ -33,10 +33,21 @@
   </script>
 </head>
 <body>
-  <nav>
-    <a href="/"><%= h(t_web(:web_nav_dashboard)) %></a>
-    <a href="/errors"><%= h(t_web(:web_nav_errors)) %></a>
-    <a href="/issues"><%= h(t_web(:web_nav_all_issues)) %></a>
+  <nav style="display: flex; justify-content: space-between; align-items: baseline">
+    <span>
+      <a href="/"><%= h(t_web(:web_nav_dashboard)) %></a>
+      <a href="/errors"><%= h(t_web(:web_nav_errors)) %></a>
+      <a href="/issues"><%= h(t_web(:web_nav_all_issues)) %></a>
+    </span>
+    <span class="muted" style="font-size: 0.85rem">
+      <% Web::I18nHelpers::AVAILABLE_LOCALES.each do |lang| %>
+        <% if lang.to_sym == web_locale %>
+          <strong><%= h(lang.upcase) %></strong>
+        <% else %>
+          <a href="/locale/<%= h(lang) %>?back=<%= h(CGI.escape(request.fullpath)) %>"><%= h(lang.upcase) %></a>
+        <% end %>
+      <% end %>
+    </span>
   </nav>
   <%= yield %>
 </body>

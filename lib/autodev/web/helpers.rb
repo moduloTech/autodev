@@ -74,10 +74,6 @@ module Web
       end
     end
 
-    def status_label(status)
-      Dashboard.status_label(status)
-    end
-
     def project_for(project_path)
       Array(app_config['projects']).find { |p| p['path'] == project_path } || {}
     end

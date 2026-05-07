@@ -70,4 +70,60 @@ class WebLocaleTest < Minitest::Test
       ConfigValidator.validate_globals!(base.merge('web' => { 'enabled' => true, 'port' => 4567, 'locale' => loc }))
     end
   end
+
+  def test_locale_switcher_route_sets_cookie_and_redirects
+    Web::Server.configure_with('web' => { 'locale' => 'fr' })
+    get '/locale/en'
+
+    assert_equal 302, last_response.status
+    assert_match(/locale=en/, last_response.headers['set-cookie'].to_s)
+  end
+
+  def test_cookie_overrides_config_locale
+    Web::Server.configure_with('web' => { 'locale' => 'fr' })
+    set_cookie 'locale=en'
+    get '/'
+
+    assert_includes last_response.body, 'All issues'
+  end
+
+  def test_invalid_locale_in_cookie_falls_back_to_config
+    Web::Server.configure_with('web' => { 'locale' => 'fr' })
+    set_cookie 'locale=klingon'
+    get '/'
+
+    assert_includes last_response.body, 'Toutes les issues'
+  end
+
+  def test_locale_switcher_rejects_unknown_lang_and_clears_cookie
+    Web::Server.configure_with({})
+    set_cookie 'locale=en'
+    get '/locale/klingon'
+
+    assert_equal 302, last_response.status
+  end
+
+  def test_locale_switcher_redirect_back_only_accepts_local_paths
+    Web::Server.configure_with({})
+    get '/locale/en?back=https://evil.example.com/x'
+    location = URI(last_response.headers['location']).path
+
+    assert_equal '/', location
+  end
+
+  def test_locale_switcher_preserves_local_back_param
+    Web::Server.configure_with({})
+    get '/locale/en?back=/issues'
+    location = URI(last_response.headers['location']).path
+
+    assert_equal '/issues', location
+  end
+
+  def test_nav_renders_language_switcher
+    Web::Server.configure_with({})
+    get '/'
+
+    assert_includes last_response.body, '/locale/en'
+    assert_includes last_response.body, '<strong>FR</strong>'
+  end
 end
