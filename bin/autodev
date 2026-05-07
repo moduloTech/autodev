@@ -23,6 +23,8 @@
 #   When `web.enabled: true` (default) and not running with --once, autodev
 #   exposes a live monitoring UI on http://127.0.0.1:<web.port> (default 4567).
 #   Disable via `web: { enabled: false }` in config.yml.
+#   Set `AUTODEV_WEB_RELOAD=1` to hot-reload Sinatra routes + Phlex views
+#   on every request (dev only — restart still required for poller / DB code).
 #
 # Configuration (priority: defaults < config.yml < env vars < CLI flags):
 #   ~/.autodev/config.yml    Central config file
@@ -42,6 +44,7 @@ gemfile(true) do
   gem 'logger'
   gem 'rack',    '~> 3.0'
   gem 'sinatra', '~> 4.0'
+  gem 'sinatra-contrib', '~> 4.0' # for sinatra/reloader (dev hot-reload)
   gem 'puma',    '~> 6.0'
   gem 'phlex',   '~> 2.4', '>= 2.4.1'
 end

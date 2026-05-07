@@ -13,6 +13,7 @@ gem 'puma',   '~> 6.0'
 gem 'rack',   '~> 3.0'
 gem 'sequel', '~> 5.0'
 gem 'sinatra', '~> 4.0'
+gem 'sinatra-contrib', '~> 4.0'
 gem 'sqlite3', '~> 2.0'
 
 # Test dependencies

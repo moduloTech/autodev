@@ -3,6 +3,13 @@
 require_relative 'helpers'
 require_relative 'lifecycle'
 
+# Hot-reload of routes + Phlex views between requests, opted in via
+# `AUTODEV_WEB_RELOAD=1`. The reloader watches Ruby files under
+# `lib/autodev/web/` and `lib/autodev/locales/` and reloads them
+# transparently. The poller, worker pool, and DB models are NOT
+# reloaded — those still need a process restart.
+require 'sinatra/reloader' if ENV['AUTODEV_WEB_RELOAD']
+
 module Web
   # Sinatra app exposing live views and actions over the autodev SQLite DB.
   class Server < Sinatra::Base # rubocop:disable Metrics/ClassLength
@@ -16,6 +23,14 @@ module Web
     set :static, false
     # Bind is always 127.0.0.1; host authorization adds no security and breaks Rack::Test.
     set :host_authorization, { permitted_hosts: [] }
+
+    if ENV['AUTODEV_WEB_RELOAD']
+      register Sinatra::Reloader
+      web_root = File.expand_path('..', __dir__)
+      locales_root = File.expand_path('../locales', __dir__)
+      also_reload "#{web_root}/web/**/*.rb"
+      also_reload "#{locales_root}/**/*.rb"
+    end
 
     helpers Web::Helpers
 

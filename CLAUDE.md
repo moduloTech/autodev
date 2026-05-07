@@ -70,6 +70,7 @@ Implementation:
 - Persistence: every AASM transition + every `ActivityLogger.post` writes an `activity_events` row (kind: `transition` or `danger_claude`). Hooks live in `IssueBehavior#emit_activity_event!` and `ActivityLogger.persist_event!`, both wrapped in `rescue StandardError` so DB failures never break the workflow.
 - Localhost only; no auth. Disable via `web: { enabled: false }` in `~/.autodev/config.yml`.
 - Localized: every string rendered in the views goes through `t_web(key, **vars)` (in `Web::I18nHelpers`) → `Locales.t(key, locale: ...)`. Templates live in `lib/autodev/locales/web.rb` (FR + EN). Locale comes from `web.locale` (default `'fr'`, validated to `'fr'` / `'en'`). Adding a third language is a one-file change.
+- **Hot reload (dev)**: run `AUTODEV_WEB_RELOAD=1 ./bin/autodev` to enable `Sinatra::Reloader`. It re-evaluates routes and Phlex view classes on every request when a file under `lib/autodev/web/` or `lib/autodev/locales/` changes, no process restart needed. CSS files in `public/css/` already revalidate via `Cache-Control: no-cache` (just F5). The poller, worker pool, AASM model, and DB schema are NOT auto-reloaded — those still need a restart.
 
 ### App Environment (`app:`)
 
