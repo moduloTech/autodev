@@ -101,3 +101,87 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
 .theme-icon { color: var(--text-muted); }
 [data-theme="light"] .theme-icon-sun  { display: none; }
 [data-theme="dark"]  .theme-icon-moon { display: none; }
+
+/* Issues list: filter bar + tabs + dense table + mobile cards. */
+.filter-bar {
+  padding: 12px 32px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+.filter-tabs { display: flex; gap: 4px; overflow-x: auto; flex: 1; min-width: 0; }
+.filter-search-form { display: flex; gap: 8px; align-items: center; }
+.search-input {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px 5px 8px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--paper);
+}
+.search-input input.search-field {
+  border: none; outline: none; font-size: 13px; width: 180px;
+  background: transparent; color: var(--text);
+}
+.search-input input.search-field:focus { outline: none; box-shadow: none; }
+
+.issues-content { padding: 24px; }
+
+/* Desktop table */
+.issues-table {
+  background: var(--paper); border: 1px solid var(--border);
+  border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-xs);
+}
+.issues-table-header {
+  display: grid;
+  grid-template-columns: 60px 1fr 220px 140px;
+  padding: 11px 18px;
+  background: var(--paper-2); border-bottom: 1px solid var(--border);
+  font-size: 11px; color: var(--text-muted); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.issues-row {
+  display: grid;
+  grid-template-columns: 60px 1fr 220px 140px;
+  padding: 13px 18px; align-items: center;
+  font-size: 13px; text-decoration: none; color: inherit;
+  transition: background 0.1s ease;
+}
+.issues-row:hover { background: var(--paper-2); }
+.issues-row .iid { font-family: var(--font-mono); color: var(--text-muted); font-size: 12px; }
+.issues-row .title-cell { min-width: 0; }
+.issues-row .title {
+  color: var(--text-strong); font-weight: 500;
+  white-space: nowrap; text-overflow: ellipsis; overflow: hidden;
+}
+.issues-row .meta {
+  color: var(--text-muted); font-size: 11px; margin-top: 2px;
+  white-space: nowrap; text-overflow: ellipsis; overflow: hidden;
+}
+.issues-row .activity-cell { font-size: 12px; color: var(--text-muted); }
+
+/* Mobile-only cards (hidden on desktop). */
+.issues-cards { display: none; flex-direction: column; gap: 10px; }
+.issue-card {
+  background: var(--paper); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 14px; box-shadow: var(--shadow-xs);
+  display: flex; flex-direction: column; gap: 10px;
+  text-decoration: none; color: inherit;
+}
+.issue-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.issue-card-header .iid-meta {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  white-space: nowrap; text-overflow: ellipsis; overflow: hidden;
+}
+.issue-card-title { font-size: 14px; font-weight: 500; color: var(--text-strong); line-height: 1.35; }
+.issue-card-footer { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+
+@media (max-width: 639px) {
+  .filter-bar { padding: 10px 14px; }
+  .filter-search-form { display: none; } /* search lives in tab bar only on desktop V1 */
+  .issues-content { padding: 12px; }
+  .issues-table { display: none; }
+  .issues-cards { display: flex; }
+}
+
+.issues-pager { margin-top: 16px; display: flex; align-items: center; gap: 12px; }
+.empty-state { padding: 48px 24px; text-align: center; }

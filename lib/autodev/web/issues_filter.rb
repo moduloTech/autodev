@@ -6,13 +6,42 @@ module Web
   module IssuesFilter
     PER_PAGE_OPTIONS = [20, 50, 100].freeze
     DEFAULT_PER_PAGE = 50
+    TABS = %w[active errors waiting done all].freeze
 
     def filter_issues(params, base = issues_dataset)
-      ds = base
+      ds = apply_tab(base, tab_param(params))
       ds = apply_keyword(ds, params[:q])
       ds = apply_date_from(ds, params[:from])
       ds = apply_date_to(ds, params[:to])
       ds.order(Sequel.desc(:id))
+    end
+
+    def tab_param(params)
+      raw = params[:tab].to_s
+      TABS.include?(raw) ? raw : 'all'
+    end
+
+    def apply_tab(dataset, tab)
+      case tab
+      when 'active'  then dataset.where(status: Dashboard::ACTIVE_STATES)
+      when 'errors'  then dataset.where(status: 'error')
+      when 'waiting' then dataset.where(status: 'needs_clarification')
+      when 'done'    then dataset.where(status: 'done')
+      else dataset
+      end
+    end
+
+    # Counts per tab on the unfiltered dataset, used to populate the
+    # numeric pill on each tab. 5 cheap queries.
+    def tab_counts
+      ds = issues_dataset
+      {
+        active: ds.where(status: Dashboard::ACTIVE_STATES).count,
+        errors: ds.where(status: 'error').count,
+        waiting: ds.where(status: 'needs_clarification').count,
+        done: ds.where(status: 'done').count,
+        all: ds.count
+      }
     end
 
     def per_page_for(params)

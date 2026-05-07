@@ -27,9 +27,10 @@ module Web
     if ENV['AUTODEV_WEB_RELOAD']
       register Sinatra::Reloader
       web_root = File.expand_path('..', __dir__)
-      locales_root = File.expand_path('../locales', __dir__)
+      autodev_root = File.expand_path('..', __dir__)
       also_reload "#{web_root}/web/**/*.rb"
-      also_reload "#{locales_root}/**/*.rb"
+      also_reload "#{autodev_root}/locales.rb"
+      also_reload "#{autodev_root}/locales/**/*.rb"
     end
 
     helpers Web::Helpers
@@ -122,6 +123,8 @@ module Web
         issues: issues, total: total, total_pages: total_pages,
         page: page, per_page: per_page,
         filters: { q: params[:q], from: params[:from], to: params[:to] },
+        tab: tab_param(params), tab_counts: tab_counts,
+        kpis: dashboard_kpis,
         **view_context
       ).call
     end

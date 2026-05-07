@@ -36,16 +36,16 @@ class LocalesTest < Minitest::Test
   end
 
   def test_all_fr_keys_have_en_counterparts
-    fr_keys = Locales::TEMPLATES[:fr].keys
-    en_keys = Locales::TEMPLATES[:en].keys
+    fr_keys = Locales.merged_for(:fr).keys
+    en_keys = Locales.merged_for(:en).keys
     missing = fr_keys - en_keys
 
     assert_empty missing, "EN locale is missing keys: #{missing.join(', ')}"
   end
 
   def test_all_en_keys_have_fr_counterparts
-    fr_keys = Locales::TEMPLATES[:fr].keys
-    en_keys = Locales::TEMPLATES[:en].keys
+    fr_keys = Locales.merged_for(:fr).keys
+    en_keys = Locales.merged_for(:en).keys
     missing = en_keys - fr_keys
 
     assert_empty missing, "FR locale is missing keys: #{missing.join(', ')}"

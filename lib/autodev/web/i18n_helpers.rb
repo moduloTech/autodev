@@ -41,6 +41,21 @@ module Web
       )
     end
 
+    # Localized "il y a 4 min" / "4 min ago" relative-time helper.
+    # Falls back to the raw timestamp if parsing fails.
+    def relative_time(timestamp) # rubocop:disable Metrics/AbcSize
+      return '' if timestamp.nil? || timestamp.to_s.empty?
+
+      diff = Time.now - Time.parse(timestamp.to_s)
+      return t_web(:web_time_just_now)               if diff < 60
+      return t_web(:web_time_minutes_ago, n: (diff / 60).to_i) if diff < 3600
+      return t_web(:web_time_hours_ago,   n: (diff / 3600).to_i) if diff < 86_400
+
+      t_web(:web_time_days_ago, n: (diff / 86_400).to_i)
+    rescue ArgumentError
+      timestamp.to_s
+    end
+
     # Set or clear the locale cookie based on `lang`. Used by /locale/:lang.
     def apply_locale_cookie!(lang)
       if AVAILABLE_LOCALES.include?(lang)

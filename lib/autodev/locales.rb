@@ -73,11 +73,29 @@ module Locales
     }
   }.freeze
 
-  MERGED = NOTIFICATION_TEMPLATES.merge(ACTIVITY_TEMPLATES) { |_key, a, b| a.merge(b) }
-  TEMPLATES = MERGED.merge(WEB_TEMPLATES) { |_key, a, b| a.merge(b) }.freeze
+  # Lookup is dynamic (per call) instead of merging once at boot.
+  # That way, when AUTODEV_WEB_RELOAD reloads `locales/web.rb` and re-defines
+  # WEB_TEMPLATES with new keys, the next `Locales.t` call sees them.
+  TABLES = %i[NOTIFICATION_TEMPLATES ACTIVITY_TEMPLATES WEB_TEMPLATES].freeze
 
   def self.t(key, locale: :fr, **vars)
-    template = TEMPLATES.dig(locale, key) || TEMPLATES.dig(:fr, key) || key.to_s
+    template = lookup(locale, key) || lookup(:fr, key) || key.to_s
     template % vars
+  end
+
+  def self.lookup(locale, key)
+    TABLES.each do |const|
+      hash = const_get(const)
+      val = hash.dig(locale, key)
+      return val if val
+    end
+    nil
+  end
+
+  # All keys merged across tables, computed on demand. Useful for
+  # test parity checks (every FR key has an EN counterpart and vice
+  # versa). Not used in the request path.
+  def self.merged_for(locale)
+    TABLES.reduce({}) { |acc, c| acc.merge(const_get(c).fetch(locale, {})) }
   end
 end

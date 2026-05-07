@@ -3,7 +3,7 @@
 require_relative 'test_helper'
 require_relative 'web_test_helper'
 
-class WebIssuesFilterTest < Minitest::Test
+class WebIssuesFilterTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include Rack::Test::Methods
   include DatabaseTestHelper
   include WebServerTestSetup
@@ -68,26 +68,80 @@ class WebIssuesFilterTest < Minitest::Test
     25.times { |i| create_issue(issue_title: "Issue #{i}") }
     get '/issues', { per_page: '999' }
 
-    assert_includes last_response.body, 'page 1 / 1'
+    # 25 issues fit in default 50 → no pager rendered.
+    refute_includes last_response.body, 'issues-pager'
   end
 
   def test_pagination_with_smaller_per_page_creates_pages
     25.times { |i| create_issue(issue_title: "Issue #{i}") }
     get '/issues', { per_page: '20' }
 
-    assert_includes last_response.body, 'page 1 / 2'
+    assert_includes last_response.body, 'Page 1 / 2'
   end
 
   def test_pagination_second_page_indicates_position
     25.times { |i| create_issue(issue_title: "Issue #{i}") }
     get '/issues', { per_page: '20', page: '2' }
 
-    assert_includes last_response.body, 'page 2 / 2'
+    assert_includes last_response.body, 'Page 2 / 2'
   end
 
   def test_issues_link_appears_in_nav
     get '/'
 
     assert_includes last_response.body, 'href="/issues"'
+  end
+
+  def test_tab_active_filters_to_active_states_only
+    create_issue(status: 'cloning', issue_title: 'WIP')
+    create_issue(status: 'done', issue_title: 'Old')
+    get '/issues', { tab: 'active' }
+
+    assert_includes last_response.body, 'WIP'
+    refute_includes last_response.body, 'Old'
+  end
+
+  def test_tab_done_filters_to_done_only
+    create_issue(status: 'cloning', issue_title: 'WIP')
+    create_issue(status: 'done', issue_title: 'Old')
+    get '/issues', { tab: 'done' }
+
+    assert_includes last_response.body, 'Old'
+    refute_includes last_response.body, 'WIP'
+  end
+
+  def test_tab_errors_filters_to_error_only
+    create_issue(status: 'error', issue_title: 'Boom')
+    create_issue(status: 'done', issue_title: 'Old')
+    get '/issues', { tab: 'errors' }
+
+    assert_includes last_response.body, 'Boom'
+    refute_includes last_response.body, 'Old'
+  end
+
+  def test_tab_all_default_shows_all
+    create_issue(status: 'cloning', issue_title: 'WIP')
+    create_issue(status: 'done', issue_title: 'Old')
+    get '/issues'
+
+    assert_includes last_response.body, 'WIP'
+    assert_includes last_response.body, 'Old'
+  end
+
+  def test_invalid_tab_falls_back_to_all
+    create_issue(status: 'cloning', issue_title: 'WIP')
+    create_issue(status: 'done', issue_title: 'Old')
+    get '/issues', { tab: 'klingon' }
+
+    assert_includes last_response.body, 'WIP'
+    assert_includes last_response.body, 'Old'
+  end
+
+  def test_tab_links_preserve_search_query
+    get '/issues', { q: 'whatever', tab: 'active' }
+    body = last_response.body
+
+    # Other-tab anchors carry q= forward
+    assert_includes body, 'href="/issues?tab=done&q=whatever"'
   end
 end
