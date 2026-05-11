@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-05-11
+
 ### Added
 
 - New `web.bind` config option (default `'127.0.0.1'`). Set to `'0.0.0.0'` or a specific interface IP to expose the embedded UI beyond loopback — e.g. to make it reachable from a NetBird mesh peer. `Web::Lifecycle.start` passes the value to `Puma::Server#add_tcp_listener`, and `ConfigValidator.validate_web_bind!` rejects empty strings / non-strings. Backward compatible: with no config change, the bind stays `127.0.0.1` and behavior is unchanged. **No built-in auth** — when binding off-loopback, put a reverse proxy or mesh VPN in front for TLS + access control.
