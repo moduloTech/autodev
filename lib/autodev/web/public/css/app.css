@@ -386,3 +386,40 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
   .hero-band { padding: 18px; }
   .project-stats-grid { padding: 14px; gap: 10px; }
 }
+
+/* /projects index — card grid */
+.projects-grid {
+  display: grid; gap: 16px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 768px) { .projects-grid { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1280px) { .projects-grid { grid-template-columns: 1fr 1fr 1fr; } }
+
+.project-index-card {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 18px;
+  background: var(--paper); border: 1px solid var(--border);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-xs);
+  text-decoration: none; color: inherit;
+  transition: border-color 0.1s ease, box-shadow 0.1s ease;
+}
+.project-index-card:hover {
+  border-color: var(--accent-bg-strong);
+  box-shadow: var(--shadow-sm);
+}
+.project-card-header {
+  display: flex; align-items: center; gap: 12px; min-width: 0;
+}
+.project-card-name {
+  font-size: 14px; font-weight: 600; color: var(--text-strong);
+  white-space: nowrap; text-overflow: ellipsis; overflow: hidden;
+}
+.project-card-repo {
+  font-size: 11px; color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap; text-overflow: ellipsis; overflow: hidden;
+}
+.project-card-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  border-top: 1px solid var(--divider); padding-top: 14px;
+}

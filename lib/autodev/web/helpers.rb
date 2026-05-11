@@ -37,6 +37,15 @@ module Web
       rows.group_by { |r| r[:status] }
     end
 
+    # Union of projects from the YAML config and projects that have any
+    # tracked issue. Used by the /projects index so a configured-but-quiet
+    # project still shows up before its first issue lands.
+    def all_known_projects
+      from_config = Array(app_config['projects']).map { |p| p['path'] }.compact
+      from_db = issues_dataset.select(:project_path).distinct.map { |r| r[:project_path] }
+      (from_config + from_db).uniq.sort
+    end
+
     # All projects that have at least one tracked issue, ordered by total
     # count desc. Returns [{path:, total:, active:, done:, error:}, ...].
     def project_breakdown

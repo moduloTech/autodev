@@ -185,6 +185,11 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_project_behavior_section: 'Comportement',
       web_project_security_section: 'Sécurité',
       web_project_no_recent: 'Aucune demande récente pour ce projet.',
+      # Projects index
+      web_projects_index_title: 'Projets',
+      web_projects_index_subtitle: 'Tous les projets suivis par autodev.',
+      web_projects_index_empty: 'Aucun projet configuré pour le moment.',
+      web_projects_card_open: 'Ouvrir',
 
       # /list/:status (single-status browse)
       web_list_title: 'Issues — ',
@@ -391,6 +396,10 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_project_behavior_section: 'Behavior',
       web_project_security_section: 'Security',
       web_project_no_recent: 'No recent request for this project.',
+      web_projects_index_title: 'Projects',
+      web_projects_index_subtitle: 'Every project autodev keeps an eye on.',
+      web_projects_index_empty: 'No project configured yet.',
+      web_projects_card_open: 'Open',
 
       web_list_title: 'Issues — ',
       web_list_count: '%<count>s issue(s)',

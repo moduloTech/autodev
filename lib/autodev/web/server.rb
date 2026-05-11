@@ -26,9 +26,9 @@ module Web
 
     if ENV['AUTODEV_WEB_RELOAD']
       register Sinatra::Reloader
-      web_root = File.expand_path('..', __dir__)
       autodev_root = File.expand_path('..', __dir__)
-      also_reload "#{web_root}/web/**/*.rb"
+      also_reload "#{autodev_root}/web.rb"
+      also_reload "#{autodev_root}/web/**/*.rb"
       also_reload "#{autodev_root}/locales.rb"
       also_reload "#{autodev_root}/locales/**/*.rb"
     end
@@ -176,6 +176,16 @@ module Web
                               .or(Sequel.~(post_completion_error: nil))
                               .order(Sequel.desc(:id)).all
       Web::Views::Errors.new(errored: errored, kpis: dashboard_kpis, **view_context).call
+    end
+
+    get '/projects' do
+      # Build a row per known project: DB stats for those with issues,
+      # zero-filled placeholder for configured-but-quiet ones.
+      stats_by_path = project_breakdown.to_h { |s| [s[:path], s] }
+      projects = all_known_projects.map do |path|
+        stats_by_path[path] || { path: path, total: 0, active: 0, done: 0, error: 0 }
+      end
+      Web::Views::ProjectsIndex.new(projects: projects, kpis: dashboard_kpis, **view_context).call
     end
 
     get '/projects/:slug' do

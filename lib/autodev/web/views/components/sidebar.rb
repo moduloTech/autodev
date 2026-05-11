@@ -123,8 +123,7 @@ module Web
             count_key: :errors, tone: :err },
           { id: 'chat',      label_key: :web_nav_conversations, icon: 'messages', href: '#',
             count_key: :chat, coming_soon: true },
-          { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '#',
-            coming_soon: true }
+          { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '/projects' }
         ].freeze
         private_constant :ITEMS
 
