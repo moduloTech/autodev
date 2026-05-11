@@ -264,3 +264,125 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
   .error-card-body { padding: 16px; }
   .error-card-title { font-size: 15px; }
 }
+
+/* /projects/:slug page */
+.project-tabs {
+  background: var(--paper); border-bottom: 1px solid var(--border);
+  padding: 0 32px; display: flex; gap: 4px; overflow-x: auto;
+  flex: 0 0 auto;
+}
+.project-tab {
+  padding: 12px 14px; font-size: 13px; font-weight: 500;
+  color: var(--text-muted); text-decoration: none;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;
+}
+.project-tab:hover { color: var(--text); }
+.project-tab-active {
+  color: var(--text-strong); border-bottom-color: var(--accent-solid);
+}
+.project-tab-count {
+  font-size: 11px; padding: 0 6px; border-radius: var(--r-pill);
+  background: var(--paper-2); color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* Overview tab */
+.project-overview-grid { display: grid; grid-template-columns: 1fr; gap: 22px; }
+@media (min-width: 1024px) {
+  .project-overview-grid { grid-template-columns: 1.5fr 1fr; }
+}
+
+.hero-band {
+  padding: 24px;
+  border-top-left-radius: var(--r-lg); border-top-right-radius: var(--r-lg);
+  border-bottom: 1px solid var(--divider);
+}
+.hero-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.hero-mark {
+  width: 40px; height: 40px; border-radius: 10px; color: white;
+  font-size: 18px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+}
+.hero-name { font-size: 16px; font-weight: 600; color: var(--text-strong); }
+.hero-repo { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+.hero-description { margin: 0; font-size: 13px; color: var(--text); line-height: 1.55; }
+
+.project-stats-grid {
+  padding: 18px; display: grid; gap: 14px;
+  grid-template-columns: 1fr 1fr;
+}
+@media (min-width: 1024px) {
+  .project-stats-grid { grid-template-columns: repeat(4, 1fr); }
+}
+.stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.stat-value {
+  font-size: 22px; font-weight: 600; letter-spacing: -0.5px;
+  line-height: 1; font-feature-settings: "tnum";
+}
+
+.card-section-header {
+  padding: 14px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.card-section-title {
+  margin: 0; font-size: 14px; font-weight: 600; color: var(--text-strong);
+}
+.recent-row {
+  display: grid; grid-template-columns: auto 1fr auto;
+  align-items: center; gap: 12px;
+  padding: 11px 18px; text-decoration: none; color: inherit;
+}
+.recent-row:hover { background: var(--paper-2); }
+.recent-title {
+  font-size: 13px; color: var(--text-strong);
+  white-space: nowrap; text-overflow: ellipsis; overflow: hidden;
+}
+.recent-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+.sidecard-title {
+  margin: 0 0 14px; font-size: 13px; font-weight: 600;
+  color: var(--text-strong); text-transform: uppercase; letter-spacing: 0.6px;
+}
+.kv-grid { display: grid; gap: 12px; }
+.kv-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+}
+.kv-label { font-size: 12px; color: var(--text-muted); }
+.kv-value { font-size: 13px; color: var(--text); text-align: right; max-width: 60%; }
+
+/* Issues tab (within /projects) */
+.project-issue-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 18px; flex-wrap: wrap;
+  text-decoration: none; color: inherit;
+}
+.project-issue-row:hover { background: var(--paper-2); }
+
+/* Config tab */
+.project-config-grid { display: grid; grid-template-columns: 1fr; gap: 22px; }
+@media (min-width: 1024px) {
+  .project-config-grid { grid-template-columns: 1.4fr 1fr; }
+}
+.yaml-header {
+  padding: 12px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.yaml-filename {
+  font-size: 12px; font-weight: 600; color: var(--text-strong);
+  font-family: var(--font-mono);
+}
+.yaml-pre {
+  margin: 0; padding: 18px; background: var(--code-bg);
+  color: var(--code-fg); font-family: var(--font-mono);
+  font-size: 12px; line-height: 1.7; overflow: auto;
+  border-bottom-left-radius: var(--r-lg); border-bottom-right-radius: var(--r-lg);
+}
+
+@media (max-width: 639px) {
+  .project-tabs { padding: 0 8px; }
+  .project-content { padding: 14px !important; }
+  .hero-band { padding: 18px; }
+  .project-stats-grid { padding: 14px; gap: 10px; }
+}

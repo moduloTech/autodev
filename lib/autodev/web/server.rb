@@ -185,6 +185,9 @@ module Web
         project_config: project_for(project_path),
         project_issues: issues_dataset.where(project_path: project_path)
                         .order(Sequel.desc(:id)).limit(100).all,
+        stats: project_overview_stats(project_path),
+        kpis: dashboard_kpis,
+        tab: params[:tab].to_s,
         **view_context
       ).call
     end

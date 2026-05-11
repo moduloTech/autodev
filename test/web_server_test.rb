@@ -123,9 +123,37 @@ class WebServerTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   end
 
   def test_project_show_renders_app_config
-    get '/projects/group__project'
+    get '/projects/group__project?tab=config'
 
     assert_includes last_response.body, 'bin/test'
+  end
+
+  def test_project_show_default_tab_is_overview
+    get '/projects/group__project'
+
+    assert_includes last_response.body, 'project-tab-active'
+    assert_includes last_response.body, 'Vue d&#39;ensemble'
+  end
+
+  def test_project_show_overview_renders_stats
+    create_issue(project_path: 'group/project', status: 'done')
+    get '/projects/group__project'
+
+    assert_includes last_response.body, 'Livrées ce mois'
+    assert_includes last_response.body, 'project-stats-grid'
+  end
+
+  def test_project_show_team_tab_is_coming_soon_stub
+    get '/projects/group__project?tab=team'
+
+    assert_includes last_response.body, 'Synchronisation avec les membres GitLab à venir'
+  end
+
+  def test_project_show_invalid_tab_falls_back_to_overview
+    get '/projects/group__project?tab=klingon'
+
+    assert_includes last_response.body, 'Vue d&#39;ensemble'
+    assert_includes last_response.body, 'project-stats-grid'
   end
 
   def test_dashboard_uses_gitlab_url_from_config

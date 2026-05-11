@@ -218,13 +218,6 @@ module Web
           "border-bottom: #{border}; text-decoration: none; color: inherit;"
       end
 
-      PROJECT_DOT_COLORS = ['var(--accent-solid)', '#2A6FDB', '#1F8A7E', '#B57A12', '#C4413B'].freeze
-      private_constant :PROJECT_DOT_COLORS
-
-      def project_dot_color(path)
-        PROJECT_DOT_COLORS[path.bytes.sum % PROJECT_DOT_COLORS.size]
-      end
-
       def render_project_error_badge(count)
         span(style: 'font-size: 11px; color: var(--err-fg); background: var(--err-bg); ' \
                     'padding: 2px 7px; border-radius: var(--r-pill);') do

@@ -105,6 +105,35 @@ module Web
       nil
     end
 
+    def gitlab_project_url(project_path)
+      base = app_config['gitlab_url'].to_s.sub(%r{/+$}, '')
+      return nil if base.empty? || project_path.to_s.empty?
+
+      "#{base}/#{project_path}"
+    end
+
+    PROJECT_DOT_COLORS = ['var(--accent-solid)', '#2A6FDB', '#1F8A7E', '#B57A12', '#C4413B'].freeze
+
+    def project_dot_color(path)
+      PROJECT_DOT_COLORS[path.to_s.bytes.sum % PROJECT_DOT_COLORS.size]
+    end
+
+    # Per-project counts used by the project page hero. Returns
+    # {active:, errors:, done_month:, total:}. Distinct from
+    # `project_stats` (above), which feeds the dashboard "Par projet"
+    # table with a slightly different shape (path/total/active/done/error).
+    def project_overview_stats(project_path) # rubocop:disable Metrics/AbcSize
+      ds = issues_dataset.where(project_path: project_path)
+      counts = ds.group_and_count(:status).to_hash(:status, :count)
+      since = (Date.today - 30).to_s
+      {
+        active: Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 },
+        errors: (counts['error'] || 0) + (counts['needs_clarification'] || 0),
+        done_month: ds.where(status: 'done').where { created_at >= since }.count,
+        total: counts.values.sum
+      }
+    end
+
     def find_issue(id)
       Issue[Integer(id)]
     end
