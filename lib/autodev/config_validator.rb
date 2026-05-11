@@ -53,6 +53,7 @@ module ConfigValidator
 
     validate_web_port!(web['port'])
     validate_web_locale!(web['locale'])
+    validate_web_bind!(web['bind'])
   end
   private_class_method :validate_web!
 
@@ -69,4 +70,14 @@ module ConfigValidator
     raise ConfigError, "'web.locale' must be 'fr' or 'en', got: #{locale.inspect}"
   end
   private_class_method :validate_web_locale!
+
+  # Best-effort check on the bind address. `0.0.0.0`, `127.0.0.1`, any IPv4
+  # literal, and any non-empty hostname are all accepted — Puma will surface
+  # a clearer error at boot if the address can't be resolved.
+  def self.validate_web_bind!(bind)
+    return if bind.nil? || (bind.is_a?(String) && !bind.strip.empty?)
+
+    raise ConfigError, "'web.bind' must be a non-empty string, got: #{bind.inspect}"
+  end
+  private_class_method :validate_web_bind!
 end

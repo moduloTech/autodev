@@ -54,4 +54,34 @@ class ConfigValidateWebTest < Minitest::Test
 
     assert_raises(ConfigError) { ConfigValidator.validate_globals!(config) }
   end
+
+  def test_bind_accepts_loopback
+    config = BASE.merge('web' => { 'enabled' => true, 'port' => 4567, 'bind' => '127.0.0.1' })
+
+    ConfigValidator.validate_globals!(config)
+  end
+
+  def test_bind_accepts_zero_addr
+    config = BASE.merge('web' => { 'enabled' => true, 'port' => 4567, 'bind' => '0.0.0.0' })
+
+    ConfigValidator.validate_globals!(config)
+  end
+
+  def test_bind_accepts_arbitrary_hostname
+    config = BASE.merge('web' => { 'enabled' => true, 'port' => 4567, 'bind' => 'bobette.netbird.lan' })
+
+    ConfigValidator.validate_globals!(config)
+  end
+
+  def test_empty_bind_rejected
+    config = BASE.merge('web' => { 'enabled' => true, 'port' => 4567, 'bind' => '' })
+
+    assert_raises(ConfigError) { ConfigValidator.validate_globals!(config) }
+  end
+
+  def test_non_string_bind_rejected
+    config = BASE.merge('web' => { 'enabled' => true, 'port' => 4567, 'bind' => 12_345 })
+
+    assert_raises(ConfigError) { ConfigValidator.validate_globals!(config) }
+  end
 end

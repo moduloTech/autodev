@@ -5,6 +5,7 @@ module Web
   # Mixed into Web::Server as class methods.
   module Lifecycle
     DEFAULT_PORT = 4567
+    DEFAULT_BIND = '127.0.0.1'
     JOIN_TIMEOUT = 5
 
     attr_accessor :app_config
@@ -14,7 +15,7 @@ module Web
       @app_config = config || {}
     end
 
-    # Boot a background Puma server bound to 127.0.0.1.
+    # Boot a background Puma server bound to `web.bind` (default 127.0.0.1).
     # Returns the chosen port if started, nil if disabled or already running.
     def start(config, logger: nil)
       return nil if @puma_server
@@ -23,8 +24,9 @@ module Web
 
       configure_with(config)
       port = config.dig('web', 'port') || DEFAULT_PORT
-      logger&.info("Web UI listening on http://127.0.0.1:#{port}")
-      boot_puma!(port)
+      bind = config.dig('web', 'bind') || DEFAULT_BIND
+      logger&.info("Web UI listening on http://#{bind}:#{port}")
+      boot_puma!(bind, port)
       port
     end
 
@@ -40,11 +42,11 @@ module Web
 
     private
 
-    def boot_puma!(port)
+    def boot_puma!(bind, port)
       require 'puma'
 
       @puma_server = Puma::Server.new(self, nil, min_threads: 0, max_threads: 8)
-      @puma_server.add_tcp_listener('127.0.0.1', port)
+      @puma_server.add_tcp_listener(bind, port)
       @puma_thread = Thread.new { @puma_server.run.join }
     end
   end

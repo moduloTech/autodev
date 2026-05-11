@@ -21,8 +21,9 @@
 #
 # Embedded web UI:
 #   When `web.enabled: true` (default) and not running with --once, autodev
-#   exposes a live monitoring UI on http://127.0.0.1:<web.port> (default 4567).
-#   Disable via `web: { enabled: false }` in config.yml.
+#   exposes a live monitoring UI on http://<web.bind>:<web.port> (defaults
+#   127.0.0.1:4567). Set `web.bind: 0.0.0.0` (or a NetBird interface IP) to
+#   expose it beyond loopback. Disable entirely via `web: { enabled: false }`.
 #   Set `AUTODEV_WEB_RELOAD=1` to hot-reload Sinatra routes + Phlex views
 #   on every request (dev only — restart still required for poller / DB code).
 #
