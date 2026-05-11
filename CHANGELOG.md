@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-11
+
 ### Added
 
 - New `activity_events` table (id, issue_id, created_at, kind, level, payload_json) with indexes on `(issue_id, created_at)` and `(kind, created_at)`. Foundation for the upcoming embedded web UI: structured per-issue activity log persisted alongside the existing GitLab note posted by `ActivityLogger`. `ActivityEvent` Sequel model exposes JSON payload helpers; built dynamically in `Database.build_model!` like `Issue`.
