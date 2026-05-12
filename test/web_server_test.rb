@@ -212,7 +212,7 @@ class WebServerTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     create_issue(status: 'cloning', issue_title: 'WIP')
     get '/'
 
-    assert_includes last_response.body, 'Demandes en cours'
+    assert_includes last_response.body, 'En traitement'
   end
 
   def test_dashboard_marks_unimplemented_features_coming_soon

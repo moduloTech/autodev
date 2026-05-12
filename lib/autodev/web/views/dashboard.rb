@@ -61,6 +61,8 @@ module Web
       KPI_DEFS = [
         { metric: :active,         tone: :working, icon: 'play',
           label_key: :web_kpi_in_progress,         hint_key: :web_kpi_in_progress_hint },
+        { metric: :pending,        tone: :working, icon: 'clock',
+          label_key: :web_kpi_pending,             hint_key: :web_kpi_pending_hint },
         { metric: :errors,         tone: :err,     icon: 'alert-tri',
           label_key: :web_kpi_to_watch,            hint_key: :web_kpi_to_watch_hint },
         { metric: :awaiting,       tone: :warn,    icon: 'messages',

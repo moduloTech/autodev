@@ -79,12 +79,13 @@ module Web
     end
 
     # Counts used by the dashboard KPI cards.
-    def dashboard_kpis
+    def dashboard_kpis # rubocop:disable Metrics/AbcSize
       counts = issues_dataset.group_and_count(:status).to_hash(:status, :count)
       active = Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 }
       delivered_week = issues_dataset.where(status: 'done')
                                      .where { created_at >= (Date.today - 7).to_s }.count
-      { active: active, errors: counts['error'] || 0,
+      { active: active, pending: counts['pending'] || 0,
+        errors: counts['error'] || 0,
         awaiting: counts['needs_clarification'] || 0,
         delivered_week: delivered_week }
     end

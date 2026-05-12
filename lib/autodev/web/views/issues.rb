@@ -7,6 +7,7 @@ module Web
     class Issues < Base # rubocop:disable Metrics/ClassLength
       TABS = [
         { id: 'active',  label_key: :web_tab_active,  count_key: :active },
+        { id: 'pending', label_key: :web_tab_pending, count_key: :pending },
         { id: 'errors',  label_key: :web_tab_errors,  count_key: :errors,  tone: :err },
         { id: 'waiting', label_key: :web_tab_waiting, count_key: :waiting, tone: :warn },
         { id: 'done',    label_key: :web_tab_done,    count_key: :done },

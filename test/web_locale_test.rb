@@ -34,7 +34,7 @@ class WebLocaleTest < Minitest::Test
     get '/'
 
     assert_includes last_response.body, 'Hello'
-    assert_includes last_response.body, 'Active requests'
+    assert_includes last_response.body, 'In progress'
   end
 
   def test_french_dashboard_uses_french_nav
@@ -42,7 +42,7 @@ class WebLocaleTest < Minitest::Test
     get '/'
 
     assert_includes last_response.body, 'Bonjour'
-    assert_includes last_response.body, 'Demandes en cours'
+    assert_includes last_response.body, 'En traitement'
   end
 
   def test_invalid_locale_falls_back_to_french

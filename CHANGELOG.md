@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- New "En attente" / "Pending" KPI card on the dashboard and matching tab on `/issues`. Pending issues (queued, not yet picked up by a worker) used to be invisible on the web — they don't fall in `Dashboard::ACTIVE_STATES` (in-flight only) and `/errors` / `/issues?tab=active` both skipped them. The KPI card surfaces the count, the tab makes them browsable. Reuses the existing `working` tone with a `clock` icon to distinguish from "En traitement" visually.
+
+### Changed
+
+- Rename the in-flight bucket from "En cours" / "Demandes en cours" to "En traitement" (FR) — matches the new distinction with "En attente" (pending, not yet started). Touches `web_kpi_in_progress`, `web_dashboard_active_section`, `web_tab_active`. EN label stays "In progress". The "X actives" sub-count next to the active section title now reads "(X)" — clearer once the title itself says "En traitement".
+
 ## [0.12.2] - 2026-05-12
 
 ### Changed
