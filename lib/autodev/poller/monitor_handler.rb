@@ -4,7 +4,7 @@ require_relative 'unassignment_handler'
 
 class Poller
   # Pipeline monitoring, discussion fixes, and error retry for the poll loop.
-  module MonitorHandler
+  module MonitorHandler # rubocop:disable Metrics/ModuleLength
     include UnassignmentHandler
 
     private
@@ -60,14 +60,23 @@ class Poller
 
       max = (project_config['max_retries'] || @config['max_retries']).to_i
       retry_helper = build_retry_helper(project_config) if Config.label_workflow?(project_config)
-      retryable.each { |issue| retry_single_issue(issue, retry_helper, path, max) }
+      retryable.each { |issue| retry_single_issue(issue, retry_helper, path, max, project_config) }
     rescue StandardError => e
       @logger.error("Error retrying issues for #{path}: #{e.message}", project: path)
     end
 
+    # Pick up two distinct kinds of stalled issues:
+    # - `error` rows whose backoff has elapsed (the normal retry path).
+    # - `pending` rows that were already retried at least once (`next_retry_at`
+    #   is non-null) but never moved past `pending`. This happens when
+    #   `retry_processing!` flips `error → pending` and `restore_labels`
+    #   re-applies `Development::Doing` on the GitLab side — the next
+    #   `fetch_assignee_issues` poll (filtered by `labels_todo`) no longer
+    #   returns the issue, so nothing re-enqueues it.
     def fetch_retryable(project_config)
       max_retries = (project_config['max_retries'] || @config['max_retries']).to_i
-      Issue.where(project_path: project_config['path'], status: 'error')
+      Issue.where(project_path: project_config['path'])
+           .where(status: %w[error pending])
            .where { retry_count < max_retries }
            .where { Sequel.lit("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')") }.all
     end
@@ -77,7 +86,17 @@ class Poller
                   project_config: project_config, logger: @logger, token: @token)
     end
 
-    def retry_single_issue(issue, retry_helper, project_path, max_retries)
+    def retry_single_issue(issue, retry_helper, project_path, max_retries, project_config)
+      if issue.status == 'pending'
+        re_enqueue_stuck_pending(issue, project_config, project_path, max_retries)
+      else
+        retry_errored_issue(issue, retry_helper, project_path, max_retries)
+      end
+    rescue AASM::InvalidTransition => e
+      @logger.error("Could not retry issue ##{issue.issue_iid}: #{e.message}", project: project_path)
+    end
+
+    def retry_errored_issue(issue, retry_helper, project_path, max_retries)
       has_mr = !issue.mr_iid.nil?
       has_mr ? issue.retry_pipeline! : issue.retry_processing!
       issue.update(error_message: nil, started_at: nil)
@@ -86,8 +105,22 @@ class Poller
       @logger.info("Issue ##{issue.issue_iid} retried → #{target} (attempt #{issue.retry_count + 1})",
                    project: project_path)
       log_retry_activity(issue, project_path, max_retries)
-    rescue AASM::InvalidTransition => e
-      @logger.error("Could not retry issue ##{issue.issue_iid}: #{e.message}", project: project_path)
+    end
+
+    # Issue is already `pending` but has been sitting idle (`next_retry_at`
+    # in the past). Skip the AASM transition (already pending) and enqueue
+    # the IssueProcessor directly via the worker pool. Clear `next_retry_at`
+    # so a second poll cycle in the same window doesn't re-enqueue before
+    # the worker has had a chance to run; if processing fails again, the
+    # ErrorHandler will set a fresh backoff.
+    def re_enqueue_stuck_pending(issue, project_config, project_path, max_retries)
+      issue.update(next_retry_at: nil)
+      processor = IssueProcessor.new(client: build_worker_client, config: @config,
+                                     project_config: project_config, logger: @logger, token: @token)
+      @pool.enqueue?(issue_iid: issue.issue_iid) { processor.process(issue) }
+      @logger.info("Re-enqueued stuck pending issue ##{issue.issue_iid} " \
+                   "(attempt #{issue.retry_count + 1})", project: project_path)
+      log_retry_activity(issue, project_path, max_retries)
     end
 
     def log_retry_activity(issue, project_path, max_retries)
