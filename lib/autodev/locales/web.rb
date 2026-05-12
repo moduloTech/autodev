@@ -159,7 +159,6 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_errors_banner_many: '%<count>s demandes ont besoin de vous.',
       web_errors_banner_body: "Autodev s'arrête et vous appelle quand il rencontre un blocage qu'il " \
                               'ne peut pas résoudre seul.',
-      web_errors_mark_all_read: 'Tout marquer comme lu',
       web_errors_cause_failure: 'Échec technique',
       web_errors_cause_clarification: 'Question en attente',
       web_errors_cause_post_completion: 'Erreur post-completion',
@@ -398,7 +397,6 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_errors_banner_many: '%<count>s requests need your attention.',
       web_errors_banner_body: "Autodev pauses and pings you whenever it hits a blocker it can't " \
                               'work around on its own.',
-      web_errors_mark_all_read: 'Mark all as read',
       web_errors_cause_failure: 'Technical failure',
       web_errors_cause_clarification: 'Awaiting answer',
       web_errors_cause_post_completion: 'Post-completion error',

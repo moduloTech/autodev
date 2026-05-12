@@ -51,18 +51,13 @@ module Web
         div(class: 'empty-state') { p(class: 'muted') { t_web(:web_errors_none) } }
       end
 
-      def render_banner # rubocop:disable Metrics/MethodLength
+      def render_banner
         div(class: 'errors-banner') do
           render Components::Icon.new(name: 'alert-tri', size: 20)
           div(style: 'flex: 1; font-size: 13px; line-height: 1.5;') do
             strong { plain banner_title }
             plain ' '
             plain t_web(:web_errors_banner_body)
-          end
-          span(class: 'coming-soon', title: t_web(:web_coming_soon_tooltip)) do
-            render Components::Button.new(kind: :ghost, size: :md, href: '#') do
-              t_web(:web_errors_mark_all_read)
-            end
           end
         end
       end
