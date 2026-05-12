@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Autodev
-  VERSION = '0.12.2'
+  VERSION = '0.13.0'
 end
 
 require_relative 'autodev/errors'

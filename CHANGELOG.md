@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-12
+
 ### Fixed
 
 - `MonitorHandler#poll_retries` now also picks up issues stuck in `pending` after a previous retry. Previously, when a mid-implementation failure flipped `error → pending` via `retry_processing!`, `restore_labels` reapplied `Development::Doing` on the GitLab side — and from that point onwards `Poller::IssueHandler.fetch_assignee_issues` (filtered by `labels_todo`) no longer returned the issue. The DB row was `pending` but nothing re-enqueued it, so the ticket sat idle for days/weeks. `fetch_retryable` now also matches `status = 'pending'` rows that have a `next_retry_at` in the past and `retry_count > 0`; for those it skips the AASM transition (already pending) and enqueues `IssueProcessor#process` directly. `next_retry_at` is cleared on re-enqueue so the same poll cycle doesn't fire twice. New `test/monitor_handler_fetch_retryable_test.rb` covers both branches plus the edges (fresh pending, future backoff, max_retries cap, project scoping).
