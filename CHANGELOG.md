@@ -7,6 +7,10 @@
 - Issue detail page (`/issues/:id`) now uses the same shell as the rest of the redesigned UI: sidebar with active "Demandes" entry, topbar with breadcrumb (`Demandes › <project> › #<iid>`) + title + GitLab/MR action buttons, status band (large status pill + branch + relative time), and a 1.5fr/1fr grid of cards (activity table, screenshots, raw JSON on the left; metadata KV + actions on the right). Previously this route was still on the old top-nav chrome because it was bundled with the chat panel work that stayed out of scope.
 - Actions card on the issue detail page is now fully localized: the danger reset button reads "Réinitialiser" in FR (was an untranslated "Reset"), and the force-transition `<select>` now displays human-readable labels per AASM event (e.g. "Lancer le post-completion", "Marquer en erreur") instead of the raw symbol. Adds 23 `web_event_*` keys covering every event defined in `IssueBehavior` (FR + EN), a `Web::I18nHelpers#event_label` helper, and updates `layout.rb`'s `data-confirm-template` JS to interpolate the option's display text so the confirmation dialog matches what the user picked.
 
+### Fixed
+
+- On `/errors`, the "Voir la question" button on `needs_clarification` cards pointed to `/issues/<id>` — same destination as "Voir le détail" next to it. It now links to the GitLab issue URL (built via `gitlab_issue_url`), since the question is posted as a comment there and that's where the user actually replies. Falls back to the local detail page when `gitlab_url` isn't configured.
+
 ### Removed
 
 - The "Tout marquer comme lu" / "Mark all as read" button on `/errors`. It was a coming-soon stub with `pointer-events: none`, which only looked broken: users saw a button and clicked it expecting an action. Drop the button (and the `web_errors_mark_all_read` key in FR + EN) until the feature is actually implemented.

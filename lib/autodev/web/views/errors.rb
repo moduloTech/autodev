@@ -160,9 +160,13 @@ module Web
 
       def render_suggested_action(row)
         if row[:status] == 'needs_clarification'
+          # "Voir la question" → the GitLab issue where the question was posted
+          # and where the user actually replies. Falls back to the local detail
+          # page if no gitlab_url is configured.
+          href = gitlab_issue_url(row) || "/issues/#{row[:id]}"
           render Components::Button.new(kind: :primary, size: :sm,
                                         icon: Components::Icon.new(name: 'messages', size: 13),
-                                        href: "/issues/#{row[:id]}") do
+                                        href: href) do
             t_web(:web_errors_action_view_question)
           end
         else
