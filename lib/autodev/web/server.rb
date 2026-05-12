@@ -144,7 +144,8 @@ module Web
       issue = issue_model.values
       events = activity_events_dataset.where(issue_id: issue[:id])
                                       .reverse_order(:created_at, :id).limit(200).all
-      Web::Views::IssueShow.new(issue: issue, issue_model: issue_model, events: events, **view_context).call
+      Web::Views::IssueShow.new(issue: issue, issue_model: issue_model, events: events,
+                                kpis: dashboard_kpis, **view_context).call
     end
 
     post %r{/issues/(\d+)/reset} do |id|

@@ -387,6 +387,43 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
   .project-stats-grid { padding: 14px; gap: 10px; }
 }
 
+/* /issues/:id detail */
+.issue-content { padding: 28px; }
+.issue-status-band {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.issue-status-band code {
+  background: var(--paper-2); padding: 2px 6px; border-radius: var(--r-xs);
+  font-size: 12px;
+}
+.issue-grid {
+  display: grid; grid-template-columns: 1fr; gap: 22px;
+}
+@media (min-width: 1024px) {
+  .issue-grid { grid-template-columns: 1.5fr 1fr; }
+}
+.activity-table {
+  width: 100%; font-size: 12px;
+}
+.activity-table thead tr {
+  background: var(--paper-2);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-muted); font-weight: 600;
+}
+.activity-table thead th {
+  padding: 8px 18px; text-align: left;
+}
+.activity-table tbody td {
+  padding: 10px 18px; border-bottom: 1px solid var(--divider);
+}
+.activity-table tbody tr:last-child td { border-bottom: none; }
+
+@media (max-width: 639px) {
+  .issue-content { padding: 14px; }
+  .issue-status-band { gap: 10px; margin-bottom: 14px; }
+}
+
 /* /projects index — card grid */
 .projects-grid {
   display: grid; gap: 16px;

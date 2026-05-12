@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Issue detail page (`/issues/:id`) now uses the same shell as the rest of the redesigned UI: sidebar with active "Demandes" entry, topbar with breadcrumb (`Demandes › <project> › #<iid>`) + title + GitLab/MR action buttons, status band (large status pill + branch + relative time), and a 1.5fr/1fr grid of cards (activity table, screenshots, raw JSON on the left; metadata KV + actions on the right). Previously this route was still on the old top-nav chrome because it was bundled with the chat panel work that stayed out of scope.
+
 ## [0.12.1] - 2026-05-11
 
 ### Added

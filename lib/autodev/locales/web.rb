@@ -97,6 +97,9 @@ module Locales # rubocop:disable Metrics/ModuleLength
 
       # Issue detail
       web_issue_title: 'Issue #%<iid>s — %<project>s',
+      web_issue_breadcrumb: 'Demandes › %<project>s › #%<iid>s',
+      web_issue_view_on_gitlab: 'Voir sur GitLab',
+      web_issue_view_mr: 'Voir la MR',
       web_issue_links: 'Liens',
       web_issue_link_gitlab: 'Issue GitLab',
       web_issue_link_mr: 'Merge Request !%<iid>s',
@@ -311,6 +314,9 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_dashboard_no_project: 'No project with tracked issues.',
 
       web_issue_title: 'Issue #%<iid>s — %<project>s',
+      web_issue_breadcrumb: 'Requests › %<project>s › #%<iid>s',
+      web_issue_view_on_gitlab: 'See on GitLab',
+      web_issue_view_mr: 'See the MR',
       web_issue_links: 'Links',
       web_issue_link_gitlab: 'GitLab issue',
       web_issue_link_mr: 'Merge Request !%<iid>s',
