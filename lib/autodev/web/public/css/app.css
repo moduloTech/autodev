@@ -62,9 +62,11 @@ button.icon-btn, .icon-btn { padding: 0; }
  * (so the layout matches the final design) but is dimmed and unclickable. */
 .coming-soon {
   opacity: 0.45;
-  cursor: not-allowed !important;
-  pointer-events: none;
+  cursor: not-allowed;
 }
+/* Disable interaction on the clickable children only, not the wrapper —
+ * otherwise the wrapper never receives hover events and the native
+ * title="…" tooltip never shows. */
 .coming-soon a, .coming-soon button { pointer-events: none; }
 .coming-soon-badge {
   font-size: 9px; font-weight: 600; letter-spacing: 0.04em;

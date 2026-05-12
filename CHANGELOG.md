@@ -10,6 +10,7 @@
 ### Fixed
 
 - On `/errors`, the "Voir la question" button on `needs_clarification` cards pointed to `/issues/<id>` — same destination as "Voir le détail" next to it. It now links to the GitLab issue URL (built via `gitlab_issue_url`), since the question is posted as a comment there and that's where the user actually replies. Falls back to the local detail page when `gitlab_url` isn't configured.
+- Tooltips on `.coming-soon` elements never showed. The wrapper had `pointer-events: none`, which suppressed the hover events the browser needs to trigger the native `title="…"` tooltip. Move `pointer-events: none` to the children (`a`, `button`) only — clicks on the disabled control still do nothing, but the wrapper now receives hover so "Bientôt disponible" appears. Side effect: `cursor: not-allowed` now actually applies too (it was being swallowed by the same `pointer-events: none`).
 
 ### Removed
 
