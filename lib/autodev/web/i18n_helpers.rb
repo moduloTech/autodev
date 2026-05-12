@@ -41,6 +41,13 @@ module Web
       )
     end
 
+    # Localized human-readable label for an AASM event (transition trigger).
+    # Falls back to the raw symbol/string if no translation is registered.
+    def event_label(event)
+      key = :"web_event_#{event}"
+      Locales.lookup(web_locale, key) || Locales.lookup(:fr, key) || event.to_s
+    end
+
     # Localized "il y a 4 min" / "4 min ago" relative-time helper.
     # Falls back to the raw timestamp if parsing fails.
     def relative_time(timestamp) # rubocop:disable Metrics/AbcSize

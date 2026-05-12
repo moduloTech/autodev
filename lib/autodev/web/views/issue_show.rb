@@ -177,7 +177,7 @@ module Web
              data: { 'confirm-template' => template },
              style: 'display: flex; gap: 8px; align-items: center;') do
           select(name: 'event', style: 'flex: 1;') do
-            events.each { |event| option(value: event.to_s) { event.to_s } }
+            events.each { |event| option(value: event.to_s) { event_label(event) } }
           end
           render Components::Button.new(size: :md, type: 'submit') { t_web(:web_issue_force_transition) }
         end

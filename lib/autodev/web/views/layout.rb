@@ -40,7 +40,8 @@ module Web
             const tpl = f.getAttribute('data-confirm-template');
             if (tpl) {
               const sel = f.querySelector('select[name=event]');
-              msg = tpl.replace('$event', sel ? sel.value : '');
+              const opt = sel && sel.options[sel.selectedIndex];
+              msg = tpl.replace('$event', opt ? opt.text : (sel ? sel.value : ''));
             }
           }
           if (msg && !confirm(msg)) e.preventDefault();

@@ -5,6 +5,7 @@
 ### Changed
 
 - Issue detail page (`/issues/:id`) now uses the same shell as the rest of the redesigned UI: sidebar with active "Demandes" entry, topbar with breadcrumb (`Demandes › <project> › #<iid>`) + title + GitLab/MR action buttons, status band (large status pill + branch + relative time), and a 1.5fr/1fr grid of cards (activity table, screenshots, raw JSON on the left; metadata KV + actions on the right). Previously this route was still on the old top-nav chrome because it was bundled with the chat panel work that stayed out of scope.
+- Actions card on the issue detail page is now fully localized: the danger reset button reads "Réinitialiser" in FR (was an untranslated "Reset"), and the force-transition `<select>` now displays human-readable labels per AASM event (e.g. "Lancer le post-completion", "Marquer en erreur") instead of the raw symbol. Adds 23 `web_event_*` keys covering every event defined in `IssueBehavior` (FR + EN), a `Web::I18nHelpers#event_label` helper, and updates `layout.rb`'s `data-confirm-template` JS to interpolate the option's display text so the confirmation dialog matches what the user picked.
 
 ## [0.12.1] - 2026-05-11
 
