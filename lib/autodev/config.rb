@@ -14,9 +14,9 @@ module Config
     gitlab_token: glpat-xxxxxxxxxxxxxxxxxxxx   # or set GITLAB_API_TOKEN env var
     poll_interval: 300                          # seconds between poll cycles
     max_workers: 3                              # concurrent worker threads
-    dc_timeout: 1800                              # danger-claude timeout in seconds (default: 1800 = 30min)
-    max_retries: 3                                 # max retry attempts per issue (default: 3)
-    retry_backoff: 30                              # base backoff in seconds, doubles each retry (default: 30)
+    dc_timeout: 600                               # danger-claude timeout in seconds (default: 600 = 10min)
+    max_retries: 1                                 # max retry attempts per issue (default: 1)
+    retry_backoff: 10                              # base backoff in seconds, doubles each retry (default: 10)
     pickup_delay: 600                               # seconds before processing a new issue (default: 600 = 10min)
     stagnation_threshold: 5                         # consecutive identical failures before giving up (default: 5)
     log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
@@ -41,9 +41,9 @@ module Config
         # label_to_add: ""
         #
         # extra_prompt: "Use RSpec for tests"   # additional instructions for Claude
-        # dc_timeout: 1800                        # danger-claude timeout in seconds (overrides global)
-        # max_retries: 3                          # max retries per issue (overrides global)
-        # retry_backoff: 30                       # base backoff seconds (overrides global)
+        # dc_timeout: 600                         # danger-claude timeout in seconds (overrides global)
+        # max_retries: 1                          # max retries per issue (overrides global)
+        # retry_backoff: 10                       # base backoff seconds (overrides global)
         # stagnation_threshold: 5                  # consecutive identical failures threshold (overrides global)
         # clone_depth: 1                         # git clone depth (0 = full clone, default: 1)
         # sparse_checkout:                       # sparse checkout paths (for monorepos)
@@ -71,9 +71,9 @@ module Config
     'gitlab_token' => nil,
     'poll_interval' => 300,
     'max_workers' => 3,
-    'dc_timeout' => 1800,
-    'max_retries' => 3,
-    'retry_backoff' => 30,
+    'dc_timeout' => 600,
+    'max_retries' => 1,
+    'retry_backoff' => 10,
     'pickup_delay' => 600,
     'stagnation_threshold' => 5,
     'log_dir' => File.join(CONFIG_DIR, 'logs'),

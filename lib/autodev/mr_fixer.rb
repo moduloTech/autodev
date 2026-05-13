@@ -20,6 +20,7 @@ class MrFixer
   end
 
   def fix(issue)
+    @dc_issue = issue
     log "Checking MR !#{issue.mr_iid} for unresolved discussions (round #{issue.fix_round + 1})..."
     log_activity(issue, :discussions_checking, round: issue.fix_round + 1)
     process_discussions(issue)

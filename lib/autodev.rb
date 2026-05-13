@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Autodev
-  VERSION = '0.13.0'
+  VERSION = '0.14.0'
 end
 
 require_relative 'autodev/errors'
@@ -24,6 +24,8 @@ require_relative 'autodev/label_manager'
 require_relative 'autodev/activity_logger'
 require_relative 'autodev/issue_notifier'
 require_relative 'autodev/process_runner'
+require_relative 'autodev/rate_limit_detector'
+require_relative 'autodev/repo_operations'
 require_relative 'autodev/danger_claude_runner'
 require_relative 'autodev/chrome_launcher'
 require_relative 'autodev/chrome_devtools_injector'

@@ -7,7 +7,7 @@ class PipelineMonitor
 
     def evaluate_code_related(work_dir, eval_context)
       prompt = build_eval_prompt(eval_context)
-      out = danger_claude_prompt(work_dir, prompt, label: '-p (pipeline eval)')
+      out = danger_claude_prompt(work_dir, prompt, label: '-p (pipeline eval)', model: 'haiku')
       parse_eval_response(out)
     end
 

@@ -27,15 +27,27 @@ module ActivityLogger
 
   # Best-effort persistence to the activity_events table. Failures here must
   # never abort the GitLab note update — they are logged and swallowed.
-  def self.persist_event!(issue, key, entry, vars)
+  def self.persist_event!(issue, key, entry, vars, level: 'info')
     return unless Object.const_defined?(:ActivityEvent)
 
     ActivityEvent.create(
       issue_id: issue.id,
       kind: 'danger_claude',
-      level: 'info',
+      level: level,
       payload_json: JSON.generate(key: key.to_s, vars: vars, message: entry)
     )
+  rescue StandardError
+    nil
+  end
+
+  # Emit a warn-level activity event to the DB only (no GitLab note update).
+  # Use for technical signals like parse failures that belong in the web UI
+  # but would be noise on the issue thread.
+  def self.warn_event(issue, key, **vars)
+    return unless issue
+
+    entry = build_entry(issue, key, **vars)
+    persist_event!(issue, key, entry, vars, level: 'warn')
   rescue StandardError
     nil
   end
@@ -81,5 +93,10 @@ module ActivityLogger
     ActivityLogger.post(ctx, issue, key, replace_pattern: replace_pattern, **vars)
   rescue StandardError => e
     log_error "Activity log update failed: #{e.message}"
+  end
+
+  # Warn-level activity event, DB only. No-op if no issue is tracked.
+  def log_activity_warn(key, **vars)
+    ActivityLogger.warn_event(@dc_issue, key, **vars)
   end
 end

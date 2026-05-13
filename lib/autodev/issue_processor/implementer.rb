@@ -14,15 +14,23 @@ class IssueProcessor
 
     def implement(work_dir, context, iid)
       @screenshot_dir = ScreenshotUploader.screenshot_dir(@project_path, iid)
-      if @project_config['parallel_agents']
-        plan = evaluate_complexity(work_dir, context, iid)
-        if plan
-          implement_parallel(work_dir, context, iid, plan)
-          return
-        end
-        log 'Complexity evaluation returned no plan, falling back'
+      @impl_session_id = nil
+      plan = parallel_plan(work_dir, context, iid)
+      if plan
+        implement_parallel(work_dir, context, iid, plan)
+      else
+        implement_fallback(work_dir, context, iid)
       end
-      implement_fallback(work_dir, context, iid)
+    end
+
+    def parallel_plan(work_dir, context, iid)
+      return nil unless @project_config['parallel_agents']
+
+      plan = evaluate_complexity(work_dir, context, iid)
+      return plan if plan
+
+      log 'Complexity evaluation returned no plan, falling back'
+      nil
     end
 
     def implement_fallback(work_dir, context, iid)
@@ -42,6 +50,7 @@ class IssueProcessor
         prompt = single_prompt(ctx, skills_line, extra, app_section)
         log 'Running implementation via danger-claude...'
         danger_claude_prompt(work_dir, prompt)
+        @impl_session_id = @last_session_id
       end
     end
 
@@ -66,7 +75,8 @@ class IssueProcessor
     def evaluate_complexity(work_dir, context, iid)
       out = with_context_file(work_dir, @current_branch_name, context) do |ctx|
         log "Evaluating issue complexity for ##{iid}..."
-        danger_claude_prompt(work_dir, format(Prompts::COMPLEXITY_EVAL, ctx), label: '-p (complexity eval)')
+        danger_claude_prompt(work_dir, format(Prompts::COMPLEXITY_EVAL, ctx),
+                             label: '-p (complexity eval)', model: 'haiku')
       end
       parse_complexity(out, iid)
     rescue JSON::ParserError

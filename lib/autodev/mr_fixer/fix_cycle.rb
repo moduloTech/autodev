@@ -1,12 +1,14 @@
 # frozen_string_literal: true
 
 require_relative 'stagnation_checker'
+require_relative 'fix_prompts'
 
 class MrFixer
   # Orchestrates the clone-fix-push cycle and error handling for MR discussion fixes.
   # Expects the including class to provide DangerClaudeRunner methods and DiscussionFormatter.
   module FixCycle
     include StagnationChecker
+    include FixPrompts
 
     private
 
@@ -57,6 +59,7 @@ class MrFixer
     end
 
     def fix_each_discussion(discussions, work_dir, branch, mr_iid, env)
+      @mr_fix_session_id = nil
       discussions.each_with_index do |discussion, idx|
         log "Fixing discussion #{idx + 1}/#{discussions.size}: #{discussion[:title]}"
         log_activity(@fix_issue, :discussion_fixing, title: discussion[:title])
@@ -66,37 +69,27 @@ class MrFixer
 
     def fix_single_discussion(discussion, work_dir, branch, mr_iid, env)
       thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: env[:target_branch])
-      extra = @project_config['extra_prompt']
+      run_fix_prompt(thread_context, work_dir, branch, env)
+      danger_claude_commit(work_dir, resume: @mr_fix_session_id)
+      resolve_discussion(mr_iid, discussion[:id])
+    end
 
+    def run_fix_prompt(thread_context, work_dir, branch, env)
+      if @mr_fix_session_id
+        danger_claude_prompt(work_dir, build_followup_prompt(thread_context),
+                             agent: env[:agent], resume: @mr_fix_session_id)
+      else
+        run_first_fix(thread_context, work_dir, branch, env)
+      end
+      @mr_fix_session_id = @last_session_id
+    end
+
+    def run_first_fix(thread_context, work_dir, branch, env)
+      extra = @project_config['extra_prompt']
       with_context_file(work_dir, branch, env[:full_context]) do |context_filename|
         prompt = build_fix_prompt(context_filename, thread_context, env[:skills_line], extra, env[:app_section])
         danger_claude_prompt(work_dir, prompt, agent: env[:agent])
       end
-      danger_claude_commit(work_dir)
-      resolve_discussion(mr_iid, discussion[:id])
-    end
-
-    def build_fix_prompt(context_filename, thread_context, skills_line, extra, app_section)
-      <<~PROMPT
-        Tu dois corriger le code en reponse a un commentaire de review sur une Merge Request.
-
-        Le contexte complet (issue + discussions MR) est dans le fichier `#{context_filename}`. Lis-le attentivement.
-
-        ## Commentaire de review a traiter
-
-        #{thread_context}
-
-        ## Instructions
-
-        #{skills_line}
-        - Le diff ci-dessus montre les lignes exactes concernees par le commentaire.
-        - Corrige le code pour repondre au commentaire.
-        - Respecte les conventions du projet (voir CLAUDE.md si present).
-        - Ne modifie que ce qui est necessaire pour repondre au commentaire.
-        - Ne touche pas aux autres parties du code.
-        #{"\n#{app_section}" if app_section}
-        #{"\n## Instructions supplementaires du projet\n\n#{extra}" if extra}
-      PROMPT
     end
 
     def new_commits?(work_dir, branch)

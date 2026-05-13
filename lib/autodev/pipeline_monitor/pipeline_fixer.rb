@@ -41,6 +41,7 @@ class PipelineMonitor
     end
 
     def fix_each_job(work_dir, job_entries, issue, context)
+      @pipeline_fix_session_id = nil
       job_entries.each_with_index do |entry, idx|
         category = entry[:category] || :unknown
         if category == :deploy
@@ -53,11 +54,28 @@ class PipelineMonitor
     end
 
     def fix_single_job(work_dir, entry, issue, context)
+      run_pipeline_fix_prompt(work_dir, entry, issue, context)
+      danger_claude_commit(work_dir, label: "-c (pipeline fix: #{entry[:name]})",
+                                     resume: @pipeline_fix_session_id)
+      @pipeline_fix_session_id = @last_session_id
+    end
+
+    def run_pipeline_fix_prompt(work_dir, entry, issue, context)
+      label = "-p (pipeline fix: #{entry[:name]})"
+      if @pipeline_fix_session_id
+        prompt = build_fix_prompt_followup(entry)
+        danger_claude_prompt(work_dir, prompt, label: label, resume: @pipeline_fix_session_id)
+      else
+        run_pipeline_first_fix(work_dir, entry, issue, context, label)
+      end
+      @pipeline_fix_session_id = @last_session_id
+    end
+
+    def run_pipeline_first_fix(work_dir, entry, issue, context, label)
       with_context_file(work_dir, issue.branch_name, context[:full_context]) do |context_filename|
         prompt = build_fix_prompt(entry, context_filename, context)
-        danger_claude_prompt(work_dir, prompt, label: "-p (pipeline fix: #{entry[:name]})")
+        danger_claude_prompt(work_dir, prompt, label: label)
       end
-      danger_claude_commit(work_dir, label: "-c (pipeline fix: #{entry[:name]})")
     end
 
     def push_fixes(work_dir, job_entries, issue)

@@ -17,7 +17,7 @@ class IssueProcessor
       log "Checking specification clarity for ##{iid}..."
       log_activity(issue, :spec_checking)
       out = with_context_file(work_dir, issue.branch_name, context) do |ctx|
-        danger_claude_prompt(work_dir, format(Prompts::SPEC_CHECK, ctx))
+        danger_claude_prompt(work_dir, format(Prompts::SPEC_CHECK, ctx), model: 'haiku')
       end
       parse_spec_result(out, iid, issue, work_dir, context)
     rescue JSON::ParserError

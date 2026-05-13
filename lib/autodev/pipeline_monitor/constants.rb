@@ -10,6 +10,8 @@ class PipelineMonitor
 
   CODE_FAILURE_REASONS = %w[script_failure].freeze
 
+  RUNNING_STATUSES = %w[running pending created waiting_for_resource preparing scheduled].freeze
+
   DEPLOY_JOB_PATTERN = /
     \b(deploy|release|publish|rollout|provision|terraform|ansible|
     helm|k8s|kubernetes|staging|production|review.?app)\b

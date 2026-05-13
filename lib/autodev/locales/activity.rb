@@ -44,7 +44,8 @@ module Locales
       activity_review_limit_reached: ':warning: Limite de review atteinte (3 tours) → termine',
       activity_stagnation_pipeline: ':warning: Stagnation pipeline detectee → termine',
       activity_stagnation_discussions: ':warning: Stagnation discussions detectee → termine',
-      activity_unassigned_stop: ':stop_sign: Desassigne, travail en cours arrete'
+      activity_unassigned_stop: ':stop_sign: Desassigne, travail en cours arrete',
+      activity_dc_parse_failed: ':warning: Sortie danger-claude non parsable, session reuse desactive pour cet appel'
     },
     en: {
       activity_header: ':robot: %<tag>s — Activity log',
@@ -87,7 +88,8 @@ module Locales
       activity_review_limit_reached: ':warning: Review limit reached (3 rounds) → done',
       activity_stagnation_pipeline: ':warning: Pipeline stagnation detected → done',
       activity_stagnation_discussions: ':warning: Discussion stagnation detected → done',
-      activity_unassigned_stop: ':stop_sign: Unassigned, stopping work in progress'
+      activity_unassigned_stop: ':stop_sign: Unassigned, stopping work in progress',
+      activity_dc_parse_failed: ':warning: danger-claude output not parseable, session reuse disabled for this call'
     }
   }.freeze
 end

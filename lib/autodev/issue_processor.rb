@@ -42,6 +42,7 @@ class IssueProcessor
   end
 
   def start_processing(issue)
+    @dc_issue = issue
     log "Processing issue ##{issue.issue_iid}: #{issue.issue_title}"
     issue.start_processing!
     Issue.where(id: issue.id).update(started_at: Sequel.lit("datetime('now')"))
@@ -89,7 +90,7 @@ class IssueProcessor
     implement(work_dir, context, iid)
     upload_screenshots(iid)
     issue.impl_complete!
-    danger_claude_commit(work_dir)
+    danger_claude_commit(work_dir, resume: @impl_session_id)
     issue.commit_complete!
     verify_changes(work_dir, @current_branch_name)
     push(work_dir, @current_branch_name)

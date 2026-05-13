@@ -56,5 +56,24 @@ class PipelineMonitor
         #{trailing}
       PROMPT
     end
+
+    # Follow-up prompt for the 2nd+ job in the same pipeline fix cycle.
+    # Previous turn already loaded issue context; we only ship the new job.
+    def build_fix_prompt_followup(entry)
+      diagnostic = CATEGORY_INSTRUCTIONS[entry[:category]]
+      diagnostic_section = diagnostic ? "\n## Diagnostic\n\n#{diagnostic}" : ''
+      <<~PROMPT
+        Nouveau job en echec a corriger sur la meme MR.
+
+        Job: "#{entry[:name]}" (stage: #{entry[:stage]}).
+        Log complet dans `#{entry[:log_path]}`.
+        #{diagnostic_section}
+        ## Instructions
+
+        - Analyse le log, corrige le code source pour que ce job passe au vert.
+        - Ne modifie que ce qui est necessaire pour corriger ce job.
+        - Ne touche pas aux fichiers de configuration CI/CD sauf si c'est la cause directe.
+      PROMPT
+    end
   end
 end

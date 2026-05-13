@@ -30,27 +30,27 @@ class PipelineMonitor
   end
 
   def check(issue)
+    @dc_issue = issue
     log "Checking pipeline for MR !#{issue.mr_iid} (issue ##{issue.issue_iid})..."
     log_pipeline_poll(issue)
     mr = @client.merge_request(@project_path, issue.mr_iid)
     return handle_mr_closed(issue, mr) if mr.state != 'opened'
 
-    pipeline = mr.head_pipeline
-    pipeline ? dispatch_status(issue, pipeline) : handle_no_pipeline(issue)
+    dispatch_pipeline(issue, mr.head_pipeline)
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to check pipeline for MR !#{issue.mr_iid}: #{e.message}"
   rescue StandardError => e
     log_check_error(issue, e)
   end
 
-  def handle_no_pipeline(issue)
+  private
+
+  def dispatch_pipeline(issue, pipeline)
+    return dispatch_status(issue, pipeline) if pipeline
+
     log "No pipeline found for MR !#{issue.mr_iid}, treating as green..."
     handle_green(issue)
   end
-
-  RUNNING_STATUSES = %w[running pending created waiting_for_resource preparing scheduled].freeze
-
-  private
 
   def dispatch_status(issue, pipeline)
     status = pipeline.respond_to?(:status) ? pipeline.status : pipeline['status']

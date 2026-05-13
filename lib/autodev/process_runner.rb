@@ -9,7 +9,7 @@ module ProcessRunner
   private
 
   def run_with_timeout(cmd, args, chdir:, label: nil)
-    timeout = (@project_config['dc_timeout'] || @config['dc_timeout'] || 1800).to_i
+    timeout = (@project_config['dc_timeout'] || @config['dc_timeout'] || 600).to_i
     tag = label ? "#{cmd} #{label}" : cmd
     pid, stdout_r, stderr_r = spawn_process(cmd, args, chdir)
     PortAllocator.release(@port_mappings) if @port_mappings
