@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-05-13
+
+### Fixed
+
+- `bin/autodev` was crashing at startup with `uninitialized constant DangerClaudeRunner::RATE_LIMIT_PATTERN`. The 0.14.0 refactor moved the regex out of `DangerClaudeRunner` into a new `RateLimitDetector` module, but missed updating `lib/autodev/usage_checker.rb:10` which still aliased the old constant. The class-level alias is evaluated at file load, so any invocation of the CLI (which `require`s the full `autodev` module) failed before reaching the entrypoint. Existing tests didn't catch this because `autodev_test_helper.rb` loads only the submodules it needs, not the full `autodev` module — so `usage_checker.rb` was never required in CI. Switched the alias to `RateLimitDetector::PATTERN`.
+
 ## [0.14.0] - 2026-05-13
 
 ### Added

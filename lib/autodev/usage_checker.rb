@@ -7,7 +7,7 @@ require 'open3'
 # quotas early, avoiding wasted clones and partial work.
 class UsageChecker
   CACHE_TTL = 300 # seconds — avoid spamming the CLI every poll cycle
-  RATE_LIMIT_PATTERN = DangerClaudeRunner::RATE_LIMIT_PATTERN
+  RATE_LIMIT_PATTERN = RateLimitDetector::PATTERN
 
   def initialize(logger:, cache_ttl: CACHE_TTL)
     @logger = logger
