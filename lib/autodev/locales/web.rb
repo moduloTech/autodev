@@ -70,7 +70,7 @@ module Locales # rubocop:disable Metrics/ModuleLength
       web_col_message: 'Message',
 
       # Status labels — one per AASM state. Vocabulary from
-      # design_handoff_autodev/primitives.jsx (preferred over STATES.md
+      # design/primitives.jsx (preferred over STATES.md
       # where they differ — JSX is the implementation reference).
       web_status_pending: 'En attente',
       web_status_cloning: 'Préparation',

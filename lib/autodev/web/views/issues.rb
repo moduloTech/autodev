@@ -3,7 +3,7 @@
 module Web
   module Views
     # GET /issues — sidebar + topbar + tab bar + dense table (desktop) /
-    # stacked cards (mobile). Mirrors design_handoff_autodev/screen-issues.jsx.
+    # stacked cards (mobile). Mirrors design/screen-issues.jsx.
     class Issues < Base # rubocop:disable Metrics/ClassLength
       TABS = [
         { id: 'active',  label_key: :web_tab_active,  count_key: :active },

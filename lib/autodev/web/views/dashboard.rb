@@ -3,7 +3,7 @@
 module Web
   module Views
     # GET / — sidebar + topbar + KPI grid + active list + sparkline + projects + error banner.
-    # Mirrors design_handoff_autodev/screen-dashboard.jsx.
+    # Mirrors design/screen-dashboard.jsx.
     class Dashboard < Base # rubocop:disable Metrics/ClassLength
       # rubocop:disable Metrics/ParameterLists
       def initialize(active:, errored:, kpis:, weekly_activity:, by_project:, **)

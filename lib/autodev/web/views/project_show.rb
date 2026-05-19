@@ -3,7 +3,7 @@
 module Web
   module Views
     # GET /projects/:slug — sidebar + topbar + tabs (overview / requests
-    # / config / team). Mirrors design_handoff_autodev/screen-project.jsx.
+    # / config / team). Mirrors design/screen-project.jsx.
     class ProjectShow < Base # rubocop:disable Metrics/ClassLength
       TABS = %w[overview issues config team].freeze
       private_constant :TABS

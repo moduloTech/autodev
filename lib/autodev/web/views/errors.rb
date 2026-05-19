@@ -3,7 +3,7 @@
 module Web
   module Views
     # GET /errors — sidebar + topbar + warning banner + cards.
-    # Mirrors design_handoff_autodev/screen-errors.jsx.
+    # Mirrors design/screen-errors.jsx.
     class Errors < Base # rubocop:disable Metrics/ClassLength
       def initialize(errored:, kpis:, **)
         super(**)

@@ -1,7 +1,7 @@
 # AutoSpec — Synthèse de cadrage
 
 **Date :** 18 mai 2026
-**Source :** interview produit à partir du compte-rendu de réunion (Matthieu, Julien, Rémi) et des design handoffs `design_handoff_autodev/` (v1) + `design_handoff_spec_update/` (v2).
+**Source :** interview produit à partir du compte-rendu de réunion (Matthieu, Julien, Rémi) et des design handoffs `design/` (v1) + `design/spec_update/` (v2).
 
 Ce document fige les décisions prises pendant le cadrage AutoSpec et le chantier de railsification qui l'accompagne. Il liste aussi les zones grises restantes et l'ordre d'attaque recommandé.
 
@@ -791,6 +791,6 @@ L'auteur revient consulter — même logique pull, même simplicité.
 ## Références
 
 - Compte-rendu de réunion : `point_produit-autodev.md` (racine du repo `tooling`).
-- Design handoff v2 (édition centrale) : `autodev/docs/design_handoff_spec_update/`.
-- Design handoff v1 (chat plein écran, conservé pour historique) : `autodev/docs/design_handoff_autodev/`.
+- Design handoff v2 (édition centrale) : `autodev/docs/design/spec_update/`.
+- Design handoff v1 (chat plein écran, conservé pour historique) : `autodev/docs/design/`.
 - Architecture Autodev actuelle : `autodev/CLAUDE.md`.

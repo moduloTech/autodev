@@ -3,7 +3,7 @@
 module Web
   module Views
     module Components
-      # Inline SVG icons. Mirrors design_handoff_autodev/primitives.jsx::Icon.
+      # Inline SVG icons. Mirrors design/primitives.jsx::Icon.
       # Path data is identical to the JSX source. Output goes through
       # raw(safe(...)) because Phlex 2 keeps the HTML and SVG namespaces
       # separate and these are static strings anyway.

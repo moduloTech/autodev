@@ -4,7 +4,7 @@ module Web
   module Views
     module Components
       # Pill that translates an AASM state into a localized label with a
-      # colored dot. Mirrors design_handoff_autodev/primitives.jsx StatusPill.
+      # colored dot. Mirrors design/primitives.jsx StatusPill.
       #
       # Tones (working / ok / warn / err / neutral) come from the design
       # tokens; the dot pulses for `working` to convey live activity.
