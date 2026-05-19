@@ -1,0 +1,14 @@
+@page {
+  size: A3 portrait;
+  margin: 15mm;
+}
+
+/* Mermaid genere des SVG dont la hauteur intrinseque peut exceder une page.
+   On contraint a la fois max-width et max-height pour forcer un scaling
+   proportionnel qui tient dans la zone utile (A3 portrait = 267mm x 390mm). */
+img, svg {
+  max-width: 100%;
+  max-height: 390mm;
+  width: auto;
+  height: auto;
+}

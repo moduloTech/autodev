@@ -1,0 +1,5 @@
+{
+  "flowchart": { "htmlLabels": false },
+  "stateDiagram": { "htmlLabels": false },
+  "themeCSS": ".label foreignObject { overflow: visible; }"
+}
