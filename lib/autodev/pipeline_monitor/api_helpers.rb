@@ -29,7 +29,7 @@ class PipelineMonitor
     end
 
     def fetch_unresolved_discussions(mr_iid)
-      discussions = @client.merge_request_discussions(@project_path, mr_iid)
+      discussions = @client.merge_request_discussions(@project_path, mr_iid, per_page: 100).auto_paginate
       discussions.select { |d| d.notes&.any? && !resolved?(d) }
     rescue Gitlab::Error::ResponseError => e
       log_error "Failed to fetch MR discussions: #{e.message}"

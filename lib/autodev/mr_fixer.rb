@@ -47,7 +47,7 @@ class MrFixer
   end
 
   def fetch_unresolved_discussions(mr_iid)
-    raw = @client.merge_request_discussions(@project_path, mr_iid)
+    raw = @client.merge_request_discussions(@project_path, mr_iid, per_page: 100).auto_paginate
     raw.select { |d| d.notes&.any? && !resolved?(d) }.map { |d| build_discussion(d) }
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to fetch MR discussions: #{e.message}"

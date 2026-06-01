@@ -17,7 +17,7 @@ module GitlabHelpers
   end
 
   def fetch_assignee_issues(client, project_path, labels_todo, assignee_id)
-    issues = client.issues(project_path, assignee_id: assignee_id, state: 'opened', per_page: 100)
+    issues = client.issues(project_path, assignee_id: assignee_id, state: 'opened', per_page: 100).auto_paginate
     todo_set = (labels_todo || []).to_set
     issues.select { |i| (i.labels || []).any? { |l| todo_set.include?(l) } }
   rescue Gitlab::Error::ResponseError => e
@@ -50,7 +50,7 @@ module GitlabHelpers
 
   # Fetch all MR discussions (resolved and unresolved) formatted as markdown.
   def fetch_mr_discussions_context(client, project_path, mr_iid)
-    discussions = client.merge_request_discussions(project_path, mr_iid)
+    discussions = client.merge_request_discussions(project_path, mr_iid, per_page: 100).auto_paginate
     return '' if discussions.empty?
 
     lines = ['## MR Discussions', '']
@@ -99,7 +99,7 @@ module GitlabHelpers
     return true unless requested_at
 
     threshold = Time.parse(requested_at.to_s)
-    notes = client.issue_notes(project_path, issue_iid, per_page: 100)
+    notes = client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
     notes.any? do |note|
       !note.system &&
         Time.parse(note.created_at.to_s) > threshold &&
@@ -207,7 +207,7 @@ module GitlabHelpers
 
     # Append user comments to the lines array.
     def append_comments(lines, client, project_path, issue_iid, img_opts)
-      notes = client.issue_notes(project_path, issue_iid, per_page: 100)
+      notes = client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
       user_notes = notes.reject { |n| n.system || n.body.to_s.include?('**autodev**') }
       return unless user_notes.any?
 
