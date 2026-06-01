@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-06-01
+
 ### Added
 
 - Smoke test `test/module_load_test.rb` that requires every `lib/autodev/*.rb` file and asserts none raise at load. Skips `LoadError` (gem missing in test gemset is not a code regression) but flags `NameError` / `ScriptError` / other `StandardError` — exactly the class of bug that caused the 0.14.0 → 0.14.1 hotfix (`usage_checker.rb` aliasing a moved constant). Verified by temporarily reverting the hotfix: the new test fails with the same error the user hit at CLI boot, then passes again once the alias is corrected.
