@@ -4,6 +4,18 @@ module Autodev
   VERSION = '0.15.2'
 end
 
+# Runtime gem dependencies. Previously these were loaded by bin/autodev's
+# `bundler/inline` block (auto-require); since phase B of the railsification
+# both bin/autodev and the Rails process load these modules, so the require
+# block lives here. Idempotent — re-requiring a gem is a no-op.
+require 'aasm'
+require 'gitlab'
+require 'pastel'
+require 'phlex'
+require 'sequel'
+require 'sinatra/base'
+require 'sqlite3'
+
 require_relative 'autodev/errors'
 require_relative 'autodev/logger'
 require_relative 'autodev/config_validator'

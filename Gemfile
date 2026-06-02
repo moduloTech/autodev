@@ -2,8 +2,10 @@
 
 source 'https://rubygems.org'
 
-# Runtime dependencies (match bin/autodev bundler/inline versions)
+# Runtime dependencies. Until phase B of the railsification, bin/autodev
+# (Sinatra+Sequel) and bin/rails (Rails) both load from this Gemfile.
 gem 'aasm',    '~> 5.5'
+gem 'gitlab',  '~> 5.1'
 gem 'i18n',    '~> 1.0'
 gem 'logger'
 gem 'ostruct'
