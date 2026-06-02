@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-06-02
+
 ### Fixed
 
 - `RateLimitDetector::PATTERN` did not match claude-code's `"You've hit your session limit"` variant — only `"your limit"`, `"rate limit"`, and `"usage limit"` were caught. When the API returned the session-limit phrasing, `RateLimitDetector.check!` silently returned, danger-claude exited non-zero, and the caller raised `ImplementationError` instead of `RateLimitError` — bypassing the rate-limit pause logic in `IssueProcessor::ErrorHandler`, `MrFixer::ErrorHandler`, and `PipelineMonitor::FailureHandler`. Observed in production on Powerpanne issues #15643 / #15737 / #15855 / #15125 / #16044 (2026-06-02): all marked `error` with `"session limit · resets HH:MMam (UTC)"` in stdout when they should have paused and retried. Pattern is now `/you've hit your (?:session |usage )?limit|rate limit|usage limit/i` and covers all three claude phrasings. While auditing, also fixed `RESET_PATTERN` to accept hour-minute formats — the original `(\d{1,2})(am|pm)` regex silently dropped `:30` in `"resets 11:30am (UTC)"`, setting the pause window to the wrong wall-clock time (always on the hour). Now matches both `"6pm"` and `"11:30am"` with minutes parsed and passed to the pause schedule. Six tests in `test/rate_limit_detector_test.rb` cover all three limit phrasings, an unrelated-failure negative case, and both reset-time formats.
