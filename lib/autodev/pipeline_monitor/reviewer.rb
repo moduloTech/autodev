@@ -26,6 +26,9 @@ class PipelineMonitor
     def finalize_review_success(issue)
       increment_review_count(issue)
       reset_review_failure_count(issue)
+      DiscussionSnapshot.capture(context: :post_mr_review, client: @client,
+                                 project_path: @project_path, mr_iid: issue.mr_iid,
+                                 logger: @logger, issue: issue)
       issue.review_done!
       log_activity(issue, :review_done)
     end

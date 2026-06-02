@@ -30,6 +30,9 @@ class MrFixer
 
   def process_discussions(issue)
     discussions = fetch_unresolved_discussions(issue.mr_iid)
+    DiscussionSnapshot.capture(context: :pre_mr_fix, client: @client,
+                               project_path: @project_path, mr_iid: issue.mr_iid,
+                               logger: @logger, issue: issue)
     return transition_no_discussions(issue) if discussions.empty?
 
     log "Found #{discussions.size} unresolved discussion(s) on MR !#{issue.mr_iid}"

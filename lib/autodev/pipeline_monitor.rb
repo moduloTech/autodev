@@ -13,7 +13,7 @@ require_relative 'pipeline_monitor/reviewer'
 require_relative 'pipeline_monitor/mr_state_checker'
 
 # Monitors CI pipeline status and triages failures for tracked MRs.
-class PipelineMonitor
+class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include DangerClaudeRunner
   include ApiHelpers
   include JobClassifier
@@ -85,9 +85,15 @@ class PipelineMonitor
 
   def green_post_review(issue)
     discussions = fetch_unresolved_discussions(issue.mr_iid)
+    snapshot(issue, :pre_fix_dispatch)
     set_pipeline_green_guards(issue, review_count_over_zero: true, no_discussions: discussions.empty?)
     issue.pipeline_green!
     finalize_green(issue, discussions)
+  end
+
+  def snapshot(issue, context)
+    DiscussionSnapshot.capture(context: context, client: @client, project_path: @project_path,
+                               mr_iid: issue.mr_iid, logger: @logger, issue: issue)
   end
 
   def green_done_max_reviews(issue)
