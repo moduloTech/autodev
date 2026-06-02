@@ -36,7 +36,7 @@ require 'bundler/inline'
 
 gemfile(true) do
   source 'https://rubygems.org'
-  gem 'gitlab',  '~> 5.0'
+  gem 'gitlab',  '~> 5.1'
   gem 'sequel',  '~> 5.0'
   gem 'sqlite3', '~> 2.0'
   gem 'pastel',  '~> 0.8'
