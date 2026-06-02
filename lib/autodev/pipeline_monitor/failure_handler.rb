@@ -9,6 +9,14 @@ class PipelineMonitor
     include ErrorHandler
     include StagnationDetector
 
+    # Regexes used to dedup recurring failure-state lines in the activity note.
+    # An issue stuck in checking_pipeline (per the "no blocked state" design) would
+    # otherwise append fresh lines for these events on every poll cycle and blow
+    # past GitLab's 1M-char note cap after ~25 days at the default 5min interval.
+    PIPELINE_RED_PATTERN = /— :x: Pipeline (en echec|failed)/
+    PIPELINE_INFRA_PATTERN = /— :warning: (Echec infrastructure|Infrastructure failure)/
+    PIPELINE_EVAL_PATTERN = /— :mag: Evaluat/i
+
     private
 
     def handle_red(issue, pipeline)
@@ -24,7 +32,7 @@ class PipelineMonitor
     end
 
     def triage_and_fix(issue, pipeline, failed_jobs)
-      log_activity(issue, :pipeline_red, count: failed_jobs.size)
+      log_activity(issue, :pipeline_red, count: failed_jobs.size, replace_pattern: PIPELINE_RED_PATTERN)
       triage = pre_triage(failed_jobs)
       return if retrigger_if_needed(issue, pipeline, triage)
       return if infra_skip?(issue, triage)
@@ -54,7 +62,7 @@ class PipelineMonitor
       return false unless triage[:verdict] == :infra
 
       log "Issue ##{issue.issue_iid}: infra failure, staying in checking_pipeline"
-      log_activity(issue, :pipeline_infra)
+      log_activity(issue, :pipeline_infra, replace_pattern: PIPELINE_INFRA_PATTERN)
       true
     end
 
@@ -109,7 +117,7 @@ class PipelineMonitor
 
     def evaluate_with_claude(issue, work_dir, job_entries)
       log "Issue ##{issue.issue_iid}: pre-triage uncertain, evaluating with Claude..."
-      log_activity(issue, :pipeline_evaluating)
+      log_activity(issue, :pipeline_evaluating, replace_pattern: PIPELINE_EVAL_PATTERN)
       eval_result = evaluate_code_related(work_dir, build_eval_context(job_entries))
       interpret_eval_result(issue, eval_result)
     end

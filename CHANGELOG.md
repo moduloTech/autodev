@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Activity-log note overflow on issues stuck in `checking_pipeline`. Observed in production: GitLab returning `400 Bad request - Note is too long (maximum is 1000000 characters)` on every poll for notes 821372 and 820384 (Powerpanne issues #15676 and #15839). Root cause: per the "no blocked state" design, an issue with an infra-side pipeline failure stays in `checking_pipeline` indefinitely until manual intervention. On each poll cycle, `PipelineMonitor::FailureHandler#triage_and_fix` emitted two activity-log entries (`pipeline_red` + `pipeline_infra`) that appended unconditionally — at the default `poll_interval: 300`, this added ~576 lines/day (~40 KB/day) and crossed GitLab's 1M-char cap after ~25 days. Once the note crossed the cap, every subsequent `edit_issue_note` returned 400 and the rescue swallowed it, so autodev kept logging the same failure on every tick. Two complementary fixes:
+  - **Source-side dedup**: `pipeline_red`, `pipeline_infra`, and `pipeline_evaluating` now pass a `replace_pattern` to `log_activity` so each new emission replaces the previous one in place instead of appending. `ActivityLogger.replace_or_append` also now uses `rindex` to find a match anywhere in the body, not only on the last line — without that, three different recurring events interleaved on the same poll cycle would each break the next one's dedup because the "last line" is whatever the previous event in the same cycle just appended (the existing `pipeline_checking` dedup was already affected by this in the failing-pipeline path).
+  - **Sink-side size guard**: `ActivityLogger.upsert` now checks `body.length > MAX_NOTE_BYTES` (900_000, conservative under GitLab's 1M cap) and truncates if needed. Strategy: keep the 2-line header, inject a localised marker (`activity_truncation_marker`, FR/EN), then keep the most recent tail lines that fit under the budget — older entries fall off. Idempotent: the marker is recognised and skipped on subsequent truncations so it doesn't stack. This also auto-repairs the existing oversized notes on the next emission: GET returns the >1M body, the guard truncates it, and the PUT succeeds.
+
+  Three regression tests in `test/activity_logger_overflow_test.rb` cover both layers and the FR/EN marker selection. Verified the rindex regression specifically by temporarily reverting to the `lines.last` semantics — the corresponding test failed immediately with "replaces match not at tail".
+
 ## [0.14.2] - 2026-06-01
 
 ### Added
