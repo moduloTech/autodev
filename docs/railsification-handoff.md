@@ -1,6 +1,6 @@
 # Railsification — Handoff
 
-**Last updated:** 2026-05-20 (after porting `GET /locale/:lang`)
+**Last updated:** 2026-06-02 (after landing step 2 — core AR models for AutoSpec)
 **Canonical plan:** [`autospec.md`](autospec.md) — section D (4 coexistence phases A/B/C/D) and section C (12-step attack order).
 
 This document is the *resume-anywhere* state of the railsification. It assumes you have **no memory of previous sessions** and gives you:
@@ -36,7 +36,9 @@ When this doc says **"phase X"** alone, it always means a coexistence phase (§D
 ## 1. State at this commit
 
 ```
-<HEAD>  feat: port GET /locale/:lang to Rails controller (phase B)
+90bcabb feat: add core AR models for AutoSpec (railsification step 2)
+478adac docs(handoff): disambiguate "phase X" vs "step N" naming
+b03088d feat: port GET /locale/:lang to Rails controller (phase B)
 ebb8581 feat: port GET /stream (SSE) to Rails controller (phase B)
 b788b55 feat: port GET /issues (paginated list) to Rails controller (phase B)
 daf5bf3 feat: port GET / (dashboard root) to Rails controller (phase B)
@@ -68,7 +70,7 @@ Mapping to [`autospec.md`](autospec.md) **§C — attack-order steps**:
 | Step | Title | Status |
 |---|---|---|
 | **1** | Squelette Rails dans le repo | ✅ done (commit `7148a7c`, during coexistence phase A) |
-| **2** | Modèles core (User, Project, ProjectAppCommand, ProjectMembership) + migration `issues` Sequel → AR | ⬜ open — phase A added then removed AR mirrors of `Issue`/`ActivityEvent` (collision with `Object.const_set`, see [§4](#4-decisions-and-gotchas-that-bit-us)); the real step-2 work — new tables + AR-authoritative `Issue` — waits for coexistence phase C |
+| **2** | Modèles core (User, Project, ProjectAppCommand, ProjectMembership) + migration `issues` Sequel → AR | 🟡 partial — `<HEAD>` landed the 4 new AR models + migrations + 20 model tests (purely additive on the DB side, tables sit empty during phase B). The `issues` Sequel→AR migration is the remaining half; still waits for phase C because of the `Object.const_set` collision (see [§4](#4-decisions-and-gotchas-that-bit-us)). |
 | **3** | Auth Devise + omniauth Azure AD + sessions table | ⬜ open |
 | **4** | Rake idempotent d'import YAML → DB | ⬜ open (depends on step 2 tables) |
 | **5** | Réécriture poller en Solid Queue récurrente | ⬜ open |
@@ -254,6 +256,20 @@ The proper long-term fix is to make the Phlex Layout emit a CSRF meta tag (a mas
 
 When porting a route that serves multiple formats (e.g. `/issues/:id` HTML + `.json`), Rails' `respond_to` picks the FIRST registered format whose mime-type matches `*/*`. curl, the dashboard's inline-`fetch` without an Accept header, and most scripts send `*/*` — they get the first format. Sinatra defaults to HTML for these; if you put `format.json` before `format.html`, every plain `curl /issues/1` will silently get JSON and the HTML route is effectively dead. Always put `format.html` first when a route serves both. Caught and fixed during the `/issues/:id` HTML port.
 
+### `bin/rails db:migrate` is NOT a registered command — use the auto_migrate initializer
+
+The skeleton in `7148a7c` loads only a minimal set of railties (`active_model`, `active_record`, `action_controller`, `action_view`) and skips `Bundler.require(*Rails.groups)`, so the `Rails::Command::Behavior` lookup never finds `db:migrate`, `db:create`, etc. `bin/rails --help` lists only `db:system:change` under "db". This contradicts the previous version of this doc — the handoff §4 used to claim `bin/rails db:migrate` worked. It doesn't, and it's been working around this since step 2:
+
+- **In production / dev**: `config/initializers/auto_migrate.rb` runs pending migrations on `Rails.application.config.after_initialize`. Idempotent. Skipped in test env (the test helper migrates against `:memory:` explicitly) and when `AUTODEV_SKIP_AUTO_MIGRATE=1`.
+- **In tests**: `test/rails_helper.rb` calls `ActiveRecord::MigrationContext.new(Rails.root.join('db/migrate').to_s).migrate` directly after booting `config/environment`.
+- **Ad-hoc / scripts**: `bin/rails runner '...MigrationContext.new(...).migrate'` is the manual escape hatch.
+
+If you ever want `bin/rails db:migrate` back, the path is to require the missing railtie tasks explicitly in `config/application.rb` — but be careful not to also re-enable the autoload-lib path, which would pull the Sequel modules into the Rails process.
+
+### `ActiveRecord::TestFixtures` can't be required in plain `rake test`
+
+Trying `require 'active_record/test_fixtures'` (or `active_record/test_help`) from a non-railtie-driven test boot triggers a Zeitwerk circular require: `test_fixtures.rb` requires `fixtures.rb` which (under the autoloader) tries to autoload `ActiveRecord::TestFixtures` and re-enters. `test/rails_helper.rb` therefore uses manual per-test cleanup (`DELETE FROM` the four step-2 tables in `teardown`) instead of transactional tests. SQLite `:memory:` makes this essentially free. If you add more AR-backed tables later, extend the `TABLES` list in `ActiveRecordTestCleanup`.
+
 ### Tests live under `test/` (minitest, not Rails::TestUnit)
 
 The existing `Rakefile` uses `Rake::TestTask` and DOES NOT call `Rails.application.load_tasks`. `bin/rake -T` only lists `rake test`. Rails tasks (migrations etc.) are accessed via `bin/rails db:migrate` — they go through `Rails::Command`, not Rake. **Do not** add `Rails.application.load_tasks` to the Rakefile in phase B; it would conflict with the existing minitest harness.
@@ -286,12 +302,23 @@ AUTODEV_DB=/tmp/sanity.db mise x ruby -- bin/rails runner 'puts "Issue: #{Issue.
 
 # 4. Test suite still green
 mise x ruby -- bundle exec rake test
-# expect: "473 runs, 838 assertions, 0 failures, 0 errors, 0 skips"
-# (number may grow as new tests land)
+# expect: "498 runs, 895 assertions, 0 failures, 0 errors, 0 skips"
+# (number grows as new tests land; baseline rose from 473 to 498 when step 2
+#  added 20 AR model tests; the +5 between "473+20=493" and "498" is the test
+#  splitting for Minitest/MultipleAssertions)
 
-# 5. Rubocop clean
-mise x ruby -- bundle exec rubocop
-# expect: "no offenses detected"
+# 5. Rubocop clean on the files we own
+mise x ruby -- bundle exec rubocop app/controllers app/models config/routes.rb \
+  config/initializers/legacy_sinatra.rb config/initializers/auto_migrate.rb \
+  db/migrate test/models test/rails_helper.rb
+# expect: "1 offense detected" (the pre-existing Style/Documentation on the
+#  generated `app/models/application_record.rb` — not worth fixing yet).
+# Running rubocop against the whole tree reports ~54 offenses, all in
+# Rails-generated files (bin/bundle, bin/rubocop, bin/setup, config/puma.rb,
+# config/initializers/*, db/seeds.rb, ...) introduced by `7148a7c` and never
+# excluded from .rubocop.yml. NOT a regression from any porting work.
+# Per repo CLAUDE.md, `.rubocop.yml` is maintained separately — do not edit it
+# to suppress these.
 
 # 6. The first ported route still works end-to-end
 AUTODEV_DB=/tmp/sanity.db mise x ruby -- bin/rails server -p 3001 -b 127.0.0.1 >/tmp/rails.log 2>&1 &
@@ -324,17 +351,20 @@ The candidates ordered by complexity (lowest first):
 | ~~`GET /locale/:lang`~~ | ✅ done | `LocaleController#update`. `apply_locale_cookie!` works unchanged (Rack-standard `response.set_cookie` / `delete_cookie`). `safe_back_path` keeps the open-redirect guard intact. 4 curl cases validated (valid, with back, invalid → cookie cleared, evil-back stripped). |
 | Static asset routes (`/assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*`) | Low individually | Better deferred until we set up the Rails asset pipeline (propshaft) — currently intentionally not configured. |
 
-**Recommended next: open attack-order step 2** — *Modèles core + migration `issues` Sequel → AR*.
+**Recommended next: open attack-order step 3** — *Auth Devise + omniauth Azure AD*.
 
 Coexistence phase B has nothing left to port that is dynamic — every page, write, SSE and cookie route is Rails-native. The only thing still on the mounted Sinatra app is `/assets/*` (vendored Turbo JS, CSS files under `lib/autodev/web/public/css/`, woff2 fonts). Those are read-only static files; leaving them on Sinatra blocks nothing and they will move to propshaft as part of attack-order step 8 (Phlex view port + asset pipeline).
 
-Attack-order steps that remain. The natural starting point is **step 2** because it is purely additive on the DB side and unblocks several others:
+Step 2's purely-additive half landed: the 4 new AR tables + models + 20 tests are in. The remaining half (Issue/ActivityEvent Sequel→AR) still waits for phase C because of the `Object.const_set` collision (see [§4](#4-decisions-and-gotchas-that-bit-us)).
 
-- **Step 2 — core models** *(recommended next)*: add `User`, `Project`, `ProjectAppCommand`, `ProjectMembership` as ActiveRecord migrations + models. Migrate the existing dynamic Sequel `Issue` / `ActivityEvent` to AR (the phase A mirror models come back at this point — see `autospec.md` §H for the rake import). Touches no running code paths — it lands new tables and new AR classes, the Sequel side keeps reading and writing as before.
+Attack-order steps that remain:
+
+- **Step 3 — Devise + omniauth Azure AD** *(recommended next)*: `gem 'devise'`, `gem 'omniauth-microsoft_graph'` (or the Azure-AD-flavored variant). Step 2's `users.microsoft_uid` column is already in place to host the Azure subject claim. Devise mounted under `/users/...`, sessions table created. Phase B-compatible: doesn't require the poller to know anything new, only adds auth gates on Rails-native routes (existing Sinatra routes stay localhost-only as before).
+- **Step 4 — rake YAML→DB import** : `autodev:migrate_projects_from_yaml` (autospec §H). Depends on step 2 tables (done) — code can land now, but the rake itself should not be executed until phase C, when the poller starts reading from DB.
 - **Step 5 — Solid Queue** : `gem 'solid_queue'`, port `lib/autodev/poller.rb` logic to `AutodevPollJob` (recurring). The post-completion / unassignment / reentry branches all become job code. Coexistence phase C cutover.
 - **Step 6 — `bin/autodev` superviseur** : boots `rails server` + `solid_queue:start` + sidecars (Chrome MCP). `lib/autodev/web/` deleted. `bundler/inline` already gone (`452d6e4`). Coexistence phase C cutover.
 
-Once step 2 lands, steps 3 (Devise), 4 (rake import), 5 (Solid Queue) can land in any order — they have no inter-step dependency beyond the tables. Step 6 (supervisor) is the actual coexistence phase C cutover and should be last among 2-6.
+Steps 3, 4, 5 can land in any order — no inter-step dependency beyond the tables that step 2 just added. Step 6 (supervisor) is the actual coexistence phase C cutover and should be last among 3-6.
 
 ---
 
