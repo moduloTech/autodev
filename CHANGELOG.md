@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-06-02
+
 ### Fixed
 
 - Bump bundler/inline pin of the `gitlab` gem from `~> 5.0` to `~> 5.1`. The previous pagination fix (commit `1191332`) passes `per_page: 100` to `client.merge_request_discussions(...)`, but the 5.0.0 signature is `def merge_request_discussions(project, merge_request_id)` — no options arg, so Ruby 3.x raised `ArgumentError: wrong number of arguments (given 3, expected 2)` on every pipeline check for users still on 5.0.0. The 5.1.0 signature added `options = {}` (where `auto_paginate` and `per_page` work as expected). Observed in production on Powerpanne issue #15930 immediately after deploying v0.14.2. `auto_paginate` itself exists in 5.0.0, only the `merge_request_discussions` call accepts options starting in 5.1.0.
