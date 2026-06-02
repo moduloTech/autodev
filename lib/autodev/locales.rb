@@ -25,6 +25,8 @@ module Locales
                             '%<mr_url>s — %<count>s job(s) corrige(s) (round %<round>s)',
       review_limit_reached: ':warning: %<tag>s : la limite de review (3 tours) est atteinte pour %<mr_url>s. ' \
                             'Les discussions non resolues restantes necessitent une intervention manuelle.',
+      review_failures_exhausted: ':warning: %<tag>s : mr-review a echoue %<count>s fois consecutives sur ' \
+                                 '%<mr_url>s. Intervention manuelle requise (binaire, jeton, ou MR en cause).',
       stagnation_pipeline: ':warning: %<tag>s : stagnation detectee — les memes jobs echouent de maniere repetee ' \
                            'sur %<mr_url>s. Intervention manuelle requise.',
       stagnation_discussions: ':warning: %<tag>s : stagnation detectee — les memes discussions restent non resolues ' \
@@ -56,6 +58,8 @@ module Locales
                             '%<count>s job(s) fixed (round %<round>s)',
       review_limit_reached: ':warning: %<tag>s: review limit (3 rounds) reached for %<mr_url>s. ' \
                             'Remaining unresolved discussions require manual intervention.',
+      review_failures_exhausted: ':warning: %<tag>s: mr-review failed %<count>s times in a row on %<mr_url>s. ' \
+                                 'Manual intervention required (binary, token, or MR issue).',
       stagnation_pipeline: ':warning: %<tag>s: stagnation detected — the same jobs keep failing ' \
                            'on %<mr_url>s. Manual intervention required.',
       stagnation_discussions: ':warning: %<tag>s: stagnation detected — the same discussions remain unresolved ' \

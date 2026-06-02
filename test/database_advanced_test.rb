@@ -72,4 +72,16 @@ class DatabaseAdvancedTransitionsTest < Minitest::Test
 
     assert_equal 'checking_pipeline', issue.status
   end
+
+  def test_review_giveup_from_reviewing_goes_to_done
+    issue = create_issue
+    advance_to(issue, 'checking_pipeline')
+    issue._review_count_zero = true
+    issue.pipeline_green!
+
+    assert_equal 'reviewing', issue.status
+    issue.review_giveup!
+
+    assert_equal 'done', issue.status
+  end
 end

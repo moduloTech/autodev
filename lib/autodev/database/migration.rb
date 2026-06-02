@@ -58,7 +58,8 @@ module Database
       'activity_note_id INTEGER',
       'pipeline_poll_since TEXT',
       'review_count INTEGER NOT NULL DEFAULT 0',
-      'stagnation_signatures TEXT'
+      'stagnation_signatures TEXT',
+      'review_failure_count INTEGER NOT NULL DEFAULT 0'
     ].freeze
 
     STATUS_RENAMES = {

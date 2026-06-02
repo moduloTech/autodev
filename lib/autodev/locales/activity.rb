@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module Locales
+module Locales # rubocop:disable Metrics/ModuleLength
   # Activity log templates: single updated GitLab comment per issue.
   ACTIVITY_TEMPLATES = {
     fr: {
@@ -17,6 +17,8 @@ module Locales
       activity_mr_created: ':twisted_rightwards_arrows: MR creee : %<mr_url>s',
       activity_reviewing: ':eyes: Review automatique en cours...',
       activity_review_done: ':white_check_mark: Review terminee',
+      activity_review_failed: ':warning: mr-review a echoue (%<count>s echec(s) consecutif(s))',
+      activity_review_failures_exhausted: ':warning: %<count>s echecs mr-review consecutifs → termine',
       activity_pipeline_watch: ':hourglass_flowing_sand: En attente du resultat du pipeline...',
       activity_pipeline_checking: ':mag: Interrogation du statut du pipeline depuis %<since>s...',
       activity_pipeline_green: ':white_check_mark: Pipeline vert',
@@ -64,6 +66,8 @@ module Locales
       activity_mr_created: ':twisted_rightwards_arrows: MR created: %<mr_url>s',
       activity_reviewing: ':eyes: Running automated review...',
       activity_review_done: ':white_check_mark: Review complete',
+      activity_review_failed: ':warning: mr-review failed (%<count>s consecutive failure(s))',
+      activity_review_failures_exhausted: ':warning: %<count>s consecutive mr-review failures → done',
       activity_pipeline_watch: ':hourglass_flowing_sand: Waiting for pipeline result...',
       activity_pipeline_checking: ':mag: Polling pipeline status since %<since>s...',
       activity_pipeline_green: ':white_check_mark: Pipeline green',

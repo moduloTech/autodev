@@ -42,8 +42,8 @@ class PollRouter
     # short-circuit if the issue had reached the review cap before.
     def reenter_via_pipeline_check(existing)
       existing.reenter_to_check_pipeline!
-      existing.update(review_count: 1, stagnation_signatures: nil, fix_round: 0,
-                      pipeline_retrigger_count: 0, error_message: nil,
+      existing.update(review_count: 1, review_failure_count: 0, stagnation_signatures: nil,
+                      fix_round: 0, pipeline_retrigger_count: 0, error_message: nil,
                       finished_at: nil, activity_note_id: nil)
       apply_label_doing(existing.issue_iid)
       log_activity(existing, :reenter_to_fix)
@@ -52,8 +52,8 @@ class PollRouter
 
     def reenter_via_reimplementation(gl_issue, existing)
       existing.reenter!
-      existing.update(review_count: 0, stagnation_signatures: nil, fix_round: 0,
-                      error_message: nil, finished_at: nil, started_at: nil,
+      existing.update(review_count: 0, review_failure_count: 0, stagnation_signatures: nil,
+                      fix_round: 0, error_message: nil, finished_at: nil, started_at: nil,
                       pipeline_retrigger_count: 0, activity_note_id: nil)
       log_activity(existing, :reenter)
       enqueue_issue_processing(gl_issue, existing)
