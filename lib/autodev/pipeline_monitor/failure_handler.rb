@@ -95,6 +95,7 @@ class PipelineMonitor
 
     def prepare_work_dir(work_dir, issue)
       clone_and_checkout(work_dir, issue.branch_name)
+      rebase_branch_on_target(work_dir, issue.branch_name)
       @all_skills = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)[:all_skills]
     end
 

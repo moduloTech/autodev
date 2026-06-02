@@ -5,6 +5,7 @@ require_relative 'issue_notifier'
 require_relative 'process_runner'
 require_relative 'rate_limit_detector'
 require_relative 'repo_operations'
+require_relative 'repo_rebaser'
 
 # Shared module for IssueProcessor, MrFixer, and PipelineMonitor.
 # Provides danger-claude execution, git clone, timeout handling,
@@ -24,6 +25,7 @@ module DangerClaudeRunner
   include IssueNotifier
   include ProcessRunner
   include RepoOperations
+  include RepoRebaser
 
   private
 

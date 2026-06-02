@@ -91,6 +91,7 @@ class IssueProcessor
       if reuse
         log "Reusing existing branch: #{previous_branch}"
         fetch_and_checkout(work_dir, previous_branch)
+        rebase_branch_on_target(work_dir, previous_branch)
         previous_branch
       else
         create_branch(work_dir, iid, issue.issue_title)

@@ -6,7 +6,7 @@ require_relative 'fix_prompts'
 class MrFixer
   # Orchestrates the clone-fix-push cycle and error handling for MR discussion fixes.
   # Expects the including class to provide DangerClaudeRunner methods and DiscussionFormatter.
-  module FixCycle
+  module FixCycle # rubocop:disable Metrics/ModuleLength
     include StagnationChecker
     include FixPrompts
 
@@ -29,6 +29,7 @@ class MrFixer
       @fix_issue = issue
       branch = issue.branch_name
       clone_and_checkout(work_dir, branch)
+      rebase_branch_on_target(work_dir, branch)
       env = prepare_fix_environment(work_dir, issue.issue_iid, issue.mr_iid)
 
       fix_each_discussion(discussions, work_dir, branch, issue.mr_iid, env)
