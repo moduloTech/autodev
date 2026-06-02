@@ -22,6 +22,21 @@ gem 'sqlite3', '~> 2.0'
 # bin/autodev is still bundler/inline and does NOT require these.
 gem 'rails', '~> 8.1.3'
 
+# Railsification — step 3: Devise + omniauth Azure AD (Microsoft 365 SSO).
+# `bin/autodev` (Sinatra-only entrypoint) never loads these — `lib/autodev.rb`
+# doesn't `require 'devise'`. They are pulled in only by `bin/rails server`
+# via the active_record / action_controller railties.
+gem 'activerecord-session_store', '~> 2.1'
+gem 'devise',                     '~> 4.9'
+# `omniauth-entra-id` is the maintained successor of the deprecated
+# `omniauth-azure-activedirectory-v2`. The OmniAuth strategy class name is
+# `Strategies::EntraId`; provider symbol passed to Devise is `:entra_id`.
+gem 'omniauth-entra-id', '~> 3.0'
+# Protects the omniauth POST callback against CSRF — omniauth 2.x defaults
+# to POST-only callbacks to prevent CSRF, and this middleware emits the
+# matching authenticity token check.
+gem 'omniauth-rails_csrf_protection', '~> 1.0'
+
 # Test dependencies
 gem 'minitest', '~> 5.0'
 gem 'rack-test', '~> 2.1'

@@ -7,6 +7,18 @@
 # matched here falls through to Web::Server, the legacy Sinatra app
 # wired up in config/initializers/legacy_sinatra.rb.
 Rails.application.routes.draw do
+  # === Devise / Entra ID SSO (step 3) ==============================
+  # /users/auth/entra_id           → omniauth strategy (redirect to Entra)
+  # /users/auth/entra_id/callback  → Users::OmniauthCallbacksController#entra_id
+  # /users/sign_out                → Devise sessions#destroy (logout)
+  # No sign_in form is rendered — there is no local-password flow. We pass
+  # `skip: [:registrations, :passwords]` because those modules aren't wired
+  # on User; declaring them in routes would 404 on visit anyway, but keeping
+  # the route file accurate avoids confusion.
+  devise_for :users,
+             skip: %i[registrations passwords],
+             controllers: { omniauth_callbacks: 'users/omniauth_callbacks' }
+
   # === Ported routes ===============================================
   # /issues/:id (both HTML + .json) → IssuesController#show via respond_to.
   # /issues/:id/reset → IssuesController#reset (raw SQL reset, not AASM).

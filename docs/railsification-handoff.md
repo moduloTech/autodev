@@ -1,6 +1,6 @@
 # Railsification — Handoff
 
-**Last updated:** 2026-06-02 (after landing step 2 — core AR models for AutoSpec)
+**Last updated:** 2026-06-02 (after landing step 3 — Devise + omniauth Entra ID wiring)
 **Canonical plan:** [`autospec.md`](autospec.md) — section D (4 coexistence phases A/B/C/D) and section C (12-step attack order).
 
 This document is the *resume-anywhere* state of the railsification. It assumes you have **no memory of previous sessions** and gives you:
@@ -36,6 +36,8 @@ When this doc says **"phase X"** alone, it always means a coexistence phase (§D
 ## 1. State at this commit
 
 ```
+7affbb5 feat: wire Devise + omniauth Entra ID for SSO (railsification step 3)
+368f332 docs(handoff): fill in step-2 commit hash in §1
 90bcabb feat: add core AR models for AutoSpec (railsification step 2)
 478adac docs(handoff): disambiguate "phase X" vs "step N" naming
 b03088d feat: port GET /locale/:lang to Rails controller (phase B)
@@ -71,7 +73,7 @@ Mapping to [`autospec.md`](autospec.md) **§C — attack-order steps**:
 |---|---|---|
 | **1** | Squelette Rails dans le repo | ✅ done (commit `7148a7c`, during coexistence phase A) |
 | **2** | Modèles core (User, Project, ProjectAppCommand, ProjectMembership) + migration `issues` Sequel → AR | 🟡 partial — `<HEAD>` landed the 4 new AR models + migrations + 20 model tests (purely additive on the DB side, tables sit empty during phase B). The `issues` Sequel→AR migration is the remaining half; still waits for phase C because of the `Object.const_set` collision (see [§4](#4-decisions-and-gotchas-that-bit-us)). |
-| **3** | Auth Devise + omniauth Azure AD + sessions table | ⬜ open |
+| **3** | Auth Devise + omniauth Azure AD + sessions table | ✅ done — Devise (`:trackable`, `:omniauthable`, no password module) + `omniauth-entra-id` + `activerecord-session_store` wired. `User.from_omniauth` factory. `/users/auth/entra_id` + `/users/auth/entra_id/callback` routes. Existing controllers NOT gated with `authenticate_user!` — Phlex dashboard stays open until per-route gates land in step 9/11. See [§4](#4-decisions-and-gotchas-that-bit-us) for the gem-require-order trap. |
 | **4** | Rake idempotent d'import YAML → DB | ⬜ open (depends on step 2 tables) |
 | **5** | Réécriture poller en Solid Queue récurrente | ⬜ open |
 | **6** | `bin/autodev` superviseur | ⬜ open |
@@ -266,6 +268,30 @@ The skeleton in `7148a7c` loads only a minimal set of railties (`active_model`, 
 
 If you ever want `bin/rails db:migrate` back, the path is to require the missing railtie tasks explicitly in `config/application.rb` — but be careful not to also re-enable the autoload-lib path, which would pull the Sequel modules into the Rails process.
 
+### Devise + omniauth gems MUST be `require`'d in `config/application.rb`, not in their initializer
+
+`config/application.rb` skips `Bundler.require(*Rails.groups)` (to keep Sequel/Sinatra out of the Rails process). That means `gem 'devise'` in the Gemfile doesn't load `devise.rb` at boot. If you put `require 'devise'` only in `config/initializers/devise.rb`, the require happens **after** Rails initializers have already collected `Rails::Engine.subclasses` — Devise's engine never registers its `app/controllers/devise/*` autoload paths, and `Devise::OmniauthCallbacksController` won't resolve at boot. Symptom: `uninitialized constant Devise::OmniauthCallbacksController` deep in route resolution. Fix lives at the top of `config/application.rb`:
+
+```ruby
+require 'devise'
+require 'omniauth-entra-id'
+require 'omniauth/rails_csrf_protection'
+```
+
+Same trap for `ActionDispatch::Session::ActiveRecordStore` — `config/initializers/session_store.rb` does `require 'action_dispatch/session/active_record_store'` because the `activerecord-session_store` gem is otherwise never loaded.
+
+### Devise needs an explicit `secret_key` under our minimal railtie set
+
+`Devise.setup do |config|` blocks normally pick up `config.secret_key = Rails.application.secret_key_base` automatically. With our pared-down railtie set the secret_key_base isn't always populated at initializer time. `config/initializers/devise.rb` sets it explicitly with a `SecureRandom.hex(64)` fallback so `bin/rails routes` / runner don't crash with `Devise.secret_key was not set`.
+
+### Existing controllers stay open — auth gates land later
+
+Step 3 wires Devise machinery (provider, callback controller, sessions) but **does not** add `before_action :authenticate_user!` to `ApplicationController` or any existing controller. The Phlex dashboard (Rails-served since phase B finished) keeps answering `GET /` to anyone hitting localhost / the NetBird mesh, matching production `bin/autodev` behavior. Per-route gates will land with the routes that actually need them — step 9 (AutoSpec greenfield routes) and step 11 (workflow approbation). Today there is no users row in production, so adding a global gate would lock everyone out of the dashboard with no way back in.
+
+### `OmniAuth.config.test_mode = true` is fragile with the Devise + csrf-protection stack
+
+Direct `post '/users/auth/entra_id/callback'` from an integration test does NOT plumb `mock_auth[:entra_id]` into `env['omniauth.auth']` in our setup — the strategy class' `client` method runs against nil credentials and crashes before the mock callback path triggers. Going through the request phase first (`post '/users/auth/entra_id'` then `follow_redirect!`) similarly trips on the strategy initialization. Three options if you need to test the full flow later: (a) inject `env['omniauth.auth']` directly into `request.env` via a custom `Rack::Test`-style setup, (b) stub `User.from_omniauth` and assert only the callback shape, (c) accept this and rely on the wiring tests in `test/controllers/users/omniauth_callbacks_controller_test.rb` plus the exhaustive `User.from_omniauth` coverage in `test/models/user_omniauth_test.rb`. We took option (c) — the controller body is 10 lines and the integration coverage cost was too high.
+
 ### `ActiveRecord::TestFixtures` can't be required in plain `rake test`
 
 Trying `require 'active_record/test_fixtures'` (or `active_record/test_help`) from a non-railtie-driven test boot triggers a Zeitwerk circular require: `test_fixtures.rb` requires `fixtures.rb` which (under the autoloader) tries to autoload `ActiveRecord::TestFixtures` and re-enters. `test/rails_helper.rb` therefore uses manual per-test cleanup (`DELETE FROM` the four step-2 tables in `teardown`) instead of transactional tests. SQLite `:memory:` makes this essentially free. If you add more AR-backed tables later, extend the `TABLES` list in `ActiveRecordTestCleanup`.
@@ -302,10 +328,11 @@ AUTODEV_DB=/tmp/sanity.db mise x ruby -- bin/rails runner 'puts "Issue: #{Issue.
 
 # 4. Test suite still green
 mise x ruby -- bundle exec rake test
-# expect: "498 runs, 895 assertions, 0 failures, 0 errors, 0 skips"
-# (number grows as new tests land; baseline rose from 473 to 498 when step 2
-#  added 20 AR model tests; the +5 between "473+20=493" and "498" is the test
-#  splitting for Minitest/MultipleAssertions)
+# expect: "508 runs, 914 assertions, 0 failures, 0 errors, 0 skips"
+# (number grows as new tests land; step 2 raised the baseline from 473 to 498
+#  with 20 AR model tests + 5 splits for Minitest/MultipleAssertions;
+#  step 3 added 10 more — 6 on User.from_omniauth, 4 on the omniauth callback
+#  controller wiring)
 
 # 5. Rubocop clean on the files we own
 mise x ruby -- bundle exec rubocop app/controllers app/models config/routes.rb \
@@ -351,7 +378,9 @@ The candidates ordered by complexity (lowest first):
 | ~~`GET /locale/:lang`~~ | ✅ done | `LocaleController#update`. `apply_locale_cookie!` works unchanged (Rack-standard `response.set_cookie` / `delete_cookie`). `safe_back_path` keeps the open-redirect guard intact. 4 curl cases validated (valid, with back, invalid → cookie cleared, evil-back stripped). |
 | Static asset routes (`/assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*`) | Low individually | Better deferred until we set up the Rails asset pipeline (propshaft) — currently intentionally not configured. |
 
-**Recommended next: open attack-order step 3** — *Auth Devise + omniauth Azure AD*.
+**Recommended next: open attack-order step 4** — *rake YAML→DB import* (autospec §H).
+
+Step 3 (Devise + omniauth Entra ID) landed in `<HEAD>`. Step 4 builds on step 2's `projects` / `project_app_commands` tables: write `autodev:migrate_projects_from_yaml`, which reads `~/.autodev/config.yml`'s `projects:` block and inserts AR rows. Idempotent, dry-run via `DRY_RUN=1`, full validator pre-pass. Per autospec §H the rake itself doesn't run until the phase C cutover (when the poller starts reading from DB), but the code can land now — the legacy YAML branch in `lib/autodev/poller.rb` stays authoritative through phase B.
 
 Coexistence phase B has nothing left to port that is dynamic — every page, write, SSE and cookie route is Rails-native. The only thing still on the mounted Sinatra app is `/assets/*` (vendored Turbo JS, CSS files under `lib/autodev/web/public/css/`, woff2 fonts). Those are read-only static files; leaving them on Sinatra blocks nothing and they will move to propshaft as part of attack-order step 8 (Phlex view port + asset pipeline).
 
@@ -359,8 +388,7 @@ Step 2's purely-additive half landed: the 4 new AR tables + models + 20 tests ar
 
 Attack-order steps that remain:
 
-- **Step 3 — Devise + omniauth Azure AD** *(recommended next)*: `gem 'devise'`, `gem 'omniauth-microsoft_graph'` (or the Azure-AD-flavored variant). Step 2's `users.microsoft_uid` column is already in place to host the Azure subject claim. Devise mounted under `/users/...`, sessions table created. Phase B-compatible: doesn't require the poller to know anything new, only adds auth gates on Rails-native routes (existing Sinatra routes stay localhost-only as before).
-- **Step 4 — rake YAML→DB import** : `autodev:migrate_projects_from_yaml` (autospec §H). Depends on step 2 tables (done) — code can land now, but the rake itself should not be executed until phase C, when the poller starts reading from DB.
+- **Step 4 — rake YAML→DB import** *(recommended next)*: `autodev:migrate_projects_from_yaml` (autospec §H). Depends on step 2 tables (done) — code can land now, but the rake itself should not be executed until phase C, when the poller starts reading from DB.
 - **Step 5 — Solid Queue** : `gem 'solid_queue'`, port `lib/autodev/poller.rb` logic to `AutodevPollJob` (recurring). The post-completion / unassignment / reentry branches all become job code. Coexistence phase C cutover.
 - **Step 6 — `bin/autodev` superviseur** : boots `rails server` + `solid_queue:start` + sidecars (Chrome MCP). `lib/autodev/web/` deleted. `bundler/inline` already gone (`452d6e4`). Coexistence phase C cutover.
 
