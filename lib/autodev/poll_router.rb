@@ -5,6 +5,7 @@ require_relative 'poll_router/resume_handler'
 # Routes GitLab issues to the appropriate processor based on their labels and DB state.
 # Extracts the label-driven routing logic from the polling loop in bin/autodev.
 class PollRouter
+  include LabelManager
   include ResumeHandler
 
   def initialize(config:, project_config:, logger:, token:, pool:)
@@ -20,7 +21,7 @@ class PollRouter
   def route(gl_issue, client)
     return :process unless @use_labels
 
-    @route_client = client
+    @client = @route_client = client
     existing = Issue.where(project_path: @project_path, issue_iid: gl_issue.iid).first
     route_by_state(gl_issue, existing)
   end
@@ -56,5 +57,13 @@ class PollRouter
 
   def log_activity(issue, key)
     ActivityLogger.post(ActivityLogger::Ctx.new(@route_client, @project_path, @logger), issue, key)
+  end
+
+  def log(msg)
+    @logger.info(msg, project: @project_path)
+  end
+
+  def log_error(msg)
+    @logger.error(msg, project: @project_path)
   end
 end

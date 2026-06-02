@@ -163,6 +163,7 @@ module IssueBehavior
         event(:pipeline_fix_done) { transitions from: :fixing_pipeline, to: :checking_pipeline }
         event(:clarification_received) { transitions from: :needs_clarification, to: :pending }
         event(:reenter) { transitions from: :done, to: :pending }
+        event(:reenter_to_check_pipeline) { transitions from: :done, to: :checking_pipeline }
       end
     end
   end

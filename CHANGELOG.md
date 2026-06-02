@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Reentry from `done` (user re-adds a `labels_todo` label on a finished issue) always routed back to `pending` and triggered a full re-implementation cycle, even when the existing MR was still open with unresolved review threads. Observed in production on Powerpanne issue #11859 (2026-05-28, MR !10681): the user re-added the `To do` label expecting Autodev to address the 12 outstanding bot/reviewer threads; instead `PollRouter::ResumeHandler#handle_reenter` fired `reenter!` → `pending` → clone → checking_spec → implementing → MR update, and MrFixer never ran (`fix_round` stayed at 0). The reset of `review_count: 0` also forced the pipeline-green path through `green_first_review` (mr-review) instead of `green_post_review` (which is what routes to `fixing_discussions`). `PollRouter::ResumeHandler` now inspects the MR state on reentry: if `mr_iid` is set and the MR is `opened`, fire a new AASM event `reenter_to_check_pipeline` (`done → checking_pipeline`), pin `review_count: 1`, and apply `label_doing` immediately. The next `poll_pipelines` tick in the same cycle picks up the issue and `green_post_review` either dispatches to `fixing_discussions` (unresolved threads exist) or transitions cleanly to `done` (everything already addressed). The original re-implementation path is preserved as the fallback when no MR exists or the MR is closed/merged — that's still the right behavior when the spec changed or the previous work was discarded. `review_count` is pinned to `1` (not preserved) on purpose: preserving a value `>= MAX_REVIEW_ROUNDS` would short-circuit straight back to `done` via the `max_review_rounds_reached?` guard. Tests: new `test/poll_router_reenter_test.rb` covers the three branches (MR open → checking_pipeline, MR closed → pending, no MR → pending), plus a regression on the review_count pin; `test_reenter_to_check_pipeline_from_done` in `database_advanced_test.rb` covers the new AASM event in isolation.
+
 ## [0.14.3] - 2026-06-02
 
 ### Fixed

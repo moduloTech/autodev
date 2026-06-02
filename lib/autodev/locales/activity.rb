@@ -41,6 +41,8 @@ module Locales
       activity_clarification_received: ':incoming_envelope: Clarification recue, reprise du traitement',
       activity_retry: ':arrows_counterclockwise: Nouvelle tentative (%<attempt>s/%<max>s)',
       activity_reenter: ':arrows_counterclockwise: Reentree (label todo detecte)',
+      activity_reenter_to_fix: ':arrows_counterclockwise: Reentree (MR ouverte) → ' \
+                               'verification des discussions a corriger',
       activity_review_limit_reached: ':warning: Limite de review atteinte (3 tours) → termine',
       activity_stagnation_pipeline: ':warning: Stagnation pipeline detectee → termine',
       activity_stagnation_discussions: ':warning: Stagnation discussions detectee → termine',
@@ -86,6 +88,8 @@ module Locales
       activity_clarification_received: ':incoming_envelope: Clarification received, resuming',
       activity_retry: ':arrows_counterclockwise: Retrying (%<attempt>s/%<max>s)',
       activity_reenter: ':arrows_counterclockwise: Re-entering (todo label detected)',
+      activity_reenter_to_fix: ':arrows_counterclockwise: Re-entering (MR open) → ' \
+                               'checking for unresolved discussions',
       activity_review_limit_reached: ':warning: Review limit reached (3 rounds) → done',
       activity_stagnation_pipeline: ':warning: Pipeline stagnation detected → done',
       activity_stagnation_discussions: ':warning: Discussion stagnation detected → done',

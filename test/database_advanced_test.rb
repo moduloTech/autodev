@@ -59,4 +59,17 @@ class DatabaseAdvancedTransitionsTest < Minitest::Test
 
     assert_equal 'pending', issue.status
   end
+
+  def test_reenter_to_check_pipeline_from_done
+    issue = create_issue
+    advance_to(issue, 'checking_pipeline')
+    issue._review_count_over_zero = true
+    issue._unresolved_discussions_empty = true
+    issue.pipeline_green!
+
+    assert_equal 'done', issue.status
+    issue.reenter_to_check_pipeline!
+
+    assert_equal 'checking_pipeline', issue.status
+  end
 end
