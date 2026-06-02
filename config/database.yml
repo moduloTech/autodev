@@ -1,0 +1,26 @@
+# Rails AR configuration — phase A of the railsification.
+#
+# Points to the SAME SQLite file that bin/autodev (Sequel) writes to. Both
+# processes share the same database; ActiveRecord opens its own pool, so we
+# cap it tight (2) to stay aligned with Sequel's `max_connections: 1` contract
+# (cf. lib/autodev/database.rb:86). `timeout` mirrors Sequel's
+# `busy_timeout=30000ms` so AR retries instead of erroring on contention.
+#
+# Override path via AUTODEV_DB env var, e.g.:
+#   AUTODEV_DB=/tmp/test.db bin/rails console
+#
+default: &default
+  adapter: sqlite3
+  pool: 2
+  timeout: 30000
+  database: "<%= ENV.fetch('AUTODEV_DB') { File.expand_path('~/.autodev/autodev.db') } %>"
+
+development:
+  <<: *default
+
+test:
+  <<: *default
+  database: "<%= ENV.fetch('AUTODEV_DB') { ':memory:' } %>"
+
+production:
+  <<: *default

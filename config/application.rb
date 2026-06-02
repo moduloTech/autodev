@@ -1,0 +1,37 @@
+# frozen_string_literal: true
+
+require_relative 'boot'
+
+# Rails skeleton — phase A of the railsification (cf. autodev/docs/autospec.md §D).
+# Loaded only by bin/rails; bin/autodev (bundler/inline Sinatra) does not boot this.
+# Only the frameworks we need are required — the rest (action_mailer, action_cable,
+# active_job, active_storage, action_text, action_mailbox) will be enabled when
+# they actually have a consumer.
+require 'rails'
+require 'active_model/railtie'
+require 'active_record/railtie'
+require 'action_controller/railtie'
+require 'action_view/railtie'
+
+# We intentionally skip `Bundler.require(*Rails.groups)` here so that
+# Sequel/Sinatra/Phlex/Puma — loaded by bin/autodev via bundler/inline — are
+# not double-loaded in the Rails process. Rails-only gems load via the
+# explicit requires above; AR models pull in `sqlite3` directly.
+require 'sqlite3'
+
+module Autodev
+  class Application < Rails::Application
+    config.load_defaults 8.1
+
+    # Phase A: Zeitwerk autoloads from app/* only. lib/ stays off the autoload
+    # path so the legacy Sequel modules in lib/autodev (loaded by bin/autodev)
+    # are never pulled into the Rails process. Rake tasks under lib/tasks/*.rake
+    # still load via `Rails.application.load_tasks` — that is a separate
+    # mechanism and does not require autoload.
+    config.eager_load = false
+    config.add_autoload_paths_to_load_path = false
+
+    # Skip generator hooks for stacks we are not using yet.
+    config.generators.system_tests = nil
+  end
+end

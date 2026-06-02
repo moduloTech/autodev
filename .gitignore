@@ -1,3 +1,10 @@
 .DS_Store
 docs/*.zip
 docs/*.pdf
+
+# Rails (phase A railsification)
+/log/*
+!/log/.keep
+/tmp/*
+!/tmp/.keep
+/storage/

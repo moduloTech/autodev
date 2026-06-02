@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <title><%= content_for(:title) || "Autodev" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="application-name" content="Autodev">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+
+    <%= yield :head %>
+
+    <%# Phase A: no asset pipeline. Stylesheets / icons are reintroduced when
+        phase B ports the Sinatra views to Rails. %>
+  </head>
+
+  <body>
+    <%= yield %>
+  </body>
+</html>

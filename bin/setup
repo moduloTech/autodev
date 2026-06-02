@@ -1,0 +1,26 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'fileutils'
+
+APP_ROOT = File.expand_path('..', __dir__)
+
+def system!(*args)
+  system(*args, exception: true)
+end
+
+FileUtils.chdir APP_ROOT do
+  # Set up the Rails side. bin/autodev (Sinatra+Sequel) bootstraps itself
+  # via bundler/inline and does not need this script.
+
+  puts '== Installing dependencies =='
+  system('bundle check') || system!('bundle install')
+
+  puts "\n== Preparing database =="
+  # In phase A there are no Rails migrations, but db:prepare is idempotent
+  # and useful to dry-run once the first migration lands in phase C.
+  system! 'bin/rails db:prepare'
+
+  puts "\n== Removing old logs and tempfiles =="
+  system! 'bin/rails log:clear tmp:clear'
+end

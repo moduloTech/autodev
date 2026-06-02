@@ -16,6 +16,10 @@ gem 'sinatra', '~> 4.0'
 gem 'sinatra-contrib', '~> 4.0'
 gem 'sqlite3', '~> 2.0'
 
+# Railsification — phase A: Rails loads its own AR models in parallel to Sequel.
+# bin/autodev is still bundler/inline and does NOT require these.
+gem 'rails', '~> 8.1.3'
+
 # Test dependencies
 gem 'minitest', '~> 5.0'
 gem 'rack-test', '~> 2.1'
