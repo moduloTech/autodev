@@ -4,8 +4,14 @@
 # (when claude includes one in its response). Raises RateLimitError so the
 # error handler can pause processing until the quota window rolls over.
 module RateLimitDetector
-  PATTERN = /you've hit your limit|rate limit|usage limit/i
-  RESET_PATTERN = /resets?\s+(\d{1,2})(am|pm)\s*\(UTC\)/i
+  # claude-code emits several variants ("You've hit your limit", "You've hit
+  # your session limit", "You've hit your usage limit"). Match all of them
+  # plus the generic "rate limit" / "usage limit" phrasings.
+  PATTERN = /you've hit your (?:session |usage )?limit|rate limit|usage limit/i
+  # Accepts both bare-hour ("6pm") and hour:minute ("11:30am") phrasings, then
+  # AM/PM and `(UTC)`. The original `\d{1,2}(am|pm)` lost the minutes silently,
+  # which set the pause window to the wrong wall-clock time.
+  RESET_PATTERN = /resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(UTC\)/i
 
   module_function
 
@@ -22,9 +28,10 @@ module RateLimitDetector
     match = text.match(RESET_PATTERN)
     return nil unless match
 
-    hour = convert_to_24h(match[1].to_i, match[2].downcase)
+    hour = convert_to_24h(match[1].to_i, match[3].downcase)
+    minute = match[2] ? match[2].to_i : 0
     now = Time.now.utc
-    reset = Time.utc(now.year, now.month, now.day, hour, 0, 0)
+    reset = Time.utc(now.year, now.month, now.day, hour, minute, 0)
     reset += 86_400 if reset <= now # next day if already past
     reset
   end

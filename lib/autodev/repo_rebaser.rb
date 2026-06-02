@@ -53,14 +53,25 @@ module RepoRebaser
   def resolve_conflicts_then_continue(work_dir, branch, target)
     log 'Rebase produced conflicts, asking danger-claude to resolve...'
     danger_claude_prompt(work_dir, build_conflict_prompt(branch, target))
+    continue_after_resolution(work_dir, branch)
+  rescue RateLimitError
+    # Rate-limit signals the worker to pause. Abort the rebase first so the
+    # tree is clean if the worker resumes later on this work_dir.
+    run_cmd_status(%w[git rebase --abort], chdir: work_dir)
+    raise
+  rescue StandardError => e
+    log_error "Conflict-resolution prompt failed (#{e.class}: #{e.message}); aborting rebase"
+    run_cmd_status(%w[git rebase --abort], chdir: work_dir)
+    :failed
+  end
+
+  def continue_after_resolution(work_dir, branch)
     out, _, ok = run_cmd_status(
       %w[git rebase --continue],
       chdir: work_dir,
       env: { 'GIT_EDITOR' => 'true' } # auto-accept the existing commit message
     )
-    return abort_rebase(work_dir, out) unless ok
-
-    finalize_rebase(work_dir, branch)
+    ok ? finalize_rebase(work_dir, branch) : abort_rebase(work_dir, out)
   end
 
   def finalize_rebase(work_dir, branch)

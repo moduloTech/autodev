@@ -9,7 +9,7 @@ require 'autodev/repo_rebaser'
 # repo on disk so the rebase / fetch / log commands run for real — stubbing
 # would defeat the purpose (the goal is to catch regressions in the git
 # command sequence, not just the Ruby control flow).
-class RepoRebaserTest < Minitest::Test
+class RepoRebaserTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   # Host class exposing the private RepoRebaser methods + the shell + repo
   # plumbing they expect (run_cmd_status, log, log_error, default_branch,
   # push_with_lease_fallback, danger_claude_prompt).
@@ -101,6 +101,32 @@ class RepoRebaserTest < Minitest::Test
     assert_empty @harness.pushed
   end
 
+  # Regression: when danger-claude itself failed (e.g. session limit) inside
+  # resolve_conflicts_then_continue, the raise propagated up uncaught, leaving
+  # the work tree in a half-rebased state and crashing PipelineFixer mid-flight.
+  # Observed on Powerpanne issue #15643 (2026-06-02) with v0.15.0.
+  def test_claude_crash_aborts_rebase_and_returns_failed
+    clone_branch('feature_conflict')
+    @harness.force_conflict_resolution = ->(_) { raise ImplementationError, 'claude crashed' }
+
+    verdict = @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict')
+
+    assert_equal :failed, verdict
+    refute rebase_in_progress?(@work_dir), 'rebase should be aborted after claude crash'
+  end
+
+  def test_rate_limit_in_conflict_resolution_propagates
+    clone_branch('feature_conflict')
+    @harness.force_conflict_resolution = lambda do |_|
+      raise RateLimitError.new('limit hit', reset_time: Time.now + 60)
+    end
+
+    assert_raises(RateLimitError) do
+      @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict')
+    end
+    refute rebase_in_progress?(@work_dir), 'rebase should be aborted before re-raising rate limit'
+  end
+
   def test_conflict_abort_leaves_branch_in_pre_rebase_state
     clone_branch('feature_conflict')
     pre_head = head_sha(@work_dir)
@@ -160,5 +186,10 @@ class RepoRebaserTest < Minitest::Test
 
   def head_sha(dir)
     `git -C #{dir} rev-parse HEAD`.strip
+  end
+
+  def rebase_in_progress?(dir)
+    File.exist?(File.join(dir, '.git', 'rebase-apply')) ||
+      File.exist?(File.join(dir, '.git', 'rebase-merge'))
   end
 end
