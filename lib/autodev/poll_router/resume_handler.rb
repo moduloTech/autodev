@@ -4,11 +4,14 @@ class PollRouter
   # Handles reentry transitions (done → pending OR done → checking_pipeline)
   # when label_todo is detected on a done issue.
   #
-  # Two paths:
-  # - If the existing MR is still open, route to `checking_pipeline` so the
-  #   next pipeline check sends to `fixing_discussions` (MrFixer addresses
-  #   unresolved threads instead of triggering a full re-implementation).
-  # - Otherwise, route to `pending` for a full implementation cycle.
+  # Three paths:
+  # - MR open → route to `checking_pipeline` so the next pipeline check sends
+  #   to `fixing_discussions` (MrFixer addresses unresolved threads instead of
+  #   triggering a full re-implementation).
+  # - MR already merged → skip: the work is shipped, no point re-implementing.
+  #   Clear the todo label and stay in `done`.
+  # - Anything else (closed without merge, no MR, lookup error) → route to
+  #   `pending` for a full implementation cycle.
   module ResumeHandler
     private
 
@@ -17,23 +20,28 @@ class PollRouter
                    project: @project_path)
       return if @config['dry_run']
 
-      if reenter_to_fix?(existing)
-        reenter_via_pipeline_check(existing)
-      else
-        reenter_via_reimplementation(gl_issue, existing)
+      case reenter_destination(existing)
+      when :pipeline_check then reenter_via_pipeline_check(existing)
+      when :skip_merged    then skip_reentry_already_merged(existing)
+      else                      reenter_via_reimplementation(gl_issue, existing)
       end
     end
 
-    # MR must exist and be open. A closed or merged MR means the previous work
-    # was discarded or already shipped — a fresh implementation cycle is the right thing.
-    def reenter_to_fix?(existing)
-      return false unless existing.mr_iid
+    # Inspect the existing MR state to decide the reentry path. A merged MR
+    # short-circuits to `:skip_merged` so we don't re-clone, re-implement, and
+    # re-push a branch whose content is already in target.
+    def reenter_destination(existing)
+      return :reimplementation unless existing.mr_iid
 
       mr = @route_client.merge_request(@project_path, existing.mr_iid)
-      mr.state == 'opened'
+      case mr.state
+      when 'opened' then :pipeline_check
+      when 'merged' then :skip_merged
+      else               :reimplementation
+      end
     rescue Gitlab::Error::ResponseError => e
       log_error "Failed to check MR !#{existing.mr_iid} state for reentry: #{e.message}"
-      false
+      :reimplementation
     end
 
     # Preserve mr_iid; reset only what would block the pipeline-fix flow.
@@ -57,6 +65,15 @@ class PollRouter
                       pipeline_retrigger_count: 0, activity_note_id: nil)
       log_activity(existing, :reenter)
       enqueue_issue_processing(gl_issue, existing)
+    end
+
+    # MR is already merged — the issue's work is shipped. Strip the todo label
+    # (so we don't loop on the next poll) and stay in `done` without any
+    # AASM transition or processor enqueue.
+    def skip_reentry_already_merged(existing)
+      apply_label_done(existing.issue_iid)
+      log_activity(existing, :reenter_skipped_merged)
+      log "Issue ##{existing.issue_iid}: MR !#{existing.mr_iid} already merged → skipping reentry"
     end
   end
 end

@@ -138,6 +138,21 @@ class PollRouterReenterTest < Minitest::Test
     assert_empty client.merge_request_calls
   end
 
+  def test_reenter_skipped_when_mr_merged
+    issue = done_issue_with_mr(mr_iid: 44)
+    client = StubClient.new(mr_state: 'merged')
+
+    verdict = build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal :next, verdict
+    issue.refresh
+
+    # Stays in done — no AASM transition, no reimplementation cycle.
+    assert_equal 'done', issue.status
+    # But we still poked GitLab labels to strip todo and re-apply done.
+    refute_empty client.label_calls
+  end
+
   private
 
   def build_router
