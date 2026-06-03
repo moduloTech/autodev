@@ -1,0 +1,225 @@
+---
+fr:
+  web_nav_dashboard: Tableau de bord
+  web_nav_errors: Erreurs
+  web_nav_all_issues: Toutes les issues
+  web_nav_issues: Demandes
+  web_nav_to_watch: À surveiller
+  web_nav_conversations: Conversations
+  web_nav_projects: Projets
+  web_theme_toggle: Changer le thème
+  web_coming_soon: Bientôt
+  web_coming_soon_tooltip: Bientôt disponible
+  web_sidebar_search: Rechercher…
+  web_sidebar_cta_title: Nouveau ticket
+  web_sidebar_cta_body: Décrivez votre besoin à Autodev, il s'occupe du reste.
+  web_sidebar_cta_button: Démarrer
+  web_sidebar_user_role: Support client
+  web_dashboard_greeting: "Bonjour \U0001F44B"
+  web_dashboard_subtitle: Voici ce qui se passe sur vos projets aujourd'hui.
+  web_dashboard_refresh: Actualiser
+  web_dashboard_new_request: Nouvelle demande
+  web_kpi_in_progress: En traitement
+  web_kpi_in_progress_hint: Autodev travaille dessus
+  web_kpi_pending: En attente
+  web_kpi_pending_hint: Dans la file, autodev les prendra au prochain tour
+  web_kpi_to_watch: À surveiller
+  web_kpi_to_watch_hint: Échec, intervention requise
+  web_kpi_awaiting_response: En attente d'une réponse
+  web_kpi_awaiting_response_hint: Autodev a une question
+  web_kpi_delivered_this_week: Livrés cette semaine
+  web_kpi_delivered_this_week_hint: 7 derniers jours
+  web_dashboard_active_section: En traitement
+  web_dashboard_active_count: "(%{count})"
+  web_dashboard_view_all: Tout voir
+  web_dashboard_weekly_activity: Activité de la semaine
+  web_dashboard_your_projects: Vos projets
+  web_project_total_requests: "%{count} demandes au total"
+  web_project_active_count: "%{count} actives"
+  web_project_error_badge: "%{count} échec"
+  web_dashboard_error_banner_one: Une demande a échoué et attend une intervention
+  web_dashboard_error_banner_many: "%{count} demandes ont échoué et attendent une intervention"
+  web_dashboard_error_banner_hint: Vous pouvez les relancer en un clic ou consulter le détail.
+  web_dashboard_view_failures: Voir les échecs
+  web_day_mon: Lun
+  web_day_tue: Mar
+  web_day_wed: Mer
+  web_day_thu: Jeu
+  web_day_fri: Ven
+  web_day_sat: Sam
+  web_day_sun: Dim
+  web_col_project: Projet
+  web_col_iid: IID
+  web_col_status: Status
+  web_col_title: Titre
+  web_col_branch: Branche
+  web_col_mr: MR
+  web_col_created_at: Créée le
+  web_col_total: Total
+  web_col_active: Actives
+  web_col_done: Terminées
+  web_col_error: Erreur
+  web_col_message: Message
+  web_status_pending: En attente
+  web_status_cloning: Préparation
+  web_status_checking_spec: Lecture du besoin
+  web_status_implementing: Développement en cours
+  web_status_committing: Sauvegarde du travail
+  web_status_pushing: Envoi sur GitLab
+  web_status_creating_mr: Création de la demande
+  web_status_reviewing: Relecture automatique
+  web_status_checking_pipeline: Vérifications auto.
+  web_status_fixing_discussions: Corrections après revue
+  web_status_fixing_pipeline: Correction des tests
+  web_status_running_post_completion: Finalisation
+  web_status_answering_question: Réponse en préparation
+  web_status_needs_clarification: Question pour vous
+  web_status_done: Terminé
+  web_status_error: Échec — action requise
+  web_dashboard_title: autodev — Dashboard
+  web_dashboard_counters: Compteurs
+  web_dashboard_active_issues: Issues actives (%{count})
+  web_dashboard_no_active: Aucune issue active.
+  web_dashboard_by_project: Par projet
+  web_dashboard_no_project: Aucun projet avec des issues suivies.
+  web_issue_title: 'Issue #%{iid} — %{project}'
+  web_issue_breadcrumb: 'Demandes › %{project} › #%{iid}'
+  web_issue_view_on_gitlab: Voir sur GitLab
+  web_issue_view_mr: Voir la MR
+  web_issue_links: Liens
+  web_issue_link_gitlab: Issue GitLab
+  web_issue_link_mr: Merge Request !%{iid}
+  web_issue_metadata: Métadonnées
+  web_issue_locale: Locale
+  web_issue_retry_count: Retry count
+  web_issue_review_count: Review count
+  web_issue_pipeline_retriggers: Pipeline retriggers
+  web_issue_started_at: Démarrée le
+  web_issue_post_completion_error: Erreur post-completion
+  web_issue_actions: Actions
+  web_issue_reset: Réinitialiser
+  web_issue_confirm_reset: Réinitialiser cette demande à pending ?
+  web_issue_force_transition: Forcer la transition
+  web_issue_confirm_transition_prefix: 'Forcer la transition « '
+  web_issue_confirm_transition_suffix: " » ?"
+  web_issue_no_transitions: Aucune transition AASM permise depuis
+  web_event_start_processing: Démarrer le traitement
+  web_event_spec_clear: Specs claires
+  web_event_spec_unclear: Spec floue, demander une précision
+  web_event_question_detected: Question détectée
+  web_event_question_answered: Question répondue
+  web_event_clone_complete: Clone terminé
+  web_event_impl_complete: Implémentation terminée
+  web_event_commit_complete: Commit terminé
+  web_event_push_complete: Push terminé
+  web_event_mr_created: MR créée
+  web_event_pipeline_green: Pipeline verte
+  web_event_post_completion_done: Post-completion terminé
+  web_event_start_post_completion: Lancer le post-completion
+  web_event_review_done: Revue terminée
+  web_event_pipeline_failed_code: Pipeline rouge (code)
+  web_event_mr_closed: MR fermée
+  web_event_discussions_fixed: Discussions résolues
+  web_event_pipeline_fix_done: Fix pipeline terminé
+  web_event_clarification_received: Précision reçue
+  web_event_reenter: Reprendre depuis terminé
+  web_event_mark_failed: Marquer en erreur
+  web_event_retry_processing: Réessayer le traitement
+  web_event_retry_pipeline: Réessayer le pipeline
+  web_issue_activity: Activity (%{count})
+  web_issue_no_activity: Aucun événement enregistré.
+  web_activity_col_date: Date
+  web_activity_col_kind: Type
+  web_activity_col_level: Niveau
+  web_activity_col_detail: Détail
+  web_issue_screenshots: Screenshots (%{count})
+  web_issue_screenshots_dir: Stockés dans
+  web_issue_raw_data: Données brutes
+  web_errors_title: À surveiller
+  web_errors_subtitle: Demandes qui ont échoué ou attendent une intervention humaine.
+  web_errors_none: Aucune demande à surveiller pour le moment.
+  web_errors_confirm_reset: 'Reset #%{iid} à pending ?'
+  web_errors_banner_one: Une demande a besoin de vous.
+  web_errors_banner_many: "%{count} demandes ont besoin de vous."
+  web_errors_banner_body: Autodev s'arrête et vous appelle quand il rencontre un blocage qu'il ne peut pas résoudre seul.
+  web_errors_cause_failure: Échec technique
+  web_errors_cause_clarification: Question en attente
+  web_errors_cause_post_completion: Erreur post-completion
+  web_errors_explain_failure: Une erreur a empêché autodev de continuer son travail. Consultez les détails techniques pour comprendre la cause.
+  web_errors_explain_clarification: Autodev a posé une question pour préciser la demande et attend une réponse pour reprendre.
+  web_errors_explain_post_completion: Le hook de finalisation a échoué après la livraison. La demande est terminée mais la commande post-completion a renvoyé une erreur.
+  web_errors_show_technical: Afficher les détails techniques
+  web_errors_view_detail: Voir le détail
+  web_errors_action_retry: Réessayer maintenant
+  web_errors_action_view_question: Voir la question
+  web_errors_requester: 'Demandé par #%{iid}'
+  web_project_title: Projet — %{path}
+  web_project_config: Configuration <code>app:</code>
+  web_project_no_config: Projet non listé dans la config courante.
+  web_project_recent: Issues récentes (%{count})
+  web_project_no_issues: Aucune issue suivie pour ce projet.
+  web_project_breadcrumb_root: Projets
+  web_project_view_on_gitlab: Voir sur GitLab
+  web_project_no_description: Aucune description configurée pour ce projet.
+  web_project_tab_overview: Vue d'ensemble
+  web_project_tab_issues: Demandes
+  web_project_tab_config: Configuration Autodev
+  web_project_tab_team: Équipe
+  web_project_stat_active: Demandes en cours
+  web_project_stat_errors: À surveiller
+  web_project_stat_done_month: Livrées ce mois
+  web_project_stat_total: Total suivi
+  web_project_recent_section: Demandes récentes
+  web_project_view_all: Tout voir
+  web_project_technical_details: Détails techniques
+  web_project_branch_label: Branche par défaut
+  web_project_branch_unset: auto
+  web_project_extra_prompt_label: Prompt additionnel
+  web_project_extra_prompt_unset: aucun
+  web_project_post_completion_label: Hook post-completion
+  web_project_post_completion_unset: désactivé
+  web_project_team_section: Équipe
+  web_project_team_coming_soon: Synchronisation avec les membres GitLab à venir.
+  web_project_config_yaml_title: ".autodev.yml"
+  web_project_config_copy: Copier
+  web_project_config_no_app_block: Aucun bloc `app:` configuré pour ce projet.
+  web_project_behavior_section: Comportement
+  web_project_security_section: Sécurité
+  web_project_no_recent: Aucune demande récente pour ce projet.
+  web_projects_index_title: Projets
+  web_projects_index_subtitle: Tous les projets suivis par autodev.
+  web_projects_index_empty: Aucun projet configuré pour le moment.
+  web_projects_card_open: Ouvrir
+  web_list_title: 'Issues — '
+  web_list_count: "%{count} issue(s)"
+  web_list_count_capped: "%{count} issue(s) (limité aux 500 dernières)"
+  web_list_none: Aucune issue dans cet état.
+  web_list_back: "← Dashboard"
+  web_issues_title: Demandes
+  web_issues_subtitle: Toutes les tâches confiées à Autodev sur vos projets.
+  web_issues_search: Recherche
+  web_issues_search_placeholder: Rechercher…
+  web_issues_from: Du
+  web_issues_to: Au
+  web_issues_per_page: Par page
+  web_issues_filter: Filtrer
+  web_issues_reset: Réinitialiser
+  web_tab_active: En traitement
+  web_tab_pending: En attente
+  web_tab_errors: Échecs
+  web_tab_waiting: Question en attente
+  web_tab_done: Livrés
+  web_tab_all: Tous
+  web_issues_col_title: Titre
+  web_issues_col_status: Statut
+  web_issues_col_activity: Activité
+  web_issues_no_results: Aucune demande ne correspond à ces filtres.
+  web_time_just_now: à l'instant
+  web_time_minutes_ago: il y a %{n} min
+  web_time_hours_ago: il y a %{n} h
+  web_time_days_ago: il y a %{n} j
+  web_issues_count_paginated: "%{count} issue(s) — page %{page} / %{total}"
+  web_issues_no_match: Aucune issue ne correspond à ces filtres.
+  web_issues_prev: "← Précédent"
+  web_issues_next: Suivant →
+  web_issues_page_indicator: Page %{page} / %{total}

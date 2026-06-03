@@ -1,0 +1,225 @@
+---
+en:
+  web_nav_dashboard: Dashboard
+  web_nav_errors: Errors
+  web_nav_all_issues: All issues
+  web_nav_issues: Requests
+  web_nav_to_watch: To watch
+  web_nav_conversations: Conversations
+  web_nav_projects: Projects
+  web_theme_toggle: Toggle theme
+  web_coming_soon: Soon
+  web_coming_soon_tooltip: Coming soon
+  web_sidebar_search: Search…
+  web_sidebar_cta_title: New ticket
+  web_sidebar_cta_body: Describe your need to Autodev, it handles the rest.
+  web_sidebar_cta_button: Start
+  web_sidebar_user_role: Customer support
+  web_dashboard_greeting: "Hello \U0001F44B"
+  web_dashboard_subtitle: Here's what's happening on your projects today.
+  web_dashboard_refresh: Refresh
+  web_dashboard_new_request: New request
+  web_kpi_in_progress: In progress
+  web_kpi_in_progress_hint: Autodev is working on them
+  web_kpi_pending: Pending
+  web_kpi_pending_hint: In the queue, autodev will pick them up on the next tick
+  web_kpi_to_watch: To watch
+  web_kpi_to_watch_hint: Failed, action required
+  web_kpi_awaiting_response: Awaiting response
+  web_kpi_awaiting_response_hint: Autodev has a question
+  web_kpi_delivered_this_week: Delivered this week
+  web_kpi_delivered_this_week_hint: Last 7 days
+  web_dashboard_active_section: In progress
+  web_dashboard_active_count: "(%{count})"
+  web_dashboard_view_all: See all
+  web_dashboard_weekly_activity: Weekly activity
+  web_dashboard_your_projects: Your projects
+  web_project_total_requests: "%{count} total requests"
+  web_project_active_count: "%{count} active"
+  web_project_error_badge: "%{count} failed"
+  web_dashboard_error_banner_one: One request failed and needs attention
+  web_dashboard_error_banner_many: "%{count} requests failed and need attention"
+  web_dashboard_error_banner_hint: Reset them in one click or open the details.
+  web_dashboard_view_failures: See failures
+  web_day_mon: Mon
+  web_day_tue: Tue
+  web_day_wed: Wed
+  web_day_thu: Thu
+  web_day_fri: Fri
+  web_day_sat: Sat
+  web_day_sun: Sun
+  web_col_project: Project
+  web_col_iid: IID
+  web_col_status: Status
+  web_col_title: Title
+  web_col_branch: Branch
+  web_col_mr: MR
+  web_col_created_at: Created at
+  web_col_total: Total
+  web_col_active: Active
+  web_col_done: Done
+  web_col_error: Error
+  web_col_message: Message
+  web_status_pending: Pending
+  web_status_cloning: Setting up
+  web_status_checking_spec: Reading spec
+  web_status_implementing: Developing
+  web_status_committing: Saving work
+  web_status_pushing: Pushing to GitLab
+  web_status_creating_mr: Opening request
+  web_status_reviewing: Auto-review
+  web_status_checking_pipeline: Auto checks
+  web_status_fixing_discussions: Fixing review comments
+  web_status_fixing_pipeline: Fixing failing tests
+  web_status_running_post_completion: Finalizing
+  web_status_answering_question: Drafting answer
+  web_status_needs_clarification: Question for you
+  web_status_done: Done
+  web_status_error: Failed — needs attention
+  web_dashboard_title: autodev — Dashboard
+  web_dashboard_counters: Counters
+  web_dashboard_active_issues: Active issues (%{count})
+  web_dashboard_no_active: No active issue.
+  web_dashboard_by_project: By project
+  web_dashboard_no_project: No project with tracked issues.
+  web_issue_title: 'Issue #%{iid} — %{project}'
+  web_issue_breadcrumb: 'Requests › %{project} › #%{iid}'
+  web_issue_view_on_gitlab: See on GitLab
+  web_issue_view_mr: See the MR
+  web_issue_links: Links
+  web_issue_link_gitlab: GitLab issue
+  web_issue_link_mr: Merge Request !%{iid}
+  web_issue_metadata: Metadata
+  web_issue_locale: Locale
+  web_issue_retry_count: Retry count
+  web_issue_review_count: Review count
+  web_issue_pipeline_retriggers: Pipeline retriggers
+  web_issue_started_at: Started at
+  web_issue_post_completion_error: Post-completion error
+  web_issue_actions: Actions
+  web_issue_reset: Reset
+  web_issue_confirm_reset: Reset this request to pending?
+  web_issue_force_transition: Force transition
+  web_issue_confirm_transition_prefix: Force transition "
+  web_issue_confirm_transition_suffix: "\"?"
+  web_issue_no_transitions: No AASM transition allowed from
+  web_event_start_processing: Start processing
+  web_event_spec_clear: Mark spec clear
+  web_event_spec_unclear: Spec unclear, ask for clarification
+  web_event_question_detected: Question detected
+  web_event_question_answered: Question answered
+  web_event_clone_complete: Clone complete
+  web_event_impl_complete: Implementation complete
+  web_event_commit_complete: Commit complete
+  web_event_push_complete: Push complete
+  web_event_mr_created: MR created
+  web_event_pipeline_green: Pipeline green
+  web_event_post_completion_done: Post-completion done
+  web_event_start_post_completion: Start post-completion
+  web_event_review_done: Review done
+  web_event_pipeline_failed_code: Pipeline failed (code)
+  web_event_mr_closed: MR closed
+  web_event_discussions_fixed: Discussions resolved
+  web_event_pipeline_fix_done: Pipeline fix done
+  web_event_clarification_received: Clarification received
+  web_event_reenter: Re-enter from done
+  web_event_mark_failed: Mark as failed
+  web_event_retry_processing: Retry processing
+  web_event_retry_pipeline: Retry pipeline
+  web_issue_activity: Activity (%{count})
+  web_issue_no_activity: No event recorded.
+  web_activity_col_date: Date
+  web_activity_col_kind: Type
+  web_activity_col_level: Level
+  web_activity_col_detail: Detail
+  web_issue_screenshots: Screenshots (%{count})
+  web_issue_screenshots_dir: Stored in
+  web_issue_raw_data: Raw data
+  web_errors_title: To watch
+  web_errors_subtitle: Requests that failed or are waiting for a human.
+  web_errors_none: Nothing to watch right now.
+  web_errors_confirm_reset: 'Reset #%{iid} to pending?'
+  web_errors_banner_one: One request needs your attention.
+  web_errors_banner_many: "%{count} requests need your attention."
+  web_errors_banner_body: Autodev pauses and pings you whenever it hits a blocker it can't work around on its own.
+  web_errors_cause_failure: Technical failure
+  web_errors_cause_clarification: Awaiting answer
+  web_errors_cause_post_completion: Post-completion error
+  web_errors_explain_failure: An error stopped autodev from making progress. Check the technical details for the root cause.
+  web_errors_explain_clarification: Autodev asked a question to refine the request and is waiting on a reply before resuming.
+  web_errors_explain_post_completion: The post-completion hook failed after delivery. The request is done but the follow-up command exited with an error.
+  web_errors_show_technical: Show technical details
+  web_errors_view_detail: See details
+  web_errors_action_retry: Retry now
+  web_errors_action_view_question: See the question
+  web_errors_requester: 'Requested by #%{iid}'
+  web_project_title: Project — %{path}
+  web_project_config: Configuration <code>app:</code>
+  web_project_no_config: Project not listed in the current config.
+  web_project_recent: Recent issues (%{count})
+  web_project_no_issues: No issue tracked for this project.
+  web_project_breadcrumb_root: Projects
+  web_project_view_on_gitlab: See on GitLab
+  web_project_no_description: No description configured for this project.
+  web_project_tab_overview: Overview
+  web_project_tab_issues: Requests
+  web_project_tab_config: Autodev configuration
+  web_project_tab_team: Team
+  web_project_stat_active: Active requests
+  web_project_stat_errors: To watch
+  web_project_stat_done_month: Delivered this month
+  web_project_stat_total: Total tracked
+  web_project_recent_section: Recent requests
+  web_project_view_all: See all
+  web_project_technical_details: Technical details
+  web_project_branch_label: Default branch
+  web_project_branch_unset: auto
+  web_project_extra_prompt_label: Extra prompt
+  web_project_extra_prompt_unset: none
+  web_project_post_completion_label: Post-completion hook
+  web_project_post_completion_unset: disabled
+  web_project_team_section: Team
+  web_project_team_coming_soon: GitLab member sync coming soon.
+  web_project_config_yaml_title: ".autodev.yml"
+  web_project_config_copy: Copy
+  web_project_config_no_app_block: No `app:` block configured for this project.
+  web_project_behavior_section: Behavior
+  web_project_security_section: Security
+  web_project_no_recent: No recent request for this project.
+  web_projects_index_title: Projects
+  web_projects_index_subtitle: Every project autodev keeps an eye on.
+  web_projects_index_empty: No project configured yet.
+  web_projects_card_open: Open
+  web_list_title: 'Issues — '
+  web_list_count: "%{count} issue(s)"
+  web_list_count_capped: "%{count} issue(s) (capped at 500 most recent)"
+  web_list_none: No issue in this state.
+  web_list_back: "← Dashboard"
+  web_issues_title: Requests
+  web_issues_subtitle: Every task you have handed to Autodev across your projects.
+  web_issues_search: Search
+  web_issues_search_placeholder: Search…
+  web_issues_from: From
+  web_issues_to: To
+  web_issues_per_page: Per page
+  web_issues_filter: Filter
+  web_issues_reset: Reset
+  web_tab_active: In progress
+  web_tab_pending: Pending
+  web_tab_errors: Failures
+  web_tab_waiting: Awaiting answer
+  web_tab_done: Delivered
+  web_tab_all: All
+  web_issues_col_title: Title
+  web_issues_col_status: Status
+  web_issues_col_activity: Activity
+  web_issues_no_results: No request matches these filters.
+  web_time_just_now: just now
+  web_time_minutes_ago: "%{n} min ago"
+  web_time_hours_ago: "%{n} h ago"
+  web_time_days_ago: "%{n} d ago"
+  web_issues_count_paginated: "%{count} issue(s) — page %{page} / %{total}"
+  web_issues_no_match: No issue matches these filters.
+  web_issues_prev: "← Previous"
+  web_issues_next: Next →
+  web_issues_page_indicator: Page %{page} / %{total}

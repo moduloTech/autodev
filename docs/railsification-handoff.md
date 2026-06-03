@@ -1,6 +1,6 @@
 # Railsification — Handoff
 
-**Last updated:** 2026-06-03 (after closing coexistence phase B — `/assets/*` ported, Sinatra mount removed)
+**Last updated:** 2026-06-03 (after step 7 — locales migrated to YAML; phase B fully closed)
 **Canonical plan:** [`autospec.md`](autospec.md) — section D (4 coexistence phases A/B/C/D) and section C (12-step attack order).
 
 This document is the *resume-anywhere* state of the railsification. It assumes you have **no memory of previous sessions** and gives you:
@@ -38,6 +38,7 @@ When this doc says **"phase X"** alone, it always means a coexistence phase (§D
 After the 2026-06-03 rebase onto master, the granular per-port commits were collapsed into four phase-shaped commits (one per attack-order step) on top of master's v0.15.1:
 
 ```
+<HEAD>  feat: migrate Locales to config/locales/*.yml via I18n (step 7)
 1cc1430 feat: port /assets/* to Rails and drop Sinatra mount (close phase B)
 e1fce2a feat: YamlProjectImporter + rake task (railsification step 4)
 8af273f feat: railsification step 3 — Devise + omniauth Entra ID for SSO (squashed)
@@ -54,7 +55,7 @@ Mapping to [`autospec.md`](autospec.md) **§D — coexistence phases**:
 | Coexistence phase | Status | What was actually done |
 |---|---|---|
 | **A — Rails s'ajoute sans rien casser** | ✅ done | `f3bb084` (squash of original `7148a7c`): Rails 8.1.3 skeleton, AR mirror models (later removed in phase B), validation via `bin/rails runner`. Closes **attack-order step 1** (Squelette Rails). |
-| **B — Rails sert des routes en parallèle de Sinatra** | ✅ done | `f16989e` (squash of 16 original commits 452d6e4..478adac): killed `bundler/inline`, mounted `Web::Server` at catch-all, ported all dynamic routes — `/issues/:id` (HTML + .json via `respond_to`), `POST /issues/:id/reset`, `POST /issues/:id/transition` (AASM `event!` from Rails — `after_all_transitions` hooks confirmed firing), `/errors`, `/projects`, `/projects/:slug` (slug decoded via `project_unslug`, no 404 on unknown — Sinatra parity), `/list/:status`, `/` (dashboard root, 5 aggregated datasets), `/issues` (paginated + filterable), `/stream` (SSE via `ActionController::Live`, `Web::EventBus` reused unchanged), `/locale/:lang` (cookie write + open-redirect-safe redirect). `<HEAD>` then closed phase B by porting `/assets/*` to `AssetsController` (3 routes, `send_file` from `lib/autodev/web/public/` — same single filesystem source of truth Sinatra reads) and **removing `mount Web::Server => '/'`** from `config/routes.rb`. `bin/rails server` now answers every URL the embedded dashboard exposes; there is no Sinatra fallback. `bin/autodev` (standalone Sinatra) is unaffected. Locale migration to `config/locales/*.yml` lives in attack-order step 7 (deferred to phase C since the Phlex views haven't moved yet). |
+| **B — Rails sert des routes en parallèle de Sinatra** | ✅ done | `f16989e` (squash of 16 original commits 452d6e4..478adac): killed `bundler/inline`, mounted `Web::Server` at catch-all, ported all dynamic routes — `/issues/:id` (HTML + .json via `respond_to`), `POST /issues/:id/reset`, `POST /issues/:id/transition` (AASM `event!` from Rails — `after_all_transitions` hooks confirmed firing), `/errors`, `/projects`, `/projects/:slug` (slug decoded via `project_unslug`, no 404 on unknown — Sinatra parity), `/list/:status`, `/` (dashboard root, 5 aggregated datasets), `/issues` (paginated + filterable), `/stream` (SSE via `ActionController::Live`, `Web::EventBus` reused unchanged), `/locale/:lang` (cookie write + open-redirect-safe redirect). `<HEAD>` then closed phase B by porting `/assets/*` to `AssetsController` (3 routes, `send_file` from `lib/autodev/web/public/` — same single filesystem source of truth Sinatra reads) and **removing `mount Web::Server => '/'`** from `config/routes.rb`. `bin/rails server` now answers every URL the embedded dashboard exposes; there is no Sinatra fallback. `bin/autodev` (standalone Sinatra) is unaffected. `<HEAD>` then closed step 7: 286 locale keys migrated from three Ruby hash files to six `config/locales/{notifications,activity,web}.{fr,en}.yml`. `Locales.t` / `lookup` / `merged_for` API preserved (thin adapter on top of `i18n` gem + `Backend::Fallbacks`); ~140 callers untouched. End-to-end FR/EN switching via `/locale/en` cookie verified. **Phase B per autospec §D is fully closed.** |
 | **C — Cutover du poller, décommissionnement Sinatra** | ⬜ not started | Solid Queue, `bin/autodev` supervisor, AR Issue becomes authoritative, `lib/autodev/web/` deleted. |
 | **D — AutoSpec** | ⬜ not started | New tables (`users`, `projects`, `autospec_drafts`, etc.), Devise, Anthropic SDK chat. |
 
@@ -68,7 +69,7 @@ Mapping to [`autospec.md`](autospec.md) **§C — attack-order steps**:
 | **4** | Rake idempotent d'import YAML → DB | ✅ done — `e1fce2a` landed `YamlProjectImporter` (`app/services/yaml_project_importer.rb` + `validator.rb`) and the `autodev:migrate_projects_from_yaml` task. Idempotent, transactional, dry-run safe, full validator pre-pass. **Not executed during phase B** — `lib/autodev/poller.rb` keeps reading YAML; the rake runs at the phase C cutover window per autospec §H. 30 new tests across three classes (validation, write, edge-case). |
 | **5** | Réécriture poller en Solid Queue récurrente | ⬜ open |
 | **6** | `bin/autodev` superviseur | ⬜ open |
-| **7** | Migration locales `lib/autodev/locales/*.rb` → `config/locales/*.yml` | ⬜ open |
+| **7** | Migration locales `lib/autodev/locales/*.rb` → `config/locales/*.yml` | ✅ done — `<HEAD>` translated 286 keys (notifications + activity + web, FR + EN) into 6 thematic YAML files. `lib/autodev/locales.rb` rewritten as adapter on `i18n` gem + `Backend::Fallbacks`. `Locales.t` / `lookup` / `merged_for` API preserved — ~140 callers untouched. Per-issue `locale: :de` (or any unknown) silently falls back to `:fr`. |
 | **8** | Port des vues Phlex + refonte libellés | 🟡 partial — Phlex views ARE rendered by Rails controllers since coexistence phase B (template pattern in [§3](#3-the-porting-pattern)), but they still live under `lib/autodev/web/views/` and the libellé refactor (cf. `autospec.md` §I) hasn't happened |
 | **9** | Backend AutoSpec (tables `autospec_*`, `AutospecChat` service, SSE) | ⬜ open |
 | **10** | Frontend AutoSpec | ⬜ open |
@@ -377,18 +378,17 @@ The candidates ordered by complexity (lowest first):
 | ~~`GET /locale/:lang`~~ | ✅ done | `LocaleController#update`. `apply_locale_cookie!` works unchanged (Rack-standard `response.set_cookie` / `delete_cookie`). `safe_back_path` keeps the open-redirect guard intact. 4 curl cases validated (valid, with back, invalid → cookie cleared, evil-back stripped). |
 | ~~Static asset routes (`/assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*`)~~ | ✅ done | `AssetsController#turbo_js` / `#css` / `#font` `send_file` from `lib/autodev/web/public/`. `skip_forgery_protection` (Rails' cross-origin-JS guard 422s `<script src>` without Referer; static public files don't need it). Same single filesystem source `bin/autodev`'s Sinatra still reads, so step 8 can swap to propshaft without touching source files. End-to-end: turbo.js 217020b, app.css 17529b, sample font 18748b — all 200 with the right content-type. |
 
-**Coexistence phase B is done. No routes left to port.**
+**Coexistence phase B is fully done per autospec §D.** Every dynamic route + every asset is Rails-native, Devise/Entra ID is wired, locales live in YAML.
 
-**Recommended next: open attack-order step 5** — *Solid Queue poller rewrite*.
+**Recommended next: phase C — open attack-order step 5** (*Solid Queue poller rewrite*).
 
-Steps 1, 3, 4 are ✅ done; phase B (all 12 dynamic routes + 3 asset routes) is ✅ done; step 2 is 🟡 partial (new tables in, Issue/AE migration deferred to phase C). The phase B closure (`/assets/*` + Sinatra mount removal) was a small extra cut to step 8 that fell out naturally — step 8 still owns the propshaft port, Phlex view relocation, and `STATES.md` vocabulary refresh.
+Steps 1, 3, 4, 7 are ✅ done; step 2 is 🟡 partial (new tables in, Issue/AE migration deferred to phase C). Phase C is the cutover work: poller → Solid Queue, supervisor, Sinatra deletion. Step 8 (Phlex view relocation + propshaft + libellé refresh) is parked because the views still live under `lib/autodev/web/` which phase C deletes.
 
 Attack-order steps that remain:
 
-- **Step 5 — Solid Queue** *(recommended next)*: `gem 'solid_queue'`, port `lib/autodev/poller.rb` logic to `AutodevPollJob` (recurring). The post-completion / unassignment / reentry branches all become job code. Required for coexistence phase C cutover. Code can land while still in phase B's wind-down; the actual swap from threads-in-bin/autodev to Solid Queue happens at the phase C cutover via the supervisor (step 6).
-- **Step 6 — `bin/autodev` superviseur** : boots `rails server` + `solid_queue:start` + sidecars (Chrome MCP). `lib/autodev/web/` deleted. The actual coexistence phase C cutover. Should be last among 4-6.
-- **Step 7 — Locales migration** : `lib/autodev/locales/*.rb` → `config/locales/*.yml`.
-- **Step 8 — Phlex view port + propshaft + libellé refactor** : Phlex views move out of `lib/autodev/web/views/`; `AssetsController` is replaced by propshaft; STATES.md vocabulary refresh (cf. autospec §I).
+- **Step 5 — Solid Queue** *(recommended next, phase C)*: `gem 'solid_queue'`, port `lib/autodev/poller.rb` logic to `AutodevPollJob` (recurring). The post-completion / unassignment / reentry branches all become job code. Required for the phase C cutover. Code lands first, the actual swap from threads-in-bin/autodev to Solid Queue happens at the phase C cutover via the supervisor (step 6).
+- **Step 6 — `bin/autodev` superviseur** *(phase C cutover)*: boots `rails server` + `solid_queue:start` + sidecars (Chrome MCP). `lib/autodev/web/` deleted. Should be last among 5-6.
+- **Step 8 — Phlex view port + propshaft + libellé refactor** *(after phase C completes)*: Phlex views move out of `lib/autodev/web/views/` (which phase C just deleted) into `app/views/`; `AssetsController` is replaced by propshaft; STATES.md vocabulary refresh (cf. autospec §I).
 
 ---
 

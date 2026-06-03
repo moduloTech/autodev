@@ -1,105 +1,84 @@
 # frozen_string_literal: true
 
-require_relative 'locales/activity'
-require_relative 'locales/web'
+require 'i18n'
+require 'i18n/backend/fallbacks'
 
-# Locale-aware message templates for GitLab issue comments.
-# Each key maps to one notify_issue call site across the processors.
+# Locale-aware message templates for GitLab issue comments, activity log
+# entries and the embedded web UI.
+#
+# Step 7 of the railsification (cf. autodev/docs/autospec.md §C item 7)
+# moved the source of truth from three Ruby hashes (NOTIFICATION_TEMPLATES,
+# ACTIVITY_TEMPLATES, WEB_TEMPLATES) to three thematic YAML files under
+# `config/locales/*.{fr,en}.yml`. The Ruby `Locales.t(key, locale:, **vars)`
+# API is preserved — every caller (~140 of them between `lib/autodev/*` and
+# `app/controllers/*`) continues to work unchanged.
+#
+# Backend setup:
+#   - `Locales::LOCALE_FILES_GLOB` enumerates the YAMLs.
+#   - I18n.load_path is extended with that glob (idempotent — guarded so
+#     re-requiring this file in dev hot-reload doesn't pile entries up).
+#   - I18n::Backend::Fallbacks is included so any locale silently falls
+#     back to :fr when a key is missing.
+#   - `available_locales = [:fr, :en]`, `default_locale = :fr`.
+#
+# Rails auto-loads `config/locales/**/*.yml` via its own railtie — but it
+# does so AFTER the application has initialized, while `bin/autodev`'s
+# pure-Sinatra entry point requires `lib/autodev` very early. Loading the
+# files here covers both code paths and is idempotent (Rails appending the
+# same glob a second time is a no-op).
 module Locales
-  NOTIFICATION_TEMPLATES = {
-    fr: {
-      processing_started: ':robot: %<tag>s : traitement en cours...',
-      mr_created: ':white_check_mark: %<tag>s : MR creee : %<mr_url>s',
-      error_generic: ':x: %<tag>s : echec — %<error>s',
-      spec_unclear_header: ':thinking: %<tag>s : la specification necessite des precisions avant implementation.',
-      spec_unclear_footer: 'Merci de repondre a ces questions dans les commentaires. ' \
-                           "L'implementation reprendra automatiquement.",
-      question_answered_header: ':mag: %<tag>s : reponse a la question',
-      question_answered_footer: '_Cette reponse a ete generee automatiquement par analyse du codebase. ' \
-                                "N'hesitez pas a demander des precisions._",
-      mr_fix_success: ':wrench: %<tag>s : %<count>s commentaire(s) de review corrige(s) ' \
-                      'sur %<mr_url>s (round %<round>s)',
-      mr_fix_error: ':x: %<tag>s : echec correction MR — %<error>s',
-      pipeline_fix_error: ':x: %<tag>s : echec de la correction du pipeline — %<error>s',
-      pipeline_fix_success: ':wrench: %<tag>s : correction du pipeline appliquee sur ' \
-                            '%<mr_url>s — %<count>s job(s) corrige(s) (round %<round>s)',
-      review_limit_reached: ':warning: %<tag>s : la limite de review (3 tours) est atteinte pour %<mr_url>s. ' \
-                            'Les discussions non resolues restantes necessitent une intervention manuelle.',
-      review_failures_exhausted: ':warning: %<tag>s : mr-review a echoue %<count>s fois consecutives sur ' \
-                                 '%<mr_url>s. Intervention manuelle requise (binaire, jeton, ou MR en cause).',
-      stagnation_pipeline: ':warning: %<tag>s : stagnation detectee — les memes jobs echouent de maniere repetee ' \
-                           'sur %<mr_url>s. Intervention manuelle requise.',
-      stagnation_discussions: ':warning: %<tag>s : stagnation detectee — les memes discussions restent non resolues ' \
-                              'sur %<mr_url>s. Intervention manuelle requise.',
-      unassigned_stop: ':stop_sign: %<tag>s : desassigne, arret du travail en cours.',
-      done_nominal: ":checkered_flag: %<tag>s : j'ai termine mon travail sur ce ticket !\n\n" \
-                    ':arrow_right: **Vous souhaitez que je corrige ou ameliore quelque chose ?** ' \
-                    'Pas de souci ! Remettez le label _%<label_todo>s_, reassignez-moi sur le ticket, ' \
-                    "et je m'en occupe.\n\n" \
-                    ':arrow_right: **Tout est bon ?** Vous pouvez passer a la suite.',
-      done_question: ":checkered_flag: %<tag>s : j'ai termine mon investigation !\n\n" \
-                     ':arrow_right: **Vous souhaitez creuser davantage ou passer a une implementation ?** ' \
-                     'Laissez un commentaire pour me guider, remettez le label _%<label_todo>s_, reassignez-moi, ' \
-                     "et c'est parti."
-    },
-    en: {
-      processing_started: ':robot: %<tag>s: processing in progress...',
-      mr_created: ':white_check_mark: %<tag>s: MR created: %<mr_url>s',
-      error_generic: ':x: %<tag>s: failed — %<error>s',
-      spec_unclear_header: ':thinking: %<tag>s: the specification needs clarification before implementation.',
-      spec_unclear_footer: 'Please answer these questions in the comments. Implementation will resume automatically.',
-      question_answered_header: ':mag: %<tag>s: answer to the question',
-      question_answered_footer: '_This answer was generated automatically by analyzing the codebase. ' \
-                                'Feel free to ask for more details._',
-      mr_fix_success: ':wrench: %<tag>s: %<count>s review comment(s) fixed on %<mr_url>s (round %<round>s)',
-      mr_fix_error: ':x: %<tag>s: MR fix failed — %<error>s',
-      pipeline_fix_error: ':x: %<tag>s: pipeline fix failed — %<error>s',
-      pipeline_fix_success: ':wrench: %<tag>s: pipeline fix applied on %<mr_url>s — ' \
-                            '%<count>s job(s) fixed (round %<round>s)',
-      review_limit_reached: ':warning: %<tag>s: review limit (3 rounds) reached for %<mr_url>s. ' \
-                            'Remaining unresolved discussions require manual intervention.',
-      review_failures_exhausted: ':warning: %<tag>s: mr-review failed %<count>s times in a row on %<mr_url>s. ' \
-                                 'Manual intervention required (binary, token, or MR issue).',
-      stagnation_pipeline: ':warning: %<tag>s: stagnation detected — the same jobs keep failing ' \
-                           'on %<mr_url>s. Manual intervention required.',
-      stagnation_discussions: ':warning: %<tag>s: stagnation detected — the same discussions remain unresolved ' \
-                              'on %<mr_url>s. Manual intervention required.',
-      unassigned_stop: ':stop_sign: %<tag>s: unassigned, stopping work in progress.',
-      done_nominal: ":checkered_flag: %<tag>s: I'm done working on this ticket!\n\n" \
-                    ':arrow_right: **Want me to fix or improve something?** ' \
-                    'No problem! Put the _%<label_todo>s_ label back, reassign me to the ticket, ' \
-                    "and I'll take care of it.\n\n" \
-                    ':arrow_right: **Everything looks good?** You can move on to the next step.',
-      done_question: ":checkered_flag: %<tag>s: I've finished my investigation!\n\n" \
-                     ':arrow_right: **Want to dig deeper or move on to an implementation?** ' \
-                     'Leave a comment to guide me, put the _%<label_todo>s_ label back, reassign me, ' \
-                     "and I'm on it."
-    }
-  }.freeze
+  LOCALE_FILES_GLOB = File.expand_path('../../config/locales/{notifications,activity,web}.*.yml', __dir__)
 
-  # Lookup is dynamic (per call) instead of merging once at boot.
-  # That way, when AUTODEV_WEB_RELOAD reloads `locales/web.rb` and re-defines
-  # WEB_TEMPLATES with new keys, the next `Locales.t` call sees them.
-  TABLES = %i[NOTIFICATION_TEMPLATES ACTIVITY_TEMPLATES WEB_TEMPLATES].freeze
-
-  def self.t(key, locale: :fr, **vars)
-    template = lookup(locale, key) || lookup(:fr, key) || key.to_s
-    template % vars
-  end
-
-  def self.lookup(locale, key)
-    TABLES.each do |const|
-      hash = const_get(const)
-      val = hash.dig(locale, key)
-      return val if val
+  # Eagerly extend I18n's load path + fallbacks the first time the module
+  # is required. Idempotent: the glob is the same every time, and the
+  # Fallbacks module short-circuits on re-inclusion.
+  unless instance_variable_defined?(:@configured)
+    I18n.load_path |= Dir[LOCALE_FILES_GLOB]
+    unless I18n::Backend::Simple.include?(I18n::Backend::Fallbacks)
+      I18n::Backend::Simple.include(I18n::Backend::Fallbacks)
     end
-    nil
+    I18n.fallbacks = I18n::Locale::Fallbacks.new(:fr)
+    I18n.available_locales |= %i[fr en]
+    I18n.default_locale = :fr unless I18n.default_locale
+    @configured = true
   end
 
-  # All keys merged across tables, computed on demand. Useful for
-  # test parity checks (every FR key has an EN counterpart and vice
-  # versa). Not used in the request path.
+  # Public API. `locale:` is mandatory at this layer (callers pick from
+  # `issue.locale`, a config field, or default to :fr at the call site).
+  # On missing key returns `key.to_s` so unmapped keys surface visibly
+  # in GitLab notes / activity logs rather than as "translation missing".
+  # Unknown locales (e.g. an `issue.locale` that drifted to ":de") fall
+  # back to French rather than raising `I18n::InvalidLocale`.
+  def self.t(key, locale: :fr, **vars)
+    locale = :fr unless I18n.available_locales.include?(locale.to_sym)
+    I18n.t(key, locale: locale, default: key.to_s, **vars).to_s
+  end
+
+  # Low-level lookup: returns the raw template string (no interpolation,
+  # no fallback) for a key in a specific locale, or `nil` if the key is
+  # absent. Used by `Web::I18nHelpers#event_label` which wants to detect
+  # the "no translation registered" case and substitute the bare event
+  # symbol rather than emitting the key string itself.
+  def self.lookup(locale, key)
+    locale = :fr unless I18n.available_locales.include?(locale.to_sym)
+    val = I18n.t(key, locale: locale, default: nil, raise: false)
+    val.is_a?(String) ? val : nil
+  end
+
+  # Flat hash of every key available for the given locale across our
+  # three YAML tables. Used by test parity checks (every FR key has an
+  # EN counterpart and vice versa). Walks the YAML files directly rather
+  # than the I18n backend — when the Rails railtie loads `rails-i18n` /
+  # ActiveSupport's built-in `date` / `time` / `support` / `number`
+  # namespaces into the same backend, those would otherwise bleed into
+  # the parity check and make it noisy. Not on the request path.
   def self.merged_for(locale)
-    TABLES.reduce({}) { |acc, c| acc.merge(const_get(c).fetch(locale, {})) }
+    locale_str = locale.to_s
+    Dir[LOCALE_FILES_GLOB].each_with_object({}) do |path, acc|
+      content = YAML.safe_load_file(path)
+      next unless content.is_a?(Hash) && content[locale_str].is_a?(Hash)
+
+      content[locale_str].each { |k, v| acc[k.to_sym] = v }
+    end
   end
 end

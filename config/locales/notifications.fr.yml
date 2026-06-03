@@ -1,0 +1,28 @@
+---
+fr:
+  processing_started: ":robot: %{tag} : traitement en cours..."
+  mr_created: ":white_check_mark: %{tag} : MR creee : %{mr_url}"
+  error_generic: ":x: %{tag} : echec — %{error}"
+  spec_unclear_header: ":thinking: %{tag} : la specification necessite des precisions avant implementation."
+  spec_unclear_footer: Merci de repondre a ces questions dans les commentaires. L'implementation reprendra automatiquement.
+  question_answered_header: ":mag: %{tag} : reponse a la question"
+  question_answered_footer: _Cette reponse a ete generee automatiquement par analyse du codebase. N'hesitez pas a demander des precisions._
+  mr_fix_success: ":wrench: %{tag} : %{count} commentaire(s) de review corrige(s) sur %{mr_url} (round %{round})"
+  mr_fix_error: ":x: %{tag} : echec correction MR — %{error}"
+  pipeline_fix_error: ":x: %{tag} : echec de la correction du pipeline — %{error}"
+  pipeline_fix_success: ":wrench: %{tag} : correction du pipeline appliquee sur %{mr_url} — %{count} job(s) corrige(s) (round %{round})"
+  review_limit_reached: ":warning: %{tag} : la limite de review (3 tours) est atteinte pour %{mr_url}. Les discussions non resolues restantes necessitent une intervention manuelle."
+  review_failures_exhausted: ":warning: %{tag} : mr-review a echoue %{count} fois consecutives sur %{mr_url}. Intervention manuelle requise (binaire, jeton, ou MR en cause)."
+  stagnation_pipeline: ":warning: %{tag} : stagnation detectee — les memes jobs echouent de maniere repetee sur %{mr_url}. Intervention manuelle requise."
+  stagnation_discussions: ":warning: %{tag} : stagnation detectee — les memes discussions restent non resolues sur %{mr_url}. Intervention manuelle requise."
+  unassigned_stop: ":stop_sign: %{tag} : desassigne, arret du travail en cours."
+  done_nominal: |-
+    :checkered_flag: %{tag} : j'ai termine mon travail sur ce ticket !
+
+    :arrow_right: **Vous souhaitez que je corrige ou ameliore quelque chose ?** Pas de souci ! Remettez le label _%{label_todo}_, reassignez-moi sur le ticket, et je m'en occupe.
+
+    :arrow_right: **Tout est bon ?** Vous pouvez passer a la suite.
+  done_question: |-
+    :checkered_flag: %{tag} : j'ai termine mon investigation !
+
+    :arrow_right: **Vous souhaitez creuser davantage ou passer a une implementation ?** Laissez un commentaire pour me guider, remettez le label _%{label_todo}_, reassignez-moi, et c'est parti.

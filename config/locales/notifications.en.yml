@@ -1,0 +1,28 @@
+---
+en:
+  processing_started: ":robot: %{tag}: processing in progress..."
+  mr_created: ":white_check_mark: %{tag}: MR created: %{mr_url}"
+  error_generic: ":x: %{tag}: failed — %{error}"
+  spec_unclear_header: ":thinking: %{tag}: the specification needs clarification before implementation."
+  spec_unclear_footer: Please answer these questions in the comments. Implementation will resume automatically.
+  question_answered_header: ":mag: %{tag}: answer to the question"
+  question_answered_footer: _This answer was generated automatically by analyzing the codebase. Feel free to ask for more details._
+  mr_fix_success: ":wrench: %{tag}: %{count} review comment(s) fixed on %{mr_url} (round %{round})"
+  mr_fix_error: ":x: %{tag}: MR fix failed — %{error}"
+  pipeline_fix_error: ":x: %{tag}: pipeline fix failed — %{error}"
+  pipeline_fix_success: ":wrench: %{tag}: pipeline fix applied on %{mr_url} — %{count} job(s) fixed (round %{round})"
+  review_limit_reached: ":warning: %{tag}: review limit (3 rounds) reached for %{mr_url}. Remaining unresolved discussions require manual intervention."
+  review_failures_exhausted: ":warning: %{tag}: mr-review failed %{count} times in a row on %{mr_url}. Manual intervention required (binary, token, or MR issue)."
+  stagnation_pipeline: ":warning: %{tag}: stagnation detected — the same jobs keep failing on %{mr_url}. Manual intervention required."
+  stagnation_discussions: ":warning: %{tag}: stagnation detected — the same discussions remain unresolved on %{mr_url}. Manual intervention required."
+  unassigned_stop: ":stop_sign: %{tag}: unassigned, stopping work in progress."
+  done_nominal: |-
+    :checkered_flag: %{tag}: I'm done working on this ticket!
+
+    :arrow_right: **Want me to fix or improve something?** No problem! Put the _%{label_todo}_ label back, reassign me to the ticket, and I'll take care of it.
+
+    :arrow_right: **Everything looks good?** You can move on to the next step.
+  done_question: |-
+    :checkered_flag: %{tag}: I've finished my investigation!
+
+    :arrow_right: **Want to dig deeper or move on to an implementation?** Leave a comment to guide me, put the _%{label_todo}_ label back, reassign me, and I'm on it.
