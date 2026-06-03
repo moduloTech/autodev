@@ -38,7 +38,7 @@ When this doc says **"phase X"** alone, it always means a coexistence phase (§D
 After the 2026-06-03 rebase onto master, the granular per-port commits were collapsed into four phase-shaped commits (one per attack-order step) on top of master's v0.15.1:
 
 ```
-<HEAD>  feat: port /assets/* to Rails and drop Sinatra mount (close phase B)
+1cc1430 feat: port /assets/* to Rails and drop Sinatra mount (close phase B)
 e1fce2a feat: YamlProjectImporter + rake task (railsification step 4)
 8af273f feat: railsification step 3 — Devise + omniauth Entra ID for SSO (squashed)
 ecf4ba4 feat: railsification step 2 — core ActiveRecord models for AutoSpec (squashed)
