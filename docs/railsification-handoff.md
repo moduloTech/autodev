@@ -38,7 +38,7 @@ When this doc says **"phase X"** alone, it always means a coexistence phase (§D
 After the 2026-06-03 rebase onto master, the granular per-port commits were collapsed into four phase-shaped commits (one per attack-order step) on top of master's v0.15.1:
 
 ```
-<HEAD>  feat: railsification step 4 — YamlProjectImporter + rake (squashed)
+e1fce2a feat: YamlProjectImporter + rake task (railsification step 4)
 8af273f feat: railsification step 3 — Devise + omniauth Entra ID for SSO (squashed)
 ecf4ba4 feat: railsification step 2 — core ActiveRecord models for AutoSpec (squashed)
 f16989e feat: railsification phase B — Sinatra→Rails route porting (squashed)
@@ -64,7 +64,7 @@ Mapping to [`autospec.md`](autospec.md) **§C — attack-order steps**:
 | **1** | Squelette Rails dans le repo | ✅ done (commit `f3bb084`, during coexistence phase A) |
 | **2** | Modèles core (User, Project, ProjectAppCommand, ProjectMembership) + migration `issues` Sequel → AR | 🟡 partial — `ecf4ba4` landed the 4 new AR models + migrations + 20 model tests (purely additive on the DB side, tables sit empty during phase B). The `issues` Sequel→AR migration is the remaining half; still waits for phase C because of the `Object.const_set` collision (see [§4](#4-decisions-and-gotchas-that-bit-us)). |
 | **3** | Auth Devise + omniauth Azure AD + sessions table | ✅ done — `8af273f` wired Devise (`:trackable`, `:omniauthable`, no password module) + `omniauth-entra-id` + `activerecord-session_store`. `User.from_omniauth` factory. `/users/auth/entra_id` + `/users/auth/entra_id/callback` routes. Existing controllers NOT gated with `authenticate_user!` — Phlex dashboard stays open until per-route gates land in step 9/11. See [§4](#4-decisions-and-gotchas-that-bit-us) for the gem-require-order trap. |
-| **4** | Rake idempotent d'import YAML → DB | ✅ done — `<HEAD>` landed `YamlProjectImporter` (`app/services/yaml_project_importer.rb` + `validator.rb`) and the `autodev:migrate_projects_from_yaml` task. Idempotent, transactional, dry-run safe, full validator pre-pass. **Not executed during phase B** — `lib/autodev/poller.rb` keeps reading YAML; the rake runs at the phase C cutover window per autospec §H. 30 new tests across three classes (validation, write, edge-case). |
+| **4** | Rake idempotent d'import YAML → DB | ✅ done — `e1fce2a` landed `YamlProjectImporter` (`app/services/yaml_project_importer.rb` + `validator.rb`) and the `autodev:migrate_projects_from_yaml` task. Idempotent, transactional, dry-run safe, full validator pre-pass. **Not executed during phase B** — `lib/autodev/poller.rb` keeps reading YAML; the rake runs at the phase C cutover window per autospec §H. 30 new tests across three classes (validation, write, edge-case). |
 | **5** | Réécriture poller en Solid Queue récurrente | ⬜ open |
 | **6** | `bin/autodev` superviseur | ⬜ open |
 | **7** | Migration locales `lib/autodev/locales/*.rb` → `config/locales/*.yml` | ⬜ open |
