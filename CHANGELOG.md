@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.2] - 2026-06-03
+
 ### Added
 
 - `RepoOperations#log_push_diagnostics` logs `git log -1 --stat HEAD` and `git count-objects -vH` before every `push_with_lease_fallback` invocation, and `log_large_blobs` lists the top 10 blobs by on-disk pack size when a push is rejected with `pack exceeds maximum allowed size`. Motivated by Powerpanne issue #15930 (2026-06-03): a reentry-triggered re-implementation produced a commit whose pack exceeded GitLab's 50 MiB `receive.maxInputSize` limit (`remote: fatal: pack exceeds maximum allowed size (50.00 MiB)` / HTTP 500), `IssueProcessor#process_issue` `rm_rf`'d the work_dir in `ensure` before the cause could be inspected, and the log captured nothing beyond the truncated stderr — no way to tell whether `vendor/bundle`, `public/packs`, or a stray binary was the culprit. The diagnostics run on every push (cheap: two git commands, ~50 ms total), so we always have HEAD's file-stat and the pack-byte counts in the log; the large-blob enumeration only runs on the specific rejection pattern, via `Open3.pipeline_r(rev-list --objects --all | cat-file --batch-check)` filtering to `blob` entries with on-disk size. Both helpers are wrapped in `rescue StandardError` so a git failure mid-diagnostic can never break a push that was otherwise going to succeed. Used by all three call sites that push: `IssueProcessor::GitOperations#push`, `MrFixer::FixCycle#push_fixes`, `PipelineMonitor::PipelineFixer#push_branch`, and `RepoRebaser#rebase_branch_on_target`.
