@@ -32,6 +32,5 @@ class MrFixer
       notify_localized(issue.issue_iid, :mr_fix_error, error: summary)
       log_activity(issue, :error, error: summary)
     end
-
   end
 end

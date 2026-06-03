@@ -31,6 +31,5 @@ class PipelineMonitor
       notify_localized(issue.issue_iid, :pipeline_fix_error, error: summary)
       log_activity(issue, :error, error: summary)
     end
-
   end
 end
