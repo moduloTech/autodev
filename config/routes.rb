@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 
-# Phase B of the railsification (cf. autodev/docs/autospec.md §D).
+# Phase B of the railsification — complete (cf. autodev/docs/autospec.md §D).
 #
-# Rails-native routes are added above the catch-all `mount` line as we
-# port them off Sinatra. Rails router matches top-down, so anything not
-# matched here falls through to Web::Server, the legacy Sinatra app
-# wired up in config/initializers/legacy_sinatra.rb.
+# Every URL the embedded dashboard serves is Rails-native. The legacy
+# Sinatra `Web::Server` still loads (the `bin/autodev` entry point uses it
+# end-to-end), but `bin/rails server` no longer mounts it: there is no
+# catch-all fallback in this routes file. Unknown paths 404 from Rails.
+#
+# Phase C will delete `lib/autodev/web/` entirely once the poller has moved
+# to Solid Queue. Until then the directory stays in place for `bin/autodev`.
 Rails.application.routes.draw do
   # === Devise / Entra ID SSO (step 3) ==============================
   # /users/auth/entra_id           → omniauth strategy (redirect to Entra)
@@ -19,7 +22,7 @@ Rails.application.routes.draw do
              skip: %i[registrations passwords],
              controllers: { omniauth_callbacks: 'users/omniauth_callbacks' }
 
-  # === Ported routes ===============================================
+  # === Application routes ==========================================
   # /issues/:id (both HTML + .json) → IssuesController#show via respond_to.
   # /issues/:id/reset → IssuesController#reset (raw SQL reset, not AASM).
   # /issues/:id/transition → IssuesController#transition (AASM event!).
@@ -32,8 +35,6 @@ Rails.application.routes.draw do
   # /stream → StreamController#show (Server-Sent Events via
   # ActionController::Live, subscribes to Web::EventBus).
   # /locale/:lang → LocaleController#update (sets/clears the locale cookie + redirect).
-  # Sinatra still owns /assets/* only (vendored Turbo + CSS + fonts —
-  # ported when the Rails asset pipeline is set up in phase C).
   root                           to: 'dashboard#show'
   get  '/issues',                to: 'issues#index'
   get  '/issues/:id',            to: 'issues#show',       constraints: { id: /\d+/ }
@@ -46,6 +47,13 @@ Rails.application.routes.draw do
   get  '/stream',                to: 'stream#show'
   get  '/locale/:lang',          to: 'locale#update'
 
-  # === Catch-all to Sinatra ========================================
-  mount Web::Server => '/' if defined?(Web::Server)
+  # === Static assets ===============================================
+  # Same URL space + content-types + cache-control as the matching
+  # Sinatra routes in lib/autodev/web/server.rb (which still serve them
+  # for the `bin/autodev` standalone entry point). Source files live
+  # under lib/autodev/web/public/; propshaft/sprockets is intentionally
+  # deferred to attack-order step 8 (Phlex view port + asset pipeline).
+  get '/assets/turbo.js',                        to: 'assets#turbo_js'
+  get '/assets/css/:name.css',                   to: 'assets#css',  constraints: { name: /[a-z0-9_-]+/ }
+  get '/assets/vendor/fonts/:name.woff2',        to: 'assets#font', constraints: { name: /[A-Za-z0-9_-]+/ }
 end

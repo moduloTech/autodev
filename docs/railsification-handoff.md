@@ -1,6 +1,6 @@
 # Railsification — Handoff
 
-**Last updated:** 2026-06-03 (after landing step 4 — YAML → DB rake import)
+**Last updated:** 2026-06-03 (after closing coexistence phase B — `/assets/*` ported, Sinatra mount removed)
 **Canonical plan:** [`autospec.md`](autospec.md) — section D (4 coexistence phases A/B/C/D) and section C (12-step attack order).
 
 This document is the *resume-anywhere* state of the railsification. It assumes you have **no memory of previous sessions** and gives you:
@@ -38,6 +38,7 @@ When this doc says **"phase X"** alone, it always means a coexistence phase (§D
 After the 2026-06-03 rebase onto master, the granular per-port commits were collapsed into four phase-shaped commits (one per attack-order step) on top of master's v0.15.1:
 
 ```
+<HEAD>  feat: port /assets/* to Rails and drop Sinatra mount (close phase B)
 e1fce2a feat: YamlProjectImporter + rake task (railsification step 4)
 8af273f feat: railsification step 3 — Devise + omniauth Entra ID for SSO (squashed)
 ecf4ba4 feat: railsification step 2 — core ActiveRecord models for AutoSpec (squashed)
@@ -53,7 +54,7 @@ Mapping to [`autospec.md`](autospec.md) **§D — coexistence phases**:
 | Coexistence phase | Status | What was actually done |
 |---|---|---|
 | **A — Rails s'ajoute sans rien casser** | ✅ done | `f3bb084` (squash of original `7148a7c`): Rails 8.1.3 skeleton, AR mirror models (later removed in phase B), validation via `bin/rails runner`. Closes **attack-order step 1** (Squelette Rails). |
-| **B — Rails sert des routes en parallèle de Sinatra** | 🟡 in progress | `f16989e` (squash of 16 original commits 452d6e4..478adac): killed `bundler/inline`, mounted `Web::Server` at catch-all, ported all dynamic routes — `/issues/:id` (HTML + .json via `respond_to`), `POST /issues/:id/reset`, `POST /issues/:id/transition` (AASM `event!` from Rails — `after_all_transitions` hooks confirmed firing), `/errors`, `/projects`, `/projects/:slug` (slug decoded via `project_unslug`, no 404 on unknown — Sinatra parity), `/list/:status`, `/` (dashboard root, 5 aggregated datasets), `/issues` (paginated + filterable), `/stream` (SSE via `ActionController::Live`, `Web::EventBus` reused unchanged), `/locale/:lang` (cookie write + open-redirect-safe redirect). **All dynamic routes are now Rails-native.** Only `/assets/*` remains on Sinatra (static files: vendored Turbo, CSS, woff2 fonts) — to be re-routed when phase C wires up propshaft. Locale migration to `config/locales/*.yml`: not started. |
+| **B — Rails sert des routes en parallèle de Sinatra** | ✅ done | `f16989e` (squash of 16 original commits 452d6e4..478adac): killed `bundler/inline`, mounted `Web::Server` at catch-all, ported all dynamic routes — `/issues/:id` (HTML + .json via `respond_to`), `POST /issues/:id/reset`, `POST /issues/:id/transition` (AASM `event!` from Rails — `after_all_transitions` hooks confirmed firing), `/errors`, `/projects`, `/projects/:slug` (slug decoded via `project_unslug`, no 404 on unknown — Sinatra parity), `/list/:status`, `/` (dashboard root, 5 aggregated datasets), `/issues` (paginated + filterable), `/stream` (SSE via `ActionController::Live`, `Web::EventBus` reused unchanged), `/locale/:lang` (cookie write + open-redirect-safe redirect). `<HEAD>` then closed phase B by porting `/assets/*` to `AssetsController` (3 routes, `send_file` from `lib/autodev/web/public/` — same single filesystem source of truth Sinatra reads) and **removing `mount Web::Server => '/'`** from `config/routes.rb`. `bin/rails server` now answers every URL the embedded dashboard exposes; there is no Sinatra fallback. `bin/autodev` (standalone Sinatra) is unaffected. Locale migration to `config/locales/*.yml` lives in attack-order step 7 (deferred to phase C since the Phlex views haven't moved yet). |
 | **C — Cutover du poller, décommissionnement Sinatra** | ⬜ not started | Solid Queue, `bin/autodev` supervisor, AR Issue becomes authoritative, `lib/autodev/web/` deleted. |
 | **D — AutoSpec** | ⬜ not started | New tables (`users`, `projects`, `autospec_drafts`, etc.), Devise, Anthropic SDK chat. |
 
@@ -91,7 +92,7 @@ Two entry points coexist on the same SQLite file. **Do not run both at the same 
 
 - Boots Rails 8.1.3 (`Autodev::Application < Rails::Application`).
 - `config/initializers/legacy_sinatra.rb` runs at boot: requires `lib/autodev`, calls `Config.load`, opens Sequel via `Database.connect`, builds the dynamic models, hands the config to `Web::Server.configure_with`.
-- `config/routes.rb` declares any Rails-native routes ABOVE `mount Web::Server => '/'`. Rails router matches top-down, so anything not declared falls through to Sinatra.
+- `config/routes.rb` declares every URL the dashboard answers — Devise omniauth, the 11 dynamic application routes, and the 3 asset routes. **No `mount Web::Server => '/'` since phase B closed**; unknown paths 404 from Rails.
 - **No poller** is running in this process. `bin/rails server` is purely the web side.
 
 ### Shared resources
@@ -111,10 +112,16 @@ bin/autodev (production)
 bin/rails server (new, transitional)
 └── one process
     └── Puma → Rails (port 3000)
-        ├── IssuesController#show         ← Rails-native, /issues/:id.json
-        └── mount Web::Server => '/'      ← Sinatra fallback for everything else
-            └── same Sequel datasets (legacy_sinatra initializer wired them)
+        ├── Devise / Entra ID SSO         ← /users/auth/entra_id*
+        ├── Dashboard / Issues / Errors / Projects / List
+        ├── Stream (ActionController::Live SSE)
+        ├── Locale (cookie write + redirect)
+        └── Assets (turbo.js, css, fonts via send_file)
+            └── same Sequel datasets (legacy_sinatra initializer wired them
+                so the controllers can call Issue / ActivityEvent / Database.db)
 ```
+
+There is no Sinatra fallback — every Rails-served URL is declared explicitly in `config/routes.rb`. The standalone `bin/autodev` process keeps using its own embedded Sinatra and is unaffected.
 
 ---
 
@@ -129,9 +136,9 @@ This is the recipe to follow for each remaining route in §6. The pattern was va
 - Phlex views it instantiates (`lib/autodev/web/views/**`).
 - Side effects (DB writes, transitions, `redirect`, `halt`, content type).
 
-### Step 2 — Declare the Rails route ABOVE the `mount`
+### Step 2 — Declare the Rails route
 
-In `config/routes.rb`, between the `# === Ported routes ===` banner and `mount Web::Server => '/'`. **Use the tightest possible constraint** so you don't steal not-yet-ported routes:
+In `config/routes.rb`, under the `# === Application routes ===` banner. Since phase B closed there is no longer a Sinatra catch-all mount — every URL has to be declared explicitly. The constraints below are kept for reference; they were tightened during the original port to avoid stealing routes from the Sinatra fallback, but the discipline is still useful for new routes (AutoSpec in step 9):
 
 | Sinatra pattern | Rails constraint that does not steal anything else |
 |---|---|
@@ -318,7 +325,7 @@ AUTODEV_DB=/tmp/sanity.db mise x ruby -- bin/rails runner 'puts "Issue: #{Issue.
 
 # 4. Test suite still green
 mise x ruby -- bundle exec rake test
-# expect: "570 runs, 1053 assertions, 0 failures, 0 errors, 0 skips"
+# expect: "575 runs, 1065 assertions, 0 failures, 0 errors, 0 skips"
 # (number grows as new tests land; step 2 raised the baseline from 473 to 498
 #  with 20 AR model tests + 5 splits for Minitest/MultipleAssertions;
 #  step 3 added 10 more — 6 on User.from_omniauth, 4 on the omniauth callback
@@ -368,18 +375,20 @@ The candidates ordered by complexity (lowest first):
 | ~~`GET /issues`~~ | ✅ done | `IssuesController#index`. Uses 7 IssuesFilter helpers (`per_page_for`, `page_for`, `filter_issues`, `paginate`, `tab_param`, `tab_counts`, `dashboard_kpis`). Byte-identical at 5 param combos. Rails' `ActionController::Parameters` works as a drop-in for the Sinatra params hash. |
 | ~~`GET /stream` (SSE)~~ | ✅ done | `StreamController#show` via `include ActionController::Live`. Reuses `Web::EventBus.subscribe`/`unsubscribe` and `Web::Helpers#format_sse` unchanged. Loop on `queue.pop`, write to `response.stream`, rescue `IOError`/`ClientDisconnected`. Byte-identical (799 bytes for one transition event). |
 | ~~`GET /locale/:lang`~~ | ✅ done | `LocaleController#update`. `apply_locale_cookie!` works unchanged (Rack-standard `response.set_cookie` / `delete_cookie`). `safe_back_path` keeps the open-redirect guard intact. 4 curl cases validated (valid, with back, invalid → cookie cleared, evil-back stripped). |
-| Static asset routes (`/assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*`) | Low individually | Better deferred until we set up the Rails asset pipeline (propshaft) — currently intentionally not configured. |
+| ~~Static asset routes (`/assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*`)~~ | ✅ done | `AssetsController#turbo_js` / `#css` / `#font` `send_file` from `lib/autodev/web/public/`. `skip_forgery_protection` (Rails' cross-origin-JS guard 422s `<script src>` without Referer; static public files don't need it). Same single filesystem source `bin/autodev`'s Sinatra still reads, so step 8 can swap to propshaft without touching source files. End-to-end: turbo.js 217020b, app.css 17529b, sample font 18748b — all 200 with the right content-type. |
+
+**Coexistence phase B is done. No routes left to port.**
 
 **Recommended next: open attack-order step 5** — *Solid Queue poller rewrite*.
 
-Step 4 (rake YAML → DB import) landed at HEAD. Steps 1, 3, 4 are ✅ done; step 2 is 🟡 partial (new tables in, Issue/AE migration deferred to phase C); coexistence phase B has nothing left to port that is dynamic (only `/assets/*` static files remain on Sinatra, deferred to step 8).
+Steps 1, 3, 4 are ✅ done; phase B (all 12 dynamic routes + 3 asset routes) is ✅ done; step 2 is 🟡 partial (new tables in, Issue/AE migration deferred to phase C). The phase B closure (`/assets/*` + Sinatra mount removal) was a small extra cut to step 8 that fell out naturally — step 8 still owns the propshaft port, Phlex view relocation, and `STATES.md` vocabulary refresh.
 
 Attack-order steps that remain:
 
-- **Step 5 — Solid Queue** *(recommended next)*: `gem 'solid_queue'`, port `lib/autodev/poller.rb` logic to `AutodevPollJob` (recurring). The post-completion / unassignment / reentry branches all become job code. Required for coexistence phase C cutover. Code can land in phase B; the actual swap to Solid Queue happens at cutover.
+- **Step 5 — Solid Queue** *(recommended next)*: `gem 'solid_queue'`, port `lib/autodev/poller.rb` logic to `AutodevPollJob` (recurring). The post-completion / unassignment / reentry branches all become job code. Required for coexistence phase C cutover. Code can land while still in phase B's wind-down; the actual swap from threads-in-bin/autodev to Solid Queue happens at the phase C cutover via the supervisor (step 6).
 - **Step 6 — `bin/autodev` superviseur** : boots `rails server` + `solid_queue:start` + sidecars (Chrome MCP). `lib/autodev/web/` deleted. The actual coexistence phase C cutover. Should be last among 4-6.
 - **Step 7 — Locales migration** : `lib/autodev/locales/*.rb` → `config/locales/*.yml`.
-- **Step 8 — Phlex view port + libellé refactor** : Phlex views move out of `lib/autodev/web/views/`; `/assets/*` moves to propshaft; STATES.md vocabulary refresh (cf. autospec §I).
+- **Step 8 — Phlex view port + propshaft + libellé refactor** : Phlex views move out of `lib/autodev/web/views/`; `AssetsController` is replaced by propshaft; STATES.md vocabulary refresh (cf. autospec §I).
 
 ---
 
