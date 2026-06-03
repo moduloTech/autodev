@@ -1,6 +1,6 @@
 # Railsification — Handoff
 
-**Last updated:** 2026-06-02 (after landing step 3 — Devise + omniauth Entra ID wiring)
+**Last updated:** 2026-06-03 (after landing step 4 — YAML → DB rake import)
 **Canonical plan:** [`autospec.md`](autospec.md) — section D (4 coexistence phases A/B/C/D) and section C (12-step attack order).
 
 This document is the *resume-anywhere* state of the railsification. It assumes you have **no memory of previous sessions** and gives you:
@@ -35,35 +35,25 @@ When this doc says **"phase X"** alone, it always means a coexistence phase (§D
 
 ## 1. State at this commit
 
+After the 2026-06-03 rebase onto master, the granular per-port commits were collapsed into four phase-shaped commits (one per attack-order step) on top of master's v0.15.1:
+
 ```
-7affbb5 feat: wire Devise + omniauth Entra ID for SSO (railsification step 3)
-368f332 docs(handoff): fill in step-2 commit hash in §1
-90bcabb feat: add core AR models for AutoSpec (railsification step 2)
-478adac docs(handoff): disambiguate "phase X" vs "step N" naming
-b03088d feat: port GET /locale/:lang to Rails controller (phase B)
-ebb8581 feat: port GET /stream (SSE) to Rails controller (phase B)
-b788b55 feat: port GET /issues (paginated list) to Rails controller (phase B)
-daf5bf3 feat: port GET / (dashboard root) to Rails controller (phase B)
-8244c21 feat: port GET /list/:status to Rails controller (phase B)
-e6cd6f7 feat: port GET /projects/:slug to Rails controller (phase B)
-8dec203 feat: port GET /projects to Rails controller (phase B)
-a61b391 feat: port GET /errors to Rails controller (phase B)
-fb4f261 feat: port POST /issues/:id/transition to Rails controller (phase B)
-3608bab feat: port POST /issues/:id/reset to Rails controller (phase B)
-8dad64b feat: port GET /issues/:id (HTML) to Rails controller (phase B)
-eed8127 docs: add railsification handoff guide for resume-from-clean-session
-159785f feat: port GET /issues/:id.json to Rails controller (phase B)
-3fcc36b feat: mount legacy Sinatra Web::Server as Rails route (phase B)
-452d6e4 refactor: drop bundler/inline in bin/autodev (phase B railsification start)
-7148a7c feat: add Rails 8.1.3 skeleton (phase A railsification)
+<HEAD>  feat: railsification step 4 — YamlProjectImporter + rake (squashed)
+8af273f feat: railsification step 3 — Devise + omniauth Entra ID for SSO (squashed)
+ecf4ba4 feat: railsification step 2 — core ActiveRecord models for AutoSpec (squashed)
+f16989e feat: railsification phase B — Sinatra→Rails route porting (squashed)
+f3bb084 feat: railsification phase A — Rails 8.1.3 skeleton (squashed)
+f43ccb8 Release v0.15.1   ← master
 ```
+
+The original granular history (21 commits, one per route ported plus the step-2/step-3 work) is preserved in git reflog and can be cherry-picked back if useful for archaeology, but the squashed commits are the canonical history.
 
 Mapping to [`autospec.md`](autospec.md) **§D — coexistence phases**:
 
 | Coexistence phase | Status | What was actually done |
 |---|---|---|
-| **A — Rails s'ajoute sans rien casser** | ✅ done | `7148a7c`: Rails 8.1.3 skeleton, AR mirror models (later removed), validation via `bin/rails runner`. This commit also closes **attack-order step 1** (Squelette Rails). |
-| **B — Rails sert des routes en parallèle de Sinatra** | 🟡 in progress | `452d6e4` killed `bundler/inline`. `3fcc36b` mounted `Web::Server` at the catch-all route. `159785f` ported `/issues/:id.json`. `8dad64b` extended the same controller to serve the HTML variant via `respond_to`. `3608bab` ported `POST /issues/:id/reset` (first write path). `fb4f261` ported `POST /issues/:id/transition` (AASM `event!` from Rails — `after_all_transitions` hooks confirmed firing). `a61b391` ported `GET /errors` (first standalone controller). `8dec203` ported `GET /projects`. `e6cd6f7` ported `GET /projects/:slug` (slug decoded via `project_unslug`, no 404 on unknown — Sinatra parity). `8244c21` ported `GET /list/:status`. `daf5bf3` ported `GET /` (dashboard root) — 5 aggregated datasets, biggest view so far. `b788b55` ported `GET /issues` (paginated + filterable list). `ebb8581` ported `GET /stream` (SSE via `ActionController::Live`, `Web::EventBus` reused unchanged). `<HEAD>` ported `GET /locale/:lang` (cookie write + open-redirect-safe redirect). **All dynamic routes are now Rails-native.** Only `/assets/*` remains on Sinatra (static files: vendored Turbo, CSS, woff2 fonts) — to be re-routed when phase C wires up propshaft. Routes left to port: see §6. Devise + omniauth Azure AD: not started. Locale migration to `config/locales/*.yml`: not started. |
+| **A — Rails s'ajoute sans rien casser** | ✅ done | `f3bb084` (squash of original `7148a7c`): Rails 8.1.3 skeleton, AR mirror models (later removed in phase B), validation via `bin/rails runner`. Closes **attack-order step 1** (Squelette Rails). |
+| **B — Rails sert des routes en parallèle de Sinatra** | 🟡 in progress | `f16989e` (squash of 16 original commits 452d6e4..478adac): killed `bundler/inline`, mounted `Web::Server` at catch-all, ported all dynamic routes — `/issues/:id` (HTML + .json via `respond_to`), `POST /issues/:id/reset`, `POST /issues/:id/transition` (AASM `event!` from Rails — `after_all_transitions` hooks confirmed firing), `/errors`, `/projects`, `/projects/:slug` (slug decoded via `project_unslug`, no 404 on unknown — Sinatra parity), `/list/:status`, `/` (dashboard root, 5 aggregated datasets), `/issues` (paginated + filterable), `/stream` (SSE via `ActionController::Live`, `Web::EventBus` reused unchanged), `/locale/:lang` (cookie write + open-redirect-safe redirect). **All dynamic routes are now Rails-native.** Only `/assets/*` remains on Sinatra (static files: vendored Turbo, CSS, woff2 fonts) — to be re-routed when phase C wires up propshaft. Locale migration to `config/locales/*.yml`: not started. |
 | **C — Cutover du poller, décommissionnement Sinatra** | ⬜ not started | Solid Queue, `bin/autodev` supervisor, AR Issue becomes authoritative, `lib/autodev/web/` deleted. |
 | **D — AutoSpec** | ⬜ not started | New tables (`users`, `projects`, `autospec_drafts`, etc.), Devise, Anthropic SDK chat. |
 
@@ -71,10 +61,10 @@ Mapping to [`autospec.md`](autospec.md) **§C — attack-order steps**:
 
 | Step | Title | Status |
 |---|---|---|
-| **1** | Squelette Rails dans le repo | ✅ done (commit `7148a7c`, during coexistence phase A) |
-| **2** | Modèles core (User, Project, ProjectAppCommand, ProjectMembership) + migration `issues` Sequel → AR | 🟡 partial — `<HEAD>` landed the 4 new AR models + migrations + 20 model tests (purely additive on the DB side, tables sit empty during phase B). The `issues` Sequel→AR migration is the remaining half; still waits for phase C because of the `Object.const_set` collision (see [§4](#4-decisions-and-gotchas-that-bit-us)). |
-| **3** | Auth Devise + omniauth Azure AD + sessions table | ✅ done — Devise (`:trackable`, `:omniauthable`, no password module) + `omniauth-entra-id` + `activerecord-session_store` wired. `User.from_omniauth` factory. `/users/auth/entra_id` + `/users/auth/entra_id/callback` routes. Existing controllers NOT gated with `authenticate_user!` — Phlex dashboard stays open until per-route gates land in step 9/11. See [§4](#4-decisions-and-gotchas-that-bit-us) for the gem-require-order trap. |
-| **4** | Rake idempotent d'import YAML → DB | ⬜ open (depends on step 2 tables) |
+| **1** | Squelette Rails dans le repo | ✅ done (commit `f3bb084`, during coexistence phase A) |
+| **2** | Modèles core (User, Project, ProjectAppCommand, ProjectMembership) + migration `issues` Sequel → AR | 🟡 partial — `ecf4ba4` landed the 4 new AR models + migrations + 20 model tests (purely additive on the DB side, tables sit empty during phase B). The `issues` Sequel→AR migration is the remaining half; still waits for phase C because of the `Object.const_set` collision (see [§4](#4-decisions-and-gotchas-that-bit-us)). |
+| **3** | Auth Devise + omniauth Azure AD + sessions table | ✅ done — `8af273f` wired Devise (`:trackable`, `:omniauthable`, no password module) + `omniauth-entra-id` + `activerecord-session_store`. `User.from_omniauth` factory. `/users/auth/entra_id` + `/users/auth/entra_id/callback` routes. Existing controllers NOT gated with `authenticate_user!` — Phlex dashboard stays open until per-route gates land in step 9/11. See [§4](#4-decisions-and-gotchas-that-bit-us) for the gem-require-order trap. |
+| **4** | Rake idempotent d'import YAML → DB | ✅ done — `<HEAD>` landed `YamlProjectImporter` (`app/services/yaml_project_importer.rb` + `validator.rb`) and the `autodev:migrate_projects_from_yaml` task. Idempotent, transactional, dry-run safe, full validator pre-pass. **Not executed during phase B** — `lib/autodev/poller.rb` keeps reading YAML; the rake runs at the phase C cutover window per autospec §H. 30 new tests across three classes (validation, write, edge-case). |
 | **5** | Réécriture poller en Solid Queue récurrente | ⬜ open |
 | **6** | `bin/autodev` superviseur | ⬜ open |
 | **7** | Migration locales `lib/autodev/locales/*.rb` → `config/locales/*.yml` | ⬜ open |
@@ -328,16 +318,18 @@ AUTODEV_DB=/tmp/sanity.db mise x ruby -- bin/rails runner 'puts "Issue: #{Issue.
 
 # 4. Test suite still green
 mise x ruby -- bundle exec rake test
-# expect: "508 runs, 914 assertions, 0 failures, 0 errors, 0 skips"
+# expect: "570 runs, 1053 assertions, 0 failures, 0 errors, 0 skips"
 # (number grows as new tests land; step 2 raised the baseline from 473 to 498
 #  with 20 AR model tests + 5 splits for Minitest/MultipleAssertions;
 #  step 3 added 10 more — 6 on User.from_omniauth, 4 on the omniauth callback
-#  controller wiring)
+#  controller wiring; the 2026-06-03 rebase onto master folded in master's
+#  rate_limit_detector / repo_rebaser / poll_router_reenter /
+#  pipeline_monitor_review_failure tests; step 4 added 30 importer tests)
 
 # 5. Rubocop clean on the files we own
-mise x ruby -- bundle exec rubocop app/controllers app/models config/routes.rb \
+mise x ruby -- bundle exec rubocop app/controllers app/models app/services config/routes.rb \
   config/initializers/legacy_sinatra.rb config/initializers/auto_migrate.rb \
-  db/migrate test/models test/rails_helper.rb
+  db/migrate lib/tasks/autodev.rake test/models test/services test/rails_helper.rb
 # expect: "1 offense detected" (the pre-existing Style/Documentation on the
 #  generated `app/models/application_record.rb` — not worth fixing yet).
 # Running rubocop against the whole tree reports ~54 offenses, all in
@@ -378,21 +370,16 @@ The candidates ordered by complexity (lowest first):
 | ~~`GET /locale/:lang`~~ | ✅ done | `LocaleController#update`. `apply_locale_cookie!` works unchanged (Rack-standard `response.set_cookie` / `delete_cookie`). `safe_back_path` keeps the open-redirect guard intact. 4 curl cases validated (valid, with back, invalid → cookie cleared, evil-back stripped). |
 | Static asset routes (`/assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*`) | Low individually | Better deferred until we set up the Rails asset pipeline (propshaft) — currently intentionally not configured. |
 
-**Recommended next: open attack-order step 4** — *rake YAML→DB import* (autospec §H).
+**Recommended next: open attack-order step 5** — *Solid Queue poller rewrite*.
 
-Step 3 (Devise + omniauth Entra ID) landed in `<HEAD>`. Step 4 builds on step 2's `projects` / `project_app_commands` tables: write `autodev:migrate_projects_from_yaml`, which reads `~/.autodev/config.yml`'s `projects:` block and inserts AR rows. Idempotent, dry-run via `DRY_RUN=1`, full validator pre-pass. Per autospec §H the rake itself doesn't run until the phase C cutover (when the poller starts reading from DB), but the code can land now — the legacy YAML branch in `lib/autodev/poller.rb` stays authoritative through phase B.
-
-Coexistence phase B has nothing left to port that is dynamic — every page, write, SSE and cookie route is Rails-native. The only thing still on the mounted Sinatra app is `/assets/*` (vendored Turbo JS, CSS files under `lib/autodev/web/public/css/`, woff2 fonts). Those are read-only static files; leaving them on Sinatra blocks nothing and they will move to propshaft as part of attack-order step 8 (Phlex view port + asset pipeline).
-
-Step 2's purely-additive half landed: the 4 new AR tables + models + 20 tests are in. The remaining half (Issue/ActivityEvent Sequel→AR) still waits for phase C because of the `Object.const_set` collision (see [§4](#4-decisions-and-gotchas-that-bit-us)).
+Step 4 (rake YAML → DB import) landed at HEAD. Steps 1, 3, 4 are ✅ done; step 2 is 🟡 partial (new tables in, Issue/AE migration deferred to phase C); coexistence phase B has nothing left to port that is dynamic (only `/assets/*` static files remain on Sinatra, deferred to step 8).
 
 Attack-order steps that remain:
 
-- **Step 4 — rake YAML→DB import** *(recommended next)*: `autodev:migrate_projects_from_yaml` (autospec §H). Depends on step 2 tables (done) — code can land now, but the rake itself should not be executed until phase C, when the poller starts reading from DB.
-- **Step 5 — Solid Queue** : `gem 'solid_queue'`, port `lib/autodev/poller.rb` logic to `AutodevPollJob` (recurring). The post-completion / unassignment / reentry branches all become job code. Coexistence phase C cutover.
-- **Step 6 — `bin/autodev` superviseur** : boots `rails server` + `solid_queue:start` + sidecars (Chrome MCP). `lib/autodev/web/` deleted. `bundler/inline` already gone (`452d6e4`). Coexistence phase C cutover.
-
-Steps 3, 4, 5 can land in any order — no inter-step dependency beyond the tables that step 2 just added. Step 6 (supervisor) is the actual coexistence phase C cutover and should be last among 3-6.
+- **Step 5 — Solid Queue** *(recommended next)*: `gem 'solid_queue'`, port `lib/autodev/poller.rb` logic to `AutodevPollJob` (recurring). The post-completion / unassignment / reentry branches all become job code. Required for coexistence phase C cutover. Code can land in phase B; the actual swap to Solid Queue happens at cutover.
+- **Step 6 — `bin/autodev` superviseur** : boots `rails server` + `solid_queue:start` + sidecars (Chrome MCP). `lib/autodev/web/` deleted. The actual coexistence phase C cutover. Should be last among 4-6.
+- **Step 7 — Locales migration** : `lib/autodev/locales/*.rb` → `config/locales/*.yml`.
+- **Step 8 — Phlex view port + libellé refactor** : Phlex views move out of `lib/autodev/web/views/`; `/assets/*` moves to propshaft; STATES.md vocabulary refresh (cf. autospec §I).
 
 ---
 
