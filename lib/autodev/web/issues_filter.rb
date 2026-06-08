@@ -13,7 +13,7 @@ module Web
       ds = apply_keyword(ds, params[:q])
       ds = apply_date_from(ds, params[:from])
       ds = apply_date_to(ds, params[:to])
-      ds.order(Sequel.desc(:id))
+      ds.order(id: :desc)
     end
 
     def tab_param(params)
@@ -61,7 +61,7 @@ module Web
       total = dataset.count
       total_pages = [(total / per_page.to_f).ceil, 1].max
       page = total_pages if page > total_pages
-      rows = dataset.limit(per_page).offset((page - 1) * per_page).all
+      rows = dataset.limit(per_page).offset((page - 1) * per_page).to_a
       [rows, total, total_pages, page]
     end
 
@@ -71,20 +71,22 @@ module Web
       return dataset if query.nil? || query.strip.empty?
 
       escaped = query.strip.gsub('%', '\\%').gsub('_', '\\_')
-      dataset.where(Sequel.ilike(:issue_title, "%#{escaped}%"))
+      # SQLite's LIKE is case-insensitive by default (CI for ASCII),
+      # matching Sequel.ilike's behaviour on the same DB.
+      dataset.where('issue_title LIKE ?', "%#{escaped}%")
     end
 
     def apply_date_from(dataset, from_date)
       return dataset if from_date.nil? || from_date.empty?
 
-      dataset.where { created_at >= from_date }
+      dataset.where('created_at >= ?', from_date)
     end
 
     def apply_date_to(dataset, to_date)
       return dataset if to_date.nil? || to_date.empty?
 
       # End-of-day inclusive: anything strictly before 00:00 the next day.
-      dataset.where { created_at < "#{to_date} 23:59:59" }
+      dataset.where('created_at < ?', "#{to_date} 23:59:59")
     end
   end
 end

@@ -97,7 +97,7 @@ module Dashboard
     def append_hidden_count(summary, config, pastel)
       return if config['status_all']
 
-      hidden = Database.db[:issues].where(status: 'done').count
+      hidden = ::Issue.where(status: 'done').count
       summary << " #{pastel.dim("(#{hidden} terminées masquées, --all pour tout voir)")}" if hidden.positive?
     end
 

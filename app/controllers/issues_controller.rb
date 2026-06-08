@@ -60,7 +60,7 @@ class IssuesController < ApplicationController
     issue = find_issue(params[:id])
     return head :not_found unless issue
 
-    Database.db[:issues].where(id: issue.id).update(
+    Issue.where(id: issue.id).update_all(
       status: 'pending', retry_count: 0, error_message: nil,
       next_retry_at: nil, started_at: nil
     )

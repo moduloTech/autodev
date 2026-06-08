@@ -4,18 +4,9 @@ require_relative 'autodev_test_helper'
 
 # Tests for parse_args (bin/autodev CLI argument parsing).
 class ParseArgsTest < Minitest::Test
-  def test_once_flag
-    config = parse_args(['--once'])
-
-    assert config['once']
-  end
-
-  def test_dry_run_implies_once
-    config = parse_args(['--dry-run'])
-
-    assert config['dry_run']
-    assert config['once']
-  end
+  # --once and --dry-run flags were retired in step 2 second half — the
+  # threaded poller they relied on is gone. The one-shot equivalent is
+  # `bin/rails runner 'AutodevPollJob.perform_now'`.
 
   def test_status_flag
     config = parse_args(['--status'])
@@ -82,9 +73,8 @@ class ParseArgsTest < Minitest::Test
   end
 
   def test_combined_flags
-    config = parse_args(['--once', '-n', '2', '-i', '30'])
+    config = parse_args(['-n', '2', '-i', '30'])
 
-    assert config['once']
     assert_equal 2, config['max_workers']
     assert_equal 30, config['poll_interval']
   end

@@ -11,7 +11,7 @@ class ListController < ApplicationController
   # returns an empty result set (the dataset filter matches nothing).
   def show
     status = params[:status]
-    issues = issues_dataset.where(status: status).order(Sequel.desc(:id)).limit(500).all
+    issues = Issue.where(status: status).order(id: :desc).limit(500).to_a
     html = ::Web::Views::List.new(
       status: status,
       issues: issues,

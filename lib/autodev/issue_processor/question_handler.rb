@@ -27,8 +27,8 @@ class IssueProcessor
       issue.question_answered!
       apply_label_done(iid)
       reassign_to_author(issue)
-      Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"),
-                                       dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
+      Issue.where(id: issue.id).update_all(finished_at: Time.current,
+                                           dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
       notify_localized(iid, :done_question, label_todo: @project_config['labels_todo']&.first)
       log_activity(issue, :question_answered)
       log_activity(issue, :done)

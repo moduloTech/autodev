@@ -1,28 +1,23 @@
 # frozen_string_literal: true
 
-# Phase B of the railsification: Rails mounts the existing Sinatra
-# Web::Server at the catch-all route. While there is at most a handful of
-# Rails-native routes (porting one-by-one in following commits), every
-# request that does not match those falls through to Sinatra, which then
-# answers it exactly the way bin/autodev's embedded web does today.
+# Legacy bridge between Rails and the remaining Sinatra-era code.
+# What this still does, post-step-2-second-half (Sequel→AR cutover):
+#   1. requires lib/autodev/* so `Web::Server` (Phlex helpers + EventBus)
+#      and the worker classes (`IssueProcessor`, `MrFixer`, `PipelineMonitor`)
+#      remain available to the Rails controllers and Solid Queue jobs.
+#   2. loads `~/.autodev/config.yml` via `Config.load` and hands the result
+#      to `Web::Server.configure_with` so the Phlex view layer can read
+#      `web.locale` etc.
 #
-# This initializer wires the legacy Sequel + Sinatra side INTO the Rails
-# process:
-#   1. requires lib/autodev/* (so Web::Server is defined),
-#   2. loads ~/.autodev/config.yml via Config.load,
-#   3. opens the same SQLite database that bin/rails AR uses,
-#   4. builds the dynamic Sequel models (Issue, ActivityEvent),
-#   5. hands the config hash to Web::Server.
+# What it no longer does:
+#   - Opens a Sequel connection. `Issue` and `ActivityEvent` are now AR
+#     models (cf. app/models/) and `ActiveRecord::Base` owns the SQLite
+#     pool via `config/database.yml`. The old `Database.connect` /
+#     `Database.build_model!` path is dead; `Object.const_set(:Issue, ...)`
+#     would now collide with the AR model that lives at the same constant.
 #
-# The Sequel-side Database.build_model! does `Object.const_set(:Issue, ...)`.
-# That is why the AR Issue / ActivityEvent mirrors added in phase A were
-# removed in the same commit — both classes can't share the top-level
-# constant. They will come back (and become authoritative) in phase C, once
-# `lib/autodev/web/` is deleted and the poller has moved to Solid Queue.
-#
-# Set AUTODEV_SKIP_LEGACY=1 to skip this entire block — useful for tooling
-# like `bin/rails db:migrate` or `bin/rails runner` snippets that should
-# not touch the Sequel side.
+# Set AUTODEV_SKIP_LEGACY=1 to skip the whole block — useful for tests
+# that don't want `lib/autodev` loaded at all (`test/jobs/*`).
 
 return if ENV['AUTODEV_SKIP_LEGACY']
 
@@ -30,17 +25,5 @@ require_relative '../../lib/autodev'
 
 Rails.application.config.after_initialize do
   config = Config.load({})
-
-  # Allow `AUTODEV_DB=/tmp/x.db bin/rails server` to override BOTH sides
-  # (AR via config/database.yml, Sequel via this initializer) and keep them
-  # pointed at the same file during local testing.
-  config['database_url'] = "sqlite://#{ENV['AUTODEV_DB']}" if ENV['AUTODEV_DB']
-
-  unless Database.connect(config['database_url'])
-    Rails.logger.warn("[legacy_sinatra] Database.connect failed for #{config['database_url']}; Sinatra routes will 500")
-    next
-  end
-
-  Database.build_model!
   Web::Server.configure_with(config)
 end

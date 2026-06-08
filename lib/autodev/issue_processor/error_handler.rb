@@ -9,10 +9,10 @@ class IssueProcessor
       wait = error.wait_seconds
       log_error "Issue ##{issue.issue_iid}: rate limit hit, parking for #{wait}s"
       safe_mark_failed!(issue)
-      Issue.where(id: issue.id).update(
+      Issue.where(id: issue.id).update_all(
         error_message: error.message, dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
-        next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')"),
-        finished_at: Sequel.lit("datetime('now')")
+        next_retry_at: wait.to_i.seconds.from_now,
+        finished_at: Time.current
       )
       log_activity(issue, :rate_limit, wait: wait)
     end
@@ -22,7 +22,7 @@ class IssueProcessor
       safe_mark_failed!(issue)
       fields = build_error_fields(issue, error, bt)
       log_retry_info(issue, fields, error)
-      Issue.where(id: issue.id).update(**fields)
+      Issue.where(id: issue.id).update_all(**fields)
       notify_error_with_activity(issue, error)
       log_error "  #{bt}" if bt
     end
@@ -40,8 +40,8 @@ class IssueProcessor
 
       fields = { error_message: "#{error.class}: #{error.message}\n  #{backtrace}",
                  dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
-                 retry_count: retry_count, finished_at: Sequel.lit("datetime('now')") }
-      fields[:next_retry_at] = Sequel.lit("datetime('now', '+#{backoff_s} seconds')") if retry_count < max
+                 retry_count: retry_count, finished_at: Time.current }
+      fields[:next_retry_at] = backoff_s.seconds.from_now if retry_count < max
       fields
     end
 

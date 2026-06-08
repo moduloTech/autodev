@@ -28,8 +28,6 @@ module ActivityLogger
   # Best-effort persistence to the activity_events table. Failures here must
   # never abort the GitLab note update — they are logged and swallowed.
   def self.persist_event!(issue, key, entry, vars, level: 'info')
-    return unless Object.const_defined?(:ActivityEvent)
-
     ActivityEvent.create(
       issue_id: issue.id,
       kind: 'danger_claude',

@@ -45,7 +45,7 @@ class IssueProcessor
     @dc_issue = issue
     log "Processing issue ##{issue.issue_iid}: #{issue.issue_title}"
     issue.start_processing!
-    Issue.where(id: issue.id).update(started_at: Sequel.lit("datetime('now')"))
+    Issue.where(id: issue.id).update_all(started_at: Time.current)
     apply_label_doing(issue.issue_iid)
     log_activity(issue, :started)
   end
@@ -57,7 +57,7 @@ class IssueProcessor
     log "Issue ##{issue.issue_iid} is no longer open (#{current.state}), skipping"
     issue._issue_closed = true
     issue.clone_complete!
-    Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"))
+    Issue.where(id: issue.id).update_all(finished_at: Time.current)
     true
   end
 
@@ -114,8 +114,8 @@ class IssueProcessor
   end
 
   def persist_finalize(issue)
-    Issue.where(id: issue.id).update(
-      finished_at: Sequel.lit("datetime('now')"), pipeline_retrigger_count: 0,
+    Issue.where(id: issue.id).update_all(
+      finished_at: Time.current, pipeline_retrigger_count: 0,
       dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
     )
   end

@@ -85,11 +85,10 @@ class ActivityLoggerTest < Minitest::Test
   def test_post_does_not_break_when_db_write_fails
     issue = create_issue
     ctx = ActivityLogger::Ctx.new(FakeClient.new, 'g/p', nil)
-    Object.send(:remove_const, :ActivityEvent)
-    begin
+    # Force ActivityEvent.create to raise — `ActivityLogger.persist_event!`
+    # rescues StandardError, so the GitLab note publish still happens.
+    ActivityEvent.stub(:create, ->(*_) { raise StandardError, 'simulated DB write failure' }) do
       ActivityLogger.post(ctx, issue, :started)
-    ensure
-      Database.build_activity_event_model!
     end
 
     assert_equal 1, ctx.client.created.size

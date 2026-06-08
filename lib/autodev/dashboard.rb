@@ -45,8 +45,6 @@ module Dashboard
 
   def show(config)
     pastel = Pastel.new
-    Database.connect(config['database_url'])
-    Database.build_model!
     issues = fetch_issues(config)
 
     if issues.empty?
@@ -57,39 +55,39 @@ module Dashboard
   end
 
   def render_dashboard(issues, config, pastel)
-    worker_map = WorkerPool.read_assignments.invert
-    rows = issues.map { |row| TableRenderer.build_row(row, worker_map) }
+    # WorkerPool used to publish ~/.autodev/workers.json with the in-process
+    # thread → issue assignment; with the step-6 supervisor + Solid Queue
+    # that state moved to solid_queue_claimed_executions. The CLI dashboard
+    # no longer surfaces it — an empty worker_map preserves the column
+    # layout while we figure out the cleanest cross-process replacement.
+    rows = issues.map { |row| TableRenderer.build_row(row, {}) }
     TableRenderer.print_table(rows, pastel)
     TableRenderer.print_summary(rows, config, pastel)
   end
 
   def show_errors(config)
     pastel = Pastel.new
-    Database.connect(config['database_url'])
-    Database.build_model!
     ErrorDisplay.print_all(config, pastel)
   end
 
   def reset(config, pastel)
-    Database.connect(config['database_url'])
-    Database.build_model!
-    dataset = Database.db[:issues].where(status: 'error')
-    dataset = dataset.where(issue_iid: config['reset_iid']) if config['reset_iid']
+    scope = ::Issue.where(status: 'error')
+    scope = scope.where(issue_iid: config['reset_iid']) if config['reset_iid']
 
-    if dataset.none?
+    if scope.none?
       puts reset_empty_message(config)
       return
     end
 
-    perform_reset(dataset, config, pastel)
+    perform_reset(scope, config, pastel)
   end
 
   # -- Private helpers ---------------------------------------------------------
 
   def fetch_issues(config)
-    dataset = Database.db[:issues].order(Sequel.desc(:id))
-    dataset = dataset.exclude(status: 'done') unless config['status_all']
-    dataset.all
+    scope = ::Issue.order(id: :desc)
+    scope = scope.where.not(status: 'done') unless config['status_all']
+    scope.to_a
   end
 
   def empty_message(config)
@@ -108,9 +106,10 @@ module Dashboard
     end
   end
 
-  def perform_reset(dataset, config, pastel)
-    count = dataset.count
-    dataset.update(status: 'pending', retry_count: 0, error_message: nil, next_retry_at: nil, started_at: nil)
+  def perform_reset(scope, config, pastel)
+    count = scope.count
+    scope.update_all(status: 'pending', retry_count: 0, error_message: nil,
+                     next_retry_at: nil, started_at: nil)
     label = config['reset_iid'] ? "Issue ##{config['reset_iid']}" : "#{count} issue(s)"
     puts pastel.green("✓ #{label} remise(s) en pending.")
   end

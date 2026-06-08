@@ -7,13 +7,15 @@ end
 # Runtime gem dependencies. Previously these were loaded by bin/autodev's
 # `bundler/inline` block (auto-require); since phase B of the railsification
 # both bin/autodev and the Rails process load these modules, so the require
-# block lives here. Idempotent — re-requiring a gem is a no-op.
+# block lives here. Idempotent — re-requiring a gem is a no-op. `sequel` is
+# intentionally absent — the Sequel-side `Issue`/`ActivityEvent` were
+# retired in step 2 second half. `sinatra/base` still lives in
+# `lib/autodev/web.rb` because the Phlex views under web/views/ co-locate
+# with what was once a Sinatra app (deletion scheduled for step 8).
 require 'aasm'
 require 'gitlab'
 require 'pastel'
 require 'phlex'
-require 'sequel'
-require 'sinatra/base'
 require 'sqlite3'
 
 require_relative 'autodev/errors'
@@ -29,9 +31,6 @@ require_relative 'autodev/language_detector'
 require_relative 'autodev/locales'
 require_relative 'autodev/shell_helpers'
 require_relative 'autodev/gitlab_helpers'
-require_relative 'autodev/issue_behavior'
-require_relative 'autodev/activity_event'
-require_relative 'autodev/database'
 require_relative 'autodev/label_manager'
 require_relative 'autodev/activity_logger'
 require_relative 'autodev/issue_notifier'
@@ -46,9 +45,7 @@ require_relative 'autodev/discussion_snapshot'
 require_relative 'autodev/issue_processor'
 require_relative 'autodev/mr_fixer'
 require_relative 'autodev/pipeline_monitor'
-require_relative 'autodev/worker_pool'
 require_relative 'autodev/usage_checker'
 require_relative 'autodev/poll_router'
 require_relative 'autodev/dashboard'
 require_relative 'autodev/web'
-require_relative 'autodev/poller'

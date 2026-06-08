@@ -23,9 +23,8 @@ class ErrorsController < ApplicationController
   # Mirrors the Sinatra query: status in (error, needs_clarification)
   # OR post_completion_error IS NOT NULL, ordered by id desc.
   def errored_issues
-    issues_dataset.where(status: %w[error needs_clarification])
-                  .or(Sequel.~(post_completion_error: nil))
-                  .order(Sequel.desc(:id))
-                  .all
+    Issue.where("status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL")
+         .order(id: :desc)
+         .to_a
   end
 end

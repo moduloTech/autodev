@@ -39,8 +39,8 @@ class ProjectsController < ApplicationController
   end
 
   def project_issues_for(project_path)
-    issues_dataset.where(project_path: project_path)
-                  .order(Sequel.desc(:id)).limit(100).all
+    Issue.where(project_path: project_path)
+         .order(id: :desc).limit(100).to_a
   end
 
   def render_projects_view

@@ -81,10 +81,10 @@ class DiscussionSnapshotTest < Minitest::Test
     client = StubClient.new([resolvable_discussion('a', resolved: false)])
 
     capture(client, :post_mr_review)
-    events = Database.db[:activity_events].where(issue_id: @issue.id, kind: 'discussions_snapshot').all
+    events = ActivityEvent.where(issue_id: @issue.id, kind: 'discussions_snapshot').to_a
 
     assert_equal 1, events.size
-    assert_equal 'post_mr_review', JSON.parse(events.first[:payload_json])['context']
+    assert_equal 'post_mr_review', JSON.parse(events.first.payload_json)['context']
   end
 
   def test_api_failure_returns_empty_snapshot_not_nil

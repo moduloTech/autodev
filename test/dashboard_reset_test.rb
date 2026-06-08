@@ -42,9 +42,9 @@ class DashboardResetTest < Minitest::Test
                  next_retry_at: Time.now.to_s)
     capture_io { Dashboard.reset({ 'database_url' => 'sqlite://:memory:' }, @pastel) }
 
-    assert_equal 'pending', Issue[issue_iid: 800].status
-    assert_equal 0, Issue[issue_iid: 800].retry_count
-    assert_nil Issue[issue_iid: 800].error_message
+    assert_equal 'pending', Issue.find_by(issue_iid: 800).status
+    assert_equal 0, Issue.find_by(issue_iid: 800).retry_count
+    assert_nil Issue.find_by(issue_iid: 800).error_message
   end
 
   def test_resets_specific_iid
@@ -54,16 +54,22 @@ class DashboardResetTest < Minitest::Test
     config = { 'database_url' => 'sqlite://:memory:', 'reset_iid' => 810 }
     capture_io { Dashboard.reset(config, @pastel) }
 
-    assert_equal 'pending', Issue[issue_iid: 810].status
-    assert_equal 'error', Issue[issue_iid: 811].status
+    assert_equal 'pending', Issue.find_by(issue_iid: 810).status
+    assert_equal 'error', Issue.find_by(issue_iid: 811).status
   end
 
   def test_does_not_reset_blocked
-    create_issue(issue_iid: 820, status: 'blocked', error_message: 'infra')
+    # `blocked` is a legacy status value not in AASM's state list — AR
+    # would reject it on `.create`, so we INSERT directly to mimic an
+    # old prod row pre-status-migration.
+    ActiveRecord::Base.connection.execute(
+      'INSERT INTO issues (project_path, issue_iid, status, error_message, created_at) ' \
+      "VALUES ('g/p', 820, 'blocked', 'infra', datetime('now'))"
+    )
 
     out = capture_io { Dashboard.reset({ 'database_url' => 'sqlite://:memory:' }, @pastel) }.first
 
     assert_match(/Aucune issue en erreur/, out)
-    assert_equal 'blocked', Issue[issue_iid: 820].status
+    assert_equal 'blocked', Issue.find_by(issue_iid: 820).status
   end
 end

@@ -9,10 +9,10 @@ class MrFixer
       wait = error.wait_seconds
       log_error "MR !#{issue.mr_iid}: rate limit hit, parking for #{wait}s"
       safe_mark_failed!(issue)
-      Issue.where(id: issue.id).update(
+      Issue.where(id: issue.id).update_all(
         error_message: error.message,
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
-        next_retry_at: Sequel.lit("datetime('now', '+#{wait} seconds')")
+        next_retry_at: wait.to_i.seconds.from_now
       )
       log_activity(issue, :rate_limit, wait: wait)
     end

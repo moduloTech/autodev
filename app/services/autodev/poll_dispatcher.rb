@@ -145,7 +145,7 @@ module Autodev
                      issue_title: gl_issue.title, status: 'pending',
                      issue_author_id: gl_issue.author&.id, locale: locale.to_s)
       ::Issue.where(project_path: @path, issue_iid: gl_issue.iid).first
-    rescue Sequel::UniqueConstraintViolation
+    rescue ActiveRecord::RecordNotUnique
       ::Issue.where(project_path: @path, issue_iid: gl_issue.iid).first
     end
 
@@ -153,7 +153,7 @@ module Autodev
 
     def dispatch_pipelines
       ::Issue.where(project_path: @path, status: 'checking_pipeline')
-             .exclude(mr_iid: nil).all.each do |issue|
+             .where.not(mr_iid: nil).find_each do |issue|
         IssueProcessJob.perform_later(@path, issue.issue_iid, :check_pipeline)
         @logger.info("Enqueued pipeline check for issue ##{issue.issue_iid} (MR !#{issue.mr_iid})",
                      project: @path)
@@ -162,7 +162,7 @@ module Autodev
 
     def dispatch_discussions
       ::Issue.where(project_path: @path, status: 'fixing_discussions')
-             .exclude(mr_iid: nil).all.each do |issue|
+             .where.not(mr_iid: nil).find_each do |issue|
         IssueProcessJob.perform_later(@path, issue.issue_iid, :fix_discussions)
         @logger.info("Enqueued discussion fix for issue ##{issue.issue_iid} (round #{issue.fix_round + 1})",
                      project: @path)
@@ -172,7 +172,7 @@ module Autodev
     # === poll_unassignment equivalent (inline — DB-only, no queue overhead) ===
 
     def dispatch_unassignment
-      ::Issue.where(project_path: @path, status: ACTIVE_STATUSES).all.each do |issue|
+      ::Issue.where(project_path: @path, status: ACTIVE_STATUSES).find_each do |issue|
         check_still_assigned(issue)
       end
     end
@@ -182,7 +182,7 @@ module Autodev
 
       @logger.info("Issue ##{issue.issue_iid}: no longer assigned, transitioning to done",
                    project: @path)
-      issue.update(status: 'done', finished_at: Sequel.lit("datetime('now')"))
+      issue.update(status: 'done', finished_at: Time.current)
       ::ActivityLogger.post(::ActivityLogger::Ctx.new(@client, @path, @logger),
                             issue, :unassigned_stop)
     rescue ::Gitlab::Error::ResponseError => e
@@ -194,7 +194,7 @@ module Autodev
       pc_cmd = @project_config['post_completion']
       return unless pc_cmd.is_a?(Array) && pc_cmd.any?
 
-      ::Issue.where(project_path: @path, status: 'done').exclude(mr_iid: nil).all.each do |issue|
+      ::Issue.where(project_path: @path, status: 'done').where.not(mr_iid: nil).find_each do |issue|
         check_post_completion_needed(issue)
       end
     end
@@ -233,9 +233,9 @@ module Autodev
       max_retries = (@project_config['max_retries'] || @config['max_retries']).to_i
       ::Issue.where(project_path: @path)
              .where(status: %w[error pending])
-             .where { retry_count < max_retries }
-             .where { Sequel.lit("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')") }
-             .all
+             .where('retry_count < ?', max_retries)
+             .where("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')")
+             .to_a
     end
 
     def enqueue_retry(issue)

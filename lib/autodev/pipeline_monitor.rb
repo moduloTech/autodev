@@ -101,7 +101,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     issue.pipeline_green!
     apply_label_done(issue.issue_iid)
     reassign_to_author(issue)
-    Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"))
+    Issue.where(id: issue.id).update_all(finished_at: Time.current)
     notify_localized(issue.issue_iid, :review_limit_reached, mr_url: issue.mr_url)
     log_activity(issue, :review_limit_reached)
     log "Issue ##{issue.issue_iid}: max review rounds reached → done"
@@ -118,7 +118,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     iid = issue.issue_iid
     apply_label_done(iid)
     reassign_to_author(issue)
-    Issue.where(id: issue.id).update(finished_at: Sequel.lit("datetime('now')"))
+    Issue.where(id: issue.id).update_all(finished_at: Time.current)
     notify_localized(iid, :done_nominal, label_todo: @project_config['labels_todo']&.first)
     log_activity(issue, discussions.empty? ? :pipeline_green_done : :done, count: discussions.size)
     log "Issue ##{iid}: pipeline green, #{discussions.size} discussion(s) → done"

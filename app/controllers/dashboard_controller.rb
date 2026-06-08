@@ -26,13 +26,10 @@ class DashboardController < ApplicationController
 
   # Same query as ErrorsController#index — status in
   # (error, needs_clarification) OR post_completion_error IS NOT NULL,
-  # id desc. Inlined here rather than shared via a model scope because
-  # the Sequel `Issue` model gets rewritten in phase C; phase B keeps
-  # the porting layer thin.
+  # id desc.
   def errored_issues
-    issues_dataset.where(status: %w[error needs_clarification])
-                  .or(Sequel.~(post_completion_error: nil))
-                  .order(Sequel.desc(:id))
-                  .all
+    Issue.where("status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL")
+         .order(id: :desc)
+         .to_a
   end
 end

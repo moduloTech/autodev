@@ -21,15 +21,15 @@ module Dashboard
     # -- Private ---------------------------------------------------------------
 
     def fetch_error_issues(config)
-      dataset = Database.db[:issues].where(status: 'error')
-      dataset = dataset.where(issue_iid: config['errors_iid']) if config['errors_iid']
-      dataset.order(Sequel.desc(:id)).all
+      scope = ::Issue.where(status: 'error')
+      scope = scope.where(issue_iid: config['errors_iid']) if config['errors_iid']
+      scope.order(id: :desc).to_a
     end
 
     def fetch_post_completion_issues(config)
-      dataset = Database.db[:issues].exclude(post_completion_error: nil)
-      dataset = dataset.where(issue_iid: config['errors_iid']) if config['errors_iid']
-      dataset.order(Sequel.desc(:id)).all
+      scope = ::Issue.where.not(post_completion_error: nil)
+      scope = scope.where(issue_iid: config['errors_iid']) if config['errors_iid']
+      scope.order(id: :desc).to_a
     end
 
     def empty_message(config)

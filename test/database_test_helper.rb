@@ -21,20 +21,24 @@ module DatabaseTestHelper
     attr_accessor :db_initialized, :iid_counter
   end
 
-  def setup_database
-    unless DatabaseTestHelper.db_initialized
-      Database.connect('sqlite://:memory:')
-      Database.build_model!
-      DatabaseTestHelper.db_initialized = true
-    end
-    Database.db[:issues].delete
-    Database.db[:activity_events].delete if Database.db.table_exists?(:activity_events)
+  def setup_database # rubocop:disable Metrics/AbcSize
+    # In-memory SQLite is per-connection, so any reconnect drops the
+    # schema the test_helper.rb migration created. Re-run the migration
+    # idempotently (every `create_table` is `if_not_exists: true`) and
+    # wipe the two tables each test writes to.
+    primary = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env)
+                                .find { |c| c.name == 'primary' }
+    ActiveRecord::Base.establish_connection(primary)
+    paths = Array(primary.migrations_paths || 'db/migrate').map { |p| Rails.root.join(p).to_s }
+    ActiveRecord::MigrationContext.new(paths).migrate
+    ActiveRecord::Base.connection.execute('DELETE FROM activity_events')
+    ActiveRecord::Base.connection.execute('DELETE FROM issues')
   end
 
   def create_issue(overrides = {})
     DatabaseTestHelper.iid_counter += 1
     defaults = { project_path: 'group/project', issue_iid: DatabaseTestHelper.iid_counter, status: 'pending' }
-    Issue.create(defaults.merge(overrides))
+    Issue.create!(defaults.merge(overrides))
   end
 
   # Advance an issue through the happy path up to a target state.

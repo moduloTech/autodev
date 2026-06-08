@@ -17,20 +17,23 @@ module Web
       Web::Server.app_config || {}
     end
 
+    # AR replacements for the Sequel datasets the legacy code returned.
+    # Both expressions are `ActiveRecord::Relation`s — same enumeration
+    # contract Phlex views consume.
     def issues_dataset
-      Database.db[:issues]
+      Issue.all
     end
 
     def activity_events_dataset
-      Database.db[:activity_events]
+      ActivityEvent.all
     end
 
     def status_counts
-      issues_dataset.group_and_count(:status).to_hash(:status, :count)
+      Issue.group(:status).count
     end
 
     def active_issues
-      issues_dataset.where(status: Dashboard::ACTIVE_STATES).order(Sequel.desc(:id)).all
+      Issue.where(status: Dashboard::ACTIVE_STATES).order(id: :desc).to_a
     end
 
     def issues_grouped_by_status(rows)
@@ -42,21 +45,19 @@ module Web
     # project still shows up before its first issue lands.
     def all_known_projects
       from_config = Array(app_config['projects']).map { |p| p['path'] }.compact
-      from_db = issues_dataset.select(:project_path).distinct.map { |r| r[:project_path] }
+      from_db = Issue.distinct.pluck(:project_path)
       (from_config + from_db).uniq.sort
     end
 
     # All projects that have at least one tracked issue, ordered by total
     # count desc. Returns [{path:, total:, active:, done:, error:}, ...].
     def project_breakdown
-      rows = issues_dataset.select_group(:project_path).select_append { count.function.* }.all
-      paths = rows.map { |r| r[:project_path] }.uniq.sort
+      paths = Issue.distinct.pluck(:project_path).compact.sort
       paths.map { |path| project_stats(path) }
     end
 
     def project_stats(path)
-      ds = issues_dataset.where(project_path: path)
-      counts = ds.group_and_count(:status).to_hash(:status, :count)
+      counts = Issue.where(project_path: path).group(:status).count
       total = counts.values.sum
       {
         path: path, total: total,
@@ -79,11 +80,11 @@ module Web
     end
 
     # Counts used by the dashboard KPI cards.
-    def dashboard_kpis # rubocop:disable Metrics/AbcSize
-      counts = issues_dataset.group_and_count(:status).to_hash(:status, :count)
+    def dashboard_kpis
+      counts = Issue.group(:status).count
       active = Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 }
-      delivered_week = issues_dataset.where(status: 'done')
-                                     .where { created_at >= (Date.today - 7).to_s }.count
+      delivered_week = Issue.where(status: 'done')
+                            .where('created_at >= ?', (Date.today - 7).to_s).count
       { active: active, pending: counts['pending'] || 0,
         errors: counts['error'] || 0,
         awaiting: counts['needs_clarification'] || 0,
@@ -92,13 +93,11 @@ module Web
 
     # Activity counts per day for the past 7 days, oldest first.
     # Used by the dashboard sparkline.
-    def weekly_activity_counts # rubocop:disable Metrics/AbcSize
+    def weekly_activity_counts
       since = (Date.today - 6).to_s
-      rows = activity_events_dataset
-             .where { created_at >= since }
-             .select_group(Sequel.function(:date, :created_at).as(:day))
-             .select_append { count.function.* }
-             .to_hash(:day, :count)
+      rows = ActivityEvent.where('created_at >= ?', since)
+                          .group('date(created_at)')
+                          .count
       (0..6).map { |offset| rows[(Date.today - 6 + offset).to_s] || 0 }
     end
 
@@ -132,20 +131,20 @@ module Web
     # {active:, errors:, done_month:, total:}. Distinct from
     # `project_stats` (above), which feeds the dashboard "Par projet"
     # table with a slightly different shape (path/total/active/done/error).
-    def project_overview_stats(project_path) # rubocop:disable Metrics/AbcSize
-      ds = issues_dataset.where(project_path: project_path)
-      counts = ds.group_and_count(:status).to_hash(:status, :count)
+    def project_overview_stats(project_path)
+      scope = Issue.where(project_path: project_path)
+      counts = scope.group(:status).count
       since = (Date.today - 30).to_s
       {
         active: Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 },
         errors: (counts['error'] || 0) + (counts['needs_clarification'] || 0),
-        done_month: ds.where(status: 'done').where { created_at >= since }.count,
+        done_month: scope.where(status: 'done').where('created_at >= ?', since).count,
         total: counts.values.sum
       }
     end
 
     def find_issue(id)
-      Issue[Integer(id)]
+      Issue.find_by(id: Integer(id))
     end
 
     def h(text)

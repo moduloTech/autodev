@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require_relative 'test_helper'
-require 'autodev/worker_pool'
 require 'autodev/dashboard'
 require 'stringio'
 
@@ -20,17 +19,12 @@ stripped = autodev_src
            .sub(/^main\s*$/, '')
 eval(stripped, TOPLEVEL_BINDING, 'bin/autodev', 1) # rubocop:disable Security/Eval
 
-# Mixin that stubs Database.connect/build_model! so in-memory DB survives method calls.
+# Step 2 second half retired the Sequel-side Database module — the parent
+# bin/autodev process now boots Rails and uses AR `Issue` directly. The
+# stub that used to neuter `Database.connect` / `Database.build_model!` is
+# kept as an empty mixin for backwards compatibility with the
+# `include StubDatabaseConnect` lines still scattered through legacy
+# dashboard tests; it's safe to drop those includes once tests are
+# audited.
 module StubDatabaseConnect
-  def setup
-    super
-    Database.define_singleton_method(:connect) { |_url| true }
-    Database.define_singleton_method(:build_model!) { nil }
-  end
-
-  def teardown
-    Database.singleton_class.remove_method(:connect)
-    Database.singleton_class.remove_method(:build_model!)
-    super
-  end
 end

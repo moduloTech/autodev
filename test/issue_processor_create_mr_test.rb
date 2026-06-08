@@ -101,13 +101,18 @@ class IssueProcessorCreateMrTest < Minitest::Test
   end
 
   def use_failing_list_client
-    Object.const_set(:Gitlab, Module.new) unless defined?(Gitlab)
-    Gitlab.const_set(:Error, Module.new) unless defined?(Gitlab::Error)
-    Gitlab::Error.const_set(:ResponseError, Class.new(StandardError)) unless defined?(Gitlab::Error::ResponseError)
+    # Skip the gitlab gem's real ResponseError#initialize (it expects a
+    # full HTTParty response object) — subclass it locally so we get a
+    # raisable that matches the `rescue Gitlab::Error::ResponseError`
+    # clause in mr_manager.rb.
+    fake_error = Class.new(Gitlab::Error::ResponseError) do
+      def initialize(msg) = (@msg = msg) # rubocop:disable Lint/MissingSuper
+      def message = @msg
+    end
     mr = Struct.new(:iid, :web_url).new(3, 'url')
     client = Object.new
     client.instance_variable_set(:@mr, mr)
-    client.define_singleton_method(:merge_requests) { |*_a, **_k| raise Gitlab::Error::ResponseError, 'x' }
+    client.define_singleton_method(:merge_requests) { |*_a, **_k| raise fake_error, 'x' }
     client.define_singleton_method(:create_merge_request) { |*_a, **_k| @mr }
     @processor.instance_variable_set(:@client, client)
   end

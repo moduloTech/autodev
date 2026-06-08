@@ -6,7 +6,6 @@ require 'autodev/danger_claude_runner'
 require 'autodev/issue_notifier'
 require 'autodev/label_manager'
 require 'autodev/activity_logger'
-require 'autodev/worker_pool'
 require 'autodev/issue_processor'
 require 'autodev/poll_router'
 
@@ -98,7 +97,7 @@ class PollRouterReenterTest < Minitest::Test
     client = StubClient.new(mr_state: 'opened')
 
     build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
-    issue.refresh
+    issue.reload
 
     assert_equal 'checking_pipeline', issue.status
   end
@@ -108,7 +107,7 @@ class PollRouterReenterTest < Minitest::Test
     client = StubClient.new(mr_state: 'opened')
 
     build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
-    issue.refresh
+    issue.reload
 
     assert_equal 1, issue.review_count
   end
@@ -120,7 +119,7 @@ class PollRouterReenterTest < Minitest::Test
     verdict = build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
 
     assert_equal :next, verdict
-    issue.refresh
+    issue.reload
 
     assert_equal 'pending', issue.status
   end
@@ -132,7 +131,7 @@ class PollRouterReenterTest < Minitest::Test
     verdict = build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
 
     assert_equal :next, verdict
-    issue.refresh
+    issue.reload
 
     assert_equal 'pending', issue.status
     assert_empty client.merge_request_calls
@@ -145,7 +144,7 @@ class PollRouterReenterTest < Minitest::Test
     verdict = build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
 
     assert_equal :next, verdict
-    issue.refresh
+    issue.reload
 
     # Stays in done — no AASM transition, no reimplementation cycle.
     assert_equal 'done', issue.status

@@ -30,7 +30,7 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     stub_mr_review(success: false)
 
     @monitor.send(:launch_review, @issue)
-    @issue.refresh
+    @issue.reload
 
     assert_equal 1, @issue.review_failure_count
   end
@@ -39,7 +39,7 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     stub_mr_review(success: false)
 
     @monitor.send(:launch_review, @issue)
-    @issue.refresh
+    @issue.reload
 
     assert_equal 'checking_pipeline', @issue.status
   end
@@ -49,7 +49,7 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     stub_mr_review(success: false)
 
     @monitor.send(:launch_review, @issue)
-    @issue.refresh
+    @issue.reload
 
     assert_equal 'done', @issue.status
   end
@@ -59,7 +59,7 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     stub_mr_review(success: true)
 
     @monitor.send(:launch_review, @issue)
-    @issue.refresh
+    @issue.reload
 
     assert_equal 0, @issue.review_failure_count
   end
@@ -69,7 +69,7 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     stub_mr_review(success: true)
 
     @monitor.send(:launch_review, @issue)
-    @issue.refresh
+    @issue.reload
 
     assert_equal 1, @issue.review_count
   end

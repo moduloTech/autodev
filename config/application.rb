@@ -20,6 +20,11 @@ require 'action_view/railtie'
 # explicit requires above; AR models pull in `sqlite3` directly.
 require 'sqlite3'
 
+# Step 2 second half of the railsification — AASM moves from Sequel's
+# `IssueBehavior` to the new ActiveRecord `Issue` model under app/models/.
+# The gem registers no Rails::Engine, so a plain require here is enough.
+require 'aasm'
+
 # Step 3 of the railsification — Devise + omniauth. These must be required
 # BEFORE the Application class is defined so Devise's engine and OmniAuth's
 # strategies register with Rails::Engine.subclasses and Rails picks up their
