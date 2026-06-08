@@ -9,39 +9,46 @@
 #             instead of erroring on contention.
 #   queue   — Solid Queue's tables (10 of them, all CRUD-heavy) live in a
 #             dedicated file so their churn does not share the WAL with the
-#             business writes. Migrations live under db/queue_migrate/.
+#             business writes. Pool sized at 6 to clear Solid Queue's
+#             threads check (its dispatcher + N worker threads each grab
+#             a connection from this pool concurrently — default arithmetic
+#             reaches 5, we leave a slot of headroom). Migrations live
+#             under db/queue_migrate/.
 #
 # Override paths via the AUTODEV_DB / AUTODEV_QUEUE_DB env vars (the primary
 # env var stays unchanged from earlier railsification phases).
 #
-default: &default
+primary_default: &primary_default
   adapter: sqlite3
   pool: 2
   timeout: 30000
 
+queue_default: &queue_default
+  adapter: sqlite3
+  pool: 6
+  timeout: 30000
+  migrations_paths: db/queue_migrate
+
 development:
   primary:
-    <<: *default
+    <<: *primary_default
     database: "<%= ENV.fetch('AUTODEV_DB') { File.expand_path('~/.autodev/autodev.db') } %>"
   queue:
-    <<: *default
+    <<: *queue_default
     database: "<%= ENV.fetch('AUTODEV_QUEUE_DB') { File.expand_path('~/.autodev/autodev_queue.db') } %>"
-    migrations_paths: db/queue_migrate
 
 test:
   primary:
-    <<: *default
+    <<: *primary_default
     database: "<%= ENV.fetch('AUTODEV_DB') { ':memory:' } %>"
   queue:
-    <<: *default
+    <<: *queue_default
     database: "<%= ENV.fetch('AUTODEV_QUEUE_DB') { ':memory:' } %>"
-    migrations_paths: db/queue_migrate
 
 production:
   primary:
-    <<: *default
+    <<: *primary_default
     database: "<%= ENV.fetch('AUTODEV_DB') { File.expand_path('~/.autodev/autodev.db') } %>"
   queue:
-    <<: *default
+    <<: *queue_default
     database: "<%= ENV.fetch('AUTODEV_QUEUE_DB') { File.expand_path('~/.autodev/autodev_queue.db') } %>"
-    migrations_paths: db/queue_migrate

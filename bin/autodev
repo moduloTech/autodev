@@ -65,6 +65,7 @@ I18n.available_locales = [:en]
 I18n.default_locale = :en
 
 require_relative '../lib/autodev'
+require_relative '../lib/autodev/supervisor'
 
 # == Argument parsing ==========================================================
 
@@ -244,13 +245,69 @@ def cleanup(logger)
   Database.disconnect
 end
 
-def main
+# == Run modes =================================================================
+
+# Default mode (no --once): the supervisor boots `bin/rails server` and
+# `bin/jobs start` as child processes. The poll loop now lives inside Solid
+# Queue (`AutodevPollJob` recurring per config/recurring.yml); WorkerPool
+# is replaced by Solid Queue's worker pool tuned via config/queue.yml.
+# `--once` keeps the legacy in-process threaded poller for the moment —
+# converting it to `AutodevPollJob.perform_now` is a separate follow-up.
+def run_supervisor(config, logger)
+  Database.disconnect # let the child processes own their own DB connections
+  Autodev::Supervisor.new(
+    children: build_supervisor_children(config),
+    logger: logger
+  ).run
+end
+
+def build_supervisor_children(config) # rubocop:disable Metrics/MethodLength
+  env = supervisor_env(config)
+  repo_root = File.expand_path('..', __dir__)
+  # bin/rails and bin/jobs are `#!/usr/bin/env ruby` scripts; both require
+  # bundler/setup via config/boot.rb so the gemset resolves without an
+  # explicit `bundle exec` wrapper (which would also force `bundle` onto
+  # PATH — a constraint we don't want for Brew-distributed installs).
+  [
+    Autodev::Supervisor::Child.new(
+      name: 'rails-server',
+      command: [File.join(repo_root, 'bin/rails'),
+                'server', '-p', config['web']['port'].to_s, '-b', config['web']['bind']],
+      env: env
+    ),
+    Autodev::Supervisor::Child.new(
+      name: 'solid-queue',
+      command: [File.join(repo_root, 'bin/jobs'), 'start'],
+      env: env
+    )
+  ]
+end
+
+# Environment exported to both children. We forward only what's needed for
+# Solid Queue + Rails to find the right databases and pool sizes; the rest
+# of config.yml is re-loaded by `Config.load` on each child boot via the
+# legacy_sinatra initializer.
+def supervisor_env(config)
+  {
+    'AUTODEV_MAX_WORKERS' => config['max_workers'].to_s,
+    'AUTODEV_POLL_INTERVAL' => config['poll_interval'].to_s,
+    'AUTODEV_DB' => ENV.fetch('AUTODEV_DB', nil),
+    'AUTODEV_QUEUE_DB' => ENV.fetch('AUTODEV_QUEUE_DB', nil),
+    'RAILS_ENV' => ENV.fetch('RAILS_ENV', 'production')
+  }.compact
+end
+
+def main # rubocop:disable Metrics/MethodLength
   pastel = Pastel.new
   logger = AppLogger.new(pastel: pastel)
   config = parse_args(ARGV)
   handle_early_commands(config, pastel)
   bootstrap(config, logger, pastel)
-  Poller.new(config: config, logger: logger, pastel: pastel).run
+  if config['once']
+    Poller.new(config: config, logger: logger, pastel: pastel).run
+  else
+    run_supervisor(config, logger)
+  end
 rescue StandardError, Interrupt => e
   handle_fatal(e, logger)
 ensure
