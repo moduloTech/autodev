@@ -1,26 +1,47 @@
-# Rails AR configuration — phase A of the railsification.
+# Rails AR configuration — multi-database since phase C step 5.
 #
-# Points to the SAME SQLite file that bin/autodev (Sequel) writes to. Both
-# processes share the same database; ActiveRecord opens its own pool, so we
-# cap it tight (2) to stay aligned with Sequel's `max_connections: 1` contract
-# (cf. lib/autodev/database.rb:86). `timeout` mirrors Sequel's
-# `busy_timeout=30000ms` so AR retries instead of erroring on contention.
+# Two SQLite files:
+#   primary — the same ~/.autodev/autodev.db that bin/autodev (Sequel) writes
+#             to. Both processes share it; ActiveRecord opens its own pool,
+#             so we cap it tight (2) to stay aligned with Sequel's
+#             `max_connections: 1` contract (cf. lib/autodev/database.rb:86).
+#             `timeout` mirrors Sequel's `busy_timeout=30000ms` so AR retries
+#             instead of erroring on contention.
+#   queue   — Solid Queue's tables (10 of them, all CRUD-heavy) live in a
+#             dedicated file so their churn does not share the WAL with the
+#             business writes. Migrations live under db/queue_migrate/.
 #
-# Override path via AUTODEV_DB env var, e.g.:
-#   AUTODEV_DB=/tmp/test.db bin/rails console
+# Override paths via the AUTODEV_DB / AUTODEV_QUEUE_DB env vars (the primary
+# env var stays unchanged from earlier railsification phases).
 #
 default: &default
   adapter: sqlite3
   pool: 2
   timeout: 30000
-  database: "<%= ENV.fetch('AUTODEV_DB') { File.expand_path('~/.autodev/autodev.db') } %>"
 
 development:
-  <<: *default
+  primary:
+    <<: *default
+    database: "<%= ENV.fetch('AUTODEV_DB') { File.expand_path('~/.autodev/autodev.db') } %>"
+  queue:
+    <<: *default
+    database: "<%= ENV.fetch('AUTODEV_QUEUE_DB') { File.expand_path('~/.autodev/autodev_queue.db') } %>"
+    migrations_paths: db/queue_migrate
 
 test:
-  <<: *default
-  database: "<%= ENV.fetch('AUTODEV_DB') { ':memory:' } %>"
+  primary:
+    <<: *default
+    database: "<%= ENV.fetch('AUTODEV_DB') { ':memory:' } %>"
+  queue:
+    <<: *default
+    database: "<%= ENV.fetch('AUTODEV_QUEUE_DB') { ':memory:' } %>"
+    migrations_paths: db/queue_migrate
 
 production:
-  <<: *default
+  primary:
+    <<: *default
+    database: "<%= ENV.fetch('AUTODEV_DB') { File.expand_path('~/.autodev/autodev.db') } %>"
+  queue:
+    <<: *default
+    database: "<%= ENV.fetch('AUTODEV_QUEUE_DB') { File.expand_path('~/.autodev/autodev_queue.db') } %>"
+    migrations_paths: db/queue_migrate

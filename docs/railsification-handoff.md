@@ -1,6 +1,6 @@
 # Railsification — Handoff
 
-**Last updated:** 2026-06-03 (after step 7 — locales migrated to YAML; phase B fully closed)
+**Last updated:** 2026-06-08 (after step 5 — Solid Queue infrastructure landed; phase C opened)
 **Canonical plan:** [`autospec.md`](autospec.md) — section D (4 coexistence phases A/B/C/D) and section C (12-step attack order).
 
 This document is the *resume-anywhere* state of the railsification. It assumes you have **no memory of previous sessions** and gives you:
@@ -35,20 +35,29 @@ When this doc says **"phase X"** alone, it always means a coexistence phase (§D
 
 ## 1. State at this commit
 
-After the 2026-06-03 rebase onto master, the granular per-port commits were collapsed into four phase-shaped commits (one per attack-order step) on top of master's v0.15.1:
+After the 2026-06-08 rebase onto v0.15.2 (cherry-picked one commit at a time
+to work around a recurring `git rebase` glitch where the apply phase
+spuriously raised "your local changes would be overwritten" against a clean
+tree), the history reads:
 
 ```
-8a60ebc feat: migrate Locales to config/locales/*.yml via I18n (step 7)
-1cc1430 feat: port /assets/* to Rails and drop Sinatra mount (close phase B)
-e1fce2a feat: YamlProjectImporter + rake task (railsification step 4)
-8af273f feat: railsification step 3 — Devise + omniauth Entra ID for SSO (squashed)
-ecf4ba4 feat: railsification step 2 — core ActiveRecord models for AutoSpec (squashed)
-f16989e feat: railsification phase B — Sinatra→Rails route porting (squashed)
-f3bb084 feat: railsification phase A — Rails 8.1.3 skeleton (squashed)
-f43ccb8 Release v0.15.1   ← master
+<HEAD>  feat: railsification step 5 — Solid Queue poller infrastructure
+ba6a564 docs(handoff): fill in step-7 commit hash in §1
+1427fce feat: migrate Locales to config/locales/*.yml via I18n (step 7)
+6b0776c docs(handoff): fill in phase-B-closure commit hash in §1
+9fd4c3a feat: port /assets/* to Rails and drop Sinatra mount (close phase B)
+ce4563a docs(handoff): fill in step-4 commit hash in §1
+4022370 feat: YamlProjectImporter + rake task (railsification step 4)
+331d8d1 feat: railsification step 3 — Devise + omniauth Entra ID for SSO (squashed)
+6da41f4 feat: railsification step 2 — core ActiveRecord models for AutoSpec (squashed)
+7de7ab2 feat: railsification phase B — Sinatra→Rails route porting (squashed)
+5716053 feat: railsification phase A — Rails 8.1.3 skeleton (squashed)
+3d91960 Release v0.15.2   ← master
 ```
 
-The original granular history (21 commits, one per route ported plus the step-2/step-3 work) is preserved in git reflog and can be cherry-picked back if useful for archaeology, but the squashed commits are the canonical history.
+A safety branch `autospec-pre-rebase-2026-06-08` preserves the pre-rebase
+state of `autospec` (10 commits posed on the older v0.15.1 base) — drop it
+once the next release lands.
 
 Mapping to [`autospec.md`](autospec.md) **§D — coexistence phases**:
 
@@ -56,7 +65,7 @@ Mapping to [`autospec.md`](autospec.md) **§D — coexistence phases**:
 |---|---|---|
 | **A — Rails s'ajoute sans rien casser** | ✅ done | `f3bb084` (squash of original `7148a7c`): Rails 8.1.3 skeleton, AR mirror models (later removed in phase B), validation via `bin/rails runner`. Closes **attack-order step 1** (Squelette Rails). |
 | **B — Rails sert des routes en parallèle de Sinatra** | ✅ done | `f16989e` (squash of 16 original commits 452d6e4..478adac): killed `bundler/inline`, mounted `Web::Server` at catch-all, ported all dynamic routes — `/issues/:id` (HTML + .json via `respond_to`), `POST /issues/:id/reset`, `POST /issues/:id/transition` (AASM `event!` from Rails — `after_all_transitions` hooks confirmed firing), `/errors`, `/projects`, `/projects/:slug` (slug decoded via `project_unslug`, no 404 on unknown — Sinatra parity), `/list/:status`, `/` (dashboard root, 5 aggregated datasets), `/issues` (paginated + filterable), `/stream` (SSE via `ActionController::Live`, `Web::EventBus` reused unchanged), `/locale/:lang` (cookie write + open-redirect-safe redirect). `<HEAD>` then closed phase B by porting `/assets/*` to `AssetsController` (3 routes, `send_file` from `lib/autodev/web/public/` — same single filesystem source of truth Sinatra reads) and **removing `mount Web::Server => '/'`** from `config/routes.rb`. `bin/rails server` now answers every URL the embedded dashboard exposes; there is no Sinatra fallback. `bin/autodev` (standalone Sinatra) is unaffected. `8a60ebc` then closed step 7: 286 locale keys migrated from three Ruby hash files to six `config/locales/{notifications,activity,web}.{fr,en}.yml`. `Locales.t` / `lookup` / `merged_for` API preserved (thin adapter on top of `i18n` gem + `Backend::Fallbacks`); ~140 callers untouched. End-to-end FR/EN switching via `/locale/en` cookie verified. **Phase B per autospec §D is fully closed.** |
-| **C — Cutover du poller, décommissionnement Sinatra** | ⬜ not started | Solid Queue, `bin/autodev` supervisor, AR Issue becomes authoritative, `lib/autodev/web/` deleted. |
+| **C — Cutover du poller, décommissionnement Sinatra** | 🟡 in progress | Step 5 (Solid Queue infrastructure) landed inert per the §6 plan: gem in, multi-DB config split, recurring `AutodevPollJob` + per-issue `IssueProcessJob` wired but **not yet driving production** — `bin/autodev` still runs the threaded `Poller`/`WorkerPool`. The supervisor switch (step 6) is the actual cutover. Remaining: step 6 supervisor, step 2 second half (Issue/AE Sequel→AR + delete `lib/autodev/web/`), step 8 (Phlex view relocation + propshaft + libellé refresh). |
 | **D — AutoSpec** | ⬜ not started | New tables (`users`, `projects`, `autospec_drafts`, etc.), Devise, Anthropic SDK chat. |
 
 Mapping to [`autospec.md`](autospec.md) **§C — attack-order steps**:
@@ -67,7 +76,7 @@ Mapping to [`autospec.md`](autospec.md) **§C — attack-order steps**:
 | **2** | Modèles core (User, Project, ProjectAppCommand, ProjectMembership) + migration `issues` Sequel → AR | 🟡 partial — `ecf4ba4` landed the 4 new AR models + migrations + 20 model tests (purely additive on the DB side, tables sit empty during phase B). The `issues` Sequel→AR migration is the remaining half; still waits for phase C because of the `Object.const_set` collision (see [§4](#4-decisions-and-gotchas-that-bit-us)). |
 | **3** | Auth Devise + omniauth Azure AD + sessions table | ✅ done — `8af273f` wired Devise (`:trackable`, `:omniauthable`, no password module) + `omniauth-entra-id` + `activerecord-session_store`. `User.from_omniauth` factory. `/users/auth/entra_id` + `/users/auth/entra_id/callback` routes. Existing controllers NOT gated with `authenticate_user!` — Phlex dashboard stays open until per-route gates land in step 9/11. See [§4](#4-decisions-and-gotchas-that-bit-us) for the gem-require-order trap. |
 | **4** | Rake idempotent d'import YAML → DB | ✅ done — `e1fce2a` landed `YamlProjectImporter` (`app/services/yaml_project_importer.rb` + `validator.rb`) and the `autodev:migrate_projects_from_yaml` task. Idempotent, transactional, dry-run safe, full validator pre-pass. **Not executed during phase B** — `lib/autodev/poller.rb` keeps reading YAML; the rake runs at the phase C cutover window per autospec §H. 30 new tests across three classes (validation, write, edge-case). |
-| **5** | Réécriture poller en Solid Queue récurrente | ⬜ open |
+| **5** | Réécriture poller en Solid Queue récurrente | ✅ done — `<HEAD>` landed `gem 'solid_queue', '~> 1.1'`, multi-DB `config/database.yml` (primary + queue), `config/queue.yml` + `config/recurring.yml`, the `db/queue_migrate/20260608000001_create_solid_queue_tables.rb` migration, `app/jobs/{application_job,autodev_poll_job,issue_process_job}.rb`, and `app/services/autodev/poll_dispatcher.rb`. Concurrency: queue.yml `threads: 3` for the global cap, IssueProcessJob's `limits_concurrency to: 1, key: "issue-#{path}-#{iid}"` for per-ticket serialization. Code lands inert: `bin/autodev` still drives the threaded `Poller`/`WorkerPool`. Step 6 will swap by starting `solid_queue:start` from a supervisor and deleting `lib/autodev/poller.rb` + `lib/autodev/worker_pool.rb`. 11 wiring tests cover the job dispatch table + AutodevPollJob's usage gate; `PollDispatcher` discovery-pass tests deferred (need full legacy stack to test against real `::Issue` Sequel queries). |
 | **6** | `bin/autodev` superviseur | ⬜ open |
 | **7** | Migration locales `lib/autodev/locales/*.rb` → `config/locales/*.yml` | ✅ done — `8a60ebc` translated 286 keys (notifications + activity + web, FR + EN) into 6 thematic YAML files. `lib/autodev/locales.rb` rewritten as adapter on `i18n` gem + `Backend::Fallbacks`. `Locales.t` / `lookup` / `merged_for` API preserved — ~140 callers untouched. Per-issue `locale: :de` (or any unknown) silently falls back to `:fr`. |
 | **8** | Port des vues Phlex + refonte libellés | 🟡 partial — Phlex views ARE rendered by Rails controllers since coexistence phase B (template pattern in [§3](#3-the-porting-pattern)), but they still live under `lib/autodev/web/views/` and the libellé refactor (cf. `autospec.md` §I) hasn't happened |
@@ -98,8 +107,9 @@ Two entry points coexist on the same SQLite file. **Do not run both at the same 
 
 ### Shared resources
 
-- **SQLite file**: `~/.autodev/autodev.db` by default. Both AR (via `config/database.yml`, pool `2`, timeout `30000`) and Sequel (via `Config.load['database_url']`) point at it. Override BOTH at once by setting `AUTODEV_DB=/tmp/x.db` — the env var is wired in both `config/database.yml` and `config/initializers/legacy_sinatra.rb`.
-- **`Issue` and `ActivityEvent` constants**: in any process where the legacy_sinatra initializer ran, these are **Sequel** models with AASM. The AR mirrors that lived in `app/models/issue.rb` and `app/models/activity_event.rb` were deleted in `3fcc36b` because they collide with `Object.const_set(:Issue, klass)` from `Database.build_model!`. They come back in phase C.
+- **Primary SQLite file**: `~/.autodev/autodev.db` by default. Both AR (via `config/database.yml`'s `primary` connection, pool `2`, timeout `30000`) and Sequel (via `Config.load['database_url']`) point at it. Override via `AUTODEV_DB=/tmp/x.db` — the env var is wired in both `config/database.yml` and `config/initializers/legacy_sinatra.rb`.
+- **Queue SQLite file**: `~/.autodev/autodev_queue.db` by default (new in step 5). Holds Solid Queue's 10 tables (`solid_queue_jobs`, `solid_queue_ready_executions`, etc.). Override via `AUTODEV_QUEUE_DB=/tmp/q.db`. `SolidQueue::Record.connects_to(database: { writing: :queue })` is configured via `config.solid_queue.connects_to` in `config/application.rb`. Migrations live under `db/queue_migrate/`.
+- **`Issue` and `ActivityEvent` constants**: in any process where the legacy_sinatra initializer ran, these are **Sequel** models with AASM. The AR mirrors that lived in `app/models/issue.rb` and `app/models/activity_event.rb` were deleted in `3fcc36b` because they collide with `Object.const_set(:Issue, klass)` from `Database.build_model!`. They come back at the step 6 cutover.
 
 ### Process diagram (current)
 
@@ -214,6 +224,18 @@ CHANGELOG entry under `## [Unreleased]` → `### Changed`, conventional commit (
 
 These are NOT in `autospec.md` — they were learned during execution.
 
+### Multi-DB migrations: `pool.migration_context.migrate` lands on the wrong DB
+
+Step 5 introduces `db/queue_migrate/` for Solid Queue. The natural-looking pattern `[ApplicationRecord, SolidQueue::Record].each { |k| k.connection_pool.migration_context.migrate }` LOOKS right (each pool's `db_config.name` is `primary` / `queue` respectively, `migrations_paths` reports the right directory) but the schema ends up on the PRIMARY DB regardless. Cause: the migration files use unqualified `create_table` which resolves to `ActiveRecord::Base.connection.create_table` — and `ActiveRecord::Base.connection` is the primary connection, not whatever `pool` the caller is iterating. Fix in `config/initializers/auto_migrate.rb`: explicitly `ActiveRecord::Base.establish_connection(db_config)` for each db config, run `MigrationContext.new(paths).migrate`, restore primary at the end. `connected_to(database: {writing: :queue})` would be the idiomatic block-scoped equivalent but **does not accept the `database:` kwarg on `ActiveRecord::Base` directly** (Rails raises `ArgumentError: unknown keyword: :database`) — that form only works on abstract classes that already declared `connects_to`.
+
+### Solid Queue gem MUST be `require`'d in `config/application.rb`
+
+Same trap as Devise (see "Devise + omniauth gems MUST be `require`'d in `config/application.rb`" below). Because `config/application.rb` skips `Bundler.require(*Rails.groups)`, `gem 'solid_queue'` in the Gemfile doesn't load `solid_queue.rb` at boot. If the require lives only in `config/initializers/solid_queue.rb` (or similar), the SolidQueue::Engine never registers — `config.solid_queue.connects_to` raises and `SolidQueue::Record` is undefined. The require sits at the top of `application.rb`, alongside Devise.
+
+### `git rebase` spuriously errors with "your local changes would be overwritten"
+
+Hit during the 2026-06-08 rebase of `autospec` onto `v0.15.2`: `git rebase origin/master` (or `--merge`, or `-i`) consistently fails on the very first commit with `error: Your local changes to the following files would be overwritten by merge: .gitignore Gemfile Gemfile.lock` — despite `git status` reporting a perfectly clean tree, no `core.autocrlf`, no smudge filters, no skip-worktree flags, and `git checkout -f origin/master` succeeding without complaint. The "your local changes" message is from `unpack-trees.c` deciding the working tree differs from the target index, but the trigger is elusive. Workaround that worked: `git checkout -b autospec-rebased origin/master`, then `git cherry-pick <sha>` for each commit one at a time (NOT batched — a batched `git cherry-pick A B C` runs into the same spurious error on the second commit). For the two commits with real conflicts (CHANGELOG.md on the phase-A entry, `lib/autodev/locales/activity.rb` deletion-vs-modification during step 7), resolve and continue. Keep a safety branch (`autospec-pre-rebase-<date>`) pointing at the pre-rebase HEAD until the next release.
+
 ### `Object.const_set(:Issue, klass)` collides with `app/models/issue.rb`
 
 `Database.build_model!` (lib/autodev/database.rb:50) does:
@@ -326,18 +348,20 @@ AUTODEV_DB=/tmp/sanity.db mise x ruby -- bin/rails runner 'puts "Issue: #{Issue.
 
 # 4. Test suite still green
 mise x ruby -- bundle exec rake test
-# expect: "575 runs, 1065 assertions, 0 failures, 0 errors, 0 skips"
+# expect: "587 runs, 1084 assertions, 0 failures, 0 errors, 0 skips"
 # (number grows as new tests land; step 2 raised the baseline from 473 to 498
 #  with 20 AR model tests + 5 splits for Minitest/MultipleAssertions;
 #  step 3 added 10 more — 6 on User.from_omniauth, 4 on the omniauth callback
-#  controller wiring; the 2026-06-03 rebase onto master folded in master's
+#  controller wiring; the 2026-06-08 rebase onto v0.15.2 folded in master's
 #  rate_limit_detector / repo_rebaser / poll_router_reenter /
-#  pipeline_monitor_review_failure tests; step 4 added 30 importer tests)
+#  pipeline_monitor_review_failure tests + the merged-MR reentry-skip test;
+#  step 4 added 30 importer tests; step 5 added 11 job wiring tests)
 
 # 5. Rubocop clean on the files we own
-mise x ruby -- bundle exec rubocop app/controllers app/models app/services config/routes.rb \
-  config/initializers/legacy_sinatra.rb config/initializers/auto_migrate.rb \
-  db/migrate lib/tasks/autodev.rake test/models test/services test/rails_helper.rb
+mise x ruby -- bundle exec rubocop app/controllers app/jobs app/models app/services \
+  config/routes.rb config/application.rb config/initializers/legacy_sinatra.rb \
+  config/initializers/auto_migrate.rb db/migrate db/queue_migrate \
+  lib/tasks/autodev.rake test/jobs test/models test/services test/rails_helper.rb
 # expect: "1 offense detected" (the pre-existing Style/Documentation on the
 #  generated `app/models/application_record.rb` — not worth fixing yet).
 # Running rubocop against the whole tree reports ~54 offenses, all in
@@ -378,17 +402,16 @@ The candidates ordered by complexity (lowest first):
 | ~~`GET /locale/:lang`~~ | ✅ done | `LocaleController#update`. `apply_locale_cookie!` works unchanged (Rack-standard `response.set_cookie` / `delete_cookie`). `safe_back_path` keeps the open-redirect guard intact. 4 curl cases validated (valid, with back, invalid → cookie cleared, evil-back stripped). |
 | ~~Static asset routes (`/assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*`)~~ | ✅ done | `AssetsController#turbo_js` / `#css` / `#font` `send_file` from `lib/autodev/web/public/`. `skip_forgery_protection` (Rails' cross-origin-JS guard 422s `<script src>` without Referer; static public files don't need it). Same single filesystem source `bin/autodev`'s Sinatra still reads, so step 8 can swap to propshaft without touching source files. End-to-end: turbo.js 217020b, app.css 17529b, sample font 18748b — all 200 with the right content-type. |
 
-**Coexistence phase B is fully done per autospec §D.** Every dynamic route + every asset is Rails-native, Devise/Entra ID is wired, locales live in YAML.
+**Coexistence phase C is in progress per autospec §D.** Phase B is closed (all routes Rails-native, Devise/Entra ID wired, locales in YAML). Step 5 (Solid Queue infrastructure) landed but the actual production swap is gated on step 6.
 
-**Recommended next: phase C — open attack-order step 5** (*Solid Queue poller rewrite*).
+**Recommended next: attack-order step 6** (*`bin/autodev` superviseur*) — this is the actual phase C cutover.
 
-Steps 1, 3, 4, 7 are ✅ done; step 2 is 🟡 partial (new tables in, Issue/AE migration deferred to phase C). Phase C is the cutover work: poller → Solid Queue, supervisor, Sinatra deletion. Step 8 (Phlex view relocation + propshaft + libellé refresh) is parked because the views still live under `lib/autodev/web/` which phase C deletes.
+Steps 1, 3, 4, 5, 7 are ✅ done; step 2 is 🟡 partial (new tables in, Issue/AE migration deferred to step 6 cutover window). Step 8 (Phlex view relocation + propshaft + libellé refresh) is parked because the views still live under `lib/autodev/web/` which step 6 deletes.
 
 Attack-order steps that remain:
 
-- **Step 5 — Solid Queue** *(recommended next, phase C)*: `gem 'solid_queue'`, port `lib/autodev/poller.rb` logic to `AutodevPollJob` (recurring). The post-completion / unassignment / reentry branches all become job code. Required for the phase C cutover. Code lands first, the actual swap from threads-in-bin/autodev to Solid Queue happens at the phase C cutover via the supervisor (step 6).
-- **Step 6 — `bin/autodev` superviseur** *(phase C cutover)*: boots `rails server` + `solid_queue:start` + sidecars (Chrome MCP). `lib/autodev/web/` deleted. Should be last among 5-6.
-- **Step 8 — Phlex view port + propshaft + libellé refactor** *(after phase C completes)*: Phlex views move out of `lib/autodev/web/views/` (which phase C just deleted) into `app/views/`; `AssetsController` is replaced by propshaft; STATES.md vocabulary refresh (cf. autospec §I).
+- **Step 6 — `bin/autodev` superviseur** *(recommended next, phase C cutover)*: `bin/autodev` becomes a supervisor that boots `rails server` + `solid_queue:start` + sidecars (Chrome MCP) instead of running the threaded poller in-process. AUTODEV_MAX_WORKERS / AUTODEV_POLL_INTERVAL env vars set from `~/.autodev/config.yml` before spawning. `bundler/inline` replaced by `bundle exec`. `lib/autodev/poller.rb` + `lib/autodev/worker_pool.rb` deleted (logic now lives in `app/services/autodev/poll_dispatcher.rb` + the `IssueProcessJob` action dispatch). `lib/autodev/web/` deleted (Sinatra fully decommissioned). `Object.const_set(:Issue, klass)` collision removed, so step 2's `app/models/issue.rb` + `activity_event.rb` can come back as authoritative AR models. SQLite snapshot before cutover per autospec §D.
+- **Step 8 — Phlex view port + propshaft + libellé refactor** *(after step 6 completes)*: Phlex views move out of `lib/autodev/web/views/` (which step 6 just deleted) into `app/views/`; `AssetsController` is replaced by propshaft; STATES.md vocabulary refresh (cf. autospec §I).
 
 ---
 

@@ -1,0 +1,27 @@
+# Solid Queue recurring tasks (railsification step 5).
+#
+# AutodevPollJob is the GitLab-discovery tick that replaces the
+# `Poller#poll_loop` while-true in `lib/autodev/poller.rb`. It runs every
+# AUTODEV_POLL_INTERVAL seconds — defaulting to 300 to mirror the legacy
+# `poll_interval: 300`. The supervisor (step 6) sets this env var from
+# ~/.autodev/config.yml so user-customised intervals carry through.
+#
+# `every N seconds` is Solid Queue's fluent.parse syntax — no need for cron
+# specs at this granularity.
+
+default: &default
+  autodev_poll:
+    class: AutodevPollJob
+    queue: default
+    schedule: "every <%= ENV.fetch('AUTODEV_POLL_INTERVAL', 300) %> seconds"
+
+development:
+  <<: *default
+
+production:
+  <<: *default
+  # Keep solid_queue_jobs from growing forever — finished rows older than a
+  # day are cleaned up hourly. Not run in development to keep dev DBs small.
+  clear_solid_queue_finished_jobs:
+    command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
+    schedule: every hour at minute 12

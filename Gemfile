@@ -37,6 +37,11 @@ gem 'omniauth-entra-id', '~> 3.0'
 # matching authenticity token check.
 gem 'omniauth-rails_csrf_protection', '~> 1.0'
 
+# Railsification — step 5: Solid Queue for the recurring poll job. Same
+# Bundler.require-skipped story as Devise — explicit require in
+# config/application.rb is required for the engine to register its tables.
+gem 'solid_queue', '~> 1.1'
+
 # Test dependencies
 gem 'minitest', '~> 5.0'
 gem 'rack-test', '~> 2.1'

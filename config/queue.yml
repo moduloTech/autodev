@@ -1,0 +1,28 @@
+# Solid Queue worker + dispatcher configuration (railsification step 5).
+#
+# One worker process serves the `*` queue with N threads, where N defaults
+# to 3 to mirror the legacy `max_workers: 3` of the threaded poller. The
+# supervisor (step 6) will override this via AUTODEV_MAX_WORKERS so the
+# value tracks `max_workers` in ~/.autodev/config.yml.
+#
+# Dispatcher polling is 1s — fine for our once-every-five-minutes recurring
+# task. Worker polling is 0.1s — Solid Queue's default and keeps issue
+# processing reactive when several arrive at once.
+default: &default
+  dispatchers:
+    - polling_interval: 1
+      batch_size: 500
+  workers:
+    - queues: "*"
+      threads: <%= ENV.fetch('AUTODEV_MAX_WORKERS', 3) %>
+      processes: 1
+      polling_interval: 0.1
+
+development:
+  <<: *default
+
+test:
+  <<: *default
+
+production:
+  <<: *default

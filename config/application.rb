@@ -5,11 +5,12 @@ require_relative 'boot'
 # Rails skeleton — phase A of the railsification (cf. autodev/docs/autospec.md §D).
 # Loaded only by bin/rails; bin/autodev (bundler/inline Sinatra) does not boot this.
 # Only the frameworks we need are required — the rest (action_mailer, action_cable,
-# active_job, active_storage, action_text, action_mailbox) will be enabled when
-# they actually have a consumer.
+# active_storage, action_text, action_mailbox) will be enabled when they actually
+# have a consumer. active_job came in with step 5 (Solid Queue backend).
 require 'rails'
 require 'active_model/railtie'
 require 'active_record/railtie'
+require 'active_job/railtie'
 require 'action_controller/railtie'
 require 'action_view/railtie'
 
@@ -30,7 +31,16 @@ require 'devise'
 require 'omniauth-entra-id'
 require 'omniauth/rails_csrf_protection'
 
+# Step 5 of the railsification — Solid Queue backs ActiveJob for the recurring
+# poll job. Same Bundler.require-skipped story as Devise: the gem's engine
+# must register BEFORE Application is defined so its autoloads + recurring
+# task machinery are picked up by Rails::Engine.subclasses.
+require 'solid_queue'
+
 module Autodev
+  # Rails application root — minimal railtie set, Bundler.require skipped.
+  # See file header for the rationale; this class is mostly a configuration
+  # surface so most of the interesting wiring lives in the initializers/.
   class Application < Rails::Application
     config.load_defaults 8.1
 
@@ -44,5 +54,12 @@ module Autodev
 
     # Skip generator hooks for stacks we are not using yet.
     config.generators.system_tests = nil
+
+    # Step 5: ActiveJob backend is Solid Queue. Solid Queue itself reads/writes
+    # exclusively from the `queue` AR connection (see config/database.yml) so
+    # the busy WAL on autodev_queue.db is isolated from the business writes
+    # on autodev.db.
+    config.active_job.queue_adapter = :solid_queue
+    config.solid_queue.connects_to = { database: { writing: :queue } }
   end
 end
