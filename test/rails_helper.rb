@@ -33,7 +33,8 @@ ActiveRecord::MigrationContext.new(Rails.root.join('db/migrate').to_s).migrate
 # from this position. Cheaper to just wipe tables between tests — SQLite
 # `:memory:` makes DELETE essentially free. AR models added in step 2 only.
 module ActiveRecordTestCleanup
-  TABLES = %w[project_memberships project_app_commands projects users].freeze
+  TABLES = %w[audit_logs activity_events issues project_memberships
+              project_app_commands projects users].freeze
 
   def teardown
     super

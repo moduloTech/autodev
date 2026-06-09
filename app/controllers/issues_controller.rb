@@ -53,14 +53,20 @@ class IssuesController < ApplicationController
   # NOT an AASM transition — raw SQL UPDATE that clears retry/error state
   # and forces status back to 'pending'. The Sinatra version does the same;
   # we match it byte-for-byte. After-transition hooks intentionally do NOT
-  # fire (this is a recovery action, not a normal flow event).
-  def reset
+  # fire (this is a recovery action, not a normal flow event). The audit row
+  # is written directly from here for that reason.
+  def reset # rubocop:disable Metrics/MethodLength
     issue = find_issue(params[:id])
     return head :not_found unless issue
 
+    previous_state = issue.status
     Issue.where(id: issue.id).update_all(
       status: 'pending', retry_count: 0, error_message: nil,
       next_retry_at: nil, started_at: nil
+    )
+    Audit.record!(
+      resource: issue, action: 'issue.reset_manual', actor: current_user,
+      payload: { project_path: issue.project_path, iid: issue.issue_iid, previous_state: previous_state }
     )
     redirect_to "/issues/#{issue.id}"
   end
@@ -74,7 +80,7 @@ class IssuesController < ApplicationController
   # (`persist_status_change!` saves the row, `emit_activity_event!` inserts a
   # transition row in activity_events). We trust those hooks to do their job;
   # the controller only enforces the "permitted event" guard, same as Sinatra.
-  def transition
+  def transition # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
     issue = find_issue(params[:id])
     return head :not_found unless issue
 
@@ -84,6 +90,8 @@ class IssuesController < ApplicationController
                     status: :unprocessable_entity
     end
 
+    issue._audit_actor = current_user
+    issue._audit_origin = :manual
     issue.send("#{event}!")
     redirect_to "/issues/#{issue.id}"
   end

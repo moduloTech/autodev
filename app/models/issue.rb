@@ -31,6 +31,14 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
               :_review_count_zero, :_review_count_over_zero,
               :_max_review_rounds_reached
 
+  # Audit context set by IssuesController before firing a manual
+  # transition. `_audit_origin == :manual` → the after_all_transitions
+  # hook records `issue.transition_manual` with `_audit_actor` (which
+  # itself may be nil until PR3 turns the gating on). Anything else
+  # (e.g. transitions fired by AutodevPollJob workers) records
+  # `issue.transition_auto` with NULL actor.
+  attr_accessor :_audit_actor, :_audit_origin
+
   aasm column: :status, whiny_transitions: false do # rubocop:disable Metrics/BlockLength
     state :pending, initial: true
     state :cloning, :checking_spec, :implementing, :committing, :pushing
@@ -39,7 +47,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     state :answering_question, :needs_clarification
     state :done, :error
 
-    after_all_transitions :persist_status_change!, :emit_activity_event!
+    after_all_transitions :persist_status_change!, :emit_activity_event!, :emit_audit_log!
 
     # === Happy path ===
 
@@ -147,6 +155,34 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     ActivityEvent.create(issue_id: id, kind: 'transition', level: 'info', payload_json: payload)
   rescue StandardError
     nil
+  end
+
+  # Audit-log fan-out. Manual transitions (set by IssuesController#transition)
+  # carry the acting user; everything else (poller-driven, job-driven, AASM
+  # transitions fired by workflow classes) records as automatic with a NULL
+  # actor. Best-effort: never raises into the AASM callback chain. The
+  # ensure clause clears the manual flags so a subsequent transition on the
+  # same instance does not inherit them.
+  def emit_audit_log! # rubocop:disable Metrics/MethodLength
+    origin = @_audit_origin == :manual ? :manual : :automatic
+    action = origin == :manual ? 'issue.transition_manual' : 'issue.transition_auto'
+    Audit.record!(
+      resource: self,
+      action: action,
+      actor: @_audit_actor,
+      payload: {
+        project_path: project_path,
+        iid: issue_iid,
+        event: aasm.current_event.to_s.delete_suffix('!'),
+        from: aasm.from_state.to_s,
+        to: aasm.to_state.to_s
+      }
+    )
+  rescue StandardError
+    nil
+  ensure
+    @_audit_actor = nil
+    @_audit_origin = nil
   end
 
   # -- Startup recovery --
