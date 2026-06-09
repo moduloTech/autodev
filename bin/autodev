@@ -32,15 +32,19 @@
 #   GITLAB_API_TOKEN         Personal Access Token with api scope
 # =============================================================================
 
-require 'bundler/setup'
+# Pin Bundler to the app's Gemfile before anything else. When installed via
+# Homebrew, `autodev` runs from /opt/homebrew/Cellar/autodev/<ver>/bin/ —
+# `__dir__` resolves there, and `../Gemfile` is the bundled Gemfile that
+# `bundle install` populated `vendor/bundle/` from at install time. Without
+# this, `require 'bundler/setup'` (called transitively by Rails) walks up
+# from the user's CWD, finds an unrelated project's Gemfile, and crashes.
+ENV['BUNDLE_GEMFILE'] ||= File.expand_path('../Gemfile', __dir__)
 
-# Step 2 second half of the railsification: the parent CLI process now boots
-# the Rails environment to gain access to the AR `Issue`/`ActivityEvent`
-# models. The old explicit gem requires + `bundler/inline` lineage are gone
-# — `config/environment` brings in Rails + AASM + every workflow class via
-# the legacy_sinatra initializer.
 require 'optparse'
 
+# The parent CLI process boots the Rails environment so AR `Issue` /
+# `ActivityEvent` and the workflow classes under `lib/autodev/` are
+# available for `--status` / `--errors` / `--reset` and for the supervisor.
 ENV['RAILS_ENV'] ||= 'production'
 require_relative '../config/environment'
 require_relative '../lib/autodev/supervisor'
@@ -265,16 +269,18 @@ def build_supervisor_children(config) # rubocop:disable Metrics/MethodLength
 end
 
 # Environment exported to both children. We forward only what's needed for
-# Solid Queue + Rails to find the right databases and pool sizes; the rest
-# of config.yml is re-loaded by `Config.load` on each child boot via the
-# legacy_sinatra initializer.
+# Solid Queue + Rails to find the right databases, pool sizes, and bundled
+# Gemfile (so the children's Bundler doesn't walk up from the operator's
+# CWD and pick up an unrelated Gemfile when autodev runs from /opt/homebrew).
 def supervisor_env(config)
   {
     'AUTODEV_MAX_WORKERS' => config['max_workers'].to_s,
     'AUTODEV_POLL_INTERVAL' => config['poll_interval'].to_s,
     'AUTODEV_DB' => ENV.fetch('AUTODEV_DB', nil),
     'AUTODEV_QUEUE_DB' => ENV.fetch('AUTODEV_QUEUE_DB', nil),
-    'RAILS_ENV' => ENV.fetch('RAILS_ENV', 'production')
+    'AUTODEV_HOME' => ENV.fetch('AUTODEV_HOME', nil),
+    'RAILS_ENV' => ENV.fetch('RAILS_ENV', 'production'),
+    'BUNDLE_GEMFILE' => ENV.fetch('BUNDLE_GEMFILE', nil)
   }.compact
 end
 

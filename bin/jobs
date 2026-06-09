@@ -3,12 +3,11 @@
 
 # Boots the Solid Queue supervisor — dispatches recurring tasks
 # (config/recurring.yml) and runs enqueued jobs against the worker pool
-# defined in config/queue.yml.
-#
-# Launched by the bin/autodev supervisor as its second child process (the
-# first is `bin/rails server`). Both children load `config/environment`, so
-# the legacy_sinatra initializer runs and Sequel `Issue` + `ActivityEvent`
-# are dynamically defined — the IssueProcessJob handlers can call them.
+# defined in config/queue.yml. Launched by the bin/autodev supervisor as
+# its second child process (the first is `bin/rails server`).
+
+# Pin Bundler to the bundled Gemfile (same Brew-cellar concern as bin/autodev).
+ENV['BUNDLE_GEMFILE'] ||= File.expand_path('../Gemfile', __dir__)
 
 require_relative '../config/environment'
 require 'solid_queue/cli'

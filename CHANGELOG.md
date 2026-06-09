@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0-alpha.1] - 2026-06-09
+
+First major-version bump — the railsification (8 attack-order steps over 5 days, 2026-06-02 → 2026-06-09) is complete. `autodev` is now a Rails 8.1.3 application: AR models, Solid Queue for the recurring poll, supervised subprocesses for web + worker, Devise + Entra ID for SSO. Tagged as `alpha.1` rather than `1.0.0` outright because the new topology hasn't yet run a full week against real production traffic.
 
 ### Added
 
