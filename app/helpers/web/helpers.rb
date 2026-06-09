@@ -153,20 +153,67 @@ module Web
 
     def format_event(event)
       payload = event_payload(event)
-      case event[:kind]
-      when 'transition'
-        "#{payload['from']} → #{payload['to']} (#{payload['event']})"
-      when 'danger_claude'
-        payload['message'] || payload['key'].to_s
-      else
-        payload.empty? ? event[:kind] : payload.to_json
-      end
+      raw = case event[:kind]
+            when 'transition'
+              "#{payload['from']} → #{payload['to']} (#{payload['event']})"
+            when 'danger_claude'
+              payload['message'] || payload['key'].to_s
+            else
+              payload.empty? ? event[:kind] : payload.to_json
+            end
+      emojify(raw)
     end
 
     def event_payload(event)
       JSON.parse(event[:payload_json] || '{}')
     rescue JSON::ParserError
       {}
+    end
+
+    # Localized label for an ActivityEvent#kind. Falls back to the raw value
+    # so unknown kinds remain visible rather than vanishing.
+    def event_kind_label(kind)
+      key = :"web_event_kind_#{kind}"
+      Locales.lookup(web_locale, key) || Locales.lookup(:fr, key) || kind.to_s
+    end
+
+    # Localized label for a locale code stored on an issue. Returns the raw
+    # code if no translation is registered.
+    def locale_label(code)
+      key = :"web_locale_#{code}"
+      Locales.lookup(web_locale, key) || Locales.lookup(:fr, key) || code.to_s
+    end
+
+    # GitLab-style emoji shortcodes (`:warning:`, `:x:`, …) are interpreted
+    # server-side on GitLab but reach the web UI verbatim. Replace the codes
+    # we use in activity templates with their Unicode equivalents.
+    EMOJI_SHORTCODES = {
+      'arrow_right' => '➡️',
+      'arrows_counterclockwise' => '🔄',
+      'checkered_flag' => '🏁',
+      'eyes' => '👀',
+      'file_folder' => '📁',
+      'gear' => '⚙️',
+      'grey_question' => '❔',
+      'hourglass_flowing_sand' => '⏳',
+      'incoming_envelope' => '📨',
+      'mag' => '🔍',
+      'outbox_tray' => '📤',
+      'pause_button' => '⏸️',
+      'robot' => '🤖',
+      'rocket' => '🚀',
+      'speech_balloon' => '💬',
+      'stop_sign' => '🛑',
+      'thinking' => '🤔',
+      'twisted_rightwards_arrows' => '🔀',
+      'warning' => '⚠️',
+      'white_check_mark' => '✅',
+      'wrench' => '🔧',
+      'x' => '❌'
+    }.freeze
+
+    def emojify(text)
+      text.to_s.gsub(/:([a-z_]+):/) { |match| EMOJI_SHORTCODES[Regexp.last_match(1)] || match }
     end
 
     def permitted_events_for(issue)

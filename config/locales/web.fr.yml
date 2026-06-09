@@ -92,11 +92,15 @@ fr:
   web_issue_link_gitlab: Issue GitLab
   web_issue_link_mr: Merge Request !%{iid}
   web_issue_metadata: Métadonnées
-  web_issue_locale: Locale
-  web_issue_retry_count: Retry count
-  web_issue_review_count: Review count
-  web_issue_pipeline_retriggers: Pipeline retriggers
+  web_issue_locale: Langue
+  web_issue_retry_count: Tentatives
+  web_issue_review_count: Revues
+  web_issue_pipeline_retriggers: Relances pipeline
   web_issue_started_at: Démarrée le
+  web_locale_fr: Français
+  web_locale_en: Anglais
+  web_event_kind_transition: Transition
+  web_event_kind_danger_claude: Activité
   web_issue_post_completion_error: Erreur post-completion
   web_issue_actions: Actions
   web_issue_reset: Réinitialiser

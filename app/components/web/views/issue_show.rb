@@ -95,13 +95,13 @@ module Web
       # === Metadata =========================================================
 
       METADATA_ROWS = [
-        [:web_col_branch,                ->(i) { i[:branch_name] }, :code],
-        [:web_issue_locale,              ->(i) { i[:locale] || 'fr' }],
-        [:web_issue_retry_count,         ->(i) { i[:retry_count] }],
-        [:web_issue_review_count,        ->(i) { i[:review_count] }],
-        [:web_issue_pipeline_retriggers, ->(i) { i[:pipeline_retrigger_count] }],
-        [:web_issue_started_at,          ->(i) { i[:started_at] }],
-        [:web_col_created_at,            ->(i) { i[:created_at] }]
+        [:web_col_branch,                ->(i, _h) { i[:branch_name] }, :code],
+        [:web_issue_locale,              ->(i, h) { h.locale_label(i[:locale] || 'fr') }],
+        [:web_issue_retry_count,         ->(i, _h) { i[:retry_count] }],
+        [:web_issue_review_count,        ->(i, _h) { i[:review_count] }],
+        [:web_issue_pipeline_retriggers, ->(i, _h) { i[:pipeline_retrigger_count] }],
+        [:web_issue_started_at,          ->(i, _h) { i[:started_at] }],
+        [:web_col_created_at,            ->(i, _h) { i[:created_at] }]
       ].freeze
       private_constant :METADATA_ROWS
 
@@ -111,7 +111,7 @@ module Web
             h3(class: 'card-section-title') { t_web(:web_issue_metadata) }
           end
           div(class: 'kv-grid', style: 'padding: 14px 18px; gap: 10px;') do
-            METADATA_ROWS.each { |key, getter, fmt| render_metadata_row(key, getter.call(@issue), fmt) }
+            METADATA_ROWS.each { |key, getter, fmt| render_metadata_row(key, getter.call(@issue, self), fmt) }
             render_error_row(:web_col_error, @issue[:error_message]) if @issue[:error_message]
             if @issue[:post_completion_error]
               render_error_row(:web_issue_post_completion_error, @issue[:post_completion_error])
@@ -215,7 +215,7 @@ module Web
       def render_activity_row(event)
         tr do
           td(class: 'muted') { event[:created_at] }
-          td { code { event[:kind] } }
+          td { event_kind_label(event[:kind]) }
           td { event[:level] }
           td { format_event(event) }
         end

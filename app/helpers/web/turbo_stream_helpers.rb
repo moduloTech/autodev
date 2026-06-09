@@ -23,7 +23,7 @@ module Web
       row = <<~HTML
         <tr>
           <td class="muted">#{h(event[:created_at])}</td>
-          <td><code>#{h(event[:kind])}</code></td>
+          <td>#{h(event_kind_label(event[:kind]))}</td>
           <td>#{h(event[:level])}</td>
           <td>#{h(format_event(event))}</td>
         </tr>

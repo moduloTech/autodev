@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `GET /issues/:id` web UI: metadata labels and activity log now fully localized.
+  - Metadata labels in `web.{fr,en}.yml` that had been left in English are translated (`web_issue_locale` → "Langue"/"Language", `web_issue_retry_count` → "Tentatives"/"Attempts", `web_issue_review_count` → "Revues"/"Reviews", `web_issue_pipeline_retriggers` → "Relances pipeline"/"Pipeline retriggers"). The metadata locale row also shows the human-readable language name ("Français"/"Anglais", "French"/"English") instead of the raw code via the new `locale_label` helper + `web_locale_{fr,en}` keys.
+  - Activity table TYPE column rendered the raw `ActivityEvent#kind` enum (`danger_claude`, `transition`). New `event_kind_label` helper + `web_event_kind_{transition,danger_claude}` locale keys translate it to "Activité"/"Activity" and "Transition" at render time. Same substitution applied to the live SSE/Turbo Stream row in `Web::TurboStreamHelpers#event_row_stream` so push updates stay consistent.
+  - Activity DÉTAIL column showed GitLab-style emoji shortcodes verbatim (`:warning:`, `:x:`, `:mag:`, …). These are interpreted server-side by GitLab on the issue thread but reach the web UI raw. `format_event` now pipes its output through a new `emojify` helper that substitutes the 22 shortcodes used by `activity.{fr,en}.yml` templates with Unicode. The locale templates remain unchanged (they still feed GitLab notes).
+
 ## [1.0.0-alpha.5] - 2026-06-09
 
 ### Fixed
