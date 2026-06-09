@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Mission Control — Jobs (`mission_control-jobs` gem) mounted at `/admin/jobs` by `config/routes.rb`. Provides a web admin for inspecting + administering Solid Queue: list queues, drill into a queue's pending/failed jobs, view job payloads + exceptions, retry/discard/dispatch individual jobs, bulk-retry/discard, watch worker processes, view + update recurring tasks. HTTP Basic Auth gate is disabled (`config/initializers/mission_control.rb` sets `MissionControl::Jobs.http_basic_auth_enabled = false`) — autodev's 127.0.0.1 + NetBird-mesh trust model already gates network access. Re-enable via the `http_basic_auth_user` / `http_basic_auth_password` mattr_accessors when remote access lands, or gate via Devise `authenticate_user!` once the host dashboard's per-route gates land in phase D step 11. `propshaft` is pulled in alongside (`gem 'propshaft', '~> 1.1'` + `require 'propshaft' + 'propshaft/railtie'` in `config/application.rb`) — MCJ's engine appends to `config.assets.paths` at boot and our minimal-railtie skeleton otherwise has no asset pipeline. AssetsController still serves the static files we own; propshaft is there only to keep MCJ happy. Smoke-validated against `bin/rails server`: `GET /admin/jobs` and `GET /admin/jobs/queues` both 200.
+
+### Fixed
+
+- `config/initializers/session_store.rb` only required `action_dispatch/session/active_record_store` (the Rack middleware), not `active_record/session_store` (the AR-side gem entry that wires `ActionDispatch::Session::ActiveRecordStore.session_class = ActiveRecord::SessionStore::Session`). That left `session_class` nil. Anonymous reads (the existing dashboard) never tripped it because they don't write to session; any controller that DOES write — `protect_from_forgery` on a non-GET, Devise sign-in, Mission Control's controllers — crashed with `NoMethodError: undefined method 'new' for nil` inside `get_session_model`. The latent bug shipped with v1.0.0-alpha.1 (Devise was wired but no controller exercised session writes); MCJ surfaced it on the first `GET /admin/jobs`. Added the missing `require 'active_record/session_store'`.
+
+### Documentation
+
+- `docs/railsification-handoff.md` moved to `docs/archive/railsification-handoff.md`. It tracked the migration as we went (which step we were on, what to do next, gotchas as they appeared) — now frozen.
+- New `docs/railsification-postmortem.md` — the after-the-fact retrospective. Timeline, what went well, the 7 bugs that needed alpha hotfixes, what to do differently, and recommendations for future migrations of similar shape.
+- `CLAUDE.md` rewritten for the post-railsification topology. The previous file described the v0.x.x architecture (single-file bundler/inline CLI, threaded poller, Sinatra `Web::Server`, dynamic Sequel `Issue` model). Updated: supervisor topology, `bin/autodev` boots `bin/rails server` + `bin/jobs start`, AR models with AASM, Phlex views under `app/components/web/views/`, helpers under `app/helpers/web/`, `Web::EventBus` under `app/services/web/`, locales under `config/locales/`, the `JobLogger` adapter, multi-DB layout. New "Process topology" diagram, new "PollDispatcher + IssueProcessJob" subsection, new "Tests" subsection.
+
 ## [1.0.0-alpha.3] - 2026-06-09
 
 ### Fixed
