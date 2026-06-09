@@ -13,6 +13,12 @@ require 'active_record/railtie'
 require 'active_job/railtie'
 require 'action_controller/railtie'
 require 'action_view/railtie'
+# Asset pipeline — required by Mission Control's engine which appends to
+# `config.assets.paths` at boot. propshaft is the lightweight Rails 8
+# default; we don't actively use it (AssetsController serves the static
+# files we own), but the railtie has to be present so MCJ initialises.
+require 'propshaft'
+require 'propshaft/railtie'
 
 # We intentionally skip `Bundler.require(*Rails.groups)` here so that
 # Sequel/Sinatra/Phlex/Puma — loaded by bin/autodev via bundler/inline — are
@@ -41,6 +47,13 @@ require 'omniauth/rails_csrf_protection'
 # must register BEFORE Application is defined so its autoloads + recurring
 # task machinery are picked up by Rails::Engine.subclasses.
 require 'solid_queue'
+
+# Mission Control — web admin for Solid Queue. Mounted at /admin/jobs in
+# config/routes.rb. Same engine-registration concern as the gems above:
+# require here so MissionControl::Jobs::Engine lands in the
+# Rails::Engine.subclasses list before our Application sets up its own
+# autoload tree.
+require 'mission_control/jobs'
 
 module Autodev
   # Rails application root — minimal railtie set, Bundler.require skipped.

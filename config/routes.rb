@@ -1,14 +1,7 @@
 # frozen_string_literal: true
 
-# Phase B of the railsification — complete (cf. autodev/docs/autospec.md §D).
-#
-# Every URL the embedded dashboard serves is Rails-native. The legacy
-# Sinatra `Web::Server` still loads (the `bin/autodev` entry point uses it
-# end-to-end), but `bin/rails server` no longer mounts it: there is no
-# catch-all fallback in this routes file. Unknown paths 404 from Rails.
-#
-# Phase C will delete `lib/autodev/web/` entirely once the poller has moved
-# to Solid Queue. Until then the directory stays in place for `bin/autodev`.
+# Post-railsification routes. Every URL the embedded dashboard serves is
+# Rails-native; `lib/autodev/web/` (the legacy Sinatra app) is gone.
 Rails.application.routes.draw do
   # === Devise / Entra ID SSO (step 3) ==============================
   # /users/auth/entra_id           → omniauth strategy (redirect to Entra)
@@ -48,12 +41,16 @@ Rails.application.routes.draw do
   get  '/locale/:lang',          to: 'locale#update'
 
   # === Static assets ===============================================
-  # Same URL space + content-types + cache-control as the matching
-  # Sinatra routes in lib/autodev/web/server.rb (which still serve them
-  # for the `bin/autodev` standalone entry point). Source files live
-  # under lib/autodev/web/public/; propshaft/sprockets is intentionally
-  # deferred to attack-order step 8 (Phlex view port + asset pipeline).
+  # Three explicit `send_file` routes from `app/assets/static/`. Propshaft
+  # isn't wired (single-user CLI dashboard — no asset-digest cache-busting
+  # story to gain from it). URLs are stable.
   get '/assets/turbo.js',                        to: 'assets#turbo_js'
   get '/assets/css/:name.css',                   to: 'assets#css',  constraints: { name: /[a-z0-9_-]+/ }
   get '/assets/vendor/fonts/:name.woff2',        to: 'assets#font', constraints: { name: /[A-Za-z0-9_-]+/ }
+
+  # === Admin =======================================================
+  # Mission Control — Jobs: Solid Queue inspector + administration UI.
+  # No auth gate (cf. config/initializers/mission_control.rb) — same
+  # 127.0.0.1 / NetBird mesh trust model as the rest of the dashboard.
+  mount MissionControl::Jobs::Engine, at: '/admin/jobs'
 end

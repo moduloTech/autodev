@@ -41,6 +41,15 @@ gem 'omniauth-rails_csrf_protection', '~> 1.0'
 # config/application.rb is required for the engine to register its tables.
 gem 'solid_queue', '~> 1.1'
 
+# Mission Control — web UI for inspecting + administering Solid Queue jobs
+# (mounted at /admin/jobs by config/routes.rb). Same Bundler.require-skipped
+# story as Devise/Solid Queue — `require 'mission_control/jobs'` lives in
+# config/application.rb so the engine registers its routes + controllers.
+# `propshaft` is pulled in because MCJ's engine touches `config.assets.paths`
+# at boot — our minimal railtie set otherwise has no asset pipeline.
+gem 'mission_control-jobs', '~> 1.1'
+gem 'propshaft', '~> 1.1'
+
 # Test dependencies
 gem 'minitest', '~> 5.0'
 gem 'rack-test', '~> 2.1'
