@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.7] - 2026-06-09
+
 ### Added
 
 - **Global Microsoft 365 SSO gate (PR3 of the users-rollout chantier).** `ApplicationController` now starts with `before_action :authenticate_user!` — every URL the embedded dashboard exposes is behind Entra ID. `Users::OmniauthCallbacksController` and `AssetsController` opt out so the sign-in handshake + the static CSS/JS/woff2 still work for anonymous traffic. New `AdminApplicationController` chains `require_admin` on top; `Admin::UsersController` inherits from it and `MissionControl::Jobs.base_controller_class` is set so `/admin/jobs` flows through the same gate (the gem's HTTP Basic Auth stays off — Devise + `admin?` replaces it). Three localized failure messages already shipped in alpha.6 (`access_revoked`, `gitlab_identity_unresolved`, `gitlab_unavailable`) — alpha.7 simply turns the surfaces that exercise them on.
