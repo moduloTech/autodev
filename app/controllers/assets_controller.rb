@@ -15,6 +15,11 @@ class AssetsController < ApplicationController
   # assets don't need that protection, so opt out on this controller.
   skip_forgery_protection
 
+  # Static assets are intentionally public: the Entra ID redirect page +
+  # any future unauthenticated screens still need CSS/fonts/turbo.js to
+  # render. PR3 of the users-rollout chantier (cf. docs/users-rollout.md §4).
+  skip_before_action :authenticate_user!, raise: false
+
   ASSETS_ROOT = Rails.root.join('app/assets/static').to_s.freeze
 
   # Vendored Turbo build (no CDN dependency). One file, fixed URL.

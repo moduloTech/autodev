@@ -37,12 +37,17 @@ class AuditTest < ActiveSupport::TestCase
   end
 
   def test_record_swallows_invalid_action_and_returns_nil
+    # `AuditLog.where(action: ...)` rather than `AuditLog.count` so the
+    # assertion is robust against legacy Minitest::Test tests that
+    # don't go through the ActiveSupport::TestCase teardown hook —
+    # they can leak audit_log rows with valid action names that aren't
+    # ours to clean up before our test runs.
     swallowed = capture_logger_warn do
       assert_nil Audit.record!(resource: @issue, action: 'not.a.real.action')
     end
 
     assert_match(/failed to record not\.a\.real\.action/, swallowed)
-    assert_equal 0, AuditLog.count
+    assert_equal 0, AuditLog.where(action: 'not.a.real.action').count
   end
 
   private

@@ -29,37 +29,23 @@
 # becomes the canonical entry point and the autodev §H plan (rake one-shot
 # during cutover) is reachable without copy-paste.
 
-# Helpers extracted from the rake tasks below (Metrics/BlockLength).
+# Helpers extracted from the rake tasks below (Metrics/BlockLength). All
+# delegate to `Autodev::OpsCommands` so `bin/autodev`'s CLI flags
+# (alpha.7+) and these rake tasks share one source of truth.
 
 def autodev_seed_admin
   email = ENV.fetch('EMAIL') { abort '[autodev:seed_admin] EMAIL=... required' }
-  user = User.find_or_initialize_by(email: email)
-  user.name ||= email.split('@', 2).first
-  user.admin = true
-  user.save!(validate: false)
-  Audit.record!(resource: user, action: 'user.created', payload: { source: 'seed_admin', email: email })
-  puts "[autodev:seed_admin] #{user.email} (id=#{user.id}, admin=true)"
+  puts Autodev::OpsCommands.seed_admin(email: email)
 end
 
 def autodev_sync_memberships
-  summary = { synced: 0, skipped: 0 }
-  User.find_each do |user|
-    Autodev::GitlabMembershipSync.for_user!(user)
-    summary[:synced] += 1
-  rescue Autodev::GitlabMembershipSync::UnresolvedGitlabIdentity,
-         Autodev::GitlabMembershipSync::SyncFailed => e
-    warn "[autodev:sync_memberships] skipping #{user.email}: #{e.class}: #{e.message}"
-    summary[:skipped] += 1
-  end
-  puts "[autodev:sync_memberships] #{summary.inspect}"
+  puts Autodev::OpsCommands.sync_memberships
 end
 
 def autodev_link_user
   email = ENV.fetch('EMAIL') { abort '[autodev:link_user] EMAIL=... required' }
   username = ENV.fetch('GITLAB_USERNAME') { abort '[autodev:link_user] GITLAB_USERNAME=... required' }
-  user = User.find_by!(email: email)
-  user.update!(gitlab_username: username, gitlab_user_id: nil)
-  puts "[autodev:link_user] #{user.email} → #{username} (gitlab_user_id will resolve at next sync)"
+  puts Autodev::OpsCommands.link_user(email: email, gitlab_username: username)
 end
 
 namespace :autodev do

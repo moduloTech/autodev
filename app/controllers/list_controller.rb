@@ -11,12 +11,11 @@ class ListController < ApplicationController
   # returns an empty result set (the dataset filter matches nothing).
   def show
     status = params[:status]
-    issues = Issue.where(status: status).order(id: :desc).limit(500).to_a
+    issues = issues_dataset.where(status: status).order(id: :desc).limit(500).to_a
     html = ::Web::Views::List.new(
       status: status,
       issues: issues,
-      locale: web_locale,
-      request_path: request.fullpath
+      **view_kwargs
     ).call
     render html: html.html_safe, layout: false
   end

@@ -11,14 +11,10 @@ class IssuesController < ApplicationController
   # are Rack-compatible (they go through ActionDispatch's Rack layer).
   include ::Web::Helpers
 
-  # Forms in the embedded dashboard are rendered by Phlex (the same
-  # views Sinatra serves) and do NOT emit a CSRF token — the Sinatra
-  # side has no CSRF protection. Until the views are ported to Rails
-  # and the layout starts emitting `csrf_meta_tags`, write actions
-  # opt out of CSRF rather than 422 every form submission. The
-  # opt-out is scoped per-action so we don't accidentally disable
-  # protection on something that doesn't strictly need to.
-  skip_forgery_protection only: %i[reset transition]
+  # CSRF protection is back on as of PR3 of the users-rollout chantier
+  # (alpha.7+). The Phlex layout emits `<meta name='csrf-token'>` and the
+  # reset/transition forms now call `csrf_input_tag` to ship the matching
+  # hidden input — Rails' `protect_from_forgery` validates them on POST.
 
   # GET /issues
   #
@@ -102,8 +98,8 @@ class IssuesController < ApplicationController
     per_page = per_page_for(params)
     issues, total, total_pages, page = paginate(filter_issues(params), page_for(params), per_page)
     ::Web::Views::Issues.new(
-      **pagination_kwargs(issues, total, total_pages, page,
-                          per_page), **filters_kwargs, locale: web_locale, request_path: request.fullpath
+      **pagination_kwargs(issues, total, total_pages, page, per_page),
+      **filters_kwargs, **view_kwargs
     ).call
   end
 
@@ -124,8 +120,7 @@ class IssuesController < ApplicationController
       issue_model: issue_model,
       events: events_for(issue_model),
       kpis: dashboard_kpis,
-      locale: web_locale,
-      request_path: request.fullpath
+      **view_kwargs
     ).call
   end
 

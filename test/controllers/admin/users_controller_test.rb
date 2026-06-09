@@ -4,17 +4,19 @@ require_relative '../../rails_helper'
 require 'action_dispatch/testing/integration'
 require 'devise'
 
-# PR2 admin guard — explicit per-route check until PR3 turns on the
-# global authenticate_user!. Anonymous and non-admin sessions both
-# return 403; admin sessions render the read-only audit page.
+# Admin guard. PR3 (alpha.7+) put `authenticate_user!` on
+# ApplicationController and made `AdminApplicationController` chain
+# `require_admin` on top — so anonymous requests now bounce to the
+# Entra ID redirect (302), non-admin sessions hit the admin gate
+# (403), and admin sessions render the page.
 module Admin
   class UsersControllerTest < ActionDispatch::IntegrationTest
     include Devise::Test::IntegrationHelpers
 
-    def test_anonymous_request_returns_forbidden
+    def test_anonymous_request_redirects_to_sign_in
       get '/admin/users'
 
-      assert_response :forbidden
+      assert_response :redirect
     end
 
     def test_non_admin_user_returns_forbidden

@@ -3,13 +3,13 @@
 # Configuration for the Mission Control — Jobs dashboard (mounted at
 # /admin/jobs by config/routes.rb).
 #
-# We turn off the gem's built-in HTTP Basic Auth gate for v1.0.0-alpha.x:
-# autodev binds to 127.0.0.1 by default and access is mediated by the
-# user's NetBird/Tailscale mesh, the same trust model the rest of the
-# dashboard runs under. Re-enable with `http_basic_auth_user` +
-# `http_basic_auth_password` (or use Devise `authenticate_user!` in the
-# host app once Entra ID is gating the Phlex dashboard too).
+# PR3 of the users-rollout chantier (alpha.7+) gates the whole dashboard
+# behind Microsoft 365 SSO. We override Mission Control's base controller
+# so its controllers inherit our `AdminApplicationController` chain:
+# authenticate_user! → require_admin. The gem's HTTP Basic Auth gate
+# stays off — Devise + admin? handles it now.
 MissionControl::Jobs.http_basic_auth_enabled = false
+MissionControl::Jobs.base_controller_class = '::AdminApplicationController'
 
 # Without explicit `applications`, Mission Control inspects the default
 # ActiveJob queue adapter — which is Solid Queue here (set in

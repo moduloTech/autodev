@@ -177,6 +177,7 @@ module Web
       def render_retry_form(row)
         form(method: 'post', action: "/issues/#{row[:id]}/reset", style: 'display: inline',
              data: { confirm: t_web(:web_errors_confirm_reset, iid: row[:issue_iid]) }) do
+          csrf_input_tag
           button(type: 'submit', class: 'btn btn-primary-sm', style: retry_btn_style) do
             render Components::Icon.new(name: 'refresh', size: 13)
             plain ' '

@@ -18,8 +18,11 @@ class ProjectsController < ApplicationController
   # Ported from `get '/projects/:slug'` in lib/autodev/web/server.rb.
   # No 404 on missing project (Sinatra parity): an unknown slug still
   # renders the page with empty issues + zero stats + empty config.
+  # Non-admin users get 403 on slugs outside their memberships.
   def show
     project_path = project_unslug(params[:slug])
+    return head :forbidden unless admin_or_no_session? || visible_project_paths.include?(project_path)
+
     render html: render_project_show(project_path).html_safe, layout: false
   end
 
@@ -33,22 +36,20 @@ class ProjectsController < ApplicationController
       stats: project_overview_stats(project_path),
       kpis: dashboard_kpis,
       tab: params[:tab].to_s,
-      locale: web_locale,
-      request_path: request.fullpath
+      **view_kwargs
     ).call
   end
 
   def project_issues_for(project_path)
-    Issue.where(project_path: project_path)
-         .order(id: :desc).limit(100).to_a
+    issues_dataset.where(project_path: project_path)
+                  .order(id: :desc).limit(100).to_a
   end
 
   def render_projects_view
     ::Web::Views::ProjectsIndex.new(
       projects: projects_with_stats,
       kpis: dashboard_kpis,
-      locale: web_locale,
-      request_path: request.fullpath
+      **view_kwargs
     ).call
   end
 

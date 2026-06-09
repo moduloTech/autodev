@@ -15,16 +15,16 @@ class ErrorsController < ApplicationController
     ::Web::Views::Errors.new(
       errored: errored_issues,
       kpis: dashboard_kpis,
-      locale: web_locale,
-      request_path: request.fullpath
+      **view_kwargs
     ).call
   end
 
-  # Mirrors the Sinatra query: status in (error, needs_clarification)
-  # OR post_completion_error IS NOT NULL, ordered by id desc.
+  # status in (error, needs_clarification) OR post_completion_error IS NOT NULL,
+  # ordered by id desc. Scoped via issues_dataset for non-admin users.
   def errored_issues
-    Issue.where("status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL")
-         .order(id: :desc)
-         .to_a
+    issues_dataset
+      .where("status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL")
+      .order(id: :desc)
+      .to_a
   end
 end

@@ -17,23 +17,57 @@ module Web
       ::Web.config || {}
     end
 
+    # Common kwargs every Phlex view consumes via `Web::Views::Base`. Pulled
+    # into a helper so the ~10 controllers that hand-roll `.new(...)` calls
+    # share a single source of truth (PR3 of the users-rollout chantier).
+    # Controllers spread `**view_kwargs` into their view instantiations.
+    def view_kwargs
+      {
+        locale: web_locale,
+        request_path: request.fullpath,
+        current_user_email: respond_to?(:current_user) ? current_user&.email : nil,
+        csrf_token: respond_to?(:form_authenticity_token) ? form_authenticity_token : nil
+      }
+    end
+
     # AR replacements for the Sequel datasets the legacy code returned.
     # Both expressions are `ActiveRecord::Relation`s — same enumeration
     # contract Phlex views consume.
+    # Projects the signed-in user is allowed to see. Admins see every
+    # row in the projects table; everyone else only sees projects they
+    # have a membership on (resolved by GitlabMembershipSync). Memoized
+    # per request — every helper below routes through this. Falls back
+    # to "all" when there's no current_user (test bootstrap, ad-hoc
+    # rails runner). PR3 of the users-rollout chantier.
+    def visible_project_paths
+      @visible_project_paths ||=
+        if !respond_to?(:current_user) || current_user.nil? || current_user.admin?
+          Project.pluck(:gitlab_path)
+        else
+          current_user.visible_projects.pluck(:gitlab_path)
+        end
+    end
+
+    def admin_or_no_session?
+      !respond_to?(:current_user) || current_user.nil? || current_user.admin?
+    end
+
     def issues_dataset
-      Issue.all
+      admin_or_no_session? ? Issue.all : Issue.where(project_path: visible_project_paths)
     end
 
     def activity_events_dataset
-      ActivityEvent.all
+      return ActivityEvent.all if admin_or_no_session?
+
+      ActivityEvent.where(issue_id: issues_dataset.select(:id))
     end
 
     def status_counts
-      Issue.group(:status).count
+      issues_dataset.group(:status).count
     end
 
     def active_issues
-      Issue.where(status: Dashboard::ACTIVE_STATES).order(id: :desc).to_a
+      issues_dataset.where(status: Dashboard::ACTIVE_STATES).order(id: :desc).to_a
     end
 
     def issues_grouped_by_status(rows)
@@ -42,17 +76,19 @@ module Web
 
     # Union of projects from the YAML config and projects that have any
     # tracked issue. Used by the /projects index so a configured-but-quiet
-    # project still shows up before its first issue lands.
+    # project still shows up before its first issue lands. Filtered by
+    # visible_project_paths for non-admin users.
     def all_known_projects
       from_config = Array(app_config['projects']).map { |p| p['path'] }.compact
-      from_db = Issue.distinct.pluck(:project_path)
-      (from_config + from_db).uniq.sort
+      from_db = issues_dataset.distinct.pluck(:project_path)
+      union = (from_config + from_db).uniq.sort
+      admin_or_no_session? ? union : (union & visible_project_paths)
     end
 
     # All projects that have at least one tracked issue, ordered by total
     # count desc. Returns [{path:, total:, active:, done:, error:}, ...].
     def project_breakdown
-      paths = Issue.distinct.pluck(:project_path).compact.sort
+      paths = issues_dataset.distinct.pluck(:project_path).compact.sort
       paths.map { |path| project_stats(path) }
     end
 
@@ -81,10 +117,10 @@ module Web
 
     # Counts used by the dashboard KPI cards.
     def dashboard_kpis
-      counts = Issue.group(:status).count
+      counts = issues_dataset.group(:status).count
       active = Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 }
-      delivered_week = Issue.where(status: 'done')
-                            .where('created_at >= ?', (Date.today - 7).to_s).count
+      delivered_week = issues_dataset.where(status: 'done')
+                                     .where('created_at >= ?', (Date.today - 7).to_s).count
       { active: active, pending: counts['pending'] || 0,
         errors: counts['error'] || 0,
         awaiting: counts['needs_clarification'] || 0,
@@ -95,9 +131,9 @@ module Web
     # Used by the dashboard sparkline.
     def weekly_activity_counts
       since = (Date.today - 6).to_s
-      rows = ActivityEvent.where('created_at >= ?', since)
-                          .group('date(created_at)')
-                          .count
+      rows = activity_events_dataset.where('created_at >= ?', since)
+                                    .group('date(created_at)')
+                                    .count
       (0..6).map { |offset| rows[(Date.today - 6 + offset).to_s] || 0 }
     end
 
@@ -144,7 +180,7 @@ module Web
     end
 
     def find_issue(id)
-      Issue.find_by(id: Integer(id))
+      issues_dataset.find_by(id: Integer(id))
     end
 
     def h(text)

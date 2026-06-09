@@ -151,6 +151,7 @@ module Web
       def render_reset_form
         form(method: 'post', action: "/issues/#{@issue[:id]}/reset",
              data: { confirm: t_web(:web_issue_confirm_reset) }) do
+          csrf_input_tag
           render Components::Button.new(kind: :danger, size: :md, full: true, type: 'submit',
                                         icon: Components::Icon.new(name: 'refresh', size: 13)) do
             t_web(:web_issue_reset)
@@ -176,6 +177,7 @@ module Web
         form(method: 'post', action: "/issues/#{@issue[:id]}/transition",
              data: { 'confirm-template' => template },
              style: 'display: flex; gap: 8px; align-items: center;') do
+          csrf_input_tag
           select(name: 'event', style: 'flex: 1;') do
             events.each { |event| option(value: event.to_s) { event_label(event) } }
           end

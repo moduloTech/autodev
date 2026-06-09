@@ -48,6 +48,7 @@ module Autodev
     end
 
     def for_user!(user)
+      warn_if_no_projects
       resolve_gitlab_identity!(user) if user.gitlab_user_id.nil?
       desired = compute_desired_roles_for(user)
       reconcile_memberships!(user, desired)
@@ -56,6 +57,7 @@ module Autodev
     end
 
     def for_all_users!
+      warn_if_no_projects
       User.find_each do |user|
         for_user!(user)
       rescue UnresolvedGitlabIdentity, SyncFailed => e
@@ -67,6 +69,20 @@ module Autodev
 
     def client
       @client ||= ::GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @config['gitlab_token'])
+    end
+
+    # Idempotent — logs once per sync run. Bobette hit this during the
+    # alpha.6 verification: a fresh DB with no projects imported looks
+    # identical to a healthy sync that simply produces zero memberships,
+    # except every user ends up `disabled`. The warning makes the cause
+    # impossible to miss.
+    def warn_if_no_projects
+      return if @warned_no_projects
+      return if Project.exists?
+
+      @warned_no_projects = true
+      @logger.warn('[gitlab_sync] WARNING: `projects` table is empty — every user will be marked ' \
+                   'disabled. Import the YAML config first (autodev:migrate_projects_from_yaml).')
     end
 
     # ---- identity resolution ---------------------------------------

@@ -22,6 +22,14 @@ require_relative '../config/environment'
 require 'minitest/autorun'
 require 'active_support/test_case'
 
+# Force routes to load so `devise_for :users` registers `Devise.mappings[:user]`
+# before any `Devise::Test::IntegrationHelpers#sign_in` call. Without this,
+# the integration tests for the admin / issues controllers occasionally
+# raise "Could not find a valid mapping for #<User ...>" when the test file
+# order causes `sign_in` to run before the routes block has been touched
+# (Devise populates mappings as a side-effect of `Rails.application.routes`).
+Rails.application.reload_routes!
+
 # Run all pending migrations against the (in-memory by default) test DB,
 # once per process. Idempotent — re-running with everything already migrated
 # is a no-op.

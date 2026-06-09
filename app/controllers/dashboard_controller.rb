@@ -19,17 +19,17 @@ class DashboardController < ApplicationController
       kpis: dashboard_kpis,
       weekly_activity: weekly_activity_counts,
       by_project: project_breakdown,
-      locale: web_locale,
-      request_path: request.fullpath
+      **view_kwargs
     ).call
   end
 
   # Same query as ErrorsController#index — status in
   # (error, needs_clarification) OR post_completion_error IS NOT NULL,
-  # id desc.
+  # id desc. Scoped via issues_dataset for non-admin users.
   def errored_issues
-    Issue.where("status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL")
-         .order(id: :desc)
-         .to_a
+    issues_dataset
+      .where("status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL")
+      .order(id: :desc)
+      .to_a
   end
 end

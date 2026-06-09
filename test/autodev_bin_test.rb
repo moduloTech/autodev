@@ -78,4 +78,29 @@ class ParseArgsTest < Minitest::Test
     assert_equal 2, config['max_workers']
     assert_equal 30, config['poll_interval']
   end
+
+  # === Ops CLI flags (alpha.7+) ============================================
+  # These mirror the lib/tasks/autodev.rake helpers — both delegate to
+  # `Autodev::OpsCommands` so behaviour stays identical.
+
+  def test_seed_admin_flag_captures_email
+    config = parse_args(['--seed-admin', 'marc@modulotech.fr'])
+
+    assert config['seed_admin']
+    assert_equal 'marc@modulotech.fr', config['seed_admin_email']
+  end
+
+  def test_sync_memberships_flag
+    config = parse_args(['--sync-memberships'])
+
+    assert config['sync_memberships']
+  end
+
+  def test_link_user_flag_splits_email_and_username
+    config = parse_args(['--link-user', 'marc@modulotech.fr,mleclercq'])
+
+    assert config['link_user']
+    assert_equal 'marc@modulotech.fr',     config['link_user_email']
+    assert_equal 'mleclercq',              config['link_user_username']
+  end
 end

@@ -2,15 +2,20 @@
 
 require_relative '../rails_helper'
 require 'action_dispatch/testing/integration'
+require 'devise'
 
 # Integration test for the audit fan-out on the two write actions of
-# IssuesController. Predates user gating (PR3) — actor is expected to be
-# NULL in every assertion. PR3 will revisit these to assert the row
-# carries `current_user.id`.
+# IssuesController. PR3 (alpha.7+) turned on the global gating, so we
+# sign in an admin to reach the actions — the audit row is expected to
+# carry the actor_id of the signed-in user.
 class IssuesControllerAuditTest < ActionDispatch::IntegrationTest
+  include Devise::Test::IntegrationHelpers
+
   setup do
+    @admin = User.create!(email: 'admin@modulotech.fr', name: 'Admin', admin: true)
     @issue = Issue.create!(project_path: 'group/proj', issue_iid: 500, status: 'error',
                            error_message: 'boom', retry_count: 2)
+    sign_in @admin
   end
 
   def test_reset_writes_audit_log_pointing_at_issue
@@ -18,7 +23,7 @@ class IssuesControllerAuditTest < ActionDispatch::IntegrationTest
     log = AuditLog.where(action: 'issue.reset_manual').last
 
     assert_not_nil log
-    assert_nil log.actor_id
+    assert_equal @admin.id, log.actor_id
     assert_equal @issue.id, log.resource_id
   end
 
@@ -37,7 +42,7 @@ class IssuesControllerAuditTest < ActionDispatch::IntegrationTest
     log = AuditLog.where(action: 'issue.transition_manual').last
 
     assert_not_nil log
-    assert_nil log.actor_id
+    assert_equal @admin.id, log.actor_id
   end
 
   def test_transition_payload_includes_event_and_states

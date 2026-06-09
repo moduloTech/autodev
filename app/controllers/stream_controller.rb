@@ -51,8 +51,20 @@ class StreamController < ApplicationController
         next
       end
       break if event == ::Web::EventBus::SHUTDOWN_SENTINEL
+      next unless visible_to_current_user?(event)
 
       response.stream.write(format_sse(event))
     end
+  end
+
+  # Drops events for issues the signed-in user isn't allowed to see.
+  # Admins (and any pre-auth caller) see everything; everyone else
+  # only sees events for issues whose `project_path` is in their
+  # `visible_project_paths`. PR3 of the users-rollout chantier.
+  def visible_to_current_user?(event)
+    return true if admin_or_no_session?
+    return false unless event.respond_to?(:issue) && event.issue
+
+    visible_project_paths.include?(event.issue.project_path)
   end
 end

@@ -36,6 +36,12 @@ module Users
   #    cached memberships; brand-new users get rolled back so we don't
   #    leave a half-provisioned account behind.
   class OmniauthCallbacksController < Devise::OmniauthCallbacksController
+    # The sign-in flow obviously can't require an authenticated user.
+    # ApplicationController#authenticate_user! is inherited via Devise's
+    # parent_controller default; skip it here so /users/auth/entra_id and
+    # its callback stay reachable to anonymous visitors.
+    skip_before_action :authenticate_user!, raise: false
+
     def entra_id
       user = User.from_omniauth(auth)
       was_new = user.previously_new_record?

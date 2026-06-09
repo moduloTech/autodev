@@ -10,14 +10,14 @@
 # runs mr-review in headless mode.
 #
 # Usage:
-#   autodev                                  # Poll with default config
-#   autodev --once                           # Single poll cycle then exit
-#   autodev --status                         # Show dashboard of tracked issues
-#   autodev --errors                         # Show details for all errored/blocked issues
-#   autodev --errors 15712                   # Show details for a specific errored/blocked issue
-#   autodev --reset                          # Reset all errored issues to pending
-#   autodev --reset 15712                    # Reset a specific errored issue to pending
-#   autodev -c ~/.autodev/custom.yml --once  # Custom config, single cycle
+#   autodev                                                # Supervisor (default)
+#   autodev --status                                       # Dashboard of tracked issues
+#   autodev --errors [IID]                                 # Details for errored/blocked issues
+#   autodev --reset [IID]                                  # Reset errored issues to pending
+#   autodev --seed-admin EMAIL                             # Seed an admin User
+#   autodev --sync-memberships                             # Reconcile project_memberships
+#   autodev --link-user EMAIL,GITLAB_USERNAME              # Override gitlab_username
+#   autodev -c ~/.autodev/custom.yml                       # Custom config path
 #
 # Embedded web UI:
 #   When `web.enabled: true` (default) and not running with --once, autodev
@@ -85,6 +85,25 @@ end
 def define_query_options(opts, overrides)
   define_status_options(opts, overrides)
   define_reset_and_errors_options(opts, overrides)
+  define_ops_options(opts, overrides)
+end
+
+def define_ops_options(opts, overrides) # rubocop:disable Metrics/MethodLength
+  opts.on('--seed-admin EMAIL', 'Seed an admin User by email and exit') do |email|
+    overrides['seed_admin'] = true
+    overrides['seed_admin_email'] = email
+  end
+  opts.on('--sync-memberships',
+          'Reconcile project_memberships against GitLab for every user and exit') do
+    overrides['sync_memberships'] = true
+  end
+  opts.on('--link-user EMAIL,GITLAB_USERNAME', Array,
+          'Override the GitLab username for a User (resets gitlab_user_id; next sync resolves it)') do |pair|
+    abort '--link-user expects EMAIL,GITLAB_USERNAME (comma-separated, no spaces)' if pair.size != 2
+    overrides['link_user'] = true
+    overrides['link_user_email'] = pair[0]
+    overrides['link_user_username'] = pair[1]
+  end
 end
 
 def define_status_options(opts, overrides)
@@ -117,10 +136,22 @@ end
 
 # == Early commands ============================================================
 
-def handle_early_commands(config, pastel)
+def handle_early_commands(config, pastel) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
   run_early_command(config, pastel, 'status') { Dashboard.show(config) }
   run_early_command(config, pastel, 'errors') { Dashboard.show_errors(config) }
   run_early_command(config, pastel, 'reset') { Dashboard.reset(config, pastel) }
+  run_early_command(config, pastel, 'seed_admin') do
+    puts Autodev::OpsCommands.seed_admin(email: config.fetch('seed_admin_email'))
+  end
+  run_early_command(config, pastel, 'sync_memberships') do
+    puts Autodev::OpsCommands.sync_memberships
+  end
+  run_early_command(config, pastel, 'link_user') do
+    puts Autodev::OpsCommands.link_user(
+      email: config.fetch('link_user_email'),
+      gitlab_username: config.fetch('link_user_username')
+    )
+  end
 end
 
 def run_early_command(config, _pastel, key)
