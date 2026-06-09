@@ -462,3 +462,60 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
   border-top: 1px solid var(--divider); padding-top: 14px;
 }
+
+.confirm-dialog {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  color: var(--text);
+  box-shadow: 0 12px 40px rgba(14, 16, 20, 0.18);
+  min-width: 340px;
+  max-width: min(90vw, 480px);
+}
+.confirm-dialog::backdrop {
+  background: rgba(14, 16, 20, 0.45);
+}
+.confirm-dialog form {
+  padding: 22px 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.confirm-dialog-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.confirm-dialog-message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.confirm-dialog-btn {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--paper);
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1.2;
+}
+.confirm-dialog-btn-secondary:hover { background: var(--paper-2); }
+.confirm-dialog-btn-primary {
+  background: var(--accent-solid);
+  color: var(--text-on-accent);
+  border-color: var(--accent-solid-hover);
+}
+.confirm-dialog-btn-primary:hover { background: var(--accent-solid-hover); }

@@ -104,7 +104,10 @@ fr:
   web_issue_post_completion_error: Erreur post-completion
   web_issue_actions: Actions
   web_issue_reset: Réinitialiser
-  web_issue_confirm_reset: Réinitialiser cette demande à pending ?
+  web_issue_confirm_reset: Relancer cette demande depuis le début ?
+  web_confirm_title: Confirmer l'action
+  web_confirm_ok: Confirmer
+  web_confirm_cancel: Annuler
   web_issue_force_transition: Forcer la transition
   web_issue_confirm_transition_prefix: 'Forcer la transition « '
   web_issue_confirm_transition_suffix: " » ?"
@@ -146,7 +149,7 @@ fr:
   web_errors_title: À surveiller
   web_errors_subtitle: Demandes qui ont échoué ou attendent une intervention humaine.
   web_errors_none: Aucune demande à surveiller pour le moment.
-  web_errors_confirm_reset: 'Reset #%{iid} à pending ?'
+  web_errors_confirm_reset: 'Relancer la demande #%{iid} depuis le début ?'
   web_errors_banner_one: Une demande a besoin de vous.
   web_errors_banner_many: "%{count} demandes ont besoin de vous."
   web_errors_banner_body: Autodev s'arrête et vous appelle quand il rencontre un blocage qu'il ne peut pas résoudre seul.

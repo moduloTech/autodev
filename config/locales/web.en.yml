@@ -104,7 +104,10 @@ en:
   web_issue_post_completion_error: Post-completion error
   web_issue_actions: Actions
   web_issue_reset: Reset
-  web_issue_confirm_reset: Reset this request to pending?
+  web_issue_confirm_reset: Restart this request from the beginning?
+  web_confirm_title: Confirm action
+  web_confirm_ok: Confirm
+  web_confirm_cancel: Cancel
   web_issue_force_transition: Force transition
   web_issue_confirm_transition_prefix: Force transition "
   web_issue_confirm_transition_suffix: "\"?"
@@ -146,7 +149,7 @@ en:
   web_errors_title: To watch
   web_errors_subtitle: Requests that failed or are waiting for a human.
   web_errors_none: Nothing to watch right now.
-  web_errors_confirm_reset: 'Reset #%{iid} to pending?'
+  web_errors_confirm_reset: 'Restart request #%{iid} from the beginning?'
   web_errors_banner_one: One request needs your attention.
   web_errors_banner_many: "%{count} requests need your attention."
   web_errors_banner_body: Autodev pauses and pings you whenever it hits a blocker it can't work around on its own.

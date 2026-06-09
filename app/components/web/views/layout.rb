@@ -40,8 +40,11 @@ module Web
         });
 
         // Delegated confirm-on-submit (Phlex 2 forbids inline onsubmit).
+        // Native <dialog> instead of window.confirm so the prompt stays
+        // styled with the app and supports keyboard/screenreader navigation.
         document.addEventListener('submit', (e) => {
           const f = e.target;
+          if (f.id === 'confirm-dialog-form') return;
           let msg = f.getAttribute('data-confirm');
           if (!msg) {
             const tpl = f.getAttribute('data-confirm-template');
@@ -51,7 +54,21 @@ module Web
               msg = tpl.replace('$event', opt ? opt.text : (sel ? sel.value : ''));
             }
           }
-          if (msg && !confirm(msg)) e.preventDefault();
+          if (!msg) return;
+          e.preventDefault();
+          const dialog = document.getElementById('confirm-dialog');
+          if (!dialog || !dialog.showModal) {
+            // Browser without <dialog> support — fall back to confirm().
+            if (confirm(msg)) f.submit();
+            return;
+          }
+          dialog.querySelector('.confirm-dialog-message').textContent = msg;
+          dialog.returnValue = '';
+          dialog.showModal();
+          // form.submit() does NOT re-fire the submit event, so no recursion.
+          dialog.addEventListener('close', () => {
+            if (dialog.returnValue === 'confirm') f.submit();
+          }, { once: true });
         });
 
         // Theme toggle — wired via data-action="toggle-theme".
@@ -88,6 +105,26 @@ module Web
               end
             else
               yield
+            end
+            render_confirm_dialog
+          end
+        end
+      end
+
+      def render_confirm_dialog # rubocop:disable Metrics/MethodLength
+        dialog(id: 'confirm-dialog', class: 'confirm-dialog') do
+          form(id: 'confirm-dialog-form', method: 'dialog') do
+            h2(class: 'confirm-dialog-title') { t_web(:web_confirm_title) }
+            p(class: 'confirm-dialog-message')
+            div(class: 'confirm-dialog-actions') do
+              button(type: 'submit', value: 'cancel',
+                     class: 'confirm-dialog-btn confirm-dialog-btn-secondary') do
+                t_web(:web_confirm_cancel)
+              end
+              button(type: 'submit', value: 'confirm',
+                     class: 'confirm-dialog-btn confirm-dialog-btn-primary') do
+                t_web(:web_confirm_ok)
+              end
             end
           end
         end
