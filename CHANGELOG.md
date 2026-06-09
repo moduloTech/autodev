@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0-alpha.2] - 2026-06-09
+
+### Fixed
+
+- `config/recurring.yml` used `"every <N> seconds"` for the `AutodevPollJob` schedule, which Fugit happens to parse as `Fugit::Cron` for small values (≤ a few seconds) but maps to `EtOrbi::EoTime` for anything from 60s upward. Solid Queue's `SolidQueue::RecurringTask#ensure_schedule_supported` validates `parsed_schedule.instance_of?(Fugit::Cron)` and rejects everything else with `"is not a supported recurring schedule"`. With the default `poll_interval: 300` from `~/.autodev/config.yml` this fell into the rejected band — the supervisor's `bin/jobs start` child died immediately after Solid Queue parsed the recurring config, the supervisor noticed (`[supervisor] child solid-queue exited (status=1); shutting down peers`), and the whole topology tore down without ever serving a job. Fix: emit a real cron expression instead. `schedule: "*/<%= [ENV.fetch('AUTODEV_POLL_INTERVAL', '300').to_i / 60, 1].max %> * * * *"` rounds the legacy seconds value up to the nearest minute and emits `*/N * * * *` — Fugit always parses that as `Fugit::Cron` and Solid Queue accepts it. Supported range without further editing: 60s to 3540s (1..59 minutes). Beyond that, hand-edit the schedule with hour-level cron syntax. The default 300s = 5 minutes = `*/5 * * * *` keeps the legacy cadence. Local smoke test (with `AUTODEV_POLL_INTERVAL=2`) accidentally hit Fugit's small-seconds-as-cron heuristic and missed this in alpha.1 — caught only on a prod-default-config deploy.
+
 ## [1.0.0-alpha.1] - 2026-06-09
 
 First major-version bump — the railsification (8 attack-order steps over 5 days, 2026-06-02 → 2026-06-09) is complete. `autodev` is now a Rails 8.1.3 application: AR models, Solid Queue for the recurring poll, supervised subprocesses for web + worker, Devise + Entra ID for SSO. Tagged as `alpha.1` rather than `1.0.0` outright because the new topology hasn't yet run a full week against real production traffic.

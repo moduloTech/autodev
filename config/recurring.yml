@@ -1,19 +1,25 @@
 # Solid Queue recurring tasks (railsification step 5).
 #
 # AutodevPollJob is the GitLab-discovery tick that replaces the
-# `Poller#poll_loop` while-true in `lib/autodev/poller.rb`. It runs every
-# AUTODEV_POLL_INTERVAL seconds — defaulting to 300 to mirror the legacy
-# `poll_interval: 300`. The supervisor (step 6) sets this env var from
-# ~/.autodev/config.yml so user-customised intervals carry through.
+# `Poller#poll_loop` while-true in `lib/autodev/poller.rb`. The schedule
+# is a standard cron expression because Solid Queue's
+# `SolidQueue::RecurringTask#ensure_schedule_supported` rejects anything
+# that doesn't parse as `Fugit::Cron` (Fugit happens to map small
+# "every N seconds" strings to Cron but anything ≥60s falls into
+# `EtOrbi::EoTime`, which Solid Queue rejects as
+# "Schedule is not a supported recurring schedule").
 #
-# `every N seconds` is Solid Queue's fluent.parse syntax — no need for cron
-# specs at this granularity.
+# AUTODEV_POLL_INTERVAL is interpreted as seconds; we round up to the
+# nearest minute and emit `*/N * * * *` (cron's minute field). The
+# default of 300s = 5min keeps the legacy `poll_interval: 300` cadence.
+# Intervals between 60s and 3540s (1..59 min) are supported as-is; for
+# longer cadences edit this file directly with hour-level cron syntax.
 
 default: &default
   autodev_poll:
     class: AutodevPollJob
     queue: default
-    schedule: "every <%= ENV.fetch('AUTODEV_POLL_INTERVAL', 300) %> seconds"
+    schedule: "*/<%= [ENV.fetch('AUTODEV_POLL_INTERVAL', '300').to_i / 60, 1].max %> * * * *"
 
 development:
   <<: *default
