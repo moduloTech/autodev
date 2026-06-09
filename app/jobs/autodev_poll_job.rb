@@ -18,9 +18,10 @@ class AutodevPollJob < ApplicationJob
       return
     end
 
+    wrapped_logger = ::Autodev::JobLogger.new(logger)
     Array(config['projects']).each do |project_config|
       ::Autodev::PollDispatcher.new(config: config, project_config: project_config,
-                                    logger: logger).dispatch
+                                    logger: wrapped_logger).dispatch
     end
   end
 

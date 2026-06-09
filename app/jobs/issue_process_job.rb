@@ -53,7 +53,10 @@ class IssueProcessJob < ApplicationJob
       client: build_client(config),
       config: config,
       project_config: project_config,
-      logger: logger,
+      # Legacy workflow classes (IssueProcessor, MrFixer, PipelineMonitor,
+      # ActivityLogger) call `logger.info(msg, project: …)` — kwargs that
+      # AppLogger accepted but Rails' Logger doesn't. JobLogger discards them.
+      logger: ::Autodev::JobLogger.new(logger),
       token: config['gitlab_token']
     }
   end
@@ -75,7 +78,8 @@ class IssueProcessJob < ApplicationJob
   def perform_post_completion(issue, config, project_config)
     monitor = ::PipelineMonitor.new(**worker_kwargs(config, project_config))
     issue.start_post_completion!
-    ctx = ::ActivityLogger::Ctx.new(build_client(config), project_config['path'], logger)
+    ctx = ::ActivityLogger::Ctx.new(build_client(config), project_config['path'],
+                                    ::Autodev::JobLogger.new(logger))
     ::ActivityLogger.post(ctx, issue, :post_completion)
     monitor.run_post_completion(issue, project_config['post_completion'])
     issue.post_completion_done!
@@ -108,7 +112,8 @@ class IssueProcessJob < ApplicationJob
 
   def log_retry_activity(issue, config, project_config)
     max = (project_config['max_retries'] || config['max_retries']).to_i
-    ctx = ::ActivityLogger::Ctx.new(build_client(config), project_config['path'], logger)
+    ctx = ::ActivityLogger::Ctx.new(build_client(config), project_config['path'],
+                                    ::Autodev::JobLogger.new(logger))
     ::ActivityLogger.post(ctx, issue, :retry, attempt: issue.retry_count + 1, max: max)
   end
 end

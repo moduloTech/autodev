@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0-alpha.3] - 2026-06-09
+
+### Fixed
+
+- Every `AutodevPollJob` execution crashed with `ArgumentError: wrong number of arguments (given 2, expected 0..1)` in `Autodev::PollDispatcher#dispatch`'s rescue clause. The legacy `AppLogger` (`lib/autodev/logger.rb`) accepted `logger.info(msg, project: path)` — message + structured-context kwargs — and emitted a tagged log line. The workflow code (`PollDispatcher`, `IssueProcessor`, `MrFixer`, `PipelineMonitor`, ...) calls that signature in ~30 places. With the Solid Queue cutover (step 5/6), the logger reaching those classes is now Rails' `ActiveSupport::BroadcastLogger` wrapping Ruby's stdlib `Logger`, which strictly accepts 0..1 positional args and rejects kwargs. The very first thing PollDispatcher does after a discovery exception is `@logger.error("[poll_dispatcher] #{@path} failed: ...", project: @path)` — kaboom. Fix: new `Autodev::JobLogger` (`app/services/autodev/job_logger.rb`) — a `SimpleDelegator`-based adapter that overrides `info`/`warn`/`error`/`debug`/`fatal`/`unknown` to swallow kwargs before forwarding to the wrapped logger. `AutodevPollJob` and `IssueProcessJob` wrap the ActiveJob `logger` in `JobLogger` before handing it to `PollDispatcher` / `IssueProcessor` / `MrFixer` / `PipelineMonitor` / `ActivityLogger::Ctx`. Structured-context kwargs (`project:`, `mr_iid:`, …) are silently dropped — the message string usually contains the same info anyway. End-to-end smoke: AutodevPollJob now performs cleanly, runs through PollDispatcher's six dispatch passes, and either enqueues IssueProcessJobs or finishes with `Performed AutodevPollJob ... in N ms`.
+
 ## [1.0.0-alpha.2] - 2026-06-09
 
 ### Fixed
