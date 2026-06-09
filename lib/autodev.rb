@@ -4,14 +4,11 @@ module Autodev
   VERSION = '0.15.2'
 end
 
-# Runtime gem dependencies. Previously these were loaded by bin/autodev's
-# `bundler/inline` block (auto-require); since phase B of the railsification
-# both bin/autodev and the Rails process load these modules, so the require
-# block lives here. Idempotent — re-requiring a gem is a no-op. `sequel` is
-# intentionally absent — the Sequel-side `Issue`/`ActivityEvent` were
-# retired in step 2 second half. `sinatra/base` still lives in
-# `lib/autodev/web.rb` because the Phlex views under web/views/ co-locate
-# with what was once a Sinatra app (deletion scheduled for step 8).
+# Runtime gem dependencies. Idempotent — re-requiring a gem is a no-op.
+# `sequel` and `sinatra/base` are intentionally absent — the Sequel-side
+# `Issue`/`ActivityEvent` were retired in step 2 second half and the
+# Sinatra `Web::Server` was retired in step 8. Phlex views now live under
+# `app/components/web/views/` and load via Zeitwerk.
 require 'aasm'
 require 'gitlab'
 require 'pastel'
@@ -48,4 +45,3 @@ require_relative 'autodev/pipeline_monitor'
 require_relative 'autodev/usage_checker'
 require_relative 'autodev/poll_router'
 require_relative 'autodev/dashboard'
-require_relative 'autodev/web'

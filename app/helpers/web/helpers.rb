@@ -14,7 +14,7 @@ module Web
     include I18nHelpers
 
     def app_config
-      Web::Server.app_config || {}
+      ::Web.config || {}
     end
 
     # AR replacements for the Sequel datasets the legacy code returned.

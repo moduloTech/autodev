@@ -60,22 +60,24 @@ fr:
   web_col_done: Terminées
   web_col_error: Erreur
   web_col_message: Message
+  # Status labels — vocabulaire métier (cf. autodev/docs/autospec.md §I).
+  # Le libellé décrit ce qu'Autodev fait, pas l'étape technique.
   web_status_pending: En attente
   web_status_cloning: Préparation
-  web_status_checking_spec: Lecture du besoin
-  web_status_implementing: Développement en cours
-  web_status_committing: Sauvegarde du travail
+  web_status_checking_spec: Compréhension de la demande
+  web_status_implementing: Écriture du code
+  web_status_committing: Sauvegarde
   web_status_pushing: Envoi sur GitLab
-  web_status_creating_mr: Création de la demande
-  web_status_reviewing: Relecture automatique
-  web_status_checking_pipeline: Vérifications auto.
-  web_status_fixing_discussions: Corrections après revue
-  web_status_fixing_pipeline: Correction des tests
+  web_status_creating_mr: Ouverture de la demande de fusion
+  web_status_reviewing: Relecture du travail
+  web_status_checking_pipeline: Test de la fonctionnalité
+  web_status_fixing_discussions: Application des retours de relecture
+  web_status_fixing_pipeline: Correction des tests qui échouent
   web_status_running_post_completion: Finalisation
-  web_status_answering_question: Réponse en préparation
-  web_status_needs_clarification: Question pour vous
-  web_status_done: Terminé
-  web_status_error: Échec — action requise
+  web_status_answering_question: Réponse à une question
+  web_status_needs_clarification: En attente d'une précision de ta part
+  web_status_done: Livrée
+  web_status_error: Bloquée, intervention nécessaire
   web_dashboard_title: autodev — Dashboard
   web_dashboard_counters: Compteurs
   web_dashboard_active_issues: Issues actives (%{count})

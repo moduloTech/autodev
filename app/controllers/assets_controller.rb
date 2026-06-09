@@ -1,19 +1,12 @@
 # frozen_string_literal: true
 
-# Static asset serving for the embedded dashboard (cf. autodev/docs/autospec.md
-# §D phase B closure). Mirrors the three explicit asset routes that
-# lib/autodev/web/server.rb still defines for the standalone `bin/autodev`
-# Sinatra entry point — same URL space, same filesystem source, same
-# content-type / cache-control headers — so the Phlex layout's
-# `<link href="/assets/css/...">` and `<script src="/assets/turbo.js">`
-# tags resolve identically whether requests hit `bin/rails server` or
-# `bin/autodev`.
-#
-# The files live under `lib/autodev/web/public/` (single source of truth).
-# Propshaft / Sprockets is intentionally NOT wired here — attack-order step 8
-# replaces this controller with the Rails asset pipeline + Phlex view port
-# during phase C. Until then, two routes serving the same bytes from two
-# entry points is acceptable cost.
+# Static asset serving for the embedded dashboard. Three explicit routes
+# under `/assets/*` send the vendored Turbo build, the three CSS files,
+# and the WOFF2 webfonts from `app/assets/static/`. Routes are explicit
+# (rather than Rails' propshaft pipeline) because the asset URL space
+# stays stable across the supervisor topology and the Phlex layout's
+# `<link href="/assets/css/...">` / `<script src="/assets/turbo.js">`
+# tags do not need to know about asset digests.
 class AssetsController < ApplicationController
   # Rails' `protect_from_forgery` includes a cross-origin JavaScript guard
   # (`X-Requested-With` check) that returns 422 for `<script src>` requests
@@ -22,7 +15,7 @@ class AssetsController < ApplicationController
   # assets don't need that protection, so opt out on this controller.
   skip_forgery_protection
 
-  ASSETS_ROOT = File.expand_path('../../lib/autodev/web/public', __dir__).freeze
+  ASSETS_ROOT = Rails.root.join('app/assets/static').to_s.freeze
 
   # Vendored Turbo build (no CDN dependency). One file, fixed URL.
   def turbo_js

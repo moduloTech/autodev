@@ -2,20 +2,19 @@
 
 source 'https://rubygems.org'
 
-# Runtime dependencies. Until phase B of the railsification, bin/autodev
-# (Sinatra+Sequel) and bin/rails (Rails) both load from this Gemfile.
-gem 'aasm',    '~> 5.5'
-gem 'gitlab',  '~> 5.1'
-gem 'i18n',    '~> 1.0'
+# Runtime dependencies shared by `bin/autodev` (parent CLI) and the Rails
+# children (`bin/rails server`, `bin/jobs`). `sequel` and `sinatra` were
+# both retired during phase C of the railsification (step 2 second half +
+# step 8) — the data layer is now AR-only and the web layer is Rails-only.
+gem 'aasm',   '~> 5.5'
+gem 'gitlab', '~> 5.1'
+gem 'i18n',   '~> 1.0'
 gem 'logger'
 gem 'ostruct'
 gem 'pastel', '~> 0.8'
-gem 'phlex', '~> 2.4', '>= 2.4.1'
+gem 'phlex',  '~> 2.4', '>= 2.4.1'
 gem 'puma',   '~> 6.0'
 gem 'rack',   '~> 3.0'
-gem 'sequel', '~> 5.0'
-gem 'sinatra', '~> 4.0'
-gem 'sinatra-contrib', '~> 4.0'
 gem 'sqlite3', '~> 2.0'
 
 # Railsification — phase A: Rails loads its own AR models in parallel to Sequel.

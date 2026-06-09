@@ -57,6 +57,13 @@ module Autodev
     config.eager_load = false
     config.add_autoload_paths_to_load_path = false
 
+    # Step 8: Phlex views relocated from `lib/autodev/web/views/` to
+    # `app/components/`. Zeitwerk doesn't pick up `app/components` by
+    # default so we add it explicitly. Files under that root follow the
+    # usual constant-from-path rule (e.g. `app/components/web/views/dashboard.rb`
+    # defines `Web::Views::Dashboard`).
+    config.autoload_paths << Rails.root.join('app/components')
+
     # Skip generator hooks for stacks we are not using yet.
     config.generators.system_tests = nil
 

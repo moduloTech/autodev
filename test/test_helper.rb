@@ -5,7 +5,6 @@ require 'fileutils'
 require 'tmpdir'
 require 'json'
 require 'yaml'
-require 'sequel'
 require 'aasm'
 require 'i18n'
 
