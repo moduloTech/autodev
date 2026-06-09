@@ -4,25 +4,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A single-file Ruby CLI tool (`bin/autodev`) distributed via Homebrew (`modulotech/tap`) that automates the implementation of GitLab issues. It polls configured projects for issues assigned to the autodev user with a `label_todo`, clones the repo, implements changes via `danger-claude`, commits, pushes, creates a Merge Request, waits for a green pipeline, then runs `mr-review` for automated code review.
+A Rails 8.1.3 application distributed as a CLI tool via Homebrew (`modulotech/tap`) that automates the implementation of GitLab issues. It polls configured projects for issues assigned to the autodev user with a `label_todo`, clones the repo, implements changes via `danger-claude`, commits, pushes, creates a Merge Request, waits for a green pipeline, then runs `mr-review` for automated code review.
+
+`bin/autodev` is a supervisor: it boots Rails + the Solid Queue worker as child processes. `bin/rails server` serves the embedded dashboard; `bin/jobs start` runs `SolidQueue::Cli` which forks dispatcher + scheduler + worker subprocesses. The recurring `AutodevPollJob` fires every `poll_interval` seconds, discovers work via `Autodev::PollDispatcher`, and enqueues per-issue `IssueProcessJob`s that run the workflow classes (`IssueProcessor`, `MrFixer`, `PipelineMonitor`).
+
+History: this used to be a single-file `bundler/inline` Sinatra+Sequel CLI. The migration to Rails (steps 1-8 of `docs/autospec.md` §C) wrapped 2026-06-09 with `v1.0.0-alpha.1`. See [`docs/railsification-postmortem.md`](docs/railsification-postmortem.md) for the retrospective. Phase D (AutoSpec — autospec.md §A, §E-G) is the next major feature scope; it is greenfield, not migration work.
 
 ## Running
 
 ```bash
-# Poll with default config
-./bin/autodev
+# Production: brew install + service
+brew install modulotech/tap/autodev
+brew services start autodev
 
-# Single poll cycle
-./bin/autodev --once
+# Foreground from the supervisor (logs to stdout/stderr instead of ~/.autodev/log/)
+autodev
 
-# Custom config
-./bin/autodev -c path/to/config.yml
+# Custom config file
+autodev -c path/to/config.yml
 
-# Override token and workers
-./bin/autodev -t glpat-xxxx -n 5
+# CLI commands that read/mutate the SQLite file and exit (no supervisor):
+autodev --status
+autodev --errors [IID]
+autodev --reset [IID]
+
+# One-shot poll cycle (the old `--once` flag is gone — use the runner):
+bin/rails runner 'AutodevPollJob.perform_now'
 ```
 
-Dependencies are installed automatically via `bundler/inline` (no separate `bundle install` needed). Requires Ruby, `danger-claude` on PATH, and optionally `mr-review` for automated reviews.
+Dependencies are installed by `bundle install --deployment` at Brew install time. The wrapper at `/opt/homebrew/bin/autodev` pins Brew's Ruby on PATH (any `mise`/`rbenv`/`asdf` shim would otherwise pick a Ruby incompatible with the gems' native extensions).
+
+Requires: Ruby ≥3.2, `danger-claude` on PATH (Brew dep), and optionally `mr-review` (Brew dep, automated review skipped if missing). When `app.run` ports are configured, Docker Desktop is also required for Chrome MCP injection.
 
 ## Configuration
 
@@ -30,17 +42,16 @@ Settings are resolved in 4 layers (highest priority wins):
 
 1. **Defaults** — `poll_interval: 300`, `max_workers: 3`, `pickup_delay: 600`, `stagnation_threshold: 5`
 2. **Config file** — `~/.autodev/config.yml`
-3. **Environment variables** — `GITLAB_API_TOKEN`, `GITLAB_URL`
-4. **CLI flags** — `-c`, `-d`, `-t`, `-n`, `-i`, `--once`
+3. **Environment variables** — `GITLAB_API_TOKEN`, `GITLAB_URL`, plus `AUTODEV_HOME` (default `~/.autodev`), `AUTODEV_DB`, `AUTODEV_QUEUE_DB`, `AUTODEV_MAX_WORKERS`, `AUTODEV_POLL_INTERVAL`
+4. **CLI flags** — `-c`, `-d`, `-t`, `-n`, `-i`
 
 ### CLI flags
 
 - `-c` / `--config PATH` — Config file path
-- `-d` / `--database-url URL` — SQLite connection URL
+- `-d` / `--database-url URL` — SQLite connection URL (legacy; AR uses `config/database.yml`)
 - `-t` / `--token TOKEN` — GitLab API token
-- `-n` / `--max-workers N` — Concurrent workers
-- `-i` / `--interval SECONDS` — Poll interval
-- `--once` — Single poll cycle then exit
+- `-n` / `--max-workers N` — Solid Queue worker threads (forwarded as `AUTODEV_MAX_WORKERS`)
+- `-i` / `--interval SECONDS` — Poll interval (forwarded as `AUTODEV_POLL_INTERVAL`; rounded up to the nearest minute for cron)
 - `--status` — Show dashboard of tracked issues and exit
 - `--all` — Include completed (`done`) issues in `--status`
 - `--errors [IID]` — Show details for errored issues (all or specific)
@@ -48,29 +59,48 @@ Settings are resolved in 4 layers (highest priority wins):
 - `-v` / `--version` — Show version and exit
 - `-h` / `--help` — Show help
 
+(`--once` and `--dry-run` were retired at v1.0.0-alpha.1.)
+
+### State on disk
+
+Everything under `~/.autodev/` (override the root via `AUTODEV_HOME`):
+
+| Path | Purpose |
+|---|---|
+| `~/.autodev/config.yml` | Projects + GitLab credentials |
+| `~/.autodev/autodev.db` | Primary AR SQLite — issues, activity_events, users, projects, etc. |
+| `~/.autodev/autodev_queue.db` | Solid Queue tables |
+| `~/.autodev/secret_key_base` | Devise + session secret (generated on first boot, 0600) |
+| `~/.autodev/log/production.log` | Rails log |
+| `~/.autodev/log/autodev-{stdout,stderr}.log` | launchd-captured supervisor output |
+| `~/.autodev/tmp/` | Rails tmp |
+
 ### Web UI
 
-When the poller is running (i.e. not `--once` and `web.enabled: true` in config — the default), autodev exposes an embedded Sinatra app on `http://127.0.0.1:<web.port>` (default 4567). It mirrors the data the CLI flags print (`--status`, `--errors`, `--reset`) but live-updates as transitions and activity events fire.
+`bin/rails server` (spawned by the supervisor) exposes the dashboard at `http://<web.bind>:<web.port>` (default `127.0.0.1:4567`). It mirrors the data the CLI flags print (`--status`, `--errors`, `--reset`) but live-updates as transitions and activity events fire.
 
-Routes:
-- `GET /` — dashboard: status counters, active issues grouped by AASM state, project breakdown.
-- `GET /issues/:id` — detail: status badge, GitLab/MR links, metadata, activity timeline (paginated to 200), screenshots, raw JSON, action forms.
-- `GET /issues/:id.json` — raw row.
-- `GET /errors` — `error` + `needs_clarification` + non-null `post_completion_error`, with reset buttons.
-- `GET /projects/:slug` — project's `app:` config + 100 most recent issues. Slug encoding: `group/project` ↔ `group__project`.
-- `POST /issues/:id/reset` — equivalent of `--reset` for a single issue.
-- `POST /issues/:id/transition` (param `event`) — fires an AASM event; rejects 422 if not in `issue.aasm.events(permitted: true)`.
-- `GET /stream` — SSE feed; emits Turbo Stream HTML for each `activity_events` row (timeline prepend + status badge replace on transitions).
-- `GET /assets/turbo.js` — vendored `@hotwired/turbo` UMD build.
+Routes (declared in `config/routes.rb`, all served by Rails controllers):
+- `GET /` → `DashboardController#show` — status counters, active issues, KPI cards, sparkline, project breakdown.
+- `GET /issues/:id` / `.json` → `IssuesController#show` — detail view (HTML or raw JSON).
+- `GET /issues` → `IssuesController#index` — paginated + filterable list.
+- `GET /errors` → `ErrorsController#index` — `error` + `needs_clarification` + non-null `post_completion_error`, with reset buttons.
+- `GET /projects` → `ProjectsController#index` — union of YAML-configured + tracked projects.
+- `GET /projects/:slug` → `ProjectsController#show` — project's `app:` config + 100 most recent issues. Slug encoding: `group/project` ↔ `group__project`.
+- `GET /list/:status` → `ListController#show` — single-status filtered list.
+- `POST /issues/:id/reset` / `transition` — write actions.
+- `GET /stream` → `StreamController#show` — SSE feed via `ActionController::Live`. Emits Turbo Stream HTML for each `activity_events` row.
+- `GET /assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*` → `AssetsController` — `send_file` from `app/assets/static/`.
+- `GET /users/auth/entra_id` (+ callback) — Devise OmniAuth (Microsoft 365 SSO).
 
 Implementation:
-- `Web::Server` is a `Sinatra::Base` subclass under `lib/autodev/web/`, started from `Poller#run` via `Web::Server.start(config)` (a Puma instance bound to 127.0.0.1 in a background thread, threads `0..8`). Routes render Phlex views (`Web::Views::*`); each view is a Phlex::HTML subclass that takes its data via kwargs and is invoked with `Views::Foo.new(**kwargs).call`.
-- `Web::Lifecycle` (mixed in via `extend`) owns the start/stop cycle.
-- `Web::EventBus` is an in-process pub/sub: a Mutex around an `Array<Queue>`. `ActivityEvent.after_create` publishes, `/stream` subscribes. Backpressure drops oldest events past 100. `shutdown!` pushes a sentinel that lets `/stream` loops exit.
-- Persistence: every AASM transition + every `ActivityLogger.post` writes an `activity_events` row (kind: `transition` or `danger_claude`). Hooks live in `IssueBehavior#emit_activity_event!` and `ActivityLogger.persist_event!`, both wrapped in `rescue StandardError` so DB failures never break the workflow.
-- Localhost only by default (`web.bind: 127.0.0.1`), no built-in auth. Set `web.bind` to `0.0.0.0` or a specific interface IP to expose the UI on a network — when doing so, **stand a reverse proxy or NetBird-style mesh in front** for TLS and access control, since autodev itself stays plain HTTP. Disable entirely via `web: { enabled: false }` in `~/.autodev/config.yml`.
-- Localized: every string rendered in the views goes through `t_web(key, **vars)` (in `Web::I18nHelpers`) → `Locales.t(key, locale: ...)`. Templates live in `lib/autodev/locales/web.rb` (FR + EN). Locale comes from `web.locale` (default `'fr'`, validated to `'fr'` / `'en'`). Adding a third language is a one-file change.
-- **Hot reload (dev)**: run `AUTODEV_WEB_RELOAD=1 ./bin/autodev` to enable `Sinatra::Reloader`. It re-evaluates routes and Phlex view classes on every request when a file under `lib/autodev/web/` or `lib/autodev/locales/` changes, no process restart needed. CSS files in `public/css/` already revalidate via `Cache-Control: no-cache` (just F5). The poller, worker pool, AASM model, and DB schema are NOT auto-reloaded — those still need a restart.
+- Controllers live under `app/controllers/`. Each one `include ::Web::Helpers` to gain access to `app_config`, `dashboard_kpis`, `project_overview_stats`, etc.
+- Phlex views live under `app/components/web/views/**/*.rb` (autoloaded via `config.autoload_paths << app/components`). Constant names are `Web::Views::Dashboard`, `Web::Views::Components::StatusPill`, etc.
+- Helpers live under `app/helpers/web/{helpers,i18n_helpers,issues_filter,turbo_stream_helpers}.rb`.
+- `Web::EventBus` (`app/services/web/event_bus.rb`) is an in-process pub/sub (Mutex around `Array<Queue>`). `ActivityEvent.after_create_commit` publishes; `/stream` subscribes. Backpressure drops events past 100.
+- `Web::config` accessor (`app/services/web.rb`) holds the loaded `~/.autodev/config.yml` hash; populated by `config/initializers/load_autodev_config.rb` on Rails boot.
+- Persistence: every AASM transition + every `ActivityLogger.post` writes an `activity_events` row (`kind: 'transition'` or `'danger_claude'`). Hooks live in `Issue#emit_activity_event!` (AR) and `ActivityLogger.persist_event!`, both wrapped in `rescue StandardError`.
+- Localhost only by default (`web.bind: 127.0.0.1`). Expose via reverse proxy / NetBird if needed; autodev itself stays plain HTTP, no built-in auth gate on the dashboard (Devise is wired for AutoSpec — phase D — but no `before_action :authenticate_user!` is applied to the existing routes).
+- Localized: views use `t_web(key, **vars)` → `Locales.t(key, locale: ...)`. Strings live in `config/locales/{notifications,activity,web}.{fr,en}.yml`. Locale comes from `web.locale` (default `fr`).
 
 ### App Environment (`app:`)
 
@@ -91,10 +121,7 @@ app:
     - command: ["bin/vite", "dev"]  # no port = not exposed
 ```
 
-`setup`/`test`/`lint`: lists of commands (Docker CMD format, array of strings).
-`run`: list of `{ command:, port: }` entries. `port` is optional — only entries with `port` get a Docker port mapping.
-
-When any project has `app.run` entries with ports, Chrome DevTools is auto-enabled at startup (Chrome headless + MCP injection). No separate flag needed.
+When any project has `app.run` entries with ports, Chrome DevTools is auto-enabled at supervisor startup (Chrome headless + MCP injection via Docker). No separate flag needed.
 
 ### Screenshot Workflow
 
@@ -109,13 +136,26 @@ Screenshot instructions are injected in implementer and MR fixer prompts only (n
 
 ## Architecture
 
+### Process topology
+
+```
+bin/autodev (supervisor parent)
+├── bin/rails server   → Puma → Rails dashboard
+└── bin/jobs start     → SolidQueue::Cli → forks:
+    ├── solid-queue-dispatcher  (claims scheduled jobs)
+    ├── solid-queue-worker × N  (perform AutodevPollJob, IssueProcessJob)
+    └── solid-queue-scheduler   (fires config/recurring.yml entries)
+```
+
+`lib/autodev/supervisor.rb` owns the parent. SIGINT/SIGTERM trap → flag → `wait_loop` exits → TERM all children, 10s graceful grace, KILL stragglers. If any child crashes the supervisor tears the rest down.
+
 ### State Machine (AASM)
 
-The Issue model uses the `aasm` gem for a formalized state machine. Each state = one action. Events define valid transitions with guards.
-
-The Issue Sequel::Model is built dynamically after DB connection via `Database.build_model!`.
+The `Issue` model (`app/models/issue.rb`) mounts AASM via `include AASM`. State machine logic lives directly in the AR model — the legacy `IssueBehavior` module was inlined during step 2 second half.
 
 **States (16):** `pending`, `cloning`, `checking_spec`, `implementing`, `committing`, `pushing`, `creating_mr`, `reviewing`, `checking_pipeline`, `fixing_discussions`, `fixing_pipeline`, `running_post_completion`, `answering_question`, `needs_clarification`, `done`, `error`
+
+`after_all_transitions :persist_status_change!, :emit_activity_event!` writes the row + emits an `activity_events` row on every transition.
 
 ### IssueProcessor
 
@@ -144,21 +184,32 @@ Handles `checking_pipeline`: fetches MR head pipeline via GitLab API.
 
 Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log` files in the work directory (no truncation). Prompts reference these files by path so danger-claude reads the complete log. Each failed job is fixed in a separate danger-claude call + commit (same pattern as MrFixer's per-discussion approach).
 
-### Poller
+### PollDispatcher + IssueProcessJob
 
-Polls for issues assigned to the autodev user with `labels_todo`. Also monitors:
-- **Unassignment detection**: active issues no longer assigned → `done`
-- **Post-completion**: `done` issues where autodev is unassigned + `post_completion` configured + MR not merged/closed → `running_post_completion` → `done`
-- **Reentry**: `done` issues with `label_todo` detected → `reenter!` → `pending` (resets stagnation signatures and review count)
-- **Pickup delay**: issues created less than `pickup_delay` seconds ago are skipped
+`app/services/autodev/poll_dispatcher.rb` runs one polling cycle per call: discovers issues from GitLab + DB, enqueues an `IssueProcessJob(project_path, issue_iid, action)` per work item. Six dispatch passes per project:
 
-### WorkerPool
+- `dispatch_new_issues` — new `label_todo` issues → `:process`
+- `dispatch_pipelines` — `checking_pipeline` rows → `:check_pipeline`
+- `dispatch_discussions` — `fixing_discussions` rows → `:fix_discussions`
+- `dispatch_unassignment` — active rows no longer assigned → done inline (no job)
+- `dispatch_done_unassigned` — `done` rows with `post_completion` configured → `:post_completion`
+- `dispatch_retries` — `error` + `pending` with backoff elapsed → `:retry_errored` / `:retry_stuck`
 
-N threads (configurable) consuming a shared `Queue`. Each worker gets its own GitLab client for thread safety. Graceful shutdown via SIGINT/SIGTERM.
+`app/jobs/issue_process_job.rb` is a single ActiveJob class that dispatches on the action symbol to the right worker class. `limits_concurrency to: 1, key: "issue-#{project}-#{iid}"` serializes work per ticket; the queue.yml `threads` setting (`AUTODEV_MAX_WORKERS`, default 3) caps global concurrency.
+
+`app/jobs/autodev_poll_job.rb` is the recurring entry (`config/recurring.yml`, default `*/5 * * * *`). Gates on `UsageChecker#available?` so a Claude usage exhaustion pauses the polling instead of burning retries.
+
+Both jobs wrap the ActiveJob `logger` in `Autodev::JobLogger` (`app/services/autodev/job_logger.rb`) before handing it to workflow classes — the legacy `AppLogger` accepted `info/warn/error(msg, project: path)` kwargs that Rails' `Logger` rejects.
 
 ## SQLite Schema
 
-Single table `issues` with AASM status lifecycle:
+Two SQLite files:
+- `~/.autodev/autodev.db` (primary): `issues`, `activity_events`, `users`, `projects`, `project_app_commands`, `project_memberships`, `sessions`, `schema_migrations`, `ar_internal_metadata`.
+- `~/.autodev/autodev_queue.db` (queue): 10 Solid Queue tables.
+
+AR migrations live under `db/migrate/` (primary) and `db/queue_migrate/` (queue). `config/initializers/auto_migrate.rb` runs both on Rails boot — idempotent, every `create_table` is `if_not_exists: true`. The same migration handles fresh installs and upgrades from the pre-rails Sequel-created prod DB.
+
+Issue lifecycle (AASM):
 
 ```
 pending → cloning → checking_spec → implementing → committing → pushing → creating_mr → checking_pipeline
@@ -211,7 +262,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | Push fails | Retry with --force-with-lease |
 | MR already exists for branch | Reuse existing MR |
 | Issue closed between poll and processing | `clone_complete!` → done (guard: issue_closed?) |
-| Issues in error at startup | `recover_on_startup!` resets to pending |
+| Issues in error at startup | `Issue.recover_on_startup!` resets transient states |
 | Pipeline red (code by pre-triage) | Skip retrigger, go straight to fix phase |
 | Pipeline red (infra/uncertain, first time) | Retrigger once, recheck next poll |
 | Pipeline red (infra/uncertain, after retrigger) | Stay in checking_pipeline (manual intervention) |
@@ -226,45 +277,46 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 
 ## Key Design Decisions
 
-- **AASM state machine**: Formalized transitions prevent invalid state changes. Guards handle conditional branching. `after_all_transitions :persist_status_change!` auto-saves.
+- **Rails 8 monolith over single-file CLI**: The single-file `bundler/inline` pattern (still used by `danger-claude` and `mr-review`) stopped scaling once we needed background jobs, multi-DB, SSO, and structured background processing. Rails 8 + Solid Queue replaced ~2,000 LOC of bespoke threading/Sinatra/Sequel/poller with conventional Rails primitives. See `docs/railsification-postmortem.md` for the migration's full account.
+- **AASM state machine**: Formalized transitions prevent invalid state changes. Guards handle conditional branching. `after_all_transitions :persist_status_change!, :emit_activity_event!` auto-saves and writes a row to `activity_events`.
+- **Supervisor over single-process**: `bin/autodev` parent spawns `bin/rails server` + `bin/jobs start` instead of running an in-process Puma + thread pool. Each child boots its own Rails app; SQLite WAL + `busy_timeout` handles the two-writer contention.
+- **Multi-DB (primary + queue)**: Solid Queue's 10 tables live in their own SQLite file so their CRUD churn doesn't share the WAL with business writes. AR's multi-database config (`config/database.yml`) handles the routing transparently.
 - **Review after pipeline**: `mr-review` runs after the first green pipeline, not immediately after MR creation. This ensures the pipeline is stable before review comments are generated.
 - **Stagnation detection**: Replaces `max_fix_rounds`. SHA256 signatures of failed job names (pipeline) or unresolved discussion IDs (discussions) detect when the same failures repeat consecutively. Configurable threshold (`stagnation_threshold`, default 5).
 - **Polling by assignee**: Issues are discovered by querying GitLab for issues assigned to the autodev user with `labels_todo`, replacing the old `trigger_label`-based approach.
 - **3 labels only**: `labels_todo`, `label_doing`, `label_done`. Label stays `label_doing` during the entire implementation + pipeline + fix + review cycle, and switches to `label_done` only when reaching `done`.
 - **Post-completion at unassignment**: The `post_completion` hook triggers when autodev is unassigned from a `done` issue (not immediately after pipeline green).
 - **No blocked state**: Infrastructure failures and canceled pipelines keep the issue in `checking_pipeline` indefinitely until manual intervention or natural resolution.
-- **Single-file CLI**: Same pattern as `mr-review` and `danger-claude` — `bundler/inline` for dependencies.
-- **Dynamic model**: Issue Sequel::Model defined after DB connection via `Database.build_model!` using `Class.new(Sequel::Model(...))`.
-- **Thread pool over processes**: Simpler resource management, shared Queue, per-worker GitLab clients for thread safety.
 - **danger-claude as implementation engine**: Leverages the existing Docker-based Claude CLI wrapper for sandboxed code generation.
-- **Reactive shutdown**: Sleep loop checks shutdown flag every 1 second.
+- **Solid Queue concurrency control**: `IssueProcessJob`'s `limits_concurrency to: 1, key: "issue-#{path}-#{iid}"` ensures no two jobs touch the same issue at once. Global concurrency cap comes from `queue.yml`'s `threads` setting (`AUTODEV_MAX_WORKERS`, default 3) — mirrors the legacy `max_workers`.
 
 ## Localization (i18n)
 
 **Rule: every user-facing string — CLI output, GitLab notes, web UI — must go through `Locales.t` / `t_web`. Never write a literal user-facing string in code or templates, in any language.**
 
-This applies to all future work, both CLI and web. Hardcoded literals are the source of every "why doesn't EN work?" bug we've already paid for once (`Dashboard.status_label` ignored the cookie until 51f0b0e).
+Hardcoded literals are the source of every "why doesn't EN work?" bug we've already paid for once (`Dashboard.status_label` ignored the cookie until 51f0b0e).
 
 ### Where templates live
 
-All under `lib/autodev/locales/`:
+All under `config/locales/`:
 
-| File | Constant | Purpose |
-|---|---|---|
-| `notifications.rb` (in `locales.rb`) | `NOTIFICATION_TEMPLATES` | One-off GitLab issue comments (errors, MR links, completion, stagnation, etc.) |
-| `activity.rb` | `ACTIVITY_TEMPLATES` | Per-issue activity-log entries (the single updated comment) |
-| `web.rb` | `WEB_TEMPLATES` | Every string rendered by the embedded web UI |
+| File | Purpose |
+|---|---|
+| `notifications.{fr,en}.yml` | One-off GitLab issue comments (errors, MR links, completion, stagnation, etc.) |
+| `activity.{fr,en}.yml` | Per-issue activity-log entries (the single updated comment) |
+| `web.{fr,en}.yml` | Every string rendered by the embedded web UI |
+| `en.yml` | Rails default English (used by gems we depend on) |
 
-They are merged at boot in `lib/autodev/locales.rb` into a single `TEMPLATES` hash. Each must declare both `:fr` and `:en` for every key; missing keys silently fall back to FR via `Locales.t`.
+Templates are loaded by Rails' i18n railtie. `Locales.t(key, locale:, **vars)` is a thin adapter around `I18n.t` with strict `:fr` fallback (`Locales` includes `I18n::Backend::Fallbacks`). Vocabulary follows `docs/autospec.md` §I — business-facing language, not technical step names.
 
 ### How to add a new string
 
 1. Pick a key with the right prefix: `notify_*`, `activity_*`, `web_*`. Keep them flat (no nesting).
-2. Add it to the matching `<AREA>_TEMPLATES` hash **in both `:fr` and `:en`**, with the same `%<var>s` placeholders in each.
+2. Add it to the matching `config/locales/<area>.{fr,en}.yml` files **in both `fr` and `en`**, with the same `%{var}` placeholders in each.
 3. Use the right helper at the call site:
    - **Ruby code (CLI, processors, services)**: `Locales.t(:my_key, locale: <locale>, **vars)`. The `locale` argument is mandatory in this layer — pick from `issue.locale`, a config field, or default to `:fr`.
    - **Phlex views**: `t_web(:my_key, **vars)` (auto-escaped, no `h()` wrapper needed). `t_web` resolves the active locale automatically (cookie > config > default).
-4. If the string represents a status label or any web concept derived from a Ruby value (not a literal in the template), wire it into `STATUS_LABEL_KEYS` in `lib/autodev/web/i18n_helpers.rb` rather than inlining a `case`.
+4. If the string represents a status label or any web concept derived from a Ruby value (not a literal in the template), wire it into `STATUS_LABEL_KEYS` in `app/helpers/web/i18n_helpers.rb` rather than inlining a `case`.
 
 ### Locale resolution per layer
 
@@ -280,6 +332,14 @@ They are merged at boot in `lib/autodev/locales.rb` into a single `TEMPLATES` ha
 - Translate FR but skip EN (or vice versa). Both keys must exist or `Locales.t` falls back silently and you get mixed-language output.
 - Add a new helper that returns French verbatim (e.g. `def label_for_X; 'Terminée'; end`). If the helper produces text shown to a user, it must take a locale and call `Locales.t`.
 
-### Migrating existing FR-only helpers
+## Tests
 
-Two hardcoded-FR helpers remain on purpose: `Dashboard.status_label` (CLI table) and the CLI summary lines in `Poller#print_issue_line`. They are FR-only because the CLI doesn't have a locale flag yet. If you add `--locale`, migrate these to `Locales.t` rather than duplicating the case-block.
+`bundle exec rake test` runs the full minitest suite. `test/test_helper.rb` boots the Rails environment in `RAILS_ENV=test` (in-memory SQLite for both primary + queue) and force-loads the AR models so tests that don't transitively reference them through `Issue` still see them defined. ~452 tests at v1.0.0-alpha.3.
+
+`test/database_test_helper.rb` re-runs the migrations idempotently and wipes `issues` + `activity_events` between tests (`:memory:` SQLite drops the schema on every reconnect; the migration's `if_not_exists: true` makes the re-run a no-op once tables exist).
+
+Job tests under `test/jobs/` use `Autodev::JobLogger` mocks; they don't require the full legacy stack.
+
+## Phase D (AutoSpec) — next major scope
+
+The railsification is done. The next chunk of work is autospec.md §C steps 9-12: `autospec_*` backend tables, `AutospecChat` service around the Anthropic SDK, frontend port of `reference/screen-chat-spec.jsx`, workflow approbation via `project_memberships`, GitLab ticket import. Greenfield, no migration risk. See `docs/autospec.md` §A, §E, §F, §G for the spec.
