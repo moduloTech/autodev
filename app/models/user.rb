@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
-# Microsoft 365 SSO user (cf. autodev/docs/autospec.md §A, §J).
+# Microsoft 365 SSO user (cf. autodev/docs/autospec.md §A, §J,
+# docs/users-rollout.md §2).
 #
-# Step 3 plugs Devise modules for tracking + omniauth. No
-# `:database_authenticatable` — passwords don't exist in this app, only
-# Entra ID tokens. `User.from_omniauth` is the only path that creates rows.
+# Step 3 plugged Devise modules for tracking + omniauth.
+# PR2 of the users-rollout chantier extends the row with the
+# admin flag (platform-wide), the GitLab identity cache
+# (`gitlab_user_id` / `gitlab_username`), and the soft-disable
+# stamp (`disabled_at`). No `:database_authenticatable` — passwords
+# don't exist in this app, only Entra ID tokens.
 class User < ApplicationRecord
   VALID_LOCALES = %w[fr en].freeze
 
@@ -12,6 +16,8 @@ class User < ApplicationRecord
 
   has_many :project_memberships, dependent: :destroy
   has_many :projects, through: :project_memberships
+  has_many :audit_logs_as_actor, class_name: 'AuditLog', foreign_key: :actor_id,
+                                 inverse_of: :actor, dependent: :nullify
 
   validates :email, presence: true, uniqueness: { case_sensitive: false }
   validates :locale, inclusion: { in: VALID_LOCALES }
@@ -19,7 +25,11 @@ class User < ApplicationRecord
   # Find-or-create the user matching an Entra ID auth hash. Lookup is on
   # `microsoft_uid` (Azure subject claim — stable per-tenant). On first
   # sign-in we also stamp `email` / `name` from the token; on subsequent
-  # sign-ins we refresh them in case the user renamed in Entra.
+  # sign-ins we refresh them in case the user renamed in Entra. The
+  # GitLab-side identity resolution + membership sync is intentionally
+  # NOT done here — `Users::OmniauthCallbacksController#entra_id` runs
+  # it after this returns, so a sync failure can short-circuit the
+  # sign-in with a clean message instead of partial state.
   def self.from_omniauth(auth)
     user = find_or_initialize_by(microsoft_uid: auth.uid)
     apply_omniauth_info!(user, auth.info)
@@ -46,5 +56,24 @@ class User < ApplicationRecord
 
   def owner_of?(project)
     role_on(project) == ProjectMembership::ROLE_OWNER
+  end
+
+  # Devise hook: a non-nil disabled_at flips the user inactive so the
+  # next sign-in is rejected. The row itself is preserved (audit_log
+  # entries continue to reference it) — soft delete, not destroy.
+  def active_for_authentication?
+    super && disabled_at.nil?
+  end
+
+  def inactive_message
+    disabled_at.present? ? :access_revoked : super
+  end
+
+  # Projects this user is allowed to see in the dashboard. Admins see
+  # everything; everyone else only sees projects where they have a
+  # membership. Used by the dashboard / issues / projects controllers
+  # once PR3 turns on per-route gating.
+  def visible_projects
+    admin? ? Project.all : projects
   end
 end

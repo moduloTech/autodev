@@ -1,0 +1,11 @@
+# Devise failure messages — minimal set covering only the keys Autodev
+# customizes. Devise's own gem provides the rest via its default
+# locale files at config/locales/devise.en.yml is OK as fallback for
+# anything missing here, with the strict :fr fallback configured in
+# the application's I18n setup.
+fr:
+  devise:
+    failure:
+      access_revoked: "Votre accès à Autodev a été révoqué. Contactez un administrateur."
+      gitlab_identity_unresolved: "Impossible de relier votre compte à GitLab. Contactez un administrateur."
+      gitlab_unavailable: "GitLab n'est pas disponible pour le moment. Réessayez plus tard."

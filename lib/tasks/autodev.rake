@@ -29,6 +29,39 @@
 # becomes the canonical entry point and the autodev §H plan (rake one-shot
 # during cutover) is reachable without copy-paste.
 
+# Helpers extracted from the rake tasks below (Metrics/BlockLength).
+
+def autodev_seed_admin
+  email = ENV.fetch('EMAIL') { abort '[autodev:seed_admin] EMAIL=... required' }
+  user = User.find_or_initialize_by(email: email)
+  user.name ||= email.split('@', 2).first
+  user.admin = true
+  user.save!(validate: false)
+  Audit.record!(resource: user, action: 'user.created', payload: { source: 'seed_admin', email: email })
+  puts "[autodev:seed_admin] #{user.email} (id=#{user.id}, admin=true)"
+end
+
+def autodev_sync_memberships
+  summary = { synced: 0, skipped: 0 }
+  User.find_each do |user|
+    Autodev::GitlabMembershipSync.for_user!(user)
+    summary[:synced] += 1
+  rescue Autodev::GitlabMembershipSync::UnresolvedGitlabIdentity,
+         Autodev::GitlabMembershipSync::SyncFailed => e
+    warn "[autodev:sync_memberships] skipping #{user.email}: #{e.class}: #{e.message}"
+    summary[:skipped] += 1
+  end
+  puts "[autodev:sync_memberships] #{summary.inspect}"
+end
+
+def autodev_link_user
+  email = ENV.fetch('EMAIL') { abort '[autodev:link_user] EMAIL=... required' }
+  username = ENV.fetch('GITLAB_USERNAME') { abort '[autodev:link_user] GITLAB_USERNAME=... required' }
+  user = User.find_by!(email: email)
+  user.update!(gitlab_username: username, gitlab_user_id: nil)
+  puts "[autodev:link_user] #{user.email} → #{username} (gitlab_user_id will resolve at next sync)"
+end
+
 namespace :autodev do
   desc 'Import ~/.autodev/config.yml `projects:` block into projects + project_app_commands. ' \
        'DRY_RUN=1 logs the summary without writing. AUTODEV_CONFIG=path overrides the file path.'
@@ -45,4 +78,16 @@ namespace :autodev do
     puts "[autodev:migrate_projects_from_yaml] #{config_path}"
     puts summary
   end
+
+  # PR2 of the users-rollout chantier (cf. docs/users-rollout.md §5).
+  desc 'Seed an admin User by email. Usage: bin/rails autodev:seed_admin EMAIL=marc@modulotech.fr'
+  task(seed_admin: :environment) { autodev_seed_admin }
+
+  desc 'Reconcile project_memberships against GitLab for every user. ' \
+       'Idempotent, transactional per user.'
+  task(sync_memberships: :environment) { autodev_sync_memberships }
+
+  desc 'Manually link a User to a GitLab username (override for non-standard naming). ' \
+       'Usage: bin/rails autodev:link_user EMAIL=marc@modulotech.fr GITLAB_USERNAME=mleclercq'
+  task(link_user: :environment) { autodev_link_user }
 end

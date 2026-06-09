@@ -49,6 +49,11 @@ Rails.application.routes.draw do
   get '/assets/vendor/fonts/:name.woff2',        to: 'assets#font', constraints: { name: /[A-Za-z0-9_-]+/ }
 
   # === Admin =======================================================
+  # /admin/users — read-only audit of users × memberships (PR2 of the
+  # users-rollout chantier). Guarded by `current_user&.admin?` in the
+  # controller until PR3 turns on the global authenticate_user!.
+  get '/admin/users', to: 'admin/users#index'
+
   # Mission Control — Jobs: Solid Queue inspector + administration UI.
   # No auth gate (cf. config/initializers/mission_control.rb) — same
   # 127.0.0.1 / NetBird mesh trust model as the rest of the dashboard.

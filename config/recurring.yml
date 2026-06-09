@@ -20,6 +20,15 @@ default: &default
     class: AutodevPollJob
     queue: default
     schedule: "*/<%= [ENV.fetch('AUTODEV_POLL_INTERVAL', '300').to_i / 60, 1].max %> * * * *"
+  # Daily GitLab → project_memberships reconciliation (PR2 of the
+  # users-rollout chantier; cf. docs/users-rollout.md §3). Login also
+  # triggers a per-user sync, so this is the catch-all for revocations
+  # that happen between two logins. 03:00 because GitLab is dispo and
+  # the box is otherwise idle.
+  sync_gitlab_memberships:
+    class: SyncGitlabMembershipsJob
+    queue: default
+    schedule: "0 3 * * *"
 
 development:
   <<: *default

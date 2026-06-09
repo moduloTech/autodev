@@ -33,6 +33,12 @@ module DatabaseTestHelper
     ActiveRecord::MigrationContext.new(paths).migrate
     ActiveRecord::Base.connection.execute('DELETE FROM activity_events')
     ActiveRecord::Base.connection.execute('DELETE FROM issues')
+    # PR1+ of the users-rollout chantier wires every AASM transition on
+    # Issue to an `audit_logs` row. Legacy DB tests fire many transitions
+    # per test and inherit `Minitest::Test` (not `ActiveSupport::TestCase`),
+    # so they don't get the rails_helper teardown. Wipe here so a stray
+    # batch doesn't leak into AuditTest's `AuditLog.count` assertion.
+    ActiveRecord::Base.connection.execute('DELETE FROM audit_logs')
   end
 
   def create_issue(overrides = {})

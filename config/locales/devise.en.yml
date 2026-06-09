@@ -1,0 +1,6 @@
+en:
+  devise:
+    failure:
+      access_revoked: "Your Autodev access has been revoked. Contact an admin."
+      gitlab_identity_unresolved: "We couldn't link your account to GitLab. Contact an admin."
+      gitlab_unavailable: "GitLab is unavailable right now. Please try again later."
