@@ -15,6 +15,14 @@ class StreamController < ApplicationController
   include ActionController::Live
   include ::Web::Helpers
 
+  # Heartbeat interval (seconds). On every tick we both wake from
+  # `queue.pop` and write a `: ping` comment to the stream — if the
+  # client has gone away, `response.stream.write` raises and the
+  # Puma thread is released. Without this, an idle queue keeps the
+  # thread parked indefinitely (Queue#pop does not observe TCP-level
+  # disconnects), exhausting Puma's small thread pool over time.
+  HEARTBEAT_INTERVAL = 15
+
   # GET /stream
   def show
     set_sse_headers!
@@ -37,7 +45,11 @@ class StreamController < ApplicationController
 
   def pump_events!(queue)
     loop do
-      event = queue.pop
+      event = queue.pop(timeout: HEARTBEAT_INTERVAL)
+      if event.nil?
+        response.stream.write(": ping\n\n")
+        next
+      end
       break if event == ::Web::EventBus::SHUTDOWN_SENTINEL
 
       response.stream.write(format_sse(event))

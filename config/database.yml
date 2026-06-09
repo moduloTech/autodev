@@ -1,12 +1,15 @@
 # Rails AR configuration — multi-database since phase C step 5.
 #
 # Two SQLite files:
-#   primary — the same ~/.autodev/autodev.db that bin/autodev (Sequel) writes
-#             to. Both processes share it; ActiveRecord opens its own pool,
-#             so we cap it tight (2) to stay aligned with Sequel's
-#             `max_connections: 1` contract (cf. lib/autodev/database.rb:86).
-#             `timeout` mirrors Sequel's `busy_timeout=30000ms` so AR retries
-#             instead of erroring on contention.
+#   primary — ~/.autodev/autodev.db. Pool sized to match Puma's thread
+#             count (10) so dashboard controllers don't block waiting
+#             for a connection. SQLite still serializes writers at the
+#             file level (WAL + busy_timeout=30000ms); the AR pool only
+#             governs how many AR connection objects this process holds
+#             concurrently, not how many DB writers SQLite tolerates.
+#             (The previous pool=2 inherited a constraint from Sequel's
+#             `max_connections: 1` contract — Sequel is gone since
+#             v1.0.0-alpha.1, the constraint no longer applies.)
 #   queue   — Solid Queue's tables (10 of them, all CRUD-heavy) live in a
 #             dedicated file so their churn does not share the WAL with the
 #             business writes. Pool sized at 6 to clear Solid Queue's
@@ -20,7 +23,7 @@
 #
 primary_default: &primary_default
   adapter: sqlite3
-  pool: 2
+  pool: 10
   timeout: 30000
 
 queue_default: &queue_default

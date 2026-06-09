@@ -24,9 +24,16 @@ module Web
       JS
 
       APP_JS = <<~JS
-        // SSE → Turbo Stream pump.
+        // SSE → Turbo Stream pump. Skipped under browser automation because
+        // /stream is a long-lived ActionController::Live response and counts
+        // as a permanently in-flight request: any caller that waits on
+        // `networkidle` (Chrome DevTools MCP's navigate_page, Puppeteer's
+        // default waitUntil, etc.) would hang until its own timeout.
+        // The dashboard is still fully usable from automation — only the
+        // live-update channel is dropped; page reloads still surface fresh data.
         document.addEventListener('turbo:load', () => {
           if (window.__autodevSSE) return;
+          if (navigator.webdriver) return;
           const es = new EventSource('/stream');
           es.onmessage = (e) => Turbo.renderStreamMessage(e.data);
           window.__autodevSSE = es;
