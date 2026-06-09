@@ -34,18 +34,16 @@ class IssuesController < ApplicationController
   # GET /issues/:id
   # GET /issues/:id.json
   #
-  # Ported from `get %r{/issues/(\\d+)\\.json}` and
-  # `get %r{/issues/(\\d+)}` in lib/autodev/web/server.rb. Both formats
-  # land here; respond_to dispatches. The data layer is still Sequel —
-  # `::Issue` is the dynamically built Sequel model loaded by the
-  # legacy_sinatra initializer.
+  # Both formats land here; respond_to dispatches. The Phlex view consumes
+  # a symbol-keyed hash (Sinatra/Sequel legacy contract), so we hand it
+  # `issue_model.attributes.symbolize_keys` rather than the AR record.
   def show
     issue_model = find_issue(params[:id])
     return head :not_found unless issue_model
 
     respond_to do |format|
       format.html { render html: render_issue_show(issue_model).html_safe, layout: false }
-      format.json { render json: issue_model.values }
+      format.json { render json: issue_model.attributes }
     end
   end
 
@@ -114,7 +112,7 @@ class IssuesController < ApplicationController
 
   def render_issue_show(issue_model)
     ::Web::Views::IssueShow.new(
-      issue: issue_model.values,
+      issue: issue_model.attributes.symbolize_keys,
       issue_model: issue_model,
       events: events_for(issue_model),
       kpis: dashboard_kpis,
@@ -125,7 +123,7 @@ class IssuesController < ApplicationController
 
   def events_for(issue_model)
     activity_events_dataset.where(issue_id: issue_model.id)
-                           .reverse_order(:created_at, :id)
-                           .limit(200).all
+                           .order(created_at: :desc, id: :desc)
+                           .limit(200).to_a
   end
 end

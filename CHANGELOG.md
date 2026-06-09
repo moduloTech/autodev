@@ -2,7 +2,14 @@
 
 ## [Unreleased]
 
-## [1.0.0-alpha.4] - 2026-06-09
+## [1.0.0-alpha.5] - 2026-06-09
+
+### Fixed
+
+- `GET /issues/:id` 500'd in production with `NoMethodError: undefined method 'values' for an instance of Issue`. Two Sequel-API leftovers had survived the `Issue` Sequel→ActiveRecord cutover in `IssuesController`:
+  1. `issue_model.values` (Sequel's symbol-keyed attribute hash) at `app/controllers/issues_controller.rb:48` (JSON response) and `:117` (Phlex view). AR's equivalent is `attributes` (string-keyed) — the Phlex view consumes `@issue[:key]` and `JSON.pretty_generate(@issue)`, so the kwarg goes through `.attributes.symbolize_keys` to preserve the legacy Sinatra/Sequel contract; the JSON response can hand `.attributes` straight through (string-keyed serializes identically).
+  2. `activity_events_dataset.reverse_order(:created_at, :id)` in `events_for`. Sequel's `reverse_order(*cols)` accepts columns; AR's `reverse_order` takes no arguments and inverts the existing order clause — passing columns raised `ArgumentError`. Rewritten as `.order(created_at: :desc, id: :desc).limit(200).to_a` (also swapped Sequel's `.all` materializer for AR's `.to_a`).
+  Stale doc block on `#show` was also refreshed — it still claimed the data layer was Sequel, which has been false since `v1.0.0-alpha.1`. Root cause for the late discovery: no integration tests exist for `IssuesController`; the railsification's Issue/AR cutover (alpha.1 step 2 second half) ported ~30 call sites by hand but missed these two in the show path.
 
 ### Added
 
