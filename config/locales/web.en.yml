@@ -109,29 +109,31 @@ en:
   web_issue_confirm_transition_prefix: Force transition "
   web_issue_confirm_transition_suffix: "\"?"
   web_issue_no_transitions: No AASM transition allowed from
-  web_event_start_processing: Start processing
-  web_event_spec_clear: Mark spec clear
-  web_event_spec_unclear: Spec unclear, ask for clarification
-  web_event_question_detected: Question detected
-  web_event_question_answered: Question answered
-  web_event_clone_complete: Clone complete
-  web_event_impl_complete: Implementation complete
-  web_event_commit_complete: Commit complete
-  web_event_push_complete: Push complete
-  web_event_mr_created: MR created
-  web_event_pipeline_green: Pipeline green
-  web_event_post_completion_done: Post-completion done
-  web_event_start_post_completion: Start post-completion
-  web_event_review_done: Review done
-  web_event_pipeline_failed_code: Pipeline failed (code)
-  web_event_mr_closed: MR closed
-  web_event_discussions_fixed: Discussions resolved
-  web_event_pipeline_fix_done: Pipeline fix done
+  web_event_start_processing: Start preparation
+  web_event_clone_complete: Preparation complete
+  web_event_spec_clear: Request understood
+  web_event_spec_unclear: Request unclear, ask for clarification
+  web_event_question_detected: Question to ask
+  web_event_question_answered: Answer sent, finish
+  web_event_impl_complete: Code writing complete
+  web_event_commit_complete: Save complete
+  web_event_push_complete: Upload to GitLab complete
+  web_event_mr_created: Merge request opened
+  web_event_pipeline_green: Tests passed
+  web_event_post_completion_done: Finalization complete
+  web_event_start_post_completion: Start finalization
+  web_event_review_done: Review complete
+  web_event_review_giveup: Give up on review
+  web_event_pipeline_failed_code: Tests failing (code to fix)
+  web_event_mr_closed: Merge request closed
+  web_event_discussions_fixed: Review feedback applied
+  web_event_pipeline_fix_done: Tests fixed
   web_event_clarification_received: Clarification received
-  web_event_reenter: Re-enter from done
-  web_event_mark_failed: Mark as failed
-  web_event_retry_processing: Retry processing
-  web_event_retry_pipeline: Retry pipeline
+  web_event_reenter: Resume from delivery
+  web_event_reenter_to_check_pipeline: Resume at test stage
+  web_event_mark_failed: Mark as blocked
+  web_event_retry_processing: Retry from start
+  web_event_retry_pipeline: Retry tests
   web_issue_activity: Activity (%{count})
   web_issue_no_activity: No event recorded.
   web_activity_col_date: Date

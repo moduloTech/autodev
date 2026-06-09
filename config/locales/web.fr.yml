@@ -109,29 +109,31 @@ fr:
   web_issue_confirm_transition_prefix: 'Forcer la transition « '
   web_issue_confirm_transition_suffix: " » ?"
   web_issue_no_transitions: Aucune transition AASM permise depuis
-  web_event_start_processing: Démarrer le traitement
-  web_event_spec_clear: Specs claires
-  web_event_spec_unclear: Spec floue, demander une précision
-  web_event_question_detected: Question détectée
-  web_event_question_answered: Question répondue
-  web_event_clone_complete: Clone terminé
-  web_event_impl_complete: Implémentation terminée
-  web_event_commit_complete: Commit terminé
-  web_event_push_complete: Push terminé
-  web_event_mr_created: MR créée
-  web_event_pipeline_green: Pipeline verte
-  web_event_post_completion_done: Post-completion terminé
-  web_event_start_post_completion: Lancer le post-completion
-  web_event_review_done: Revue terminée
-  web_event_pipeline_failed_code: Pipeline rouge (code)
-  web_event_mr_closed: MR fermée
-  web_event_discussions_fixed: Discussions résolues
-  web_event_pipeline_fix_done: Fix pipeline terminé
+  web_event_start_processing: Démarrer la préparation
+  web_event_clone_complete: Préparation terminée
+  web_event_spec_clear: Demande comprise
+  web_event_spec_unclear: Demande floue, demander une précision
+  web_event_question_detected: Question à poser
+  web_event_question_answered: Réponse envoyée, terminer
+  web_event_impl_complete: Écriture du code terminée
+  web_event_commit_complete: Sauvegarde terminée
+  web_event_push_complete: Envoi sur GitLab terminé
+  web_event_mr_created: Demande de fusion ouverte
+  web_event_pipeline_green: Tests réussis
+  web_event_post_completion_done: Finalisation terminée
+  web_event_start_post_completion: Lancer la finalisation
+  web_event_review_done: Relecture terminée
+  web_event_review_giveup: Abandonner la relecture
+  web_event_pipeline_failed_code: Tests en échec (code à corriger)
+  web_event_mr_closed: Demande de fusion fermée
+  web_event_discussions_fixed: Retours de relecture appliqués
+  web_event_pipeline_fix_done: Tests corrigés
   web_event_clarification_received: Précision reçue
-  web_event_reenter: Reprendre depuis terminé
-  web_event_mark_failed: Marquer en erreur
-  web_event_retry_processing: Réessayer le traitement
-  web_event_retry_pipeline: Réessayer le pipeline
+  web_event_reenter: Reprendre depuis la livraison
+  web_event_reenter_to_check_pipeline: Reprendre au stade des tests
+  web_event_mark_failed: Marquer comme bloquée
+  web_event_retry_processing: Réessayer depuis le début
+  web_event_retry_pipeline: Réessayer les tests
   web_issue_activity: Activity (%{count})
   web_issue_no_activity: Aucun événement enregistré.
   web_activity_col_date: Date
