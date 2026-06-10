@@ -303,7 +303,7 @@ end
 # Solid Queue + Rails to find the right databases, pool sizes, and bundled
 # Gemfile (so the children's Bundler doesn't walk up from the operator's
 # CWD and pick up an unrelated Gemfile when autodev runs from /opt/homebrew).
-def supervisor_env(config)
+def supervisor_env(config) # rubocop:disable Metrics/MethodLength
   {
     'AUTODEV_MAX_WORKERS' => config['max_workers'].to_s,
     'AUTODEV_POLL_INTERVAL' => config['poll_interval'].to_s,
@@ -311,7 +311,14 @@ def supervisor_env(config)
     'AUTODEV_QUEUE_DB' => ENV.fetch('AUTODEV_QUEUE_DB', nil),
     'AUTODEV_HOME' => ENV.fetch('AUTODEV_HOME', nil),
     'RAILS_ENV' => ENV.fetch('RAILS_ENV', 'production'),
-    'BUNDLE_GEMFILE' => ENV.fetch('BUNDLE_GEMFILE', nil)
+    'BUNDLE_GEMFILE' => ENV.fetch('BUNDLE_GEMFILE', nil),
+    # Forward Azure SSO credentials when the operator set them in their
+    # shell. The canonical place is `~/.autodev/config.yml` under
+    # `azure:` (read by `config/initializers/devise.rb`) — env vars are
+    # a convenience override for one-off testing / debugging.
+    'AZURE_AD_CLIENT_ID' => ENV.fetch('AZURE_AD_CLIENT_ID', nil),
+    'AZURE_AD_CLIENT_SECRET' => ENV.fetch('AZURE_AD_CLIENT_SECRET', nil),
+    'AZURE_AD_TENANT_ID' => ENV.fetch('AZURE_AD_TENANT_ID', nil)
   }.compact
 end
 

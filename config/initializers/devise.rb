@@ -62,10 +62,27 @@ Devise.setup do |config|
   #    the strategy's middleware-build step exploding on a nil client_id
   #    (the underlying oauth2 gem refuses to construct a Client with
   #    nil credentials, even when test_mode short-circuits the request).
+  # Read Azure credentials in priority order: ENV → ~/.autodev/config.yml
+  # → stub. The config-file path is what production typically uses since
+  # launchd's env doesn't inherit the operator's shell vars; the ENV path
+  # is convenient for one-off `bin/rails console` sessions.
+  azure_config = (defined?(Web) && Web.config && Web.config['azure']) || {}
+
   config.omniauth :entra_id, {
-    client_id: ENV.fetch('AZURE_AD_CLIENT_ID', 'stub-client-id'),
-    client_secret: ENV.fetch('AZURE_AD_CLIENT_SECRET', 'stub-client-secret'),
-    tenant_id: ENV.fetch('AZURE_AD_TENANT_ID', 'common')
+    client_id: ENV.fetch('AZURE_AD_CLIENT_ID', azure_config['client_id'] || 'stub-client-id'),
+    client_secret: ENV.fetch('AZURE_AD_CLIENT_SECRET',
+                             azure_config['client_secret'] || 'stub-client-secret'),
+    tenant_id: ENV.fetch('AZURE_AD_TENANT_ID', azure_config['tenant_id'] || 'common'),
+
+    # CRITICAL: OmniAuth strategies match `/auth/:provider` by default,
+    # but Devise's `devise_for :users` builds routes at
+    # `/users/auth/:provider`. Without an explicit path_prefix the
+    # middleware never sees the request and Devise falls back to
+    # `Users::OmniauthCallbacksController#passthru` (a hardcoded 404).
+    # Set this to the scope path so the strategy's request_path /
+    # callback_path align with what `user_omniauth_authorize_path`
+    # produces. Hit during the alpha.7 → alpha.8 cutover on bobette.
+    path_prefix: '/users/auth'
   }
 end
 

@@ -24,6 +24,16 @@ module Config
     # database_url: sqlite://~/.autodev/autodev.db  # default
     web: { enabled: true, port: 4567, locale: fr, bind: '127.0.0.1' }  # embedded web UI; bind: 0.0.0.0 or NetBird IP to expose
 
+    # Microsoft 365 SSO credentials (Entra ID / Azure AD). Required as of
+    # v1.0.0-alpha.7 — without these the gated dashboard can't complete
+    # the sign-in handshake. Env vars (`AZURE_AD_CLIENT_ID`,
+    # `AZURE_AD_CLIENT_SECRET`, `AZURE_AD_TENANT_ID`) override the values
+    # here when set; `tenant_id: common` lets any work/school account in.
+    # azure:
+    #   client_id: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    #   client_secret: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    #   tenant_id: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
 
     projects:
       - path: group/project-name
