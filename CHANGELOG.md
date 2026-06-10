@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.15] - 2026-06-10
+
+### Fixed
+
+- `User.from_omniauth` raised `ActiveRecord::RecordInvalid (Validation failed: Email has already been taken)` on the very first SSO sign-in when the user had previously been seeded via `autodev:seed_admin`. The seeded row carries an email but no `microsoft_uid`; the existing `find_or_initialize_by(microsoft_uid:)` then missed and tried to insert a new row that collided on the unique-email index. Fix: fall back to a case-insensitive email lookup when the uid lookup misses, and attach the Entra uid to the existing row instead of duplicating. Hit during the alpha.14 verification on bobette as the OAuth flow finally completed end to end.
+
 ## [1.0.0-alpha.14] - 2026-06-10
 
 ### Fixed
