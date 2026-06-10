@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.10] - 2026-06-10
+
+### Fixed
+
+- `azure:` config-file block silently ignored — Devise was registering the omniauth provider with stub credentials even when `~/.autodev/config.yml` had valid Microsoft 365 credentials in it. Root cause: `config/initializers/load_autodev_config.rb` populates `Web.config` inside a `Rails.application.config.after_initialize` block, which fires AFTER every initializer has run. By the time `config/initializers/devise.rb`'s `azure_config = … Web.config['azure']` read happens, `Web.config` is still nil. The Devise `omniauth_configs` hash is locked in at the engine's middleware-build step, so a post-hoc fixup isn't reachable. Fix: read `~/.autodev/config.yml` directly in devise.rb (synchronous YAML load, no dependency on `Web.config`'s initialization order). Hit during the alpha.9 verification on bobette: the strategy correctly intercepted `/users/auth/entra_id` (path_prefix fix from alpha.9 confirmed working via the runtime middleware-args dump) but the redirect to Microsoft carried `client_id=stub-client-id` which Entra rejected.
+
 ## [1.0.0-alpha.9] - 2026-06-10
 
 ### Fixed
