@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.11] - 2026-06-10
+
+### Fixed
+
+- `/users/auth/entra_id` still 404'd via `Users::OmniauthCallbacksController#passthru` even with the path_prefix (alpha.9) and credentials (alpha.10) fixes in place. Root cause: OmniAuth 2.x ships with `OmniAuth.config.allowed_request_methods = [:post]` as a CSRF hardening default — a request-phase GET passes through the strategy middleware untouched. Our flow is GET-driven: `EntraIdFailureApp` returns a 302 redirect to `/users/auth/entra_id` and the browser follows with GET. Fix: set `OmniAuth.config.allowed_request_methods = %i[get post]` in `config/initializers/devise.rb` so both verbs route through the strategy. The defence-in-depth this disables is the gem-level CSRF check on the request phase; the OAuth `state` parameter (set by OmniAuth and validated on callback) is the canonical defence against forged sign-in initiations, and autodev runs behind a NetBird mesh so the attack surface is already narrow. Hit during the alpha.10 verification on bobette: middleware args were correctly populated (real Azure credentials + path_prefix) yet the GET still bypassed the strategy.
+
 ## [1.0.0-alpha.10] - 2026-06-10
 
 ### Fixed

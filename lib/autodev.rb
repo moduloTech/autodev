@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Autodev
-  VERSION = '1.0.0.alpha.10'
+  VERSION = '1.0.0.alpha.11'
 end
 
 # Runtime gem dependencies. Idempotent — re-requiring a gem is a no-op.
