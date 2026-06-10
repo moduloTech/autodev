@@ -31,11 +31,27 @@ class User < ApplicationRecord
   # it after this returns, so a sync failure can short-circuit the
   # sign-in with a clean message instead of partial state.
   def self.from_omniauth(auth)
-    user = find_or_initialize_by(microsoft_uid: auth.uid)
+    user = find_by(microsoft_uid: auth.uid)
+    # If the row was seeded with an email but no microsoft_uid (e.g.
+    # `autodev:seed_admin EMAIL=…` ran before the user's first SSO),
+    # attach the Entra uid to the existing row instead of creating a
+    # duplicate that would collide on the unique-email index. Email
+    # match is case-insensitive — mirrors the `case_sensitive: false`
+    # uniqueness validation.
+    user ||= find_by_email_ci(auth.info&.email)
+    user ||= new
+    user.microsoft_uid ||= auth.uid
     apply_omniauth_info!(user, auth.info)
     user.save!
     user
   end
+
+  def self.find_by_email_ci(email)
+    return nil if email.blank?
+
+    where('LOWER(email) = ?', email.downcase).first
+  end
+  private_class_method :find_by_email_ci
 
   def self.apply_omniauth_info!(user, info)
     return if info.nil?

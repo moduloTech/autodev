@@ -71,4 +71,29 @@ class UserOmniauthTest < ActiveSupport::TestCase
 
     assert_equal 'alice@modulotech.fr', user.email
   end
+
+  # Regression: alpha.7's `autodev:seed_admin` rake creates a User row
+  # with email + admin: true but no microsoft_uid. When that same person
+  # later signs in via Entra ID, find_or_initialize_by(microsoft_uid:)
+  # wouldn't see the existing row and would try to create a duplicate,
+  # bombing on the unique-email index. We fall back to a case-
+  # insensitive email lookup and attach the uid to the seeded row.
+  def test_seeded_user_without_uid_gets_uid_attached_on_first_sso
+    User.create!(email: 'alice@modulotech.fr', name: 'Pre-seeded', admin: true)
+
+    assert_no_difference -> { User.count } do
+      user = User.from_omniauth(AUTH_HASH)
+
+      assert_equal 'azure-oid-abc-123', user.microsoft_uid
+      assert_predicate user, :admin?
+    end
+  end
+
+  def test_email_match_is_case_insensitive
+    User.create!(email: 'Alice@modulotech.fr', name: 'Pre-seeded')
+
+    assert_no_difference -> { User.count } do
+      User.from_omniauth(AUTH_HASH) # auth hash has alice@modulotech.fr (lowercase)
+    end
+  end
 end
