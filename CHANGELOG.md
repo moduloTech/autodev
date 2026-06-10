@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.12] - 2026-06-10
+
+### Changed
+
+- POST-only OmniAuth request phase, via an interim `/sign_in` page. Reverts the alpha.11 `OmniAuth.config.allowed_request_methods = [:get, :post]` relaxation in favour of the canonical Devise + omniauth posture (POST-only, CSRF token required). New `SignInController#new` renders a standalone Phlex page (no layout chrome — the layout opens an EventSource to `/stream` which is gated and would redirect-loop in the browser console) with a single `<form method=post action=/users/auth/entra_id>` carrying a hidden `authenticity_token`. One click → POST → OmniAuth strategy intercepts → redirect to Microsoft. `EntraIdFailureApp.redirect_url` now points anonymous callers at `/sign_in` instead of `/users/auth/entra_id`. New locale keys `web_sign_in_title` / `web_sign_in_subtitle` / `web_sign_in_button` (FR + EN). Gating tests assert the redirect lands on `/sign_in` and that the page carries a POST form pointing at the omniauth path. 516 → 518 tests.
+
 ## [1.0.0-alpha.11] - 2026-06-10
 
 ### Fixed
