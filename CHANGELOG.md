@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.9] - 2026-06-10
+
+### Fixed
+
+- `/users/auth/entra_id` returned `404 Not Found ... Not found. Authentication passthru.` after the alpha.8 hotfix unblocked the redirect loop. Root cause: OmniAuth strategies default to `path_prefix = '/auth'`, but `devise_for :users` builds the sign-in routes under `/users/auth/:provider` — without an explicit `path_prefix` the strategy middleware never matches the URL, and Devise's hardcoded `Users::OmniauthCallbacksController#passthru` action returns 404 as the documented fallback. Fix: pass `path_prefix: '/users/auth'` in the `config.omniauth :entra_id` call in `config/initializers/devise.rb` so the strategy's `request_path` / `callback_path` align with `user_omniauth_authorize_path`. Hit during the alpha.8 verification on bobette.
+
+### Added
+
+- `~/.autodev/config.yml` can now carry Azure / Entra ID credentials under an `azure:` block (`client_id`, `client_secret`, `tenant_id`). Reads in priority order: ENV (`AZURE_AD_CLIENT_ID` / `AZURE_AD_CLIENT_SECRET` / `AZURE_AD_TENANT_ID`) → `Web.config['azure']` → stub. The config-file path is the canonical place for production since launchd-managed services don't inherit the operator's shell env; the ENV path is kept as a convenience for one-off `bin/rails console` / smoke testing. Template comment added in `lib/autodev/config.rb`.
+- `bin/autodev`'s supervisor forwards `AZURE_AD_CLIENT_ID` / `AZURE_AD_CLIENT_SECRET` / `AZURE_AD_TENANT_ID` to the children when set in the parent's env — so an operator who exports them in the shell + foreground-runs `autodev` gets them propagated to Rails / Solid Queue.
+
 ## [1.0.0-alpha.8] - 2026-06-10
 
 ### Fixed
