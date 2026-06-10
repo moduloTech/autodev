@@ -68,3 +68,41 @@ Devise.setup do |config|
     tenant_id: ENV.fetch('AZURE_AD_TENANT_ID', 'common')
   }
 end
+
+# alpha.7 → alpha.8 hotfix: `Devise.parent_controller` defaults to
+# `ApplicationController`, so Devise's own controllers (sessions,
+# omniauth_callbacks, the failure_app's redirect target) inherited
+# `before_action :authenticate_user!` once PR3 turned it on globally.
+# That caused `/users/sign_in` to itself require an authenticated user
+# → Devise redirected back to `/users/sign_in` → loop →
+# `ERR_TOO_MANY_REDIRECTS` in the browser (and a flood of
+# `Completed 401 Unauthorized` in `production.log`).
+#
+# Two-part fix:
+#   1. Strip `authenticate_user!` off the Devise parent class so every
+#      Devise controller is reachable to anonymous traffic.
+#   2. Replace the FailureApp so unauthenticated requests redirect
+#      straight to `/users/auth/entra_id` (the omniauth handshake)
+#      rather than `/users/sign_in` — the latter would render Devise's
+#      default sessions/new view, which expects `:database_authenticatable`
+#      fields we don't have.
+Rails.application.config.to_prepare do
+  DeviseController.skip_before_action :authenticate_user!, raise: false
+end
+
+# Custom FailureApp: skip the new_user_session_path detour, point
+# every unauthenticated redirect at the omniauth handshake instead.
+# `respond` is the entry point Warden uses; we keep super's behaviour
+# for HTTP-auth callers (xhr / api) and only override the HTML
+# navigational redirect URL.
+class EntraIdFailureApp < Devise::FailureApp
+  def redirect_url
+    return super unless scope == :user
+
+    "#{request.base_url}/users/auth/entra_id"
+  end
+end
+
+Devise.warden do |manager|
+  manager.failure_app = EntraIdFailureApp
+end
