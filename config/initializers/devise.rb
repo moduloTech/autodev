@@ -66,7 +66,20 @@ Devise.setup do |config|
   # → stub. The config-file path is what production typically uses since
   # launchd's env doesn't inherit the operator's shell vars; the ENV path
   # is convenient for one-off `bin/rails console` sessions.
-  azure_config = (defined?(Web) && Web.config && Web.config['azure']) || {}
+  #
+  # We can't read through `Web.config` here — that's populated by
+  # `config/initializers/load_autodev_config.rb`'s `after_initialize`
+  # block, which fires AFTER every initializer (including this one) has
+  # run. Devise's `config.omniauth` call must happen synchronously here
+  # so the Engine's middleware-build step picks the args up — by then,
+  # the values are immutable. Read the YAML directly instead.
+  azure_config = begin
+    cfg_path = File.expand_path(ENV.fetch('AUTODEV_CONFIG', '~/.autodev/config.yml'))
+    yaml = File.exist?(cfg_path) ? YAML.safe_load_file(cfg_path, aliases: true) : {}
+    yaml.is_a?(Hash) ? (yaml['azure'] || {}) : {}
+  rescue StandardError
+    {}
+  end
 
   config.omniauth :entra_id, {
     client_id: ENV.fetch('AZURE_AD_CLIENT_ID', azure_config['client_id'] || 'stub-client-id'),
