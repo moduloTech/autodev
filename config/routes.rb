@@ -15,6 +15,11 @@ Rails.application.routes.draw do
              skip: %i[registrations passwords],
              controllers: { omniauth_callbacks: 'users/omniauth_callbacks' }
 
+  # Anonymous sign-in landing — rendered by `SignInController#new`,
+  # POSTs to `/users/auth/entra_id`. Kicked off by Devise's failure_app
+  # redirect (config/initializers/devise.rb). Anonymous-accessible.
+  get '/sign_in', to: 'sign_in#new'
+
   # === Application routes ==========================================
   # /issues/:id (both HTML + .json) → IssuesController#show via respond_to.
   # /issues/:id/reset → IssuesController#reset (raw SQL reset, not AASM).

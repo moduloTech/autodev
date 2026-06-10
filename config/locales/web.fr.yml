@@ -9,6 +9,9 @@ fr:
   web_nav_projects: Projets
   web_theme_toggle: Changer le thème
   web_sign_out: Se déconnecter
+  web_sign_in_title: Connexion
+  web_sign_in_subtitle: Connectez-vous avec votre compte Microsoft 365.
+  web_sign_in_button: Se connecter avec Microsoft
   web_coming_soon: Bientôt
   web_coming_soon_tooltip: Bientôt disponible
   web_sidebar_search: Rechercher…

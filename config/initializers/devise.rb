@@ -25,19 +25,12 @@ require 'devise'
 require 'omniauth-entra-id'
 require 'omniauth/rails_csrf_protection'
 
-# OmniAuth 2.x ships with `allowed_request_methods = [:post]` as a CSRF
-# hardening default — a request-phase GET passes through the strategy
-# middleware untouched, which means our `EntraIdFailureApp` redirect
-# (302 → browser GET) never gets intercepted and falls through to
-# `Users::OmniauthCallbacksController#passthru` (a hardcoded 404).
-#
-# Allow GET so the redirect-based flow works. The defense-in-depth this
-# disables is the gem-level CSRF check on the request phase — the OAuth
-# `state` parameter (set by OmniAuth, validated on callback) is the
-# canonical defense against forged sign-in initiations, and autodev
-# runs behind a NetBird mesh so the attack surface is already narrow.
-OmniAuth.config.allowed_request_methods = %i[get post]
-OmniAuth.config.silence_get_warning = true
+# Keep OmniAuth 2.x's `allowed_request_methods = [:post]` default —
+# the request phase only triggers via the POST form on /sign_in
+# (SignInController) which carries a CSRF token validated by
+# omniauth/rails_csrf_protection. Defence in depth on top of the
+# OAuth `state` parameter; safe to require even though autodev runs
+# behind NetBird.
 
 Devise.setup do |config|
   # Required by Devise even when no mailer-related module is active.
@@ -135,15 +128,16 @@ Rails.application.config.to_prepare do
 end
 
 # Custom FailureApp: skip the new_user_session_path detour, point
-# every unauthenticated redirect at the omniauth handshake instead.
-# `respond` is the entry point Warden uses; we keep super's behaviour
-# for HTTP-auth callers (xhr / api) and only override the HTML
+# every unauthenticated redirect at /sign_in (rendered by
+# SignInController), which hands the user a button POSTing to the
+# omniauth strategy with a CSRF token. We keep super's behaviour for
+# HTTP-auth callers (xhr / api) and only override the HTML
 # navigational redirect URL.
 class EntraIdFailureApp < Devise::FailureApp
   def redirect_url
     return super unless scope == :user
 
-    "#{request.base_url}/users/auth/entra_id"
+    "#{request.base_url}/sign_in"
   end
 end
 

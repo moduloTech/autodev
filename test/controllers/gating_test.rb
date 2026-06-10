@@ -40,16 +40,23 @@ class GatingTest < ActionDispatch::IntegrationTest
     refute_includes filters, :authenticate_user!
   end
 
-  def test_users_auth_entra_id_remains_public
-    # We can't follow the full Entra ID handshake in an integration test
-    # (cf. railsification-handoff §4 on OmniAuth.config.test_mode). What
-    # we *can* assert is that the route doesn't 302 back to itself via
-    # authenticate_user! — the omniauth middleware will own the redirect
-    # to Microsoft instead. Both responses (302 to Entra, or 4xx if the
-    # middleware rejects the unset session) prove the gate skipped.
-    get '/users/auth/entra_id'
+  def test_sign_in_page_renders_for_anonymous
+    get '/sign_in'
 
-    refute_match(%r{/users/auth/entra_id\z}, response.headers['Location'].to_s)
+    assert_response :success
+  end
+
+  def test_sign_in_page_carries_post_button_to_omniauth
+    get '/sign_in'
+
+    assert_includes response.body, 'action="/users/auth/entra_id"'
+    assert_includes response.body, 'method="post"'
+  end
+
+  def test_anonymous_dashboard_redirect_lands_on_sign_in
+    get '/'
+
+    assert_match(%r{/sign_in\z}, response.headers['Location'].to_s)
   end
 
   def test_logged_in_user_reaches_dashboard

@@ -9,6 +9,9 @@ en:
   web_nav_projects: Projects
   web_theme_toggle: Toggle theme
   web_sign_out: Sign out
+  web_sign_in_title: Sign in
+  web_sign_in_subtitle: Sign in with your Microsoft 365 account.
+  web_sign_in_button: Sign in with Microsoft
   web_coming_soon: Soon
   web_coming_soon_tooltip: Coming soon
   web_sidebar_search: Search…
