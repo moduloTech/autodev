@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.13] - 2026-06-10
+
+### Fixed
+
+- POST `/users/auth/entra_id` from the alpha.12 `/sign_in` form 422'd with `InvalidAuthenticityToken` even when the CSRF token was correct. Root cause: the NetBird reverse proxy terminates TLS at `https://autodev.netbird.<tenant>` and forwards plain HTTP to Puma on `127.0.0.1:4567`. Rails saw `request.scheme = "http"`, so `request.base_url = "http://127.0.0.1:4567"` while the browser sent `Origin: https://autodev.netbird.<tenant>`. `verified_request?` calls `valid_request_origin?` which compares the two — mismatch → false → 422. Fix: `config.assume_ssl = true` in `config/environments/production.rb`. Flips `env['HTTPS']` to "on" on every request so `request.scheme` returns "https" and `base_url` matches `Origin`.
+
 ## [1.0.0-alpha.12] - 2026-06-10
 
 ### Changed
