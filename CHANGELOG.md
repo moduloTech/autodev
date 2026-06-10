@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.8] - 2026-06-10
+
+### Fixed
+
+- `ERR_TOO_MANY_REDIRECTS` on every dashboard URL after the alpha.7 cutover (flooding `production.log` with `Completed 401 Unauthorized in 1ms` lines, one per browser retry). Root cause: `Devise.parent_controller` defaults to `ApplicationController`, so the global `before_action :authenticate_user!` PR3 added in alpha.7 chained onto Devise's own controllers — `/users/sign_in` therefore required an authenticated user, Devise's failure app redirected back to `/users/sign_in`, and the cycle repeated. PR3 only skipped the filter on `Users::OmniauthCallbacksController`, not on the parent `DeviseController`. Two-part hotfix in `config/initializers/devise.rb`:
+  1. `Rails.application.config.to_prepare { DeviseController.skip_before_action :authenticate_user!, raise: false }` strips the inherited filter off Devise's parent class so every Devise controller (sessions, omniauth_callbacks, etc.) is reachable to anonymous traffic.
+  2. New `EntraIdFailureApp < Devise::FailureApp` overrides `redirect_url` to point unauthenticated callers at `/users/auth/entra_id` directly. Devise's default redirect target is `/users/sign_in`, which would render the gem's sessions/new view that expects `:database_authenticatable` form fields we don't ship — the omniauth handshake is the only sign-in path this app has, no detour needed.
+
 ## [1.0.0-alpha.7] - 2026-06-09
 
 ### Added
