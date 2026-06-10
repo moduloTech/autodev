@@ -25,6 +25,20 @@ require 'devise'
 require 'omniauth-entra-id'
 require 'omniauth/rails_csrf_protection'
 
+# OmniAuth 2.x ships with `allowed_request_methods = [:post]` as a CSRF
+# hardening default — a request-phase GET passes through the strategy
+# middleware untouched, which means our `EntraIdFailureApp` redirect
+# (302 → browser GET) never gets intercepted and falls through to
+# `Users::OmniauthCallbacksController#passthru` (a hardcoded 404).
+#
+# Allow GET so the redirect-based flow works. The defense-in-depth this
+# disables is the gem-level CSRF check on the request phase — the OAuth
+# `state` parameter (set by OmniAuth, validated on callback) is the
+# canonical defense against forged sign-in initiations, and autodev
+# runs behind a NetBird mesh so the attack surface is already narrow.
+OmniAuth.config.allowed_request_methods = %i[get post]
+OmniAuth.config.silence_get_warning = true
+
 Devise.setup do |config|
   # Required by Devise even when no mailer-related module is active.
   config.mailer_sender = ENV.fetch('AUTODEV_MAILER_SENDER', 'noreply@autodev.local')
