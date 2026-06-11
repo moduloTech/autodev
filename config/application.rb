@@ -77,6 +77,20 @@ module Autodev
     # defines `Web::Views::Dashboard`).
     config.autoload_paths << Rails.root.join('app/components')
 
+    # Propshaft's railtie auto-inserts `Propshaft::Server` into the middleware
+    # stack whenever `config.public_file_server.enabled` is true — Rails 8's
+    # default in development. The middleware then intercepts every `/assets/*`
+    # request *before* the router, scans only the standard load paths
+    # (`app/assets/stylesheets`, etc.) — which we don't use — and returns a
+    # bare `404 Not found` for the files we keep under `app/assets/static/`.
+    # The router never gets a chance to dispatch to `AssetsController`. Drop
+    # the middleware so `/assets/*` falls through to the router in every
+    # environment. We still need `propshaft/railtie` loaded for Mission
+    # Control's engine to find `config.assets.paths` at boot. The middleware
+    # isn't present in production by default (`RAILS_SERVE_STATIC_FILES` is
+    # unset there), which is why this only ever broke dev.
+    config.middleware.delete Propshaft::Server
+
     # Skip generator hooks for stacks we are not using yet.
     config.generators.system_tests = nil
 
