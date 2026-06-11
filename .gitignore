@@ -1,6 +1,6 @@
 .DS_Store
 docs/*.zip
-docs/*.pdf
+docs/**/*.pdf
 
 # Rails (phase A railsification)
 /log/*
