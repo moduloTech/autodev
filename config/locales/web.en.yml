@@ -7,6 +7,7 @@ en:
   web_nav_to_watch: To watch
   web_nav_conversations: Conversations
   web_nav_projects: Projects
+  web_nav_admin_users: Users
   web_theme_toggle: Toggle theme
   web_sign_out: Sign out
   web_sign_in_title: Sign in
@@ -248,3 +249,20 @@ en:
   web_issues_prev: "← Previous"
   web_issues_next: Next →
   web_issues_page_indicator: Page %{page} / %{total}
+  web_admin_users_title: Users
+  web_admin_users_subtitle: Read-only. Roles and project access are synced from GitLab.
+  web_admin_users_breadcrumb: Administration
+  web_admin_users_count_one: "%{count} user"
+  web_admin_users_count_many: "%{count} users"
+  web_admin_users_empty: No users yet. Seed an account via `bin/rails autodev:seed_admin EMAIL=…`.
+  web_admin_users_col_user: User
+  web_admin_users_col_gitlab: GitLab
+  web_admin_users_col_role: Role
+  web_admin_users_col_status: Status
+  web_admin_users_col_memberships: Project access
+  web_admin_users_role_admin: Admin
+  web_admin_users_role_member: Member
+  web_admin_users_status_active: Active
+  web_admin_users_status_disabled: Disabled %{date}
+  web_admin_users_memberships_none: No access
+  web_admin_users_no_gitlab: "—"

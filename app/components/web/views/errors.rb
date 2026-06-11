@@ -36,7 +36,7 @@ module Web
         render Components::Sidebar.new(
           active: 'errors', locale: web_locale, request_path: @request_path,
           counts: { issues: @kpis[:active], errors: @kpis[:errors], chat: 0 },
-          translator: ->(key, **vars) { t_web(key, **vars) }
+          translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin
         )
       end
 

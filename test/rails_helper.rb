@@ -19,6 +19,16 @@ ENV['AUTODEV_SKIP_LEGACY'] = '1'
 
 require_relative '../config/environment'
 
+# AUTODEV_SKIP_LEGACY=1 also short-circuits config/initializers/load_autodev_config.rb,
+# which is what normally requires `lib/autodev` (and transitively `autodev/locales`).
+# The web Phlex views call `t_web` → `Locales.t` whenever they render through
+# the shared sidebar/topbar, so they crash with `NameError (uninitialized
+# constant Web::I18nHelpers::Locales)` in the test environment unless we wire
+# the dependency up by hand. Pull in only what the views need — not the full
+# lib/autodev tree (which would drag in Sequel-era modules).
+require 'autodev/locales'
+require 'autodev/config'
+
 require 'minitest/autorun'
 require 'active_support/test_case'
 

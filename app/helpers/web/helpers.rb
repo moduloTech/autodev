@@ -22,10 +22,12 @@ module Web
     # share a single source of truth (PR3 of the users-rollout chantier).
     # Controllers spread `**view_kwargs` into their view instantiations.
     def view_kwargs
+      user = respond_to?(:current_user) ? current_user : nil
       {
         locale: web_locale,
         request_path: request.fullpath,
-        current_user_email: respond_to?(:current_user) ? current_user&.email : nil,
+        current_user_email: user&.email,
+        current_user_admin: user&.admin? || false,
         csrf_token: respond_to?(:form_authenticity_token) ? form_authenticity_token : nil
       }
     end

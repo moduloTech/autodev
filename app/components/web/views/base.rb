@@ -17,10 +17,11 @@ module Web
       include Web::Helpers
 
       def initialize(locale: :fr, request_path: '/', # rubocop:disable Lint/MissingSuper
-                     current_user_email: nil, csrf_token: nil)
+                     current_user_email: nil, current_user_admin: false, csrf_token: nil)
         @locale = locale
         @request_path = request_path
         @current_user_email = current_user_email
+        @current_user_admin = current_user_admin
         @csrf_token = csrf_token
       end
 

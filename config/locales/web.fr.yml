@@ -7,6 +7,7 @@ fr:
   web_nav_to_watch: À surveiller
   web_nav_conversations: Conversations
   web_nav_projects: Projets
+  web_nav_admin_users: Utilisateurs
   web_theme_toggle: Changer le thème
   web_sign_out: Se déconnecter
   web_sign_in_title: Connexion
@@ -248,3 +249,20 @@ fr:
   web_issues_prev: "← Précédent"
   web_issues_next: Suivant →
   web_issues_page_indicator: Page %{page} / %{total}
+  web_admin_users_title: Utilisateurs
+  web_admin_users_subtitle: Lecture seule. Les rôles et accès projet sont synchronisés depuis GitLab.
+  web_admin_users_breadcrumb: Administration
+  web_admin_users_count_one: "%{count} utilisateur"
+  web_admin_users_count_many: "%{count} utilisateurs"
+  web_admin_users_empty: Aucun utilisateur pour le moment. Initialise un compte via `bin/rails autodev:seed_admin EMAIL=…`.
+  web_admin_users_col_user: Utilisateur
+  web_admin_users_col_gitlab: GitLab
+  web_admin_users_col_role: Rôle
+  web_admin_users_col_status: Statut
+  web_admin_users_col_memberships: Accès projets
+  web_admin_users_role_admin: Admin
+  web_admin_users_role_member: Membre
+  web_admin_users_status_active: Actif
+  web_admin_users_status_disabled: Désactivé %{date}
+  web_admin_users_memberships_none: Aucun accès
+  web_admin_users_no_gitlab: "—"

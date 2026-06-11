@@ -8,14 +8,15 @@ module Web
       # Middle: search-bar placeholder + nav items with optional counts.
       # Bottom: "Nouveau ticket" CTA + user info.
       class Sidebar < Phlex::HTML # rubocop:disable Metrics/ClassLength
-        def initialize( # rubocop:disable Lint/MissingSuper
+        def initialize( # rubocop:disable Lint/MissingSuper,Metrics/ParameterLists
           active:, locale:, request_path:,
-          counts: {}, translator: nil
+          counts: {}, translator: nil, admin: false
         )
           @active = active.to_s
           @locale = locale
           @request_path = request_path
           @counts = counts
+          @admin = admin
           # Caller passes a t_web-like lambda since the Sidebar isn't a Web::Views::Base.
           @t = translator || ->(key, **) { key.to_s }
         end
@@ -125,10 +126,16 @@ module Web
             count_key: :chat, coming_soon: true },
           { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '/projects' }
         ].freeze
-        private_constant :ITEMS
+        # Appended after ITEMS when the caller passes `admin: true`. Lives in a
+        # separate constant so non-admin sidebars stay byte-identical to before.
+        ADMIN_ITEMS = [
+          { id: 'admin', label_key: :web_nav_admin_users, icon: 'users', href: '/admin/users' }
+        ].freeze
+        private_constant :ITEMS, :ADMIN_ITEMS
 
         def render_nav_items
-          ITEMS.each { |item| render_nav_item(item) }
+          items = @admin ? ITEMS + ADMIN_ITEMS : ITEMS
+          items.each { |item| render_nav_item(item) }
         end
 
         def render_nav_item(item) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
