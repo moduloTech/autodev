@@ -36,6 +36,31 @@ Dependencies are installed by `bundle install --deployment` at Brew install time
 
 Requires: Ruby ≥3.2, `danger-claude` on PATH (Brew dep), and optionally `mr-review` (Brew dep, automated review skipped if missing). When `app.run` ports are configured, Docker Desktop is also required for Chrome MCP injection.
 
+## Local development
+
+The repo runs the exact same code path as production — same Devise + Entra ID SSO, same `GitlabMembershipSync` in the OAuth callback, same Solid Queue worker. There is no dev-only auth bypass: you sign in with your real Microsoft 365 account and the callback resolves your real GitLab membership. To wire that up locally:
+
+1. **`RAILS_ENV=development`**. `config/recurring.yml`'s `development:` block is empty, so the Solid Queue scheduler boots with zero recurring tasks — a local `bin/autodev` never auto-polls production tickets. Trigger a cycle by hand: `bin/rails runner 'AutodevPollJob.perform_now'`. `bin/autodev` prints a banner at boot reminding you of this.
+
+2. **Azure SSO credentials**. Add an `azure:` block to your local `~/.autodev/config.yml` (mirrors prod's — same client_id / client_secret / tenant_id):
+   ```yaml
+   azure:
+     client_id: <prod-client-id>
+     client_secret: <prod-secret>
+     tenant_id: <prod-tenant>
+   ```
+   Or export `AZURE_AD_CLIENT_ID` / `AZURE_AD_CLIENT_SECRET` / `AZURE_AD_TENANT_ID` (the supervisor forwards them to the Rails + worker children). Without one of those, `config/initializers/devise.rb` falls back to `stub-client-id` and Microsoft returns AADSTS700016. `bin/autodev` warns at boot when the stub is detected; the `/sign_in` page also surfaces a banner with the setup steps.
+
+3. **Localhost redirect URI**. Register `http://localhost:4567/users/auth/entra_id/callback` (Web platform, not SPA) on the app in the Azure portal. The Entra ID strategy does server-side OAuth, so it needs a Web redirect — and Azure allows `http://localhost` specifically as an exception to the HTTPS-only rule for public clients.
+
+4. **GitLab token**. Set `gitlab_token` in `~/.autodev/config.yml` (or `GITLAB_API_TOKEN` env var) to a real PAT with `api` scope. `Users::OmniauthCallbacksController#entra_id` calls `Autodev::GitlabMembershipSync.for_user!` synchronously on every login — without a working token the first sign-in raises `SyncFailed` and rolls back the new User row. Same scope as prod's token.
+
+5. **Projects table populated**. Copy the `projects:` block from your prod `~/.autodev/config.yml` into the local one, then `bin/rails autodev:migrate_projects_from_yaml`. Without this the table is empty; `GitlabMembershipSync` will then compute zero memberships for your user, mark you `disabled`, and Devise will refuse the sign-in (401). The sync logs `[gitlab_sync] WARNING: projects table is empty…` when this happens — that's the symptom.
+
+6. **Boot the dev server**. `RAILS_ENV=development bin/autodev` runs the full supervisor (Rails + Solid Queue), or `RAILS_ENV=development bin/rails server -p 4567` if you only need the web UI and will trigger jobs by hand.
+
+The first dev sign-in inserts your `users` row, runs the GitLab sync, and lands you on the dashboard with your prod memberships visible — exactly the prod flow. Re-running the sync after manual edits to `project_memberships` in dev: `bin/rails runner 'SyncGitlabMembershipsJob.perform_now'`.
+
 ## Configuration
 
 Settings are resolved in 4 layers (highest priority wins):

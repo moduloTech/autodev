@@ -1,33 +1,11 @@
 # frozen_string_literal: true
 
-# Step 4 of the railsification — rake wrapper around YamlProjectImporter
+# Rake wrappers around `Autodev::OpsCommands` and `YamlProjectImporter`
 # (cf. autodev/docs/autospec.md §H).
 #
-# Invocation: NOT via `bundle exec rake` — the project's Rakefile deliberately
-# does NOT call `Rails.application.load_tasks` (see autodev/docs/railsification-
-# handoff.md §4: that would conflict with the existing minitest harness's
-# `:test` task). Until the supervisor lands in phase C and owns the rake
-# wiring, invoke this task explicitly via `bin/rails runner`:
-#
-#   bin/rails runner '
-#     Rake.application.init
-#     Rake.application.add_import("lib/tasks/autodev.rake")
-#     Rake.application.load_imports
-#     Rake::Task["autodev:migrate_projects_from_yaml"].invoke
-#   '
-#
-# Or, more practically until then, instantiate the importer directly:
-#
-#   bin/rails runner '
-#     yaml = YAML.safe_load_file(File.expand_path(ENV.fetch("AUTODEV_CONFIG", "~/.autodev/config.yml")))
-#     summary = YamlProjectImporter.new(yaml: yaml).import!(dry_run: ENV["DRY_RUN"] == "1")
-#     puts summary
-#   '
-#
-# The task itself lives here for forward compatibility — once the
-# Rakefile is wired up in phase C, `bundle exec rake autodev:migrate_projects_from_yaml`
-# becomes the canonical entry point and the autodev §H plan (rake one-shot
-# during cutover) is reachable without copy-paste.
+# Invocation: `bin/rails autodev:<task>` — the Rakefile loads Rails tasks
+# (since the phase C cutover) and redefines `:test` on top to keep the
+# minitest harness intact.
 
 # Helpers extracted from the rake tasks below (Metrics/BlockLength). All
 # delegate to `Autodev::OpsCommands` so `bin/autodev`'s CLI flags

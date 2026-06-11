@@ -12,6 +12,16 @@ fr:
   web_sign_in_title: Connexion
   web_sign_in_subtitle: Connectez-vous avec votre compte Microsoft 365.
   web_sign_in_button: Se connecter avec Microsoft
+  web_sign_in_dev_banner_title: "Configuration Azure manquante (dev)"
+  web_sign_in_dev_banner_body: "Les identifiants Azure ne sont pas configurés — la connexion va échouer côté Microsoft (AADSTS700016). À configurer avant de cliquer :"
+  web_sign_in_dev_step_yaml_prefix: "Dans"
+  web_sign_in_dev_step_yaml_suffix: "ajoute le bloc"
+  web_sign_in_dev_step_env_prefix: "Ou exporte les variables d'env"
+  web_sign_in_dev_step_redirect_prefix: "Et ajoute"
+  web_sign_in_dev_step_redirect_suffix: "aux Redirect URIs de l'app dans Entra ID."
+  web_sign_in_dev_empty_projects_title: "Table projects vide (dev)"
+  web_sign_in_dev_empty_projects_body: "Aucun projet n'est importé en base. GitlabMembershipSync va te marquer disabled et Devise refusera la connexion (401)."
+  web_sign_in_dev_empty_projects_fix_prefix: "Importer depuis ~/.autodev/config.yml :"
   web_coming_soon: Bientôt
   web_coming_soon_tooltip: Bientôt disponible
   web_sidebar_search: Rechercher…

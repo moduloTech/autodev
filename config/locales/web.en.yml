@@ -12,6 +12,16 @@ en:
   web_sign_in_title: Sign in
   web_sign_in_subtitle: Sign in with your Microsoft 365 account.
   web_sign_in_button: Sign in with Microsoft
+  web_sign_in_dev_banner_title: "Azure SSO not configured (dev)"
+  web_sign_in_dev_banner_body: "Azure SSO credentials are unset — sign-in will fail at the Microsoft consent screen (AADSTS700016). Configure before clicking:"
+  web_sign_in_dev_step_yaml_prefix: "In"
+  web_sign_in_dev_step_yaml_suffix: "add the block"
+  web_sign_in_dev_step_env_prefix: "Or export the env vars"
+  web_sign_in_dev_step_redirect_prefix: "And add"
+  web_sign_in_dev_step_redirect_suffix: "to the app's Redirect URIs in Entra ID."
+  web_sign_in_dev_empty_projects_title: "Empty projects table (dev)"
+  web_sign_in_dev_empty_projects_body: "No projects are imported in the database. GitlabMembershipSync will mark you as disabled and Devise will refuse the sign-in (401)."
+  web_sign_in_dev_empty_projects_fix_prefix: "Import from ~/.autodev/config.yml:"
   web_coming_soon: Soon
   web_coming_soon_tooltip: Coming soon
   web_sidebar_search: Search…

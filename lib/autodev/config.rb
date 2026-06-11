@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Configuration loading, validation, and CLI argument parsing for autodev.
-module Config
+module Config # rubocop:disable Metrics/ModuleLength
   CONFIG_DIR  = File.expand_path('~/.autodev')
   CONFIG_PATH = File.join(CONFIG_DIR, 'config.yml')
   DEFAULT_DB  = File.join(CONFIG_DIR, 'autodev.db')
@@ -133,6 +133,18 @@ module Config
   def self.project_has_exposed_ports?(project_config)
     entries = project_config.dig('app', 'run')
     entries.is_a?(Array) && entries.any? { |e| e.is_a?(Hash) && e['port'] }
+  end
+
+  # Returns true when Azure SSO credentials are missing or still set to the
+  # `stub-client-id` fallback baked into `config/initializers/devise.rb`.
+  # In that state the OAuth request reaches Microsoft but fails with
+  # AADSTS700016 ("Application with identifier 'stub-client-id' was not
+  # found"). Mirrors devise.rb's resolution order: ENV → config['azure']
+  # → stub fallback.
+  def self.azure_stub_credentials?(config = nil)
+    client_id = ENV.fetch('AZURE_AD_CLIENT_ID', nil)
+    client_id ||= config&.dig('azure', 'client_id')
+    client_id.nil? || client_id.to_s.strip.empty? || client_id == 'stub-client-id'
   end
 
   # Validate global config. Called at startup before validate_projects!.

@@ -31,7 +31,14 @@ default: &default
     schedule: "0 3 * * *"
 
 development:
-  <<: *default
+  # Recurring jobs are intentionally disabled in development so a local
+  # `bin/autodev` doesn't act on production tickets while iterating on
+  # code. The Solid Queue dispatcher + worker still run, so jobs enqueued
+  # by hand are processed normally. Trigger a cycle manually with:
+  #
+  #   bin/rails runner 'AutodevPollJob.perform_now'
+  #   bin/rails runner 'SyncGitlabMembershipsJob.perform_now'
+  {}
 
 production:
   <<: *default

@@ -235,6 +235,40 @@ def bootstrap(config, logger, pastel)
   validate_config(config, config_path, logger)
   setup_database(config, logger)
   setup_chrome_devtools(config, logger)
+  warn_dev_recurring_disabled(logger, pastel)
+  warn_stub_azure_credentials(config, logger, pastel)
+end
+
+# In RAILS_ENV=development, `config/recurring.yml` ships with an empty
+# `development:` block — Solid Queue's scheduler boots but has no
+# recurring tasks to fire, so a local supervisor doesn't act on
+# production tickets while iterating on code. Print a banner so the
+# operator knows nothing will auto-poll and can trigger jobs by hand.
+def warn_dev_recurring_disabled(logger, pastel)
+  return unless ENV['RAILS_ENV'] == 'development'
+
+  logger.warn(pastel.bold('RAILS_ENV=development — recurring jobs are disabled.'))
+  logger.warn('Trigger a poll cycle manually:')
+  logger.warn("  #{pastel.cyan("bin/rails runner 'AutodevPollJob.perform_now'")}")
+  logger.warn("  #{pastel.cyan("bin/rails runner 'SyncGitlabMembershipsJob.perform_now'")}")
+end
+
+# Detect the case where Azure SSO is unconfigured (or still on the
+# `stub-client-id` fallback from `config/initializers/devise.rb`) — the
+# OAuth handshake will reach Microsoft and fail with AADSTS700016, which
+# is hard to diagnose from the consent-screen error alone. Warn early so
+# the operator can fix `~/.autodev/config.yml` (or set `AZURE_AD_*` env
+# vars) before clicking the sign-in button.
+def warn_stub_azure_credentials(config, logger, pastel)
+  return unless Config.azure_stub_credentials?(config)
+
+  logger.warn(pastel.bold('Azure SSO credentials are not configured — sign-in will fail at Microsoft.'))
+  logger.warn('Set them in ~/.autodev/config.yml under `azure:` (client_id, client_secret, tenant_id),')
+  logger.warn('or via the AZURE_AD_CLIENT_ID / AZURE_AD_CLIENT_SECRET / AZURE_AD_TENANT_ID env vars.')
+  return unless ENV['RAILS_ENV'] == 'development'
+
+  callback_url = pastel.cyan('http://localhost:4567/users/auth/entra_id/callback')
+  logger.warn("Also add #{callback_url} to the app's Redirect URIs in Entra ID.")
 end
 
 def log_or_warn(logger, msg)
