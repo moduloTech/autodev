@@ -217,11 +217,6 @@ fr:
   web_projects_index_subtitle: Tous les projets suivis par autodev.
   web_projects_index_empty: Aucun projet configuré pour le moment.
   web_projects_card_open: Ouvrir
-  web_list_title: 'Issues — '
-  web_list_count: "%{count} issue(s)"
-  web_list_count_capped: "%{count} issue(s) (limité aux 500 dernières)"
-  web_list_none: Aucune issue dans cet état.
-  web_list_back: "← Dashboard"
   web_issues_title: Demandes
   web_issues_subtitle: Toutes les tâches confiées à Autodev sur vos projets.
   web_issues_search: Recherche

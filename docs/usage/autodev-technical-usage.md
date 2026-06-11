@@ -41,7 +41,6 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/errors` | `ErrorsController#index` | Issues en `error` + `needs_clarification` + `post_completion_error IS NOT NULL` |
 | `/projects` | `ProjectsController#index` | Union des projets YAML + projets ayant des rows |
 | `/projects/:slug` | `ProjectsController#show` | Slug = `group/sub/name` encodé en `group__sub__name` |
-| `/list/:status` | `ListController#show` | Filtre par status exact (cap 500) |
 | `/stream` | `StreamController#show` | Server-Sent Events, `ActionController::Live` |
 | `/locale/:lang` | `LocaleController#update` | Set le cookie `locale`, redirige sur `back` |
 | `/users/auth/entra_id` (+ callback) | Devise | OmniAuth Microsoft 365 |

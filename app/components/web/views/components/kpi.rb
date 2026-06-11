@@ -13,17 +13,30 @@ module Web
         }.freeze
 
         # rubocop:disable Metrics/ParameterLists
-        def initialize(label:, value:, tone:, icon_name:, hint: nil, compact: false) # rubocop:disable Lint/MissingSuper
+        def initialize(label:, value:, tone:, icon_name:, hint: nil, compact: false, href: nil) # rubocop:disable Lint/MissingSuper
           @label = label
           @value = value
           @tone = TONES[tone] || TONES[:working]
           @icon_name = icon_name
           @hint = hint
           @compact = compact
+          @href = href
         end
         # rubocop:enable Metrics/ParameterLists
 
         def view_template
+          if @href
+            a(href: @href, class: 'kpi-link', style: 'text-decoration: none; color: inherit; display: block;') do
+              render_card
+            end
+          else
+            render_card
+          end
+        end
+
+        private
+
+        def render_card
           render Card.new(padding: @compact ? 14 : 18,
                           extra_style: "display: flex; flex-direction: column; gap: #{@compact ? 6 : 10}px;") do
             render_top_row
@@ -31,8 +44,6 @@ module Web
             render_hint if @hint && !@compact
           end
         end
-
-        private
 
         def render_top_row
           div(style: 'display: flex; align-items: center; justify-content: space-between;') do

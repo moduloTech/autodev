@@ -59,15 +59,15 @@ module Web
       end
 
       KPI_DEFS = [
-        { metric: :active,         tone: :working, icon: 'play',
+        { metric: :active,         tone: :working, icon: 'play', href: '/issues?tab=active',
           label_key: :web_kpi_in_progress,         hint_key: :web_kpi_in_progress_hint },
-        { metric: :pending,        tone: :working, icon: 'clock',
+        { metric: :pending,        tone: :working, icon: 'clock', href: '/issues?tab=pending',
           label_key: :web_kpi_pending,             hint_key: :web_kpi_pending_hint },
-        { metric: :errors,         tone: :err,     icon: 'alert-tri',
+        { metric: :errors,         tone: :err,     icon: 'alert-tri', href: '/issues?tab=errors',
           label_key: :web_kpi_to_watch,            hint_key: :web_kpi_to_watch_hint },
-        { metric: :awaiting,       tone: :warn,    icon: 'messages',
+        { metric: :awaiting,       tone: :warn,    icon: 'messages', href: '/issues?tab=waiting',
           label_key: :web_kpi_awaiting_response,   hint_key: :web_kpi_awaiting_response_hint },
-        { metric: :delivered_week, tone: :ok,      icon: 'check',
+        { metric: :delivered_week, tone: :ok,      icon: 'check', href: '/issues?tab=done',
           label_key: :web_kpi_delivered_this_week, hint_key: :web_kpi_delivered_this_week_hint }
       ].freeze
       private_constant :KPI_DEFS
@@ -80,7 +80,8 @@ module Web
               value: @kpis[kpi[:metric]] || 0,
               tone: kpi[:tone],
               icon_name: kpi[:icon],
-              hint: t_web(kpi[:hint_key])
+              hint: t_web(kpi[:hint_key]),
+              href: kpi[:href]
             )
           end
         end

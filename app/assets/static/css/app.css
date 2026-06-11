@@ -18,6 +18,8 @@ body { min-height: 100vh; }
 
 /* Dashboard responsive grids (mobile < 640px, tablet < 1024px, desktop >=). */
 .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
+.kpi-link .card { transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease; }
+.kpi-link:hover .card { box-shadow: var(--shadow-sm); transform: translateY(-1px); border-color: var(--border-strong, var(--border)); }
 .split-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
 @media (min-width: 1024px) {
   .kpi-grid { grid-template-columns: repeat(4, 1fr); }

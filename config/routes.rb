@@ -27,7 +27,6 @@ Rails.application.routes.draw do
   # /errors → ErrorsController#index (errored + needs_clarification + post_completion_error).
   # /projects → ProjectsController#index (union of YAML config + DB-distinct paths).
   # /projects/:slug → ProjectsController#show (slug = group__project, decoded via project_unslug).
-  # /list/:status → ListController#show (filter all issues by status, limit 500).
   # / → DashboardController#show (5 datasets aggregated into the Dashboard view).
   # /issues → IssuesController#index (paginated + filterable list).
   # /stream → StreamController#show (Server-Sent Events via
@@ -41,7 +40,6 @@ Rails.application.routes.draw do
   get  '/errors',                to: 'errors#index'
   get  '/projects',              to: 'projects#index'
   get  '/projects/:slug',        to: 'projects#show'
-  get  '/list/:status',          to: 'list#show'
   get  '/stream',                to: 'stream#show'
   get  '/locale/:lang',          to: 'locale#update'
 

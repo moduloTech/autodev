@@ -111,7 +111,6 @@ Routes (declared in `config/routes.rb`, all served by Rails controllers):
 - `GET /errors` → `ErrorsController#index` — `error` + `needs_clarification` + non-null `post_completion_error`, with reset buttons.
 - `GET /projects` → `ProjectsController#index` — union of YAML-configured + tracked projects.
 - `GET /projects/:slug` → `ProjectsController#show` — project's `app:` config + 100 most recent issues. Slug encoding: `group/project` ↔ `group__project`.
-- `GET /list/:status` → `ListController#show` — single-status filtered list.
 - `POST /issues/:id/reset` / `transition` — write actions.
 - `GET /stream` → `StreamController#show` — SSE feed via `ActionController::Live`. Emits Turbo Stream HTML for each `activity_events` row.
 - `GET /assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*` → `AssetsController` — `send_file` from `app/assets/static/`.
