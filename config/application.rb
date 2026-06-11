@@ -78,17 +78,17 @@ module Autodev
     config.autoload_paths << Rails.root.join('app/components')
 
     # Propshaft's railtie auto-inserts `Propshaft::Server` into the middleware
-    # stack whenever `config.public_file_server.enabled` is true — Rails 8's
-    # default in development. The middleware then intercepts every `/assets/*`
-    # request *before* the router, scans only the standard load paths
-    # (`app/assets/stylesheets`, etc.) — which we don't use — and returns a
-    # bare `404 Not found` for the files we keep under `app/assets/static/`.
-    # The router never gets a chance to dispatch to `AssetsController`. Drop
-    # the middleware so `/assets/*` falls through to the router in every
-    # environment. We still need `propshaft/railtie` loaded for Mission
-    # Control's engine to find `config.assets.paths` at boot. The middleware
-    # isn't present in production by default (`RAILS_SERVE_STATIC_FILES` is
-    # unset there), which is why this only ever broke dev.
+    # stack whenever `config.public_file_server.enabled` is true (the Rails 8
+    # default in development; unset in production unless RAILS_SERVE_STATIC_FILES
+    # is exported). The middleware intercepts every `/assets/*` request *before*
+    # the router AND gates each response on a matching asset digest in the URL
+    # (`Asset#fresh?(nil)` returns false), so our Phlex layout's stable
+    # `/assets/css/tokens.css` URLs 404 with a bare "Not found" body in dev.
+    # AssetsController serves the same `/assets/*` URLs through Propshaft's
+    # load_path *without* requiring a digest — see the comment there. Dropping
+    # the middleware lets `/assets/*` fall through to the router (the same
+    # code path production already takes — Propshaft::Server isn't in the
+    # prod stack either, which is why this only ever broke dev).
     config.middleware.delete Propshaft::Server
 
     # Skip generator hooks for stacks we are not using yet.

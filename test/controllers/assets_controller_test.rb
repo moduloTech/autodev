@@ -2,43 +2,49 @@
 
 require_relative '../rails_helper'
 
-# Wiring tests for AssetsController — kept minimal because the controller
-# is just three `send_file` calls. Routes-mapping checks catch the most
-# likely regression (a typo in config/routes.rb constraint regexes), the
-# content-type expectations catch the second-most (wrong MIME on rename).
+# Wiring tests for AssetsController. All `/assets/*` URLs now route through
+# a single catch-all `show` action that resolves via Propshaft's load_path,
+# so the per-pattern tests (one for turbo.js, one for css/:name.css, one
+# for fonts) collapse into a path-extraction test + a content-type sanity
+# check for each kind we actually serve.
 class AssetsControllerWiringTest < ActiveSupport::TestCase
-  def test_turbo_js_route_maps_to_controller
-    route = Rails.application.routes.recognize_path('/assets/turbo.js')
-
-    assert_equal 'assets',   route[:controller]
-    assert_equal 'turbo_js', route[:action]
-  end
-
-  def test_css_route_maps_with_name_extracted
+  def test_route_maps_to_controller_with_path_extracted
     route = Rails.application.routes.recognize_path('/assets/css/app.css')
 
-    assert_equal 'assets', route[:controller]
-    assert_equal 'css',    route[:action]
-    assert_equal 'app',    route[:name]
+    assert_equal 'assets',  route[:controller]
+    assert_equal 'show',    route[:action]
+    assert_equal 'css/app.css', route[:path]
   end
 
-  def test_font_route_maps_with_name_extracted
-    route = Rails.application.routes.recognize_path('/assets/vendor/fonts/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2')
+  def test_route_extracts_nested_path
+    route = Rails.application.routes.recognize_path(
+      '/assets/vendor/fonts/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2'
+    )
 
     assert_equal 'assets', route[:controller]
-    assert_equal 'font',   route[:action]
-    assert_equal 'UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7', route[:name]
+    assert_equal 'show',   route[:action]
+    assert_equal 'vendor/fonts/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2', route[:path]
   end
 
-  def test_css_route_rejects_invalid_name_characters
-    assert_raises(ActionController::RoutingError) do
-      Rails.application.routes.recognize_path('/assets/css/has spaces.css')
+  def test_route_handles_digested_filenames
+    # Propshaft-style digest in the URL (Mission Control emits these via
+    # `stylesheet_link_tag`). The catch-all keeps the digest in `path`;
+    # the controller strips it before doing the load_path lookup.
+    route = Rails.application.routes.recognize_path(
+      '/assets/mission_control/jobs/application-6148a20a.css'
+    )
+
+    assert_equal 'assets', route[:controller]
+    assert_equal 'show',   route[:action]
+    assert_equal 'mission_control/jobs/application-6148a20a.css', route[:path]
+  end
+
+  def test_our_static_assets_resolve_through_propshaft_load_path
+    %w[css/tokens.css css/app.css css/fonts.css turbo.js].each do |logical|
+      asset = Rails.application.assets.load_path.find(logical)
+
+      assert_not_nil asset, "expected Propshaft load_path to include #{logical}"
+      assert_path_exists asset.path.to_s
     end
-  end
-
-  def test_assets_root_points_at_existing_directory
-    assert_path_exists AssetsController::ASSETS_ROOT
-    assert_path_exists File.join(AssetsController::ASSETS_ROOT, 'turbo.js')
-    assert_path_exists File.join(AssetsController::ASSETS_ROOT, 'css', 'app.css')
   end
 end

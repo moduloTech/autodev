@@ -129,7 +129,8 @@ module Web
         # Appended after ITEMS when the caller passes `admin: true`. Lives in a
         # separate constant so non-admin sidebars stay byte-identical to before.
         ADMIN_ITEMS = [
-          { id: 'admin', label_key: :web_nav_admin_users, icon: 'users', href: '/admin/users' }
+          { id: 'admin', label_key: :web_nav_admin_users, icon: 'users', href: '/admin/users' },
+          { id: 'jobs',  label_key: :web_nav_admin_jobs,  icon: 'settings', href: '/admin/jobs' }
         ].freeze
         private_constant :ITEMS, :ADMIN_ITEMS
 

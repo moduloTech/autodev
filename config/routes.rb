@@ -46,12 +46,14 @@ Rails.application.routes.draw do
   get  '/locale/:lang',          to: 'locale#update'
 
   # === Static assets ===============================================
-  # Three explicit `send_file` routes from `app/assets/static/`. Propshaft
-  # isn't wired (single-user CLI dashboard — no asset-digest cache-busting
-  # story to gain from it). URLs are stable.
-  get '/assets/turbo.js',                        to: 'assets#turbo_js'
-  get '/assets/css/:name.css',                   to: 'assets#css',  constraints: { name: /[a-z0-9_-]+/ }
-  get '/assets/vendor/fonts/:name.woff2',        to: 'assets#font', constraints: { name: /[A-Za-z0-9_-]+/ }
+  # Single catch-all that resolves via Propshaft's load_path (cf.
+  # AssetsController). Replaces three earlier per-pattern routes
+  # (`/assets/turbo.js`, `/assets/css/:name.css`,
+  # `/assets/vendor/fonts/:name.woff2`) — and also handles Mission
+  # Control's digested URLs (`/assets/mission_control/jobs/application-<sha>.css`,
+  # `/assets/turbo.min-<sha>.js`, …) which the gem's `stylesheet_link_tag` /
+  # `javascript_importmap_tags` helpers emit.
+  get '/assets/*path', to: 'assets#show', format: false
 
   # === Admin =======================================================
   # /admin/users — read-only audit of users × memberships (PR2 of the

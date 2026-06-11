@@ -8,6 +8,7 @@ fr:
   web_nav_conversations: Conversations
   web_nav_projects: Projets
   web_nav_admin_users: Utilisateurs
+  web_nav_admin_jobs: Jobs
   web_theme_toggle: Changer le thème
   web_sign_out: Se déconnecter
   web_sign_in_title: Connexion

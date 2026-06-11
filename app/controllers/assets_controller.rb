@@ -1,12 +1,30 @@
 # frozen_string_literal: true
 
-# Static asset serving for the embedded dashboard. Three explicit routes
-# under `/assets/*` send the vendored Turbo build, the three CSS files,
-# and the WOFF2 webfonts from `app/assets/static/`. Routes are explicit
-# (rather than Rails' propshaft pipeline) because the asset URL space
-# stays stable across the supervisor topology and the Phlex layout's
-# `<link href="/assets/css/...">` / `<script src="/assets/turbo.js">`
-# tags do not need to know about asset digests.
+# Static asset serving for the embedded dashboard and any Rails engine mounted
+# under it (Mission Control — Jobs in particular). A single catch-all route
+# `/assets/*path` resolves via Propshaft's load_path so we get one consistent
+# handler whether the URL is digested (MCJ's `application-<sha>.css`) or
+# stable (`/assets/css/tokens.css` from our Phlex layout).
+#
+# Why not just let `Propshaft::Server` (the middleware Propshaft auto-inserts
+# in dev) handle this? Two reasons:
+#
+#  1. The middleware demands a digest in the URL — its `Asset#fresh?(nil)`
+#     returns false, so stable URLs like `/assets/css/tokens.css` 404 with a
+#     bare "Not found" body before reaching the router. Our Phlex layout
+#     hardcodes those URLs intentionally (cf. the original comment on this
+#     controller: "the asset URL space stays stable across the supervisor
+#     topology"), so the dev-default middleware breaks our own pages.
+#
+#  2. Production already runs without `Propshaft::Server` — Rails 8 only
+#     inserts it when `RAILS_SERVE_STATIC_FILES` is set, and it isn't. So
+#     prod has always served `/assets/*` through this controller via the
+#     router. Dropping the middleware in dev too keeps both environments on
+#     the same code path.
+#
+# We still keep Propshaft's railtie loaded — MCJ depends on
+# `config.assets.paths` being available at boot, and the load_path machinery
+# is what this controller looks assets up in.
 class AssetsController < ApplicationController
   # Rails' `protect_from_forgery` includes a cross-origin JavaScript guard
   # (`X-Requested-With` check) that returns 422 for `<script src>` requests
@@ -20,33 +38,38 @@ class AssetsController < ApplicationController
   # render. PR3 of the users-rollout chantier (cf. docs/users-rollout.md §4).
   skip_before_action :authenticate_user!, raise: false
 
-  ASSETS_ROOT = Rails.root.join('app/assets/static').to_s.freeze
+  # Catch-all action: `/assets/<logical-path-maybe-with-digest>`.
+  # Strips any propshaft-style `-<sha>` digest from the basename before
+  # looking the asset up by its logical path in Propshaft's load_path
+  # (`app/assets/static/*`, MCJ's `app/assets/stylesheets/*`, vendored
+  # turbo/stimulus, etc.). Emits `asset.compiled_content` so CSS that
+  # references other assets via `url()` gets the propshaft compilers'
+  # digest-aware rewriting — matching the body Propshaft::Server would
+  # produce, minus the digest-required gate.
+  def show
+    asset = find_asset
+    return head :not_found unless asset
 
-  # Vendored Turbo build (no CDN dependency). One file, fixed URL.
-  def turbo_js
-    send_file File.join(ASSETS_ROOT, 'turbo.js'),
-              type: 'application/javascript',
+    response.headers['Cache-Control'] = cache_control_for(asset)
+    send_data asset.compiled_content,
+              type: asset.content_type_with_charset.to_s,
               disposition: 'inline'
   end
 
-  # Stylesheets under public/css/. `no-cache` so dev edits don't require a
-  # manual cache-bust (the browser still 304s on unchanged bytes).
-  def css
-    path = File.join(ASSETS_ROOT, 'css', "#{params[:name]}.css")
-    return head :not_found unless File.file?(path)
+  private
 
-    response.headers['Cache-Control'] = 'no-cache'
-    send_file path, type: 'text/css', disposition: 'inline'
+  def find_asset
+    logical_path, _digest = Propshaft::Asset.extract_path_and_digest(params[:path].to_s)
+    Rails.application.assets.load_path.find(logical_path)
   end
 
-  # Vendored web fonts (Inter, JetBrains Mono). Names are opaque hashes
-  # from Google Fonts — the constraint at the route level pins them to
-  # `[A-Za-z0-9_-]+`, so the filesystem lookup is safe.
-  def font
-    path = File.join(ASSETS_ROOT, 'vendor', 'fonts', "#{params[:name]}.woff2")
-    return head :not_found unless File.file?(path)
-
-    response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
-    send_file path, type: 'font/woff2', disposition: 'inline'
+  # Fingerprinted URLs (e.g. MCJ's `application-<sha>.css`) get the standard
+  # propshaft `immutable` cache header — the digest changes when contents do,
+  # so the browser can cache aggressively. Stable URLs from our layout (e.g.
+  # `/assets/css/tokens.css`) get `no-cache` so dev edits show up without a
+  # hard refresh; the browser still 304s on unchanged bytes via ETag.
+  def cache_control_for(asset)
+    digested_in_url = params[:path].to_s != asset.logical_path.to_s
+    digested_in_url ? 'public, max-age=31536000, immutable' : 'no-cache'
   end
 end
