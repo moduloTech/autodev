@@ -5,12 +5,14 @@ require_relative 'boot'
 # Rails skeleton — phase A of the railsification (cf. autodev/docs/autospec.md §D).
 # Loaded only by bin/rails; bin/autodev (bundler/inline Sinatra) does not boot this.
 # Only the frameworks we need are required — the rest (action_mailer, action_cable,
-# active_storage, action_text, action_mailbox) will be enabled when they actually
-# have a consumer. active_job came in with step 5 (Solid Queue backend).
+# action_text, action_mailbox) will be enabled when they actually have a consumer.
+# active_job came in with step 5 (Solid Queue backend); active_storage came in
+# with phase D step 9 (AutoSpec attachments — drag-drop captures on drafts).
 require 'rails'
 require 'active_model/railtie'
 require 'active_record/railtie'
 require 'active_job/railtie'
+require 'active_storage/engine'
 require 'action_controller/railtie'
 require 'action_view/railtie'
 # Asset pipeline — required by Mission Control's engine which appends to

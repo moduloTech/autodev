@@ -55,6 +55,14 @@ gem 'propshaft', '~> 1.1'
 # blocks out of the box, plus standard inline / block markdown.
 gem 'redcarpet', '~> 3.6'
 
+# Phase D step 9 (AutoSpec) — official Anthropic Ruby SDK. Wraps the
+# Messages API + tool use + prompt caching (cf. autodev/docs/autospec.md §G).
+# `bin/autodev` (legacy Sinatra entrypoint) never loads this — only the
+# Rails-side `Autospec::Chat` service. Required lazily inside that service
+# so test environments can inject a stub client without pulling the SDK
+# (and its dependencies) into the test boot.
+gem 'anthropic', '~> 1.4'
+
 # Test dependencies
 gem 'minitest', '~> 5.0'
 gem 'rack-test', '~> 2.1'

@@ -51,8 +51,28 @@ ActiveRecord::MigrationContext.new(Rails.root.join('db/migrate').to_s).migrate
 # from this position. Cheaper to just wipe tables between tests — SQLite
 # `:memory:` makes DELETE essentially free. AR models added in step 2 only.
 module ActiveRecordTestCleanup
-  TABLES = %w[audit_logs activity_events issues project_memberships
-              project_app_commands projects users].freeze
+  # Child-before-parent order so SQLite FK enforcement (default-on under
+  # AR 8) does not reject the DELETE chain. ActiveStorage tables are
+  # listed first because they reference each other (variants → blobs);
+  # the autospec_* set sits below ActiveStorage because attachments
+  # connect a draft row to a blob row, and approvals + messages +
+  # attachments all FK to drafts.
+  TABLES = %w[
+    active_storage_variant_records
+    active_storage_attachments
+    active_storage_blobs
+    autospec_approvals
+    autospec_attachments
+    autospec_messages
+    autospec_drafts
+    audit_logs
+    activity_events
+    issues
+    project_memberships
+    project_app_commands
+    projects
+    users
+  ].freeze
 
   def teardown
     super

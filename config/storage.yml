@@ -1,0 +1,20 @@
+# ActiveStorage services (phase D step 9 — AutoSpec attachments).
+#
+# See autodev/docs/autospec.md §F for the lifecycle: drag-drop captures on
+# AutospecDraft are stored locally during drafting + pending_approval, then
+# uploaded to GitLab at submission time. No S3 / no remote object store —
+# volume is light (drafts × ~5 captures × ~500KB on 1-2 years).
+#
+# `local` lands blobs under `<Rails.root>/storage/` — backed up alongside
+# the autodev SQLite files on bobette. `test` uses a tmp dir so the suite
+# does not litter the working tree; rails_helper.rb wipes the
+# `active_storage_*` tables on teardown, but the blobs themselves stay in
+# tmp until the process exits (acceptable for a fast minitest suite).
+
+local:
+  service: Disk
+  root: <%= Rails.root.join('storage') %>
+
+test:
+  service: Disk
+  root: <%= Rails.root.join('tmp/storage') %>

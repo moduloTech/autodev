@@ -18,6 +18,8 @@ class User < ApplicationRecord
   has_many :projects, through: :project_memberships
   has_many :audit_logs_as_actor, class_name: 'AuditLog', foreign_key: :actor_id,
                                  inverse_of: :actor, dependent: :nullify
+  has_many :autospec_drafts, dependent: :destroy
+  has_many :autospec_approvals_cast, class_name: 'AutospecApproval', dependent: :destroy
 
   validates :email, presence: true, uniqueness: { case_sensitive: false }
   validates :locale, inclusion: { in: VALID_LOCALES }

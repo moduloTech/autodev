@@ -68,4 +68,10 @@ Rails.application.configure do
   # default), `request.base_url` matches the browser's Origin and the
   # CSRF origin check passes.
   config.assume_ssl = true
+
+  # ActiveStorage (phase D step 9 — AutoSpec attachments). Same machine as
+  # the SQLite files on bobette; storage/ sits next to autodev.db. See
+  # storage.yml. Backup story: include <Rails.root>/storage/ in the same
+  # rsync/snapshot routine that already covers ~/.autodev/.
+  config.active_storage.service = :local
 end

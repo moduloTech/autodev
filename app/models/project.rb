@@ -14,6 +14,7 @@ class Project < ApplicationRecord
   has_many :users, through: :project_memberships
   has_many :owners, -> { where(project_memberships: { role: ProjectMembership::ROLE_OWNER }) },
            through: :project_memberships, source: :user
+  has_many :autospec_drafts, dependent: :destroy
 
   validates :gitlab_path, presence: true, uniqueness: true
   validates :slug, presence: true, uniqueness: true
