@@ -267,3 +267,35 @@ en:
   web_admin_users_status_disabled: Disabled %{date}
   web_admin_users_memberships_none: No access
   web_admin_users_no_gitlab: "—"
+
+  # AutoSpec (phase D step 10a)
+  web_autospec_index_title: AutoSpec
+  web_autospec_index_subtitle: Draft new tickets with Autodev's help.
+  web_autospec_index_empty: You don't have any draft yet. Start one to shape a ticket with Autodev.
+  web_autospec_new_cta: New draft
+  web_autospec_new_title: New draft
+  web_autospec_new_subtitle: Pick a project to get started. You'll then chat with Autodev to shape the ticket.
+  web_autospec_no_projects: No project is accessible to you. Ask an owner to add a membership before continuing.
+  web_autospec_field_project: Project
+  web_autospec_field_project_prompt: Pick a project…
+  web_autospec_field_title: Title (optional)
+  web_autospec_field_title_placeholder: Describe the ticket in one sentence
+  web_autospec_field_markdown: Initial description (optional)
+  web_autospec_field_markdown_placeholder: You can start empty and let Autodev shape it.
+  web_autospec_cancel: Cancel
+  web_autospec_create: Start draft
+  web_autospec_untitled: (untitled)
+  web_autospec_meta_status: Status
+  web_autospec_meta_iteration: Iteration
+  web_autospec_meta_destination: Destination
+  web_autospec_meta_project: Project
+  web_autospec_section_markdown: Markdown draft
+  web_autospec_markdown_empty: (empty — chat with Autodev to build it)
+  web_autospec_section_conversation: Conversation with Autodev
+  web_autospec_conversation_empty: Start the conversation to shape this ticket.
+  web_autospec_composer_placeholder: "Write to Autodev (e.g. \"Help me phrase this bug\")…"
+  web_autospec_composer_send: Send
+  web_autospec_status_drafting: Drafting
+  web_autospec_status_pending_approval: Pending approval
+  web_autospec_status_rejected: Rejected
+  web_autospec_status_submitted: Submitted to GitLab

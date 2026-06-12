@@ -51,10 +51,10 @@ module Web
           render Components::Button.new(kind: :secondary, size: :md,
                                         icon: Components::Icon.new(name: 'refresh', size: 14),
                                         href: '/') { t_web(:web_dashboard_refresh) }
-          span(class: 'coming-soon', title: t_web(:web_coming_soon_tooltip)) do
-            render Components::Button.new(kind: :primary, size: :md,
-                                          icon: Components::Icon.new(name: 'plus', size: 14),
-                                          href: '#') { t_web(:web_dashboard_new_request) }
+          render Components::Button.new(kind: :primary, size: :md,
+                                        icon: Components::Icon.new(name: 'plus', size: 14),
+                                        href: '/autospec_drafts/new') do
+            t_web(:web_dashboard_new_request)
           end
         end
       end

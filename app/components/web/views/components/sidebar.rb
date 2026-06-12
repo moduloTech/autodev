@@ -125,8 +125,8 @@ module Web
             count_key: :issues },
           { id: 'errors',    label_key: :web_nav_to_watch,     icon: 'alert-tri', href: '/errors',
             count_key: :errors, tone: :err },
-          { id: 'chat',      label_key: :web_nav_conversations, icon: 'messages', href: '#',
-            count_key: :chat, coming_soon: true },
+          { id: 'chat',      label_key: :web_nav_conversations, icon: 'messages',
+            href: '/autospec_drafts', count_key: :chat },
           { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '/projects' },
           { id: 'help',      label_key: :web_nav_help,    icon: 'info', href: '/help' }
         ].freeze
@@ -205,9 +205,9 @@ module Web
             div(style: 'color: var(--text-muted); line-height: 1.45; font-size: 12px;') do
               @t.call(:web_sidebar_cta_body)
             end
-            div(class: 'coming-soon', title: @t.call(:web_coming_soon_tooltip),
-                style: 'margin-top: 10px;') do
-              render Button.new(kind: :primary, size: :sm, full: true, href: '#',
+            div(style: 'margin-top: 10px;') do
+              render Button.new(kind: :primary, size: :sm, full: true,
+                                href: '/autospec_drafts/new',
                                 icon: Icon.new(name: 'plus', size: 13)) { @t.call(:web_sidebar_cta_button) }
             end
           end

@@ -267,3 +267,35 @@ fr:
   web_admin_users_status_disabled: Désactivé %{date}
   web_admin_users_memberships_none: Aucun accès
   web_admin_users_no_gitlab: "—"
+
+  # AutoSpec (phase D step 10a)
+  web_autospec_index_title: AutoSpec
+  web_autospec_index_subtitle: Rédigez de nouveaux tickets avec l'aide d'Autodev.
+  web_autospec_index_empty: Vous n'avez pas encore de brouillon. Démarrez-en un pour cadrer un ticket avec Autodev.
+  web_autospec_new_cta: Nouveau brouillon
+  web_autospec_new_title: Nouveau brouillon
+  web_autospec_new_subtitle: Choisissez un projet pour démarrer. Vous pourrez ensuite chater avec Autodev pour cadrer le ticket.
+  web_autospec_no_projects: Aucun projet ne vous est accessible. Demandez l'ajout d'un membership à un owner avant de continuer.
+  web_autospec_field_project: Projet
+  web_autospec_field_project_prompt: Sélectionnez un projet…
+  web_autospec_field_title: Titre (optionnel)
+  web_autospec_field_title_placeholder: Décrivez le ticket en une phrase
+  web_autospec_field_markdown: Description initiale (optionnelle)
+  web_autospec_field_markdown_placeholder: Vous pouvez démarrer vide et laisser Autodev cadrer.
+  web_autospec_cancel: Annuler
+  web_autospec_create: Démarrer le brouillon
+  web_autospec_untitled: (sans titre)
+  web_autospec_meta_status: Statut
+  web_autospec_meta_iteration: Itération
+  web_autospec_meta_destination: Destination
+  web_autospec_meta_project: Projet
+  web_autospec_section_markdown: Brouillon markdown
+  web_autospec_markdown_empty: (vide — discutez avec Autodev pour le construire)
+  web_autospec_section_conversation: Conversation avec Autodev
+  web_autospec_conversation_empty: Démarrez la conversation pour cadrer ce ticket.
+  web_autospec_composer_placeholder: "Écrivez à Autodev (ex : « Aide-moi à formuler ce bug »)…"
+  web_autospec_composer_send: Envoyer
+  web_autospec_status_drafting: En rédaction
+  web_autospec_status_pending_approval: En attente d'approbation
+  web_autospec_status_rejected: Refusé
+  web_autospec_status_submitted: Soumis sur GitLab

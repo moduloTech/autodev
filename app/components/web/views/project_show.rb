@@ -59,11 +59,10 @@ module Web
               t_web(:web_project_view_on_gitlab)
             end
           end
-          span(class: 'coming-soon', title: t_web(:web_coming_soon_tooltip)) do
-            render Components::Button.new(kind: :primary, size: :md, href: '#',
-                                          icon: Components::Icon.new(name: 'plus', size: 14)) do
-              t_web(:web_dashboard_new_request)
-            end
+          render Components::Button.new(kind: :primary, size: :md,
+                                        href: '/autospec_drafts/new',
+                                        icon: Components::Icon.new(name: 'plus', size: 14)) do
+            t_web(:web_dashboard_new_request)
           end
         end
       end

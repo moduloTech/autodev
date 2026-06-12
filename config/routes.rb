@@ -49,6 +49,16 @@ Rails.application.routes.draw do
   get  '/stream',                to: 'stream#show'
   get  '/locale/:lang',          to: 'locale#update'
 
+  # === AutoSpec (phase D step 9c-10a) ==============================
+  # index / new / create / show, plus :member POST routes for chat
+  # (HTML redirect or JSON) and apply_suggestion (idempotent, 409 on
+  # re-apply). Token-level SSE streaming on chat deferred per
+  # autospec.md §L — see AutospecDraftsController for the rationale.
+  resources :autospec_drafts, only: %i[index new create show], constraints: { id: /\d+/ } do
+    post :chat,              on: :member
+    post :apply_suggestion,  on: :member
+  end
+
   # In-app help — renders `docs/usage/autodev-functional-usage.md` as HTML
   # (same source the operator builds the PDF from via `md2pdf`). The
   # markdown references screenshots under `docs/usage/screenshots/`; those
