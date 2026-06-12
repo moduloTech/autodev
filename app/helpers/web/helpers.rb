@@ -28,7 +28,13 @@ module Web
         request_path: request.fullpath,
         current_user_email: user&.email,
         current_user_admin: user&.admin? || false,
-        csrf_token: respond_to?(:form_authenticity_token) ? form_authenticity_token : nil
+        # `form_authenticity_token` is PRIVATE on ActionController::Base, so
+        # `respond_to?(:form_authenticity_token)` (default) returns false —
+        # which silently dropped the CSRF token from every Phlex form since
+        # the users-rollout PR3. Pass `true` to include private methods.
+        # The eventual call resolves on self (the controller) so the private
+        # visibility doesn't block invocation.
+        csrf_token: respond_to?(:form_authenticity_token, true) ? form_authenticity_token : nil
       }
     end
 

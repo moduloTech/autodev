@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- CSRF token missing from every Phlex-rendered form on the dashboard (regression introduced silently in users-rollout PR3, surfaced when wiring AutoSpec's `POST /autospec_drafts` form). Root cause: `view_kwargs` in `app/helpers/web/helpers.rb` guarded the call with `respond_to?(:form_authenticity_token)` — but `form_authenticity_token` is **private** on `ActionController::Base`, so the default `respond_to?` (which excludes private methods) returned false and the helper silently set `csrf_token: nil`. Every view that depends on `@csrf_token` (Layout's `meta[name=csrf-token]`, the sidebar sign-out hidden input, the issues reset/transition forms, the new AutoSpec forms) therefore omitted the token. The sidebar sign-out form happened to be the only POST that still worked because `Users::SessionsController#destroy` calls `skip_forgery_protection only: :destroy` — the rest 422'd on any submission. Fix: pass `true` to `respond_to?` to include private methods. Verified end-to-end via Chrome DevTools MCP: `POST /autospec_drafts` with the meta tag + hidden input now redirects 302 to the draft show page instead of 422'ing.
+
 ### Added
 
 - Phase D step 10a — wire the existing "Nouvelle demande" / "Démarrer" CTAs to `/autospec_drafts/new`. Four placeholders shipped as `coming-soon` in earlier phases now point at the AutoSpec draft creation form: the dashboard topbar action, the `/issues` topbar action, the project show topbar action, and the sidebar CTA card at the bottom. No new locale keys — `web_dashboard_new_request` and `web_sidebar_cta_button` were already in place. The `coming-soon` span + tooltip wrapper is removed at each site (and the bouton becomes a real link), so the affordance now matches the user expectation that AutoSpec IS the "new request" entry point.
