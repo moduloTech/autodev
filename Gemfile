@@ -50,6 +50,11 @@ gem 'solid_queue', '~> 1.1'
 gem 'mission_control-jobs', '~> 1.1'
 gem 'propshaft', '~> 1.1'
 
+# Markdown → HTML for the in-app `/help` page (renders the functional
+# usage guide that lives under `docs/usage/`). GFM tables + fenced code
+# blocks out of the box, plus standard inline / block markdown.
+gem 'redcarpet', '~> 3.6'
+
 # Test dependencies
 gem 'minitest', '~> 5.0'
 gem 'rack-test', '~> 2.1'

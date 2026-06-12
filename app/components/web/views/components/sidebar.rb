@@ -127,13 +127,15 @@ module Web
             count_key: :errors, tone: :err },
           { id: 'chat',      label_key: :web_nav_conversations, icon: 'messages', href: '#',
             count_key: :chat, coming_soon: true },
-          { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '/projects' }
+          { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '/projects' },
+          { id: 'help',      label_key: :web_nav_help,    icon: 'info', href: '/help' }
         ].freeze
         # Appended after ITEMS when the caller passes `admin: true`. Lives in a
         # separate constant so non-admin sidebars stay byte-identical to before.
         ADMIN_ITEMS = [
           { id: 'admin', label_key: :web_nav_admin_users, icon: 'users', href: '/admin/users' },
-          { id: 'jobs',  label_key: :web_nav_admin_jobs,  icon: 'settings', href: '/admin/jobs' }
+          { id: 'jobs',  label_key: :web_nav_admin_jobs,  icon: 'settings', href: '/admin/jobs' },
+          { id: 'admin_help', label_key: :web_nav_admin_help, icon: 'info', href: '/admin/help' }
         ].freeze
         private_constant :ITEMS, :ADMIN_ITEMS
 

@@ -49,6 +49,14 @@ Rails.application.routes.draw do
   get  '/stream',                to: 'stream#show'
   get  '/locale/:lang',          to: 'locale#update'
 
+  # In-app help — renders `docs/usage/autodev-functional-usage.md` as HTML
+  # (same source the operator builds the PDF from via `md2pdf`). The
+  # markdown references screenshots under `docs/usage/screenshots/`; those
+  # are served by `#image` rather than the asset pipeline because they are
+  # documentation assets, not Propshaft-managed.
+  get '/help',                   to: 'help#show'
+  get '/help/images/:filename',  to: 'help#image', constraints: { filename: /[\w\-.]+/ }
+
   # === Static assets ===============================================
   # Single catch-all that resolves via Propshaft's load_path (cf.
   # AssetsController). Replaces three earlier per-pattern routes
@@ -64,6 +72,12 @@ Rails.application.routes.draw do
   # users-rollout chantier). Guarded by `current_user&.admin?` in the
   # controller until PR3 turns on the global authenticate_user!.
   get '/admin/users', to: 'admin/users#index'
+
+  # /admin/help — same in-app rendering as /help but for the technical
+  # guide (`docs/usage/autodev-technical-usage.md`). Admin-gated via
+  # AdminApplicationController. Image refs in both docs point at
+  # /help/images/* — that endpoint is shared and lives on HelpController.
+  get '/admin/help', to: 'admin/help#show'
 
   # Mission Control — Jobs: Solid Queue inspector + administration UI.
   # No auth gate (cf. config/initializers/mission_control.rb) — same

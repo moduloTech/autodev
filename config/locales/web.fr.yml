@@ -9,6 +9,12 @@ fr:
   web_nav_projects: Projets
   web_nav_admin_users: Utilisateurs
   web_nav_admin_jobs: Jobs
+  web_nav_help: Aide
+  web_help_title: Guide utilisateur
+  web_help_subtitle: Comment confier une demande à Autodev et suivre son travail
+  web_nav_admin_help: Aide technique
+  web_admin_help_title: Guide technique
+  web_admin_help_subtitle: Routes admin, configuration projet, CLI, machine à états
   web_theme_toggle: Changer le thème
   web_sign_out: Se déconnecter
   web_sign_in_title: Connexion
