@@ -5,6 +5,8 @@
 
 Ce document fige les décisions prises pendant le cadrage AutoSpec et le chantier de railsification qui l'accompagne. Il liste aussi les zones grises restantes et l'ordre d'attaque recommandé.
 
+> **Statut au 2026-06-12.** La railsification (attack-order steps 1-8) est livrée en `v1.0.0-alpha.3` le 2026-06-09 — voir [`railsification-postmortem.md`](railsification-postmortem.md). Le chantier *users rollout* (audit_log + sync GitLab des memberships + gating SSO global + visibilité par membership) intercalé après step 8 est livré entre alpha.4 et alpha.7 — spec et plan d'attaque dans [`users-rollout.md`](users-rollout.md). Le reste de ce document décrit **phase D (AutoSpec proper, steps 9-12)** : drafts, chat Anthropic, frontend, workflow d'approbation, import GitLab. Les sections marquées ✅ ci-dessous sont *de l'historique conservé pour contexte* ; les sections marquées ⬜ sont le travail restant.
+
 ---
 
 ## A. Décisions actées
@@ -24,27 +26,38 @@ Ce document fige les décisions prises pendant le cadrage AutoSpec et le chantie
 - **Rejet** : un owner qui rejette doit commenter la raison. Le ticket sort alors de la file d'approbation des autres owners ; l'auteur reprend la main dans l'interface de création.
 - **"Mode autonome client"** mentionné dans le CR : oublié pour le MVP.
 
-### Architecture
+### Architecture (✅ livré sauf mention contraire)
 
-- **Railsification dans le même repo**, progressive.
-- **Solid Queue** pour le polling, en tâche récurrente.
-- **`bin/autodev` devient un superviseur** : boot Rails server + Solid Queue worker + sidecars. Distribution Brew préservée — le script reste le point d'entrée d'installation.
-- **`danger-claude` et `mr-review` restent des formulas Brew séparées**, indépendantes.
-- **Devise + omniauth Azure AD** pour le SSO Microsoft 365.
-- **Locales** : migration complète des hashes Ruby (`NOTIFICATION_TEMPLATES`, `ACTIVITY_TEMPLATES`, `WEB_TEMPLATES`) vers `config/locales/*.yml`, fichiers séparés par thème. FR + EN obligatoires (la stricte règle de localisation héritée de l'actuel Autodev s'applique aussi à AutoSpec malgré des designs 100% FR).
-- **`config.yml`** : ne contient plus que les settings root (token GitLab, intervals, web bind/port). Toute la configuration projet passe en DB.
+- ✅ **Railsification dans le même repo**, progressive — livrée en `v1.0.0-alpha.3`. Détails et leçons : [`railsification-postmortem.md`](railsification-postmortem.md).
+- ✅ **Solid Queue** pour le polling, en tâche récurrente (`AutodevPollJob` toutes les 5 min par défaut).
+- ✅ **`bin/autodev` superviseur** : spawn `bin/rails server` + `bin/jobs start` comme processus enfants. Distribution Brew préservée.
+- **`danger-claude` et `mr-review` restent des formulas Brew séparées**, indépendantes (inchangé).
+- ✅ **Devise + omniauth Entra ID** pour le SSO Microsoft 365. `before_action :authenticate_user!` global posé en alpha.7 (PR3 du users rollout). Toute route AutoSpec hérite du gating sans effort.
+- ✅ **Locales** : `notifications.{fr,en}.yml` + `activity.{fr,en}.yml` + `web.{fr,en}.yml` chargés par le railtie i18n. `Locales.t` est un adapter conservé pour rétro-compatibilité. La règle FR+EN s'applique aussi à AutoSpec.
+- ✅ **`config.yml`** : settings root (token GitLab, intervals, web bind/port, Azure creds) + bloc `projects:` lu uniquement par le rake `autodev:migrate_projects_from_yaml`. Toute la conf projet vit en DB.
 
-### Modèle de données (nouvelles tables)
+### Modèle de données
+
+**Déjà en place** (railsification steps 2-3 + users rollout) :
+
+| Table | Rôle | Source |
+|---|---|---|
+| `users` | Compte Microsoft 365. Colonnes étendues PR2 : `admin`, `gitlab_user_id`, `gitlab_username`, `disabled_at`. | step 3 + PR2 users-rollout |
+| `projects` | Métadonnées projet (gitlab_path, slug, locale par défaut, …) | step 2 |
+| `project_app_commands` | `belongs_to :project`, `category` enum (`setup`, `test`, `lint`, `run`), `command` JSON, `port` nullable | step 2 |
+| `project_memberships` | `user_id` + `project_id` + `role` ('contributor' \| 'owner'), index unique sur la paire | step 2 |
+| `audit_logs` | Trace nominative platform-wide : reset/transition manuels, transitions AASM auto, lifecycle memberships, lifecycle users. `actor_id` nullable (NULL = automatique). | PR1 users-rollout |
+| `sessions` | Devise ActiveRecord session store | step 3 |
+| `issues`, `activity_events` | Legacy AR-backed (AASM sur `Issue`) | step 2 second half |
+
+**À créer pour AutoSpec (phase D, step 9)** :
 
 | Table | Rôle |
 |---|---|
-| `users` | Compte Microsoft 365 |
-| `projects` | Métadonnées projet (path GitLab, slug, locale par défaut, …) |
-| `project_app_commands` | `belongs_to :project`, `category` enum (`setup`, `test`, `lint`, `run`), `command` JSON, `port` nullable |
-| `project_memberships` | `user_id` + `project_id` + rôle (`contributor` ou `owner`) |
-| `autospec_messages` | Historique conversationnel (role, content, tool_calls JSON), `belongs_to :autospec_draft` |
-| `autospec_drafts` | N drafts par user, état du futur ticket (titre, markdown, meta chips, attachments) |
-| `autospec_attachments` | Captures liées à un draft |
+| `autospec_drafts` | N drafts par user, état du futur ticket (titre, markdown, meta chips, attachments, `current_iteration`, `destination`, pointeur GitLab post-soumission). Schéma détaillé en [§E](#e-cycle-de-vie-dun-draft-autospec). |
+| `autospec_messages` | Historique conversationnel (`role`, `content`, `tool_calls` JSON), `belongs_to :autospec_draft`. |
+| `autospec_attachments` | Captures liées à un draft. `has_one_attached :file` via ActiveStorage — voir [§F](#f-stockage-des-attachments). |
+| `autospec_approvals` | Vote d'un owner à une itération donnée. Audit trail des approvals/rejets. Schéma en [§E](#e-cycle-de-vie-dun-draft-autospec). |
 
 Exemple de contenu `project_app_commands` (chaque ligne = une row) :
 
@@ -101,22 +114,41 @@ Questions implicites non tranchées pendant l'interview, à arbitrer avant ou pe
 
 Logique de dépendances. À ajuster selon la timeline (qui est traitée hors de ce document).
 
-1. **Squelette Rails** dans le repo : Gemfile, `app/`, `config/`, routes minimales, ActiveRecord branché sur le SQLite existant.
-2. **Modèles core** : `User`, `Project`, `ProjectAppCommand`, `ProjectMembership`. Migration `issues` Sequel → ActiveRecord (conserver la gem AASM, qui s'intègre aussi bien à AR).
-3. **Auth Devise + omniauth Azure AD** + table sessions.
-4. **Rake idempotent d'import** : YAML existant → tables `projects` + `project_app_commands` (cf section H, exécuté manuellement en phase C).
-5. **Réécriture poller en Solid Queue récurrente** (`AutodevPollJob`).
-6. **`bin/autodev` superviseur** : démarre Rails server + Solid Queue worker en parallèle.
-7. **Migration locales** : `lib/autodev/locales/*.rb` → `config/locales/*.yml` thématiques.
-8. **Port des vues Phlex** existantes vers Rails (Phlex reste utilisable dans Rails) + refonte des libellés en langage métier.
-9. **Backend AutoSpec** : tables `autospec_*`, service `AutospecChat` autour du SDK Anthropic, endpoint SSE.
-10. **Frontend AutoSpec** : portage de `reference/screen-chat-spec.jsx` vers Rails (ERB + Stimulus ou Phlex + Turbo, à trancher). Drag-drop attachments via ActiveStorage.
-11. **Workflow approbation** : tables `project_memberships` mises en service, encart dashboard, transitions de validation côté `Issue`, gestion des labels GitLab add/remove.
-12. **Import GitLab d'un ticket existant** (dernier).
+### Railsification (✅ livré en `v1.0.0-alpha.3`, 2026-06-09)
+
+1. ✅ **Squelette Rails** dans le repo : Gemfile, `app/`, `config/`, routes minimales, ActiveRecord branché sur le SQLite existant.
+2. ✅ **Modèles core** : `User`, `Project`, `ProjectAppCommand`, `ProjectMembership`. Migration `issues` Sequel → ActiveRecord (conserver la gem AASM, qui s'intègre aussi bien à AR).
+3. ✅ **Auth Devise + omniauth Entra ID** + table sessions.
+4. ✅ **Rake idempotent d'import** : YAML existant → tables `projects` + `project_app_commands` (cf section H, exécuté manuellement en phase C).
+5. ✅ **Réécriture poller en Solid Queue récurrente** (`AutodevPollJob`).
+6. ✅ **`bin/autodev` superviseur** : démarre Rails server + Solid Queue worker en parallèle.
+7. ✅ **Migration locales** : `lib/autodev/locales/*.rb` → `config/locales/*.yml` thématiques.
+8. ✅ **Port des vues Phlex** existantes vers Rails (Phlex reste utilisable dans Rails) + refonte des libellés en langage métier.
+
+Détails et leçons d'implémentation : [`railsification-postmortem.md`](railsification-postmortem.md).
+
+### Users rollout (✅ livré en `v1.0.0-alpha.4` → `v1.0.0-alpha.7`, intercalé après step 8)
+
+Chantier non prévu dans la numérotation d'origine, ajouté entre la railsification et AutoSpec parce que (a) le dashboard est devenu accessible depuis NetBird et le mesh seul ne suffit plus comme contrôle d'accès, (b) AutoSpec a besoin d'un audit trail nominatif et d'une visibilité par membership. Trois PRs :
+
+- ✅ **PR1 — `audit_log`** : table `audit_logs` platform-wide, helper `Audit.record!`, câblage sur reset/transition manuels + transitions AASM auto.
+- ✅ **PR2 — `GitlabMembershipSync`** : sync des memberships depuis l'API GitLab (mapping access_level → 'owner' / 'contributor'), colonnes `admin` / `gitlab_user_id` / `gitlab_username` / `disabled_at` sur `users`, job récurrent quotidien `0 3 * * *`, rake `autodev:seed_admin`, page admin `/admin/users` read-only.
+- ✅ **PR3 — Gating + visibilité + CSRF** : `before_action :authenticate_user!` global, `current_user.visible_projects` substitué à `Project.all`, CSRF réactivé (helper `csrf_input` côté Phlex), bouton sign-out dans le sidebar.
+
+Spec et plan d'attaque détaillés : [`users-rollout.md`](users-rollout.md). 8 hotfixes auth (alpha.7 → alpha.15) couvrent les pièges Devise/omniauth-Entra-ID rencontrés en prod.
+
+### Phase D — AutoSpec (⬜ à attaquer)
+
+9. ⬜ **Backend AutoSpec** : tables `autospec_*` (drafts, messages, attachments, approvals), service `AutospecChat` autour du SDK Anthropic (system prompt cacheable + 4 tools dédiés, voir [§G](#g-format-des-suggestions-autodev-tool_calls)), endpoint streaming (SSE ou ActionCable — décision en [§L](#l-streaming-sse--limitation-observée-et-décision-à-revalider-à-limplem-autospec) à acter à ce step).
+10. ⬜ **Frontend AutoSpec** : portage de `reference/screen-chat-spec.jsx` vers Phlex + Turbo (cohérent avec le reste du dashboard, qui n'a pas migré vers ERB). Drag-drop attachments via ActiveStorage.
+11. ⬜ **Workflow approbation** : encart dashboard listant les drafts à approuver, transitions `drafting → pending_approval → submitted` (avec branche `rejected → drafting`), création GitLab + ajout des labels (autodev `labels_todo` si destination = `autodev`, label "à assigner" sinon). La table `project_memberships` + le helper `owner_of?` sont déjà en service depuis le users rollout — il reste à câbler les actions draft-spécifiques.
+12. ⬜ **Import GitLab d'un ticket existant** (dernier).
 
 ---
 
 ## D. Coexistence pendant la railsification
+
+> ✅ **Achevé en `v1.0.0-alpha.3`.** Section conservée pour mémoire — le strangler fig en 3 phases a été appliqué tel que décrit. Le détail de ce qui a réellement été facile / dur / surprenant est dans [`railsification-postmortem.md`](railsification-postmortem.md). Le doc de reprise utilisé pendant la migration est archivé à [`archive/railsification-handoff.md`](archive/railsification-handoff.md).
 
 Approche retenue : **strangler fig en 3 phases sur DB SQLite partagée**. Sinatra+Sequel et Rails+ActiveRecord cohabitent dans le même process pendant la transition, sans cutover big-bang. La migration progresse fonctionnalité par fonctionnalité ; seul le passage du poller (phase C) constitue un moment de bascule sensible.
 
@@ -469,6 +501,8 @@ Le markdown courant du draft est aussi cachable s'il ne change pas pendant la se
 
 ## H. Migration YAML → DB
 
+> ✅ **Livré au step 4 de la railsification** (commit `e1fce2a`, rake `autodev:migrate_projects_from_yaml`). Exécuté manuellement pendant le cutover phase C. Section conservée pour mémoire — l'approche dry-run + transaction + validator pré-pass a tenu sans surprise.
+
 Approche retenue : **rake idempotent + dry-run + double backup, exécuté manuellement en phase C avec downtime court**. Le réflexe "one-shot pur" est écarté au profit d'une tâche qui peut être testée sur snapshot avant le cutover réel et ré-exécutée sans dommage si la première passe plante.
 
 ### Le rake
@@ -573,6 +607,8 @@ Justification : un seul opérateur (toi) au MVP, risque de confusion faible. Si 
 
 ## I. Vocabulaire des états (refonte STATES.md)
 
+> ✅ **Appliqué au step 8 de la railsification** (commits `dc461b9` `b3a4ff8` et alentour). Les 16 clés `web_status_*` de `config/locales/web.{fr,en}.yml` reflètent la table ci-dessous. L'itération avec le CSM pilote interviendra à la bêta — coût d'ajustement = un commit sur les YAML.
+
 Décision : **v0 figée en interne maintenant, itération avec le CSM pilote en bêta**. Proposer un table complète avant le pilote, plutôt que de lui demander d'inventer en partant de rien. Coût d'ajustement bêta = trivial (un `*.yml`).
 
 ### Principes directeurs
@@ -657,6 +693,8 @@ Le hash Ruby `STATUS_LABEL_KEYS` actuel (cf. `lib/autodev/web/i18n_helpers.rb`) 
 ---
 
 ## J. Rôles & permissions
+
+> **Statut.** Le socle est en place depuis le users rollout : table `project_memberships` avec colonne `role` enum, helpers `User#owner_of?` / `User#contributor_of?` / `User#admin?`, `current_user.visible_projects` (admin = tout, autre = via memberships), audit_log sur le lifecycle des memberships. **Ce qui reste à câbler en step 11** : la matrice draft-spécifique ci-dessous (création/visibilité/approbation/rétractation/destination), les transitions correspondantes sur `autospec_drafts`, et l'encart d'approbation du dashboard.
 
 Deux rôles, avec héritage : **owner = contributor + privilèges supplémentaires**. Pas de table par rôle, une seule `project_memberships` avec colonne `role` enum.
 
@@ -832,3 +870,6 @@ Le profil de charge AutoSpec change la donne par rapport à l'usage AutoDev actu
 - Design handoff v2 (édition centrale) : `autodev/docs/design/spec_update/`.
 - Design handoff v1 (chat plein écran, conservé pour historique) : `autodev/docs/design/`.
 - Architecture Autodev actuelle : `autodev/CLAUDE.md`.
+- Post-mortem railsification (steps 1-8) : [`railsification-postmortem.md`](railsification-postmortem.md).
+- Spec users rollout (audit_log + sync GitLab + gating SSO) : [`users-rollout.md`](users-rollout.md).
+- Handoff archivé de la railsification : [`archive/railsification-handoff.md`](archive/railsification-handoff.md).
