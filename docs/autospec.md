@@ -64,7 +64,7 @@ Exemple de contenu `project_app_commands` (chaque ligne = une row) :
   - Quota partagé avec AutoDev = goulot doublé sur le siège Team (pas d'API `/usage` pour anticiper).
   - Prompt caching impossible à exploiter via la CLI.
 - **Prompt caching** sur système prompt + contexte projet stable (TTL 5 min couvre une session CSM typique).
-- **Streaming SSE** côté Rails (`ActionController::Live` ou Rack hijack — ActionCable est overkill pour du one-way LLM streaming).
+- **Streaming SSE** côté Rails (`ActionController::Live` ou Rack hijack — ActionCable est overkill pour du one-way LLM streaming). **Décision à revalider à l'implem AutoSpec** : l'usage AutoDev a fait apparaître une limitation de threading (1 thread Puma parqué par onglet, saturation du pool si les morts client ne sont pas détectées tôt) — détails et critères de décision en section L.
 - **Sonnet 4.6** pour la conversation principale, **Haiku 4.5** pour les quick chips (`reformule plus court`, `propose un titre alternatif`).
 - **AutoDev reste sur Team** le temps qu'AutoSpec se stabilise. La migration AutoDev → API est explicitement parquée dans le CR (post-bêta).
 - **Threads per-user** : un thread = un CSM. Pas de collaboration multi-CSM sur un même draft.
@@ -785,6 +785,44 @@ L'auteur revient consulter — même logique pull, même simplicité.
 | Auteur ne sait pas que son draft a été rejeté | Idem. La vue "Mes brouillons" est l'endroit naturel à consulter. |
 | Tentation d'ajouter "juste un petit email" en cours de route | Tenir le no-notifs MVP : sinon on glisse vers de l'infra qui n'est pas le sujet du pilote. |
 | Pas de signal de présence d'un nouveau draft pour les owners | Acceptable. Si vraiment bloquant, un compteur Turbo Stream en live sur le badge sidebar peut suffire sans email — c'est gratuit côté infra. |
+
+---
+
+## L. Streaming SSE : limitation observée et décision à revalider à l'implem AutoSpec
+
+La décision de section A ("ActionCable est overkill pour du one-way LLM streaming") tenait avec les hypothèses du cadrage : un canal sortant peu fréquent, peu d'onglets concurrents, payload léger. À l'usage AutoDev, un coût opérationnel est apparu qui doit être documenté avant d'attaquer l'implem AutoSpec, où la pression sur ce canal augmentera.
+
+### Symptôme observé
+
+`StreamController#show` utilise `ActionController::Live` et boucle sur `Web::EventBus.subscribe.pop(timeout: HEARTBEAT_INTERVAL)`. Chaque onglet dashboard ouvert **parque un thread Puma** pour la durée de vie de la connexion. À chaque F5, le navigateur ferme l'EventSource côté client, mais `Queue#pop` ne voit pas la coupure TCP — le thread reste parqué jusqu'au prochain tick, où `write(": ping\n\n")` lève `ClientDisconnected` et le thread est libéré.
+
+Avec un pool Puma à 10 (déjà remonté de 3 → 10 explicitement pour ça), enchaîner quelques refresh ou cumuler plusieurs onglets saturait le pool : toutes les requêtes Rails freezaient, restart serveur obligatoire. Le profil AutoDev actuel l'a fait apparaître sur des refresh successifs du dashboard côté Bobette.
+
+### Mitigation court terme (en place)
+
+Deux changements minimaux qui ne remettent pas en cause l'architecture :
+
+1. **Fermeture proactive côté client sur `pagehide`** dans `Layout::APP_JS` : `window.addEventListener('pagehide', () => window.__autodevSSE?.close())`. Le navigateur envoie un FIN TCP immédiat, le thread serveur prend la `ClientDisconnected` au write suivant sans attendre le heartbeat. Couvre le cas courant (F5, fermeture d'onglet, navigation cross-document).
+2. **`HEARTBEAT_INTERVAL` baissé de 15 → 5 secondes** dans `StreamController`. Filet de sécurité pour les morts silencieuses où aucun event JS ne fire (kill navigateur, perte réseau, sleep machine, bfcache imparfait). Trade-off CPU/réseau négligeable (3 pings vides/min/onglet).
+
+La limitation architecturale reste : un thread Puma par onglet vivant, et la dépendance au heartbeat pour les morts silencieuses.
+
+### Pourquoi se reposer la question à l'implem AutoSpec
+
+Le profil de charge AutoSpec change la donne par rapport à l'usage AutoDev actuel :
+
+- **Streaming LLM token-by-token** : fréquence d'écriture nettement plus élevée que les `activity_events` sporadiques d'aujourd'hui. Un thread parqué + actif sur N onglets pèse plus.
+- **Multi-CSM concurrent** attendu en bêta puis en prod, ≥ 1 onglet par CSM. Le pool Puma à 10 sature vite si chaque onglet squatte un thread.
+- **`Web::EventBus` est strictement in-process** : les events créés par le worker Solid Queue (process séparé du process web) n'atteignent pas les abonnés SSE. Aujourd'hui ça passe parce que les events critiques pour le dashboard sont émis depuis le process web (transitions AASM côté contrôleurs). AutoSpec ajoute des broadcasts depuis le pipeline LLM — c'est le moment où ce trou d'IPC se manifestera.
+- **ActionCable + Solid Cable** (le défaut Rails 8 remplaçant Redis comme backend pub/sub d'ActionCable) règle les deux problèmes d'un coup : le hijack WebSocket libère le thread Puma après le handshake (la connexion vit dans l'event loop d'ActionCable), et Solid Cable porte le pub/sub vers une 3ᵉ DB SQLite partagée entre process — les broadcasts depuis le worker atteignent les abonnés du process web.
+
+### Critères de décision au moment de l'implem
+
+- Si le streaming LLM mesuré reste tolérable avec les mitigations + pool Puma remonté, et si les broadcasts critiques restent émis depuis le process web → rester sur SSE + `Web::EventBus`.
+- Si on observe saturation du pool, perte d'events inter-process, ou si AutoSpec veut broadcaster depuis le worker → migrer vers ActionCable + Solid Cable. Coût estimé : ~50 lignes nettes (Channel + `cable.yml` + JS client + remplacement de `Web::EventBus.publish` par `ActionCable.server.broadcast`, ajout d'une 3ᵉ DB SQLite). Le bonus IPC inter-process tombe gratuitement.
+- `Web::EventBus` peut soit rester en façade par-dessus ActionCable (refactor minimal), soit disparaître au profit de broadcasts directs.
+
+À acter au moment où le streaming AutoSpec passe en intégration, pas avant — la mesure réelle prime sur l'estimation.
 
 ---
 

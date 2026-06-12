@@ -39,6 +39,23 @@ module Web
           window.__autodevSSE = es;
         });
 
+        // Close the EventSource proactively on `pagehide` (F5, tab close,
+        // cross-document navigation). Without this, the browser tears down
+        // the client-side socket but the server's StreamController stays
+        // parked on Queue#pop until the next heartbeat tick detects the
+        // dead TCP via a write — up to HEARTBEAT_INTERVAL seconds of
+        // Puma-thread squat per stale connection. With enough refreshes
+        // / concurrent tabs, the pool saturates and every Rails request
+        // freezes. Closing client-side sends a FIN immediately so the
+        // server's next write raises ClientDisconnected and the thread
+        // is released right away. See autospec.md §L for the full story.
+        window.addEventListener('pagehide', () => {
+          if (window.__autodevSSE) {
+            window.__autodevSSE.close();
+            window.__autodevSSE = null;
+          }
+        });
+
         // Delegated confirm-on-submit (Phlex 2 forbids inline onsubmit).
         // Native <dialog> instead of window.confirm so the prompt stays
         // styled with the app and supports keyboard/screenreader navigation.

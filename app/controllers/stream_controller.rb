@@ -21,7 +21,14 @@ class StreamController < ApplicationController
   # Puma thread is released. Without this, an idle queue keeps the
   # thread parked indefinitely (Queue#pop does not observe TCP-level
   # disconnects), exhausting Puma's small thread pool over time.
-  HEARTBEAT_INTERVAL = 15
+  #
+  # Set to 5s as a safety net for silently-disconnected clients
+  # (browser killed, network drop, machine sleep, bfcache misses).
+  # The primary mechanism is now the client-side `pagehide` listener
+  # in `Layout::APP_JS`, which sends a FIN immediately on F5 / tab
+  # close so the next write raises ClientDisconnected without waiting
+  # for a tick. See autospec.md §L for the full architectural picture.
+  HEARTBEAT_INTERVAL = 5
 
   # GET /stream
   def show
