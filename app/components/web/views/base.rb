@@ -38,7 +38,6 @@ module Web
       def with_layout(nav: true, shell: true, &)
         render(Layout.new(locale: @locale, request_path: @request_path,
                           nav: nav, shell: shell,
-                          current_user_email: @current_user_email,
                           csrf_token: @csrf_token), &)
       end
 

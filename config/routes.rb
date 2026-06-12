@@ -15,6 +15,12 @@ Rails.application.routes.draw do
              skip: %i[registrations passwords],
              controllers: { omniauth_callbacks: 'users/omniauth_callbacks' }
 
+  # The User model only declares `:trackable, :omniauthable` (no
+  # `:database_authenticatable`), so `devise_for :users` does not emit the
+  # `sessions` resource and `/users/sign_out` would 404. Wire it explicitly
+  # to a custom controller that calls Devise's `sign_out` helper.
+  delete '/users/sign_out', to: 'users/sessions#destroy', as: :destroy_user_session
+
   # Anonymous sign-in landing — rendered by `SignInController#new`,
   # POSTs to `/users/auth/entra_id`. Kicked off by Devise's failure_app
   # redirect (config/initializers/devise.rb). Anonymous-accessible.

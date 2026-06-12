@@ -32,7 +32,8 @@ module Web
         def render_sidebar
           render Components::Sidebar.new(
             active: 'admin', locale: web_locale, request_path: @request_path,
-            counts: {}, translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin
+            counts: {}, translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin,
+            current_user_email: @current_user_email, csrf_token: @csrf_token
           )
         end
 

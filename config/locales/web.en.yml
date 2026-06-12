@@ -30,7 +30,6 @@ en:
   web_sidebar_cta_title: New ticket
   web_sidebar_cta_body: Describe your need to Autodev, it handles the rest.
   web_sidebar_cta_button: Start
-  web_sidebar_user_role: Customer support
   web_dashboard_greeting: "Hello \U0001F44B"
   web_dashboard_subtitle: Here's what's happening on your projects today.
   web_dashboard_refresh: Refresh

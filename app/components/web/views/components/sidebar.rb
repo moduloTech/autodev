@@ -10,13 +10,16 @@ module Web
       class Sidebar < Phlex::HTML # rubocop:disable Metrics/ClassLength
         def initialize( # rubocop:disable Lint/MissingSuper,Metrics/ParameterLists
           active:, locale:, request_path:,
-          counts: {}, translator: nil, admin: false
+          counts: {}, translator: nil, admin: false,
+          current_user_email: nil, csrf_token: nil
         )
           @active = active.to_s
           @locale = locale
           @request_path = request_path
           @counts = counts
           @admin = admin
+          @current_user_email = current_user_email
+          @csrf_token = csrf_token
           # Caller passes a t_web-like lambda since the Sidebar isn't a Web::Views::Base.
           @t = translator || ->(key, **) { key.to_s }
         end
@@ -216,16 +219,43 @@ module Web
         end
 
         def render_user_strip
-          div(style: 'display: flex; align-items: center; gap: 10px; padding: 10px 8px; ' \
-                     'margin-top: 8px; border-top: 1px solid var(--border);') do
-            div(style: avatar_style) { 'A' }
+          username = user_display_name
+          div(style: user_strip_style) do
+            div(style: avatar_style) { username[0, 1].upcase }
             div(style: 'flex: 1; min-width: 0;') do
-              div(style: 'font-size: 13px; font-weight: 500; color: var(--text);') { 'autodev' }
-              div(style: 'font-size: 11px; color: var(--text-muted);') do
-                @t.call(:web_sidebar_user_role)
-              end
+              div(style: username_style) { username }
+              render_signout_link
             end
           end
+        end
+
+        def user_strip_style
+          'display: flex; align-items: center; gap: 10px; padding: 10px 8px; ' \
+            'margin-top: 8px; border-top: 1px solid var(--border);'
+        end
+
+        def username_style
+          'font-size: 13px; font-weight: 500; color: var(--text); ' \
+            'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'
+        end
+
+        def user_display_name
+          local = @current_user_email.to_s.split('@', 2).first.to_s
+          local.empty? ? 'autodev' : local
+        end
+
+        def render_signout_link
+          form(action: '/users/sign_out', method: 'post',
+               'data-turbo' => 'false', style: 'display: inline;') do
+            input(type: 'hidden', name: '_method', value: 'delete')
+            input(type: 'hidden', name: 'authenticity_token', value: @csrf_token) if @csrf_token.present?
+            button(type: 'submit', style: signout_btn_style) { @t.call(:web_sign_out) }
+          end
+        end
+
+        def signout_btn_style
+          'background: none; border: 0; padding: 0; cursor: pointer; ' \
+            'font-size: 11px; color: var(--text-muted); text-align: left;'
         end
 
         def avatar_style

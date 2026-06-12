@@ -82,13 +82,12 @@ module Web
         });
       JS
 
-      def initialize(locale: :fr, request_path: '/', nav: true, shell: true, # rubocop:disable Lint/MissingSuper,Metrics/ParameterLists
-                     current_user_email: nil, csrf_token: nil)
+      def initialize(locale: :fr, request_path: '/', nav: true, shell: true, # rubocop:disable Lint/MissingSuper
+                     csrf_token: nil)
         @locale = locale
         @request_path = request_path
         @nav = nav
         @shell = shell
-        @current_user_email = current_user_email
         @csrf_token = csrf_token
       end
 
@@ -109,43 +108,9 @@ module Web
             else
               yield
             end
-            render_session_widget if @current_user_email
             render_confirm_dialog
           end
         end
-      end
-
-      # Floats above the page chrome (sidebar/topbar render their own area;
-      # this widget lives at the document root so it works for views with
-      # `shell: false` too). Click triggers a CSRF-bearing form POST to
-      # /users/sign_out — Devise routes that to sessions#destroy.
-      SESSION_WIDGET_STYLE = 'position: fixed; top: 12px; right: 16px; z-index: 1000; ' \
-                             'display: flex; align-items: center; gap: 8px; ' \
-                             'font-size: 12px; color: var(--text-muted); ' \
-                             'background: var(--paper); border: 1px solid var(--border); ' \
-                             'border-radius: var(--r-sm); padding: 4px 10px;'
-      SIGNOUT_BTN_STYLE = 'background: none; border: 0; padding: 0; cursor: pointer; ' \
-                          'color: var(--accent-solid); font-size: 12px;'
-      private_constant :SESSION_WIDGET_STYLE, :SIGNOUT_BTN_STYLE
-
-      def render_session_widget
-        div(class: 'session-widget', style: SESSION_WIDGET_STYLE) do
-          span { @current_user_email }
-          span(class: 'muted') { '·' }
-          form(action: '/users/sign_out', method: 'post', style: 'display: inline;') do
-            csrf_input_tag
-            button(type: 'submit', style: SIGNOUT_BTN_STYLE) { t_web(:web_sign_out) }
-          end
-        end
-      end
-
-      # Hidden input Rails' protect_from_forgery expects on every non-GET
-      # form. Phlex doesn't auto-emit it (no FormBuilder), so views call
-      # this helper from inside any form they hand-write.
-      def csrf_input_tag
-        return if @csrf_token.blank?
-
-        input(type: 'hidden', name: 'authenticity_token', value: @csrf_token)
       end
 
       def render_confirm_dialog # rubocop:disable Metrics/MethodLength
