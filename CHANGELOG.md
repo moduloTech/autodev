@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.17] - 2026-06-12
+
 ### Added
 
 - New in-app help pages: `/help` renders `docs/usage/autodev-functional-usage.md` (open to all signed-in users), `/admin/help` renders `docs/usage/autodev-technical-usage.md` (admin-gated via `AdminApplicationController`). Both flow through the same pipeline: `HelpDoc.render(:functional | :technical)` strips pandoc artifacts (YAML frontmatter, `\newpage`) and rewrites image refs from `screenshots/X.png` to `/help/images/X.png`, then Redcarpet renders (GFM tables, fenced code, autolinking, strikethrough). The image endpoint is shared between both pages (`HelpController#image`, allowlisted filename pattern, `image/png` content-type, 1h browser cache) — screenshots are not sensitive and live outside the Propshaft pipeline since they're documentation assets, not application assets. The generic `Web::Views::Help` Phlex shell takes `content` + `active` + `title_key` + `subtitle_key` so a single view serves both pages. The sidebar gains an "Aide" entry (visible to everyone) and an admin-only "Aide technique" entry (icon `info`, `web_nav_help` / `web_nav_admin_help` locale keys); `web_help_title|subtitle` + `web_admin_help_title|subtitle` feed the topbars. New `.help-doc` CSS block scoped to the rendered article restores readable typography (h1/h2/h3 hierarchy, table styling, image framing, blockquote treatment, inline code chips). `redcarpet ~> 3.6` added to the Gemfile.
