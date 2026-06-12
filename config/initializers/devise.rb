@@ -86,7 +86,7 @@ Devise.setup do |config|
   # is convenient for one-off `bin/rails console` sessions.
   #
   # We can't read through `Web.config` here — that's populated by
-  # `config/initializers/load_autodev_config.rb`'s `after_initialize`
+  # `config/initializers/load_autodev_config.rb`'s `to_prepare`
   # block, which fires AFTER every initializer (including this one) has
   # run. Devise's `config.omniauth` call must happen synchronously here
   # so the Engine's middleware-build step picks the args up — by then,
