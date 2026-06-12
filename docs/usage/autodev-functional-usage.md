@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-06-11
+date: 2026-06-12
 lang: fr
 documentclass: article
 papersize: a4
@@ -56,7 +56,7 @@ Le dashboard est protégé par le SSO Microsoft 365 de Modulotech. À la premiè
 
 Cliquez sur **Se connecter avec Microsoft** et terminez la connexion avec votre compte Modulotech habituel. Vous arrivez ensuite directement sur le tableau de bord.
 
-Le badge en haut à droite rappelle qui est connecté et propose **Se déconnecter**.
+Votre identité et le lien **Se déconnecter** apparaissent en bas du menu de gauche, sous une pastille qui reprend la première lettre de votre adresse mail.
 
 \newpage
 
@@ -94,6 +94,8 @@ Présent sur toutes les pages :
 - **À surveiller** — tout ce qui demande votre attention.
 - **Conversations** *(à venir)* — la future entrée pour rédiger un ticket par chat.
 - **Projets** — la liste des projets suivis.
+
+Tout en bas du menu : votre identité connectée et le lien **Se déconnecter**.
 
 ## Les options en haut à droite
 

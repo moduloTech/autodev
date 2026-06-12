@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-06-11
+date: 2026-06-12
 lang: fr
 documentclass: article
 papersize: a4
@@ -44,6 +44,7 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/stream` | `StreamController#show` | Server-Sent Events, `ActionController::Live` |
 | `/locale/:lang` | `LocaleController#update` | Set le cookie `locale`, redirige sur `back` |
 | `/users/auth/entra_id` (+ callback) | Devise | OmniAuth Microsoft 365 |
+| `/users/sign_out` (DELETE) | `Users::SessionsController#destroy` | Sign-out custom — `devise_for :users` n'émet pas la ressource `sessions` (le model `User` n'a pas `:database_authenticatable`), ce contrôleur comble le trou |
 | `/sign_in` | `SignInController#new` | Page d'atterrissage avec form POST CSRF |
 | `/admin/users` | `Admin::UsersController#index` | Audit users + memberships (admin only) |
 | `/admin/jobs` | Mission Control | Inspecteur Solid Queue (admin only) |
@@ -56,6 +57,7 @@ Pas de chrome custom sur `/admin/jobs` — c'est l'UI fournie par la gem `missio
 
 - `/stream` est une long-lived SSE. Tout `ActivityEvent` créé est publié sur `Web::EventBus` (in-process pub/sub, backpressure drop à 100), puis transformé en Turbo Stream HTML envoyé sur la connexion ouverte.
 - Le layout Phlex ouvre une `EventSource('/stream')` au `turbo:load`. Désactivé sous `navigator.webdriver` pour ne pas bloquer les outils d'automation qui attendent `networkidle`.
+- Listener `pagehide` côté client : ferme l'`EventSource` à chaque F5 / fermeture d'onglet / navigation cross-document, pour que le thread Puma parqué sur `Queue#pop` soit libéré au prochain write au lieu d'attendre le heartbeat. `StreamController::HEARTBEAT_INTERVAL = 5` secondes en filet de sécurité pour les morts silencieuses (kill navigateur, perte réseau, sleep machine). Voir `docs/autospec.md` §L pour le contexte et les critères pour migrer vers ActionCable + Solid Cable à l'implem AutoSpec.
 
 \newpage
 

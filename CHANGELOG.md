@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/usage/` refreshed against v1.0.0-alpha.16. Functional guide: the "Se connecter" + "Tableau de bord" sections now describe the sign-out link as living at the bottom of the sidebar user strip (the floating top-right widget is gone). Technical guide: routes table gains a `delete /users/sign_out` row pointing at the new `Users::SessionsController#destroy` (with a one-liner explaining why `devise_for :users` doesn't emit the sessions resource here); the "Comportement temps réel" section documents the new client-side `pagehide` listener + the lowered `HEARTBEAT_INTERVAL = 5` + the reference to `docs/autospec.md` §L for the deferred ActionCable + Solid Cable decision. All 11 screenshots recaptured against the current prod dashboard.
+
 ## [1.0.0-alpha.16] - 2026-06-12
 
 ### Added
