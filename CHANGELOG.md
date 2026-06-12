@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.16] - 2026-06-12
+
 ### Added
 
 - `docs/usage/autodev-functional-usage.md` and `docs/usage/autodev-technical-usage.md` — paired French guides with 11 screenshots captured against the prod dashboard. Functional doc is strictly for non-admin, non-technical users (no AASM names, no routes, no internal jargon); technical doc covers admin routes, `~/.autodev/config.yml`, CLI, AASM state machine, polling pass list, pipeline decision matrix, error catalog, and on-disk state. Both files compile to PDF via `pandoc --pdf-engine=xelatex` and are gitignored as build artifacts (`docs/**/*.pdf`).
