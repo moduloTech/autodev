@@ -864,6 +864,91 @@ Le profil de charge AutoSpec change la donne par rapport à l'usage AutoDev actu
 
 ---
 
+## M. Project briefing — contexte projet pour le chat
+
+> ✅ **Livré en addon post-phase-D** (commit `b0f21cd`, 2026-06-16). Cette section est une **nouvelle décision** non couverte par le cadrage initial — elle adresse un manque devenu visible une fois le chat AutoSpec en service.
+
+### Problème identifié à la mise en service
+
+Le système prompt construit par `Autospec::SystemPrompt` n'embarque que (1) la persona + l'usage des outils, (2) l'état du draft (titre, markdown, meta chips). **Zéro contexte projet** : Claude ne voit ni le code, ni les autres tickets, ni le `CLAUDE.md`, ni les conventions. Conséquence : ses suggestions de cadrage sont génériques — bonnes en moyenne, mais incapables de référencer le code existant, le vocabulaire métier, ou les patterns récurrents du projet. Pour un CSM qui cadre un ticket sur un domaine technique précis (multi-dispatch sur Powerpanne, par exemple), Autodev répond en "bien cadrer un ticket en général" plutôt qu'en "bien cadrer ce ticket-là sur ce projet-là".
+
+### Solution retenue
+
+**Briefing par projet, rafraîchi en tâche de fond, injecté comme bloc cacheable du system prompt.**
+
+- Toutes les heures, un job Solid Queue (`RefreshProjectBriefingsJob`) itère sur chaque `Project`.
+- Pour chaque projet : `git clone --depth 1 --branch staging` du repo dans un `Dir.mktmpdir`, puis `danger-claude -p <prompt>` avec le workdir comme cwd.
+- Le prompt demande à Claude (via le pipeline danger-claude classique, qui a accès au code) de produire 30-60 lignes de markdown couvrant : domaine & purpose, stack, architecture sketch (avec chemins de fichiers réels), glossary métier, conventions (en pull depuis `CLAUDE.md` si présent), recent direction (`git log -20 --oneline` themes).
+- Le markdown produit est stocké sur `projects.briefing_text` + timestamp `briefing_generated_at`.
+- Au moment du chat, `Autospec::SystemPrompt#build` insère le briefing comme **2ᵉ bloc** entre la persona et le draft state, taggé `cache_control: { type: 'ephemeral' }` (donc 2ᵉ cache breakpoint Anthropic, persona + briefing partagent le cache). Omis quand `briefing_text` est `NULL` (projet sans briefing encore généré, ou danger-claude indisponible).
+
+### Pourquoi `staging` plutôt que `main`
+
+Le briefing doit refléter ce qui **arrive en prochaine release**, pas ce qui a été mergé et attend un release-cut. `staging` est la convention Modulotech pour cette branche tampon. Pour les projets qui ne suivent pas la convention (ou qui n'ont pas encore créé `staging`), `git ls-remote --symref HEAD` résout vers la branche par défaut (`main`/`master`) — fallback transparent, pas de configuration.
+
+### Pourquoi rafraîchir en background et pas à la création du draft
+
+Le coût d'un cycle danger-claude (clone + boot container + Claude Code → output) est de l'ordre de **10-30 secondes**. Le faire au moment où le CSM ouvre un nouveau draft serait une friction inacceptable sur le geste central du produit (création de draft = fast path). En découplant clone et chat :
+- La création du draft reste instantanée.
+- Le chat reste rapide (l'API Anthropic répond en ~2-5s sans clone à charger).
+- Le briefing peut être rafraîchi sans bloquer aucun utilisateur.
+
+### Pourquoi danger-claude plutôt qu'un appel API direct
+
+Pour générer le briefing on a besoin que Claude **lise réellement le code** — pas juste qu'on lui colle le `CLAUDE.md` dans le prompt. `danger-claude` est l'outil existant qui orchestre Claude Code avec accès filesystem (le même que la phase implémentation d'AutoDev). Cohérence architecturale, pas de duplication.
+
+### Pourquoi pas dans le chat directement (alternative écartée)
+
+L'idée naturelle "remplaçons l'API Anthropic par des invocations `danger-claude -p` dans le chat AutoSpec" a été examinée et écartée :
+
+| Friction | Détail |
+|---|---|
+| Latence | Chaque tour de chat passerait à 10-30s vs 2-5s actuels — UX dégradée |
+| Plus de `tool_use` structuré | danger-claude renvoie du markdown libre ; faut soit le parser (fragile) soit redéfinir tout le protocole d'application des suggestions |
+| Coût opérationnel | N CSM chat simultanés = N containers en vie + N clones disque |
+| Cache de prompt perdu | Anthropic ephemeral cache économise ~80% des tokens persona ; perdu via CLI |
+
+Le hybride "API rapide pour la conversation + danger-claude background pour le briefing" capture les bénéfices des deux approches.
+
+### Schéma
+
+```ruby
+add_column :projects, :briefing_text,         :text
+add_column :projects, :briefing_generated_at, :datetime
+add_column :projects, :briefing_error,        :text
+```
+
+Trois colonnes nullables sur `projects`. `briefing_error` capture la dernière erreur de refresh (clone failed, danger-claude crashed, etc.) — utile pour debug, surface via une page admin future.
+
+### Mode dégradé
+
+Trois niveaux de dégradation gracieuse :
+
+1. **Briefing jamais généré** (`briefing_text IS NULL`) : `SystemPrompt#build` omet entièrement le 2ᵉ bloc, le chat fonctionne comme avant (persona + draft state seulement). Comportement par défaut pour un projet fraîchement créé.
+2. **Briefing stale après échec** (`briefing_error IS NOT NULL` mais `briefing_text` non vide) : on garde le briefing précédent et on stampe l'erreur. Un briefing périmé d'une heure beats no briefing.
+3. **danger-claude indisponible sur le worker** : le job log un warn et passe au projet suivant. Les briefings existants restent valides ; les projets sans briefing en restent privés.
+
+### Pièges identifiés
+
+| Piège | Mitigation |
+|---|---|
+| `danger-claude` pas sur le PATH du worker Solid Queue | Détecté par `Open3` qui retourne `success?: false`, stampe `briefing_error`, briefing existant conservé |
+| Projet sans branche `staging` | Fallback automatique via `git ls-remote --symref HEAD` vers la branche par défaut |
+| Clone consomme du disque temporaire | `Dir.mktmpdir` (auto-cleanup à la sortie du block), depth 1 minimise la taille |
+| Briefing contient du verbatim CLAUDE.md (pas un résumé) | Instruction explicite dans le prompt "summarise, don't repeat verbatim" — à monitorer empiriquement sur le pilote |
+| Token GitLab dans l'URL de clone visible dans `ps` | Acceptable : worker tourne sur Bobette en localhost-only, NetBird mesh, pas d'utilisateur non-autorisé qui peut `ps` |
+| Tests qui shell-out à danger-claude | Test seam `Autospec::ProjectBriefer.stub_invoker = ->(work_dir, prompt) { ... }` court-circuite l'invocation |
+| Job tourne en dev par erreur | `config/recurring.yml` `development:` reste vide ; en dev local `bin/autodev` n'auto-déclenche pas, trigger manuel via `bin/rails runner` |
+
+### Limites connues
+
+- **Une seule version du briefing par projet** : pas d'historique, pas de rollback à un briefing antérieur. Si une régression côté code génère un briefing dégradé, on attend le tick suivant (1h) ou on trigger manuellement.
+- **Pas de surface admin pour l'erreur** : `briefing_error` est lisible via console mais n'est pas affiché dans `/admin/users` ou ailleurs. À ajouter si le pilote remonte des erreurs régulières.
+- **Pas de bouton "refresh now"** : si un projet refactor majeur veut un briefing à jour immédiatement, il faut soit attendre le tick d'1h soit `bin/rails runner 'Autospec::ProjectBriefer.new(Project.find_by(gitlab_path: "...")).refresh!'`. UI possible plus tard.
+- **Briefing identique pour tous les drafts du projet** : ne s'adapte pas au domaine du ticket en cours. Acceptable pour le MVP — un briefing global donne déjà un saut qualitatif énorme vs zéro contexte.
+
+---
+
 ## Références
 
 - Compte-rendu de réunion : `point_produit-autodev.md` (racine du repo `tooling`).

@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-06-16 (after the hourly project briefing — phase D + briefing addon shipped)
 **Canonical plan:** [`autospec.md`](autospec.md) §C (12-step attack order, marked ⬜/✅)
-**Latest release tag:** `v1.0.0-alpha.17` (phase D complete + project-briefing addon — 13 commits ahead of master, briefing pending commit)
+**Latest release tag:** `v1.0.0-alpha.17` (phase D complete + project-briefing addon — 5 commits ahead of origin/master, unpushed; ready to cut `v1.0.0-alpha.18`)
 
 This document is the *resume-anywhere* state of phase D (AutoSpec). It assumes
 you have **no memory of previous sessions** and gives you:
@@ -37,7 +37,8 @@ sessions:
 | **10b** | Markdown editor (toggle Édition/Aperçu, ⌘+B/I/K, autosave) + meta-chip editing + title editing + two-column desktop layout | ✅ done at SHA `b286915` |
 | **10c** | Drag-drop attachments via ActiveStorage + AttachmentCard grid + mobile responsive (tabs) + dark-mode polish | ✅ done at SHA `566cf41` |
 | **11** | Workflow approbation: owners' encart, vote orchestration, GitLab issue creation pipeline | ✅ done at SHA `d4c46f3` |
-| **12** | Import an existing GitLab issue as a draft (lowest priority — §A "very nice to have") | ✅ done (working tree, pending commit) |
+| **12** | Import an existing GitLab issue as a draft (lowest priority — §A "very nice to have") | ✅ done at SHA `173c90c` |
+| **briefing** | Hourly project briefing — clone `staging` + `danger-claude -p` + cached system-prompt block. Post-phase-D addon. See [`autospec.md`](autospec.md) §M. | ✅ done at SHA `b0f21cd` |
 
 The sub-slice names (9a/9b/9c) are historical — they all live in one
 commit now. Use them in commit messages or PR titles only if you want
@@ -48,7 +49,8 @@ to be precise about WHICH part of step 9 you're touching.
 ## 1. State at this commit
 
 ```
-(working tree) feat(autospec): GitLab issue import (step 12)
+b0f21cd feat(autospec): hourly project briefing — staging clone + danger-claude   ← HEAD
+173c90c feat(autospec): GitLab issue import (step 12) — phase D complete
 d4c46f3 feat(autospec): workflow approbation + GitlabSubmitter (step 11)
 566cf41 feat(autospec): drag-drop attachments + mobile tabs (step 10c)
 b286915 feat(autospec): editor + autosave + missing-key handling (step 10b)
@@ -60,16 +62,17 @@ fd5b9c6 feat(autospec): backend (step 9) — schema, models, chat service, sugge
 da2ce03 Release v1.0.0-alpha.17   ← latest tag, master HEAD before phase D
 ```
 
-Not pushed to origin. Branch is 11 commits ahead (step 12 still uncommitted). **Phase D is now functionally complete end-to-end — ready to cut `v1.0.0-alpha.18`.**
+5 commits ahead of `origin/master`, unpushed. **Phase D functionally complete end-to-end + briefing addon shipped — ready to cut `v1.0.0-alpha.18`.**
 
-Mapping to [`autospec.md`](autospec.md) §C:
+Mapping to [`autospec.md`](autospec.md) §C + addon:
 
 | Step | Title | Status |
 |---|---|---|
 | **9** | Backend AutoSpec | ✅ done (`fd5b9c6`) |
 | **10** | Frontend AutoSpec | ✅ done (10a `d2db3d6`, 10b `b286915`, 10c `566cf41`) |
 | **11** | Workflow approbation | ✅ done (`d4c46f3`) |
-| **12** | Import GitLab d'un ticket existant | ✅ done (WIP) |
+| **12** | Import GitLab d'un ticket existant | ✅ done (`173c90c`) |
+| addon | Project briefing (autospec.md §M) | ✅ done (`b0f21cd`) |
 
 The CSRF fix in `e4133fb` is independent — see §4 for the root cause.
 
@@ -212,7 +215,7 @@ Suite total at HEAD: **734 runs, 1368 assertions, 0 failures**.
 
 ### Step 10b — markdown editor + meta chips + title editing + two-col layout — ✅ done
 
-**What landed** (working tree, pending commit):
+**What landed**:
 
 - Two-column workspace in `Web::Views::AutospecDrafts::Show`: editor centre (max-width 820 px, `autospec-editor-col`) + chat right (`autospec-chat-col`, 380 px desktop / 320 px tablet / collapsed under 960 px). CSS lives in `app/assets/static/css/app.css` under the `/* ── AutoSpec editor workspace ──` block.
 - Sticky toolbar with pill-style Édition|Aperçu tabs, format buttons (B / I / `</>` / H / list / quote / link 🔗), and save indicator (idle / saving / error / locked).
@@ -227,7 +230,7 @@ Suite total at HEAD: **734 runs, 1368 assertions, 0 failures**.
 
 ### Step 10c — drag-drop attachments + responsive — ✅ done
 
-**What landed** (working tree, pending commit):
+**What landed**:
 
 - `AutospecAttachmentsController` with `POST` (multipart) + `DELETE` actions, nested under `resources :autospec_drafts`. Validates content-type against `image/(png|jpe?g|gif|webp)` and size ≤ 10 MB (`:content_too_large`, the `:payload_too_large` symbol is deprecated in Rack 3 / Rails 8.1 — heads up). Returns serialised JSON `{id, filename, byte_size, width, height, url, markdown_snippet}` for each attachment.
 - AttachmentCard grid below the markdown editor (220 px `minmax(auto-fill)` columns, ✕ button top-right, footer with filename + size + copy-markdown ⧉ button). Perpetual `autospec-drop-target` slot at the end of the grid so the affordance is always visible, even with zero attachments. Clicking it opens a native file picker.
@@ -241,7 +244,7 @@ Suite total at HEAD: **734 runs, 1368 assertions, 0 failures**.
 
 ### Step 11 — workflow approbation — ✅ done
 
-**What landed** (working tree, pending commit):
+**What landed**:
 
 - Permission helpers on `AutospecDraft` (model): `viewable_by?`, `editable_by?`, `submittable_by?`, `destination_choosable_by?`, `retractable_by?`, `votable_by?` — encode the §J matrix combining role + author + state. Controllers and the Show view call them.
 - 4 new controller actions: `#submit_for_approval` (with `destination` param + the `autodev`-is-owner-only gate), `#retract`, `#approve`, `#reject` (with mandatory `reason`). The before-action chain split into `authorize_view!` (show), `authorize_voter!` (approve/reject), and the existing `authorize_author!` (everything else).
@@ -255,13 +258,111 @@ Reference: autospec.md §E (lifecycle diagram), §F (attachment upload at submis
 
 ### Step 12 — GitLab import — ✅ done
 
-**What landed** (working tree, pending commit):
+**What landed**:
 
 - `Autospec::GitlabImporter` service parses the GitLab issue URL (regex `\Ahttps?://[^/]+/(?<path>.+?)/-/issues/(?<iid>\d+)/?(?:[?#].*)?\z` — supports nested namespaces, trailing slashes, query/fragment), looks up the matching `Project` row by `gitlab_path`, checks user access (admin bypass + `contributor_of?`), fetches the issue via `client.issue(path, iid)`, creates an `AutospecDraft` pre-populated with the issue's `title` + `description`. 4 typed errors (`InvalidUrl`, `ProjectNotFound`, `ProjectNotVisible`, `IssueNotFound`) cover every rejection path.
 - New routes on the existing resources block: `get :import` + `post :import → #create_from_import`. The controller maps each importer exception to a stable error key (`import_invalid_url`, `import_project_not_found`, `import_project_not_visible`, `import_issue_not_found`) and redirects back to the form with `flash[:alert]`. The before-actions skip-list grew to include the two new actions so neither `load_draft` nor `authorize_author!` fires for collection-route requests.
 - New Phlex view `Web::Views::AutospecDrafts::Import` — single URL textfield with a `font-family: var(--font-mono)` styling cue, "Importer" submit + "Annuler" link back to the index.
 - New "Importer depuis GitLab" secondary button on `/autospec_drafts` next to the primary "Nouveau brouillon" CTA so the path is discoverable.
 - 8 service tests + 5 controller tests covering URL parsing variants (trailing slash, query string, nested namespace), permission matrix (no membership / admin bypass), and the four error-key redirects.
+
+### Deferred work — to revisit if the pilot surfaces a need
+
+Phase D + briefing addon is functionally complete end-to-end. The
+following items were **explicitly deferred** during cadrage or
+implementation — none of them block shipping, all are documented
+here so a future session can pick one up without re-deriving the
+rationale. Listed roughly by likely usefulness.
+
+#### Likely to come up during pilot use
+
+1. **Token-by-token streaming in the chat** — `#chat` currently
+   returns synchronous JSON. `Autospec::Chat#reply` calls
+   `client.messages.create(...)`; streaming uses
+   `client.messages.stream(...)` instead. Rebinding the action to
+   `ActionController::Live` + a `fetch`-with-ReadableStream client
+   is ~30 LOC. Cadrage rationale + revisit-criteria in
+   [`autospec.md`](autospec.md) §L; the §L thread-saturation concern
+   doesn't apply (chat connections are short-lived during a single
+   LLM response).
+
+2. **Push notifications to owners + authors** — cadrage chose
+   pull-only (encart dashboard + "Mes brouillons") for MVP, no
+   email/Teams/webhook. AASM transitions already emit the events; a
+   future Mailer or webhook job would subscribe to the same hooks.
+   Cadrage rationale in [`autospec.md`](autospec.md) §K.
+
+3. **Image dimensions in AttachmentCard footer** — `width/height`
+   stay `nil` because ActiveStorage's image analyzer needs either
+   `mini_magick` or `ruby-vips`, neither in the Gemfile. The
+   serialiser already passes the metadata through (`blob.metadata
+   ['width']`), so adding `gem 'mini_magick'` lights the feature up
+   without code changes. Detailed in [`autospec.md`](autospec.md)
+   §10c "what landed".
+
+4. **Admin surface for `briefing_error`** — `projects.briefing_error`
+   stores the last refresh failure but isn't displayed anywhere.
+   Useful debug surface: add a column to `/admin/users` (or a
+   `/admin/projects` page) showing per-project briefing status +
+   last-error. Listed in [`autospec.md`](autospec.md) §M "limites
+   connues".
+
+5. **"Refresh briefing now" button per project** — currently a
+   manual refresh requires `bin/rails runner 'Autospec::ProjectBriefer.
+   new(Project.find(…)).refresh!'`. A POST admin route enqueuing
+   `RefreshProjectBriefingsJob` for a single project_id would give
+   a one-click path. Same source as item 4 (autospec.md §M).
+
+6. **Per-iteration draft history** — when an owner rejects at
+   iteration N, the author has no view of what was different between
+   iteration N-1 and N. Could be useful for "what did I actually
+   change between rejections?". Out of scope at cadrage; would need
+   snapshot rows on every `submit_for_approval` transition. Not
+   referenced in autospec.md — invented here, document if added.
+
+#### Out of phase-D scope, not urgent
+
+7. **Model code introspection from the chat** — explicitly written
+   out of scope ([`autospec.md`](autospec.md) §G "Hors scope MVP"):
+   "Tools d'introspection codebase (`read_file`, `list_files`):
+   registre AutoDev, pas AutoSpec." The project briefing addon
+   (§M) is the substitute — Claude sees a digest of the code rather
+   than direct read access. If we ever want direct read access, the
+   path is integrating the relevant `danger-claude` tools through
+   the chat, not adding new schemas to `Autospec::Tools`.
+
+8. **Multi-CSM concurrent on a single draft** — cadrage decision:
+   "Threads per-user: un thread = un CSM. Pas de collaboration
+   multi-CSM sur un même draft." ([`autospec.md`](autospec.md) §A
+   "Modèle Claude"). If two CSM want to co-author a spec, they
+   discuss offline and one drives. To lift this: would need
+   ActionCable for live state sync + conflict resolution on
+   markdown / meta_chips. Substantial work; only do if the pilot
+   demonstrates a real need.
+
+9. **"Mode autonome client"** — mentioned in the meeting CR but
+   explicitly: "oublié pour le MVP" ([`autospec.md`](autospec.md)
+   §A "Workflow d'approbation"). A client-facing surface where a
+   non-CSM (e.g. the customer's own product owner) could open
+   drafts. Big product / security implications; not on the
+   radar until post-bêta.
+
+10. **AutoDev migration to the API** (instead of `danger-claude
+    -p`) — parked: "AutoDev reste sur Team le temps qu'AutoSpec se
+    stabilise. La migration AutoDev → API est explicitement parquée
+    dans le CR (post-bêta)." ([`autospec.md`](autospec.md) §A
+    "Modèle Claude"). Quota considerations: would double the load
+    on the Team seat unless AutoDev moves first.
+
+#### Always-applicable next step
+
+11. **Vocabulary tuning of the chat suggestions** — the persona
+    prompt (`Autospec::SystemPrompt::PERSONA` + the briefing
+    prompt in `ProjectBriefer::PROMPT`) is the highest-leverage
+    knob. Iterate based on pilot CSM feedback (the wording of
+    apply buttons, the format of the briefing, the questions
+    Claude asks first). No code changes — yaml/string tweaks
+    only.
 
 ---
 
@@ -583,7 +684,8 @@ mise x ruby -- bundle exec rubocop \
 | Step-10b commit | `b286915` |
 | Step-10c commit | `566cf41` |
 | Step-11 commit  | `d4c46f3` |
-| Step-12 commit  | _(pending — working tree)_ |
+| Step-12 commit  | `173c90c` |
+| Briefing commit | `b0f21cd` |
 | Approval recorder | [`app/services/autospec/approval_recorder.rb`](../app/services/autospec/approval_recorder.rb) |
 | GitLab submitter | [`app/services/autospec/gitlab_submitter.rb`](../app/services/autospec/gitlab_submitter.rb) |
 | GitLab importer | [`app/services/autospec/gitlab_importer.rb`](../app/services/autospec/gitlab_importer.rb) |
@@ -597,7 +699,7 @@ mise x ruby -- bundle exec rubocop \
 1. Read this file end-to-end (you're doing it now).
 2. Skim [`autospec.md`](autospec.md) §C to confirm step status.
 3. Run [§5 sanity checks](#5-fresh-session-sanity-checks) — every one.
-4. **Phase D is complete.** All 4 steps (9–12) from autospec.md §C are merged into the working tree (steps 9, 10a–c, 11, 12). Next actions are either: cut a release tag (`v1.0.0-alpha.18`) and push, or move to the next chantier outside autospec.md (whatever the roadmap calls for).
+4. **Phase D is complete.** All 4 steps (9–12) from autospec.md §C are shipped + the project briefing addon. If you're starting fresh and looking for something to do, [§3 "Deferred work"](#deferred-work--to-revisit-if-the-pilot-surfaces-a-need) lists 11 items roughly ranked by usefulness — items 1–6 are likely pilot-triggered, 7–10 are explicitly out of scope unless product priorities shift, item 11 (vocabulary tuning) is the always-applicable lever.
 5. **Update this handoff if you DO start a new chantier** — keep §1, §3, §4 current so the next session has the same one-glance overview phase D enjoyed.
 
 — Last touched 2026-06-16 after step 12 (GitLab issue import) — **phase D complete**.
