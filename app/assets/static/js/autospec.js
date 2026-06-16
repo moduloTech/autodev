@@ -40,6 +40,21 @@
     wireShortcuts(ctx);
     wireAutosave(ctx);
     wireMetaChips(workspace, ctx);
+    wireAttachments(workspace, ctx);
+    wireMobileTabs(workspace);
+  }
+
+  // ── Mobile tabs (Édition | Discussion, ≤960 px) ───────────────
+
+  function wireMobileTabs(workspace) {
+    const tabs = workspace.querySelectorAll('[data-autospec-mobile-tab]');
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const key = tab.getAttribute('data-autospec-mobile-tab');
+        workspace.setAttribute('data-autospec-active-tab', key);
+        tabs.forEach((t) => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
+      });
+    });
   }
 
   // ── Tab toggle ─────────────────────────────────────────────────
@@ -350,6 +365,196 @@
     try {
       ['markdown', 'title', 'meta_chips'].forEach(f => localStorage.removeItem(lsKey(ctx, f)));
     } catch (_) {}
+  }
+
+  // ── Attachments (step 10c) ────────────────────────────────────
+
+  function wireAttachments(workspace, ctx) {
+    if (ctx.locked) return;
+    const col = workspace.querySelector('[data-autospec-editor-col]');
+    const overlay = workspace.querySelector('[data-autospec-dropzone-overlay]');
+    const grid = workspace.querySelector('[data-autospec-attachments-grid]');
+    if (!col || !grid) return;
+
+    wireDropzone(col, overlay, (files) => uploadFiles(ctx, grid, files));
+    wireAttachmentActions(workspace, ctx, grid);
+    wireDropTargetClick(workspace, ctx, grid);
+  }
+
+  function wireDropzone(col, overlay, onFiles) {
+    let depth = 0;  // dragenter/leave fire per descendant — count to find the real boundary.
+    col.addEventListener('dragenter', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth += 1;
+      if (overlay) overlay.setAttribute('data-active', 'true');
+    });
+    col.addEventListener('dragover', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    col.addEventListener('dragleave', () => {
+      depth -= 1;
+      if (depth <= 0) { depth = 0; if (overlay) overlay.setAttribute('data-active', 'false'); }
+    });
+    col.addEventListener('drop', (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      if (overlay) overlay.setAttribute('data-active', 'false');
+      const files = Array.from(e.dataTransfer.files || []);
+      if (files.length) onFiles(files);
+    });
+  }
+
+  function hasFiles(e) {
+    if (!e.dataTransfer || !e.dataTransfer.types) return false;
+    return Array.from(e.dataTransfer.types).includes('Files');
+  }
+
+  function wireDropTargetClick(workspace, ctx, grid) {
+    const target = workspace.querySelector('[data-autospec-drop-target]');
+    if (!target) return;
+    target.style.cursor = 'pointer';
+    target.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/png,image/jpeg,image/gif,image/webp';
+      input.multiple = true;
+      input.addEventListener('change', () => {
+        const files = Array.from(input.files || []);
+        if (files.length) uploadFiles(ctx, grid, files);
+      });
+      input.click();
+    });
+  }
+
+  function wireAttachmentActions(workspace, ctx, grid) {
+    // Event delegation so cards added dynamically (after upload) are
+    // wired too without re-binding.
+    grid.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-autospec-attachment-delete]');
+      const cpy = e.target.closest('[data-autospec-attachment-copy]');
+      if (del) {
+        const card = del.closest('[data-autospec-attachment-id]');
+        if (card) deleteAttachment(ctx, card);
+      } else if (cpy) {
+        const card = cpy.closest('[data-autospec-attachment-id]');
+        if (card) copyMarkdownSnippet(card, cpy);
+      }
+    });
+  }
+
+  function uploadFiles(ctx, grid, files) {
+    files.forEach((file) => uploadOne(ctx, grid, file));
+  }
+
+  function uploadOne(ctx, grid, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const url = '/autospec_drafts/' + ctx.draftId + '/autospec_attachments';
+    const token = csrfToken();
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'X-CSRF-Token': token },
+      credentials: 'same-origin',
+      body: formData,
+    }).then(r => {
+      if (!r.ok) throw new Error('http_' + r.status);
+      return r.json();
+    }).then(json => {
+      if (json && json.attachment) appendAttachmentCard(grid, json.attachment);
+    }).catch(() => {
+      // Surface failures via the save indicator's error state — the
+      // user already understands what that dot means. Markdown editor
+      // stays usable; the file just didn't make it.
+      setIndicator(ctx, 'error');
+    });
+  }
+
+  function appendAttachmentCard(grid, attachment) {
+    const card = document.createElement('div');
+    card.className = 'autospec-attachment-card';
+    card.setAttribute('data-autospec-attachment-id', String(attachment.id));
+    card.setAttribute('data-autospec-attachment-markdown', attachment.markdown_snippet || '');
+
+    const preview = document.createElement('div');
+    preview.className = 'autospec-attachment-preview';
+    const img = document.createElement('img');
+    img.src = attachment.url;
+    img.alt = attachment.filename;
+    img.loading = 'lazy';
+    preview.appendChild(img);
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'autospec-attachment-delete';
+    del.setAttribute('data-autospec-attachment-delete', 'true');
+    del.textContent = '✕';
+
+    const footer = document.createElement('div');
+    footer.className = 'autospec-attachment-footer';
+    const name = document.createElement('div');
+    name.className = 'autospec-attachment-filename';
+    name.title = attachment.filename;
+    name.textContent = attachment.filename;
+    const meta = document.createElement('div');
+    meta.className = 'autospec-attachment-meta';
+    meta.textContent = humanSize(attachment.byte_size);
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'autospec-attachment-copy';
+    copy.setAttribute('data-autospec-attachment-copy', 'true');
+    copy.textContent = '⧉';
+    meta.appendChild(copy);
+    footer.appendChild(name);
+    footer.appendChild(meta);
+
+    card.appendChild(preview);
+    card.appendChild(del);
+    card.appendChild(footer);
+
+    // Insert before the perpetual drop-target slot so it stays last.
+    const dropTarget = grid.querySelector('[data-autospec-drop-target]');
+    grid.insertBefore(card, dropTarget);
+  }
+
+  function deleteAttachment(ctx, card) {
+    const id = card.getAttribute('data-autospec-attachment-id');
+    const url = '/autospec_drafts/' + ctx.draftId + '/autospec_attachments/' + id;
+    fetch(url, {
+      method: 'DELETE',
+      headers: { 'Accept': 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+    }).then(r => {
+      if (r.status === 204 || r.ok) card.remove();
+      else setIndicator(ctx, 'error');
+    }).catch(() => setIndicator(ctx, 'error'));
+  }
+
+  function copyMarkdownSnippet(card, button) {
+    const md = card.getAttribute('data-autospec-attachment-markdown') || '';
+    const writer = navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText(md)
+      : Promise.reject(new Error('clipboard_unavailable'));
+    writer.then(() => {
+      button.setAttribute('data-state', 'copied');
+      setTimeout(() => button.removeAttribute('data-state'), 1200);
+    }).catch(() => { /* swallow — the user can re-try */ });
+  }
+
+  function csrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+  }
+
+  function humanSize(bytes) {
+    if (!bytes && bytes !== 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
   }
 
   // On load: if localStorage holds a different value than what's in

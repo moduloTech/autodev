@@ -1,8 +1,8 @@
 # AutoSpec — Handoff
 
-**Last updated:** 2026-06-15 (after step 10b — editor + meta chips + autosave)
+**Last updated:** 2026-06-16 (after step 10c — drag-drop attachments + mobile tabs)
 **Canonical plan:** [`autospec.md`](autospec.md) §C (12-step attack order, marked ⬜/✅)
-**Latest release tag:** `v1.0.0-alpha.17` (phase D not yet released — 5 commits ahead of master, 10b pending commit)
+**Latest release tag:** `v1.0.0-alpha.17` (phase D not yet released — 7 commits ahead of master, 10c pending commit)
 
 This document is the *resume-anywhere* state of phase D (AutoSpec). It assumes
 you have **no memory of previous sessions** and gives you:
@@ -34,8 +34,8 @@ sessions:
 |---|---|---|
 | **9** | Backend: schema, models, Chat service, suggestion applier, markdown patcher | ✅ done at SHA `fd5b9c6` (3 internal sub-slices 9a/9b/9c bundled into one commit) |
 | **10a** | Frontend backbone: index/new/create/show, sidebar entry, CTA wire-ups | ✅ done at SHA `d2db3d6` |
-| **10b** | Markdown editor (toggle Édition/Aperçu, ⌘+B/I/K, autosave) + meta-chip editing + title editing + two-column desktop layout | ✅ done (working tree, pending commit) |
-| **10c** | Drag-drop attachments via ActiveStorage + AttachmentCard grid + mobile responsive (tabs) + dark-mode polish | ⬜ next |
+| **10b** | Markdown editor (toggle Édition/Aperçu, ⌘+B/I/K, autosave) + meta-chip editing + title editing + two-column desktop layout | ✅ done at SHA `b286915` |
+| **10c** | Drag-drop attachments via ActiveStorage + AttachmentCard grid + mobile responsive (tabs) + dark-mode polish | ✅ done (working tree, pending commit) |
 | **11** | Workflow approbation: owners' encart, vote orchestration, GitLab issue creation pipeline | ⬜ |
 | **12** | Import an existing GitLab issue as a draft (lowest priority — §A "very nice to have") | ⬜ |
 
@@ -48,7 +48,8 @@ to be precise about WHICH part of step 9 you're touching.
 ## 1. State at this commit
 
 ```
-(working tree) feat(autospec): editor + meta chips + autosave (step 10b)
+(working tree) feat(autospec): drag-drop attachments + mobile tabs (step 10c)
+b286915 feat(autospec): editor + autosave + missing-key handling (step 10b)
 6904257 docs(autospec): add handoff doc for resuming phase D work across sessions
 e4133fb fix(web): emit CSRF token on Phlex forms — form_authenticity_token is private
 d2db3d6 feat(autospec): frontend backbone (step 10a) + CTA wire-ups
@@ -57,15 +58,15 @@ fd5b9c6 feat(autospec): backend (step 9) — schema, models, chat service, sugge
 da2ce03 Release v1.0.0-alpha.17   ← latest tag, master HEAD before phase D
 ```
 
-Not pushed to origin. Branch is 5 commits ahead (10b still uncommitted). No release tag yet.
+Not pushed to origin. Branch is 7 commits ahead (10c still uncommitted). No release tag yet.
 
 Mapping to [`autospec.md`](autospec.md) §C:
 
 | Step | Title | Status |
 |---|---|---|
 | **9** | Backend AutoSpec | ✅ done (`fd5b9c6`) |
-| **10** | Frontend AutoSpec | 🟡 backbone (10a `d2db3d6`) + editor (10b WIP) done; attachments + mobile responsive (10c) remain |
-| **11** | Workflow approbation | ⬜ open |
+| **10** | Frontend AutoSpec | ✅ done (10a `d2db3d6`, 10b `b286915`, 10c WIP). Editor + chat + attachments + mobile layout all live. |
+| **11** | Workflow approbation | ⬜ next |
 | **12** | Import GitLab d'un ticket existant | ⬜ open |
 
 The CSRF fix in `e4133fb` is independent — see §4 for the root cause.
@@ -118,15 +119,17 @@ migration.
 | `GET /autospec_drafts` | `#index` | Lists `current_user.autospec_drafts` |
 | `GET /autospec_drafts/new` | `#new` | Form scoped to `current_user.visible_projects` |
 | `POST /autospec_drafts` | `#create` | Rejects project_id outside visibility |
-| `GET /autospec_drafts/:id` | `#show` | Two-column workspace (editor + chat). Loads `/assets/js/autospec.js`. |
+| `GET /autospec_drafts/:id` | `#show` | Two-column workspace (editor + chat). Loads `/assets/js/autospec.js`. Renders attachments via `@draft.autospec_attachments.with_attached_file`. |
 | `PATCH /autospec_drafts/:id` | `#update` | Autosave from the editor (title, markdown, meta_chips). `respond_to`: HTML redirect / JSON. **409 if not in `drafting`** (edits frozen once submitted; author must `retract!` first). `meta_chips` is server-side sliced to `META_KEYS` ∩ permitted keys. |
-| `POST /autospec_drafts/:id/chat` | `#chat` | `respond_to`: HTML redirect / JSON |
+| `POST /autospec_drafts/:id/chat` | `#chat` | `respond_to`: HTML redirect / JSON. 503 if Anthropic key missing. |
 | `POST /autospec_drafts/:id/apply_suggestion` | `#apply_suggestion` | `respond_to`: HTML redirect / JSON (409 on re-apply, 404 if tool_use_id absent) |
+| `POST /autospec_drafts/:autospec_draft_id/autospec_attachments` | `AutospecAttachmentsController#create` | Multipart upload. Returns 201 + serialised `{id, filename, byte_size, width, height, url, markdown_snippet}`. 415 on bad content-type, **413** (`:content_too_large`) on >10 MB, 400 if `:file` absent. |
+| `DELETE /autospec_drafts/:autospec_draft_id/autospec_attachments/:id` | `AutospecAttachmentsController#destroy` | 204 on success. |
 
 Mounted via `resources :autospec_drafts, only: %i[index new create show update]`
-+ two `:member` POSTs. Author-only auth check (`@draft.user_id ==
-current_user.id`). Wider owner/contributor matrix (autospec.md §J) is
-step 11.
++ two `:member` POSTs + nested `resources :autospec_attachments, only: %i[create destroy]`.
+Author-only auth check on both controllers (`@draft.user_id == current_user.id`).
+Wider owner/contributor matrix (autospec.md §J) is step 11.
 
 Token-level SSE deferred per autospec.md §L — `#chat` is synchronous
 JSON. Rebinding to `ActionController::Live` + the SDK's
@@ -162,6 +165,8 @@ defer>` at the end of the page). Served via `AssetsController` from
 - localStorage backup keyed `autodev:draft:<id>:<field>` (markdown, title, meta_chips). On load, any value differing from the server-rendered input is restored + immediately queued for save. Cleared after each successful PATCH.
 - Save indicator (idle / saving / error / locked) via `data-state`. The label dictionary is built once from the initial server-rendered text via an FR/EN heuristic — fine because locale doesn't switch mid-page.
 - Meta-chip inline edit: click a chip → swap value span for a `<select>` (when `data-autospec-chip-options` is set, e.g. type/priority) or `<input>` (tags, comma-separated). Commit on blur / Enter, Escape cancels.
+- Drag-drop attachments (step 10c): listen for `dragenter / dragover / dragleave / drop` on the editor column with a depth counter (descendant `dragenter`/`leave` pairs cancel out); on drop, multipart POST per file to the attachments endpoint, then `appendAttachmentCard` mutates the grid (inserted before the perpetual drop-target slot so it stays last). Event delegation handles ✕ (DELETE → remove card) and ⧉ (copy `data-autospec-attachment-markdown` to clipboard, brief "copied" state via `data-state="copied"`).
+- Mobile tabs (step 10c): below 960 px, the workspace's `data-autospec-active-tab` attribute drives which of editor-col / chat-col is `display: none`. The tab bar itself is `display: flex` only inside the same media query.
 
 ### Test surface
 
@@ -169,11 +174,13 @@ defer>` at the end of the page). Served via `AssetsController` from
 |---|---|---|
 | Models | `test/models/autospec_*.rb` (5 files) | 32 |
 | Services | `test/services/autospec/*.rb` (7 files incl. `markdown_renderer_test.rb`) | 54 |
-| Controllers (JSON) | `test/controllers/autospec_drafts_controller_test.rb` | 16 |
-| Controllers (HTML) | `test/controllers/autospec_drafts_html_test.rb` | 13 |
-| **Total added at phase D** | | **115** |
+| Controllers (JSON drafts) | `test/controllers/autospec_drafts_controller_test.rb` | 17 |
+| Controllers (HTML drafts) | `test/controllers/autospec_drafts_html_test.rb` | 15 |
+| Controllers (attachments) | `test/controllers/autospec_attachments_controller_test.rb` | 9 |
+| Controllers (dashboard banner) | `test/controllers/dashboard_anthropic_banner_test.rb` | 3 |
+| **Total added at phase D** | | **130** |
 
-Suite total at HEAD: **653 runs, 1209 assertions, 0 failures**.
+Suite total at HEAD: **672 runs, 1247 assertions, 0 failures**.
 
 ---
 
@@ -194,22 +201,19 @@ Suite total at HEAD: **653 runs, 1209 assertions, 0 failures**.
 
 **What's deferred to 10c** (covered below): drag-drop attachments, the mobile **Édition | Discussion** tabs layout, dark-mode polish on the new components, the explicit "Créer le ticket" button + ⌘+Enter submit (currently ⌘+Enter just flushes the autosave debounce — the actual submit transition is step 11 work).
 
-### Step 10c — drag-drop attachments + responsive
+### Step 10c — drag-drop attachments + responsive — ✅ done
 
-**Already wired** in step 9:
+**What landed** (working tree, pending commit):
 
-- `AutospecAttachment` model with `has_one_attached :file`
-- ActiveStorage `:local` service under `<Rails.root>/storage/`
-- Test env uses `:test` service rooted at `tmp/storage/` (10b/10c tests don't need new infra)
+- `AutospecAttachmentsController` with `POST` (multipart) + `DELETE` actions, nested under `resources :autospec_drafts`. Validates content-type against `image/(png|jpe?g|gif|webp)` and size ≤ 10 MB (`:content_too_large`, the `:payload_too_large` symbol is deprecated in Rack 3 / Rails 8.1 — heads up). Returns serialised JSON `{id, filename, byte_size, width, height, url, markdown_snippet}` for each attachment.
+- AttachmentCard grid below the markdown editor (220 px `minmax(auto-fill)` columns, ✕ button top-right, footer with filename + size + copy-markdown ⧉ button). Perpetual `autospec-drop-target` slot at the end of the grid so the affordance is always visible, even with zero attachments. Clicking it opens a native file picker.
+- Full-column dropzone overlay (`autospec-dropzone-overlay`) covering the editor column, toggled by JS via `data-active="true"` on dragenter and back to `"false"` on dragleave / drop. `pointer-events: none` so it never swallows real input — purely visual.
+- Mobile tabs **Édition | Discussion** at ≤ 960 px. The CSS grid stays single-column at that breakpoint but now hides the inactive column entirely (`display: none` controlled by `data-autospec-active-tab` on the workspace). On desktop the tab bar itself is `display: none`.
+- Dark-mode polish: all new components reuse the existing `--paper`, `--paper-2`, `--border`, `--border-strong`, `--text-strong`, `--text-muted`, `--accent-*`, `--err-*`, `--ok-*`, `--shadow-{xs,md}` tokens which already have dark variants in `tokens.css`. No new tokens introduced.
+- 9 new tests: 7 create (auth, forbid non-author, persists, serialised payload, missing-file, bad mime, oversized) + 2 destroy (success, forbid).
+- **Width / height not populated** at the MVP. ActiveStorage's analyzer requires either `mini_magick` or `ruby-vips`, neither of which is in the Gemfile. The metadata stays empty; the UI degrades gracefully (size shown alone). Bring `mini_magick` in if dims become important — `serialise` already passes `blob.metadata['width']` / `'height'` through, so a single gem add lights the feature up without code changes.
 
-**What's missing:**
-
-- Dropzone overlay on the editor column (cf. README.md §7)
-- `POST /autospec_drafts/:id/autospec_attachments` endpoint (multipart) creating an `AutospecAttachment` + attaching the file
-- AttachmentCard grid below the markdown editor (autospec.md §F — 220px columns, ✕ button per card, footer with filename + dims + copy-markdown button)
-- At submission time (step 11's GitLab pipeline): download each blob, upload via GitLab's `/projects/:id/uploads`, rewrite the markdown to point at GitLab URLs (cf. autospec.md §F "Flux à deux temps")
-- Mobile: tabs **Édition | Discussion** under the topbar (≤960px breakpoint)
-- Dark-mode token polish (existing tokens.css already supports dark, just verify the new components)
+**Submission-time pipeline** (step 11's GitlabSubmitter): download each blob, upload via GitLab's `POST /api/v4/projects/:id/uploads`, rewrite the markdown to swap `/rails/active_storage/...` URLs for the returned GitLab URLs. The card stores the original `![filename](/rails/...)` snippet in `data-autospec-attachment-markdown`, which the copy button reads — at submission time the submitter rewrites whatever the editor's markdown body contains, regardless of where the user pasted the snippet.
 
 ### Step 11 — workflow approbation
 
@@ -406,6 +410,15 @@ If you add a new endpoint that talks to Anthropic, gate it on
 `api_key_configured?` and follow the same 503 pattern. Don't catch
 `ConfigError` higher up — the predicate is the contract.
 
+### `:payload_too_large` is deprecated — use `:content_too_large`
+
+Rack 3 / Rails 8.1 renamed the 413 status symbol. `render status:
+:payload_too_large` still works but emits a warning every test run.
+`AutospecAttachmentsController#create` uses `:content_too_large`. If
+you copy from older code in this repo (or upstream Rails examples)
+that uses the old name, update it. Same trick may apply to other
+renamed-in-Rack-3 symbols.
+
 ### Save-indicator label dictionary is built once, from initial text
 
 `autospec.js`'s `setIndicator` switches the label text by reading from
@@ -445,7 +458,7 @@ mise x ruby -- bundle exec rake test TEST=test/models/autospec_draft_aasm_test.r
 
 # 4. Full suite still green
 mise x ruby -- bundle exec rake test 2>&1 | tail -3
-# expect 653+ runs, 0 failures, 0 errors
+# expect 672+ runs, 0 failures, 0 errors
 
 # 5. Rubocop clean on the AutoSpec surface
 mise x ruby -- bundle exec rubocop \
@@ -479,15 +492,17 @@ mise x ruby -- bundle exec rubocop \
 | The markdown patcher | [`app/services/autospec/markdown_patcher.rb`](../app/services/autospec/markdown_patcher.rb) |
 | The markdown renderer (Aperçu pane) | [`app/services/autospec/markdown_renderer.rb`](../app/services/autospec/markdown_renderer.rb) |
 | The view tree | [`app/components/web/views/autospec_drafts/`](../app/components/web/views/autospec_drafts/) |
-| The editor JS (step 10b) | [`app/assets/static/js/autospec.js`](../app/assets/static/js/autospec.js) |
-| Editor CSS (workspace grid, chips, panes) | grep `AutoSpec editor workspace` in [`app/assets/static/css/app.css`](../app/assets/static/css/app.css) |
+| The editor + attachments JS (steps 10b + 10c) | [`app/assets/static/js/autospec.js`](../app/assets/static/js/autospec.js) |
+| Editor / attachments CSS (workspace grid, chips, cards, dropzone, mobile tabs) | grep `AutoSpec editor workspace` / `Attachments grid` in [`app/assets/static/css/app.css`](../app/assets/static/css/app.css) |
+| Attachments controller | [`app/controllers/autospec_attachments_controller.rb`](../app/controllers/autospec_attachments_controller.rb) |
 | Existing similar Phlex view (Card + Topbar + Sidebar pattern) | [`app/components/web/views/issue_show.rb`](../app/components/web/views/issue_show.rb) |
 | How the `csrf_input_tag` helper works | [`app/components/web/views/base.rb`](../app/components/web/views/base.rb) |
 | Where `view_kwargs` lives (the CSRF fix) | [`app/helpers/web/helpers.rb`](../app/helpers/web/helpers.rb) |
 | Step-9 commit | `fd5b9c6` |
 | Step-10a commit | `d2db3d6` |
 | CSRF fix commit | `e4133fb` |
-| Step-10b commit | _(pending — working tree)_ |
+| Step-10b commit | `b286915` |
+| Step-10c commit | _(pending — working tree)_ |
 
 ---
 
@@ -496,7 +511,7 @@ mise x ruby -- bundle exec rubocop \
 1. Read this file end-to-end (you're doing it now).
 2. Skim [`autospec.md`](autospec.md) §C to confirm step status.
 3. Run [§5 sanity checks](#5-fresh-session-sanity-checks) — every one.
-4. Pick the next step from [§3](#3-pattern-for-the-next-slices). Default: 10c (drag-drop attachments + mobile responsive — the only UX gap left before workflow).
+4. Pick the next step from [§3](#3-pattern-for-the-next-slices). Default: **11 — workflow approbation** (the big jump that makes the tool usable end-to-end: "Créer le ticket" button, owner votes, GitLab submission with attachment upload + URL rewrite).
 5. **Update this handoff at the end of the session** — §1 (state at this commit), §3 (mark the step done, append gotchas if any), §4 (any new traps). Future-you (or the next agent) will thank you.
 
-— Last touched 2026-06-15 after step 10b (editor + meta chips + autosave).
+— Last touched 2026-06-16 after step 10c (drag-drop attachments + mobile tabs).

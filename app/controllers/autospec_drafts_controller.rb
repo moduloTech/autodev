@@ -62,6 +62,7 @@ class AutospecDraftsController < ApplicationController
   def show
     render html: Web::Views::AutospecDrafts::Show.new(
       draft: @draft, messages: @draft.autospec_messages.order(:id),
+      attachments: @draft.autospec_attachments.with_attached_file.order(:created_at),
       chat_enabled: Autospec::Chat.api_key_configured?, **view_kwargs
     ).call.html_safe, layout: false
   end

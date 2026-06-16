@@ -328,3 +328,15 @@ en:
   web_autospec_chat_unavailable_hint: The Anthropic API key is not configured. Markdown and meta-chips remain editable — ask an admin to add `anthropic.api_key` to the config.
   web_dashboard_anthropic_missing_title: Anthropic API key missing
   web_dashboard_anthropic_missing_hint: AutoSpec chat is disabled. Set ANTHROPIC_API_KEY or add `anthropic.api_key` to ~/.autodev/config.yml then restart autodev.
+
+  # AutoSpec attachments (phase D step 10c)
+  web_autospec_attachments_label:
+    one: "Attachments · %{count}"
+    other: "Attachments · %{count}"
+  web_autospec_attachment_delete: Delete
+  web_autospec_attachment_copy_markdown: Copy markdown
+  web_autospec_attachment_drop_here: Drop a capture here
+  web_autospec_attachment_drop_hint: PNG, JPG, GIF, WEBP — up to 10 MB
+  web_autospec_attachment_upload_error: Capture upload failed
+  web_autospec_tab_mobile_edit: Edit
+  web_autospec_tab_mobile_chat: Chat

@@ -57,6 +57,7 @@ Rails.application.routes.draw do
   resources :autospec_drafts, only: %i[index new create show update], constraints: { id: /\d+/ } do
     post :chat,              on: :member
     post :apply_suggestion,  on: :member
+    resources :autospec_attachments, only: %i[create destroy], constraints: { id: /\d+/ }
   end
 
   # In-app help — renders `docs/usage/autodev-functional-usage.md` as HTML

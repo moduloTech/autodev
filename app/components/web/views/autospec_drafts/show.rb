@@ -41,10 +41,11 @@ module Web
         ].freeze
         private_constant :META_CHIPS
 
-        def initialize(draft:, messages:, chat_enabled: true, **)
+        def initialize(draft:, messages:, attachments: [], chat_enabled: true, **)
           super(**)
           @draft = draft
           @messages = messages
+          @attachments = attachments
           @chat_enabled = chat_enabled
         end
 
@@ -68,9 +69,31 @@ module Web
         def render_workspace
           div(class: 'autospec-workspace',
               data: { 'autospec-draft-id' => @draft.id.to_s,
-                      'autospec-locked' => (@draft.drafting? ? 'false' : 'true') }) do
+                      'autospec-locked' => (@draft.drafting? ? 'false' : 'true'),
+                      'autospec-active-tab' => 'edit' }) do
+            render_mobile_tabs
             render_editor_column
             render_chat_column
+          end
+        end
+
+        # Mobile-only tab bar (≤ 960 px). Hidden on desktop via CSS;
+        # the JS reacts to clicks by flipping `data-autospec-active-tab`
+        # on the workspace, which the same CSS file uses to show only
+        # the matching column.
+        def render_mobile_tabs
+          div(class: 'autospec-mobile-tabs', role: 'tablist') do
+            mobile_tab_button('edit', :web_autospec_tab_mobile_edit, selected: true)
+            mobile_tab_button('chat', :web_autospec_tab_mobile_chat, selected: false)
+          end
+        end
+
+        def mobile_tab_button(key, label_key, selected:)
+          button(type: 'button', role: 'tab',
+                 class: 'autospec-mobile-tab',
+                 'aria-selected' => selected.to_s,
+                 data: { 'autospec-mobile-tab' => key }) do
+            t_web(label_key)
           end
         end
 
@@ -93,17 +116,112 @@ module Web
 
         # ── Editor column ─────────────────────────────────────────
 
-        def render_editor_column
-          div(class: 'autospec-editor-col') do
+        def render_editor_column # rubocop:disable Metrics/MethodLength
+          div(class: 'autospec-editor-col',
+              data: { 'autospec-editor-col' => 'true' }) do
             render_editor_toolbar
             div(class: 'autospec-editor-body') do
               render_meta_chips_row
               render_title_input
               render_editor_pane
               render_preview_pane
+              render_attachments_section
               render_footer_hint
             end
+            render_dropzone_overlay
           end
+        end
+
+        def render_attachments_section # rubocop:disable Metrics/MethodLength
+          div(class: 'autospec-attachments',
+              data: { 'autospec-attachments' => 'true' }) do
+            div(class: 'muted',
+                style: 'font-size: 11px; text-transform: uppercase; ' \
+                       'letter-spacing: 0.04em; margin-bottom: 8px;') do
+              t_web(:web_autospec_attachments_label, count: @attachments.size)
+            end
+            div(class: 'autospec-attachments-grid',
+                data: { 'autospec-attachments-grid' => 'true' }) do
+              @attachments.each { |att| render_attachment_card(att) }
+              render_drop_target
+            end
+          end
+        end
+
+        def render_attachment_card(attachment)
+          blob = attachment.file.blob
+          url  = Rails.application.routes.url_helpers.rails_blob_path(attachment.file, only_path: true)
+          div(class: 'autospec-attachment-card',
+              data: { 'autospec-attachment-id' => attachment.id.to_s,
+                      'autospec-attachment-markdown' => "![#{blob.filename}](#{url})" }) do
+            render_attachment_preview(url, blob.filename.to_s)
+            render_attachment_delete
+            render_attachment_footer(blob)
+          end
+        end
+
+        def render_attachment_preview(url, alt)
+          div(class: 'autospec-attachment-preview') do
+            img(src: url, alt: alt, loading: 'lazy')
+          end
+        end
+
+        def render_attachment_delete
+          button(type: 'button', class: 'autospec-attachment-delete',
+                 'aria-label' => t_web(:web_autospec_attachment_delete),
+                 title: t_web(:web_autospec_attachment_delete),
+                 data: { 'autospec-attachment-delete' => 'true' }) { plain '✕' }
+        end
+
+        def render_attachment_footer(blob) # rubocop:disable Metrics/MethodLength
+          div(class: 'autospec-attachment-footer') do
+            div(class: 'autospec-attachment-filename', title: blob.filename.to_s) do
+              plain blob.filename.to_s
+            end
+            div(class: 'autospec-attachment-meta') do
+              plain humanise_size(blob.byte_size)
+              button(type: 'button', class: 'autospec-attachment-copy',
+                     title: t_web(:web_autospec_attachment_copy_markdown),
+                     data: { 'autospec-attachment-copy' => 'true' }) { plain '⧉' }
+            end
+          end
+        end
+
+        def render_drop_target
+          div(class: 'autospec-drop-target',
+              data: { 'autospec-drop-target' => 'true' }) do
+            div(style: 'font-size: 13px; font-weight: 500;') do
+              t_web(:web_autospec_attachment_drop_here)
+            end
+            div(class: 'muted', style: 'font-size: 11px; margin-top: 2px;') do
+              t_web(:web_autospec_attachment_drop_hint)
+            end
+          end
+        end
+
+        def render_dropzone_overlay # rubocop:disable Metrics/MethodLength
+          div(class: 'autospec-dropzone-overlay',
+              data: { 'autospec-dropzone-overlay' => 'true' }) do
+            div(class: 'autospec-dropzone-card') do
+              div(style: 'font-size: 26px;') { plain '🖼️' }
+              div(style: 'font-size: 14px; font-weight: 600; margin-top: 6px;') do
+                t_web(:web_autospec_attachment_drop_here)
+              end
+              div(class: 'muted', style: 'font-size: 12px; margin-top: 2px;') do
+                t_web(:web_autospec_attachment_drop_hint)
+              end
+            end
+          end
+        end
+
+        # Format bytes for the AttachmentCard footer. KB / MB rounded to
+        # one decimal — the design specs ask for "dims × size", but
+        # without ImageMagick we don't have dims, so just size.
+        def humanise_size(bytes)
+          return "#{bytes} B" if bytes < 1024
+          return "#{(bytes / 1024.0).round(1)} KB" if bytes < 1_048_576
+
+          "#{(bytes / 1_048_576.0).round(1)} MB"
         end
 
         def render_editor_toolbar
