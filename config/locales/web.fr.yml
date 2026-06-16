@@ -355,3 +355,12 @@ fr:
   web_autospec_approval_rejected_title: Brouillon refusé — reprenez en édition pour corriger
   web_autospec_approval_submitted_title: Brouillon soumis sur GitLab
   web_autospec_approval_iteration: "Itération %{n}"
+
+  # AutoSpec GitLab import (phase D step 12)
+  web_autospec_import_title: Importer un ticket GitLab existant
+  web_autospec_import_subtitle: Collez l'URL d'une issue GitLab pour pré-remplir un nouveau brouillon avec son titre et son corps.
+  web_autospec_import_field_url: URL de l'issue GitLab
+  web_autospec_import_field_url_placeholder: "https://gitlab.example.com/group/projet/-/issues/42"
+  web_autospec_import_field_url_hint: Le projet doit être listé dans vos accès — sinon demandez à un owner de vous ajouter avant.
+  web_autospec_import_submit: Importer
+  web_autospec_import_cta: Importer depuis GitLab

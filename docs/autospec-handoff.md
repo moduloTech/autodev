@@ -1,8 +1,8 @@
 # AutoSpec — Handoff
 
-**Last updated:** 2026-06-16 (after step 11 — workflow d'approbation + GitlabSubmitter)
+**Last updated:** 2026-06-16 (after step 12 — GitLab issue import; phase D complete)
 **Canonical plan:** [`autospec.md`](autospec.md) §C (12-step attack order, marked ⬜/✅)
-**Latest release tag:** `v1.0.0-alpha.17` (phase D not yet released — 9 commits ahead of master, step 11 pending commit)
+**Latest release tag:** `v1.0.0-alpha.17` (phase D complete — 11 commits ahead of master, step 12 pending commit; ready to cut a release)
 
 This document is the *resume-anywhere* state of phase D (AutoSpec). It assumes
 you have **no memory of previous sessions** and gives you:
@@ -36,8 +36,8 @@ sessions:
 | **10a** | Frontend backbone: index/new/create/show, sidebar entry, CTA wire-ups | ✅ done at SHA `d2db3d6` |
 | **10b** | Markdown editor (toggle Édition/Aperçu, ⌘+B/I/K, autosave) + meta-chip editing + title editing + two-column desktop layout | ✅ done at SHA `b286915` |
 | **10c** | Drag-drop attachments via ActiveStorage + AttachmentCard grid + mobile responsive (tabs) + dark-mode polish | ✅ done at SHA `566cf41` |
-| **11** | Workflow approbation: owners' encart, vote orchestration, GitLab issue creation pipeline | ✅ done (working tree, pending commit) |
-| **12** | Import an existing GitLab issue as a draft (lowest priority — §A "very nice to have") | ⬜ next |
+| **11** | Workflow approbation: owners' encart, vote orchestration, GitLab issue creation pipeline | ✅ done at SHA `d4c46f3` |
+| **12** | Import an existing GitLab issue as a draft (lowest priority — §A "very nice to have") | ✅ done (working tree, pending commit) |
 
 The sub-slice names (9a/9b/9c) are historical — they all live in one
 commit now. Use them in commit messages or PR titles only if you want
@@ -48,7 +48,8 @@ to be precise about WHICH part of step 9 you're touching.
 ## 1. State at this commit
 
 ```
-(working tree) feat(autospec): workflow approbation + GitlabSubmitter (step 11)
+(working tree) feat(autospec): GitLab issue import (step 12)
+d4c46f3 feat(autospec): workflow approbation + GitlabSubmitter (step 11)
 566cf41 feat(autospec): drag-drop attachments + mobile tabs (step 10c)
 b286915 feat(autospec): editor + autosave + missing-key handling (step 10b)
 6904257 docs(autospec): add handoff doc for resuming phase D work across sessions
@@ -59,7 +60,7 @@ fd5b9c6 feat(autospec): backend (step 9) — schema, models, chat service, sugge
 da2ce03 Release v1.0.0-alpha.17   ← latest tag, master HEAD before phase D
 ```
 
-Not pushed to origin. Branch is 9 commits ahead (step 11 still uncommitted). No release tag yet.
+Not pushed to origin. Branch is 11 commits ahead (step 12 still uncommitted). **Phase D is now functionally complete end-to-end — ready to cut `v1.0.0-alpha.18`.**
 
 Mapping to [`autospec.md`](autospec.md) §C:
 
@@ -67,8 +68,8 @@ Mapping to [`autospec.md`](autospec.md) §C:
 |---|---|---|
 | **9** | Backend AutoSpec | ✅ done (`fd5b9c6`) |
 | **10** | Frontend AutoSpec | ✅ done (10a `d2db3d6`, 10b `b286915`, 10c `566cf41`) |
-| **11** | Workflow approbation | ✅ done (WIP). Submit/retract, owner votes, GitlabSubmitter, dashboard widget all live. |
-| **12** | Import GitLab d'un ticket existant | ⬜ next (lowest priority) |
+| **11** | Workflow approbation | ✅ done (`d4c46f3`) |
+| **12** | Import GitLab d'un ticket existant | ✅ done (WIP) |
 
 The CSRF fix in `e4133fb` is independent — see §4 for the root cause.
 
@@ -114,6 +115,7 @@ migration.
 | `MarkdownRenderer` | Thin Redcarpet wrapper used by the Aperçu pane of the editor + the `preview_html` field in the PATCH JSON response. **`escape_html: true`** (user content, contra `HelpDoc` which renders trusted in-app docs). Tables intentionally absent at MVP. |
 | `ApprovalRecorder` | Records one owner vote (approve / reject) per draft per iteration, atomically. On rejection → `mark_rejected!`. On approval, if every owner has an `approved` row at `current_iteration` → calls `GitlabSubmitter#submit!` then `finalize!`. Raises `NotAnOwner`, `AlreadyVoted`, `DraftNotPending`. |
 | `GitlabSubmitter` | At finalize: uploads each AutospecAttachment blob via `client.upload_file(project_path, tmp_path)`, rewrites the draft markdown to swap `/rails/active_storage/...` URLs for the returned GitLab `/uploads/...` paths, then `client.create_issue(project_path, title, description:, labels:)`. `labels_todo` from the project config is sent only when `destination == 'autodev'`. Stamps `gitlab_issue_iid` + `gitlab_issue_url` + `submitted_at`. **Test seam:** `Autospec::GitlabSubmitter.disabled = true` makes `#submit!` a no-op (the workflow tests use this). |
+| `GitlabImporter` | Step 12 backfill path: parses a GitLab issue URL (`https://host/group/.../proj/-/issues/N`, supports nested namespaces + trailing slashes/queries), looks up the matching `Project` row, checks `user.contributor_of?(project)` (admin bypass), fetches via `client.issue(path, iid)`, creates an `AutospecDraft` pre-populated with `title` + `description`. Raises `InvalidUrl`, `ProjectNotFound`, `ProjectNotVisible`, `IssueNotFound`. **Test seam:** `Autospec::GitlabImporter.default_client = stub` (same pattern as `Autospec::Chat.default_client`). |
 
 ### HTTP layer
 
@@ -132,6 +134,8 @@ migration.
 | `POST /autospec_drafts/:id/retract` | `#retract` | Author transition `pending_approval → drafting`. Iteration NOT decremented (audit-trail invariant). 409 if not pending_approval. |
 | `POST /autospec_drafts/:id/approve` | `#approve` | Owner records an approval vote (via `Autospec::ApprovalRecorder`). 403 if not an owner / not pending, 409 if already voted at current iteration. Quorum reached (every owner approved at `current_iteration`) triggers `GitlabSubmitter` then `finalize!`. |
 | `POST /autospec_drafts/:id/reject` | `#reject` | Owner records a rejection vote with a mandatory `reason`. 422 if reason empty. First rejection at current iteration flips the draft straight to `rejected`. |
+| `GET /autospec_drafts/import` | `#import` | Form to paste a GitLab issue URL for backfill. |
+| `POST /autospec_drafts/import` | `#create_from_import` | Creates a draft from the URL via `Autospec::GitlabImporter`. Stable error keys on failure: `import_invalid_url`, `import_project_not_found`, `import_project_not_visible`, `import_issue_not_found` (all redirect back to the form with `flash[:alert]`). |
 
 Mounted via `resources :autospec_drafts, only: %i[index new create show update]`
 + six `:member` POSTs (chat, apply_suggestion, submit_for_approval, retract,
@@ -190,15 +194,16 @@ defer>` at the end of the page). Served via `AssetsController` from
 | Area | File(s) | Count |
 |---|---|---|
 | Models | `test/models/autospec_*.rb` (5 files) | 32 |
-| Services | `test/services/autospec/*.rb` (9 files incl. `approval_recorder_test.rb` + `gitlab_submitter_test.rb`) | 70 |
+| Services | `test/services/autospec/*.rb` (10 files incl. `gitlab_importer_test.rb`) | 78 |
 | Controllers (JSON drafts) | `test/controllers/autospec_drafts_controller_test.rb` | 29 |
 | Controllers (HTML drafts) | `test/controllers/autospec_drafts_html_test.rb` | 18 |
 | Controllers (attachments) | `test/controllers/autospec_attachments_controller_test.rb` | 9 |
+| Controllers (import) | `test/controllers/autospec_drafts_import_test.rb` | 5 |
 | Controllers (dashboard banner) | `test/controllers/dashboard_anthropic_banner_test.rb` | 3 |
 | Controllers (dashboard owner widget) | `test/controllers/dashboard_owner_widget_test.rb` | 4 |
-| **Total added at phase D** | | **165** |
+| **Total added at phase D** | | **178** |
 
-Suite total at HEAD: **713 runs, 1327 assertions, 0 failures**.
+Suite total at HEAD: **727 runs, 1353 assertions, 0 failures**.
 
 ---
 
@@ -247,12 +252,15 @@ Suite total at HEAD: **713 runs, 1327 assertions, 0 failures**.
 
 Reference: autospec.md §E (lifecycle diagram), §F (attachment upload at submission), §J (rôles matrix).
 
-### Step 12 — GitLab import
+### Step 12 — GitLab import — ✅ done
 
-Lowest priority. A service that takes a GitLab issue URL, fetches the
-body via the `gitlab` gem (already in `Gemfile`), and creates an
-`AutospecDraft` pre-populated with the title + markdown. Useful for
-backfilling drafts from existing issues during the pilot.
+**What landed** (working tree, pending commit):
+
+- `Autospec::GitlabImporter` service parses the GitLab issue URL (regex `\Ahttps?://[^/]+/(?<path>.+?)/-/issues/(?<iid>\d+)/?(?:[?#].*)?\z` — supports nested namespaces, trailing slashes, query/fragment), looks up the matching `Project` row by `gitlab_path`, checks user access (admin bypass + `contributor_of?`), fetches the issue via `client.issue(path, iid)`, creates an `AutospecDraft` pre-populated with the issue's `title` + `description`. 4 typed errors (`InvalidUrl`, `ProjectNotFound`, `ProjectNotVisible`, `IssueNotFound`) cover every rejection path.
+- New routes on the existing resources block: `get :import` + `post :import → #create_from_import`. The controller maps each importer exception to a stable error key (`import_invalid_url`, `import_project_not_found`, `import_project_not_visible`, `import_issue_not_found`) and redirects back to the form with `flash[:alert]`. The before-actions skip-list grew to include the two new actions so neither `load_draft` nor `authorize_author!` fires for collection-route requests.
+- New Phlex view `Web::Views::AutospecDrafts::Import` — single URL textfield with a `font-family: var(--font-mono)` styling cue, "Importer" submit + "Annuler" link back to the index.
+- New "Importer depuis GitLab" secondary button on `/autospec_drafts` next to the primary "Nouveau brouillon" CTA so the path is discoverable.
+- 8 service tests + 5 controller tests covering URL parsing variants (trailing slash, query string, nested namespace), permission matrix (no membership / admin bypass), and the four error-key redirects.
 
 ---
 
@@ -505,7 +513,7 @@ mise x ruby -- bundle exec rake test TEST=test/models/autospec_draft_aasm_test.r
 
 # 4. Full suite still green
 mise x ruby -- bundle exec rake test 2>&1 | tail -3
-# expect 713+ runs, 0 failures, 0 errors
+# expect 727+ runs, 0 failures, 0 errors
 
 # 5. Rubocop clean on the AutoSpec surface
 mise x ruby -- bundle exec rubocop \
@@ -550,9 +558,11 @@ mise x ruby -- bundle exec rubocop \
 | CSRF fix commit | `e4133fb` |
 | Step-10b commit | `b286915` |
 | Step-10c commit | `566cf41` |
-| Step-11 commit  | _(pending — working tree)_ |
+| Step-11 commit  | `d4c46f3` |
+| Step-12 commit  | _(pending — working tree)_ |
 | Approval recorder | [`app/services/autospec/approval_recorder.rb`](../app/services/autospec/approval_recorder.rb) |
 | GitLab submitter | [`app/services/autospec/gitlab_submitter.rb`](../app/services/autospec/gitlab_submitter.rb) |
+| GitLab importer | [`app/services/autospec/gitlab_importer.rb`](../app/services/autospec/gitlab_importer.rb) |
 | Permission matrix on the model | grep `Permission matrix` in [`app/models/autospec_draft.rb`](../app/models/autospec_draft.rb) |
 
 ---
@@ -562,7 +572,7 @@ mise x ruby -- bundle exec rubocop \
 1. Read this file end-to-end (you're doing it now).
 2. Skim [`autospec.md`](autospec.md) §C to confirm step status.
 3. Run [§5 sanity checks](#5-fresh-session-sanity-checks) — every one.
-4. Pick the next step from [§3](#3-pattern-for-the-next-slices). With step 11 landed, AutoSpec is functionally complete end-to-end. **Step 12 (import existing GitLab issue as draft)** is the lowest-priority "nice to have" from autospec.md §A — only pick it up if the pilot surfaces a backfill need. Otherwise the next chantier is whatever the product roadmap calls for outside autospec.md.
-5. **Update this handoff at the end of the session** — §1 (state at this commit), §3 (mark the step done, append gotchas if any), §4 (any new traps). Future-you (or the next agent) will thank you.
+4. **Phase D is complete.** All 4 steps (9–12) from autospec.md §C are merged into the working tree (steps 9, 10a–c, 11, 12). Next actions are either: cut a release tag (`v1.0.0-alpha.18`) and push, or move to the next chantier outside autospec.md (whatever the roadmap calls for).
+5. **Update this handoff if you DO start a new chantier** — keep §1, §3, §4 current so the next session has the same one-glance overview phase D enjoyed.
 
-— Last touched 2026-06-16 after step 11 (workflow d'approbation + GitlabSubmitter).
+— Last touched 2026-06-16 after step 12 (GitLab issue import) — **phase D complete**.

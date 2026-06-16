@@ -23,10 +23,11 @@
 class AutospecDraftsController < ApplicationController # rubocop:disable Metrics/ClassLength
   include ::Web::Helpers
 
-  before_action :load_draft, except: %i[index new create]
+  before_action :load_draft, except: %i[index new create import create_from_import]
   before_action :authorize_view!, only: :show
   before_action :authorize_voter!, only: %i[approve reject]
-  before_action :authorize_author!, except: %i[index new create show approve reject]
+  before_action :authorize_author!,
+                except: %i[index new create show approve reject import create_from_import]
 
   rescue_from Autospec::SuggestionApplier::AlreadyApplied,
               with: -> { render_apply_error('already_applied', :conflict) }
@@ -64,6 +65,29 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
                                   title: params[:title].presence,
                                   markdown: params[:markdown].presence)
     redirect_to "/autospec_drafts/#{draft.id}"
+  end
+
+  # GET /autospec_drafts/import — paste a GitLab issue URL to backfill
+  # an AutoSpec draft pre-populated with the issue's title + body.
+  # Lowest-priority §A path: useful during the pilot to migrate
+  # already-filed tickets into the workflow without retyping.
+  def import
+    render html: Web::Views::AutospecDrafts::Import.new(**view_kwargs).call.html_safe,
+           layout: false
+  end
+
+  # POST /autospec_drafts/import
+  def create_from_import
+    draft = Autospec::GitlabImporter.new(params[:url].to_s, current_user).call
+    redirect_to "/autospec_drafts/#{draft.id}"
+  rescue Autospec::GitlabImporter::InvalidUrl
+    redirect_to('/autospec_drafts/import', alert: 'import_invalid_url')
+  rescue Autospec::GitlabImporter::ProjectNotFound
+    redirect_to('/autospec_drafts/import', alert: 'import_project_not_found')
+  rescue Autospec::GitlabImporter::ProjectNotVisible
+    redirect_to('/autospec_drafts/import', alert: 'import_project_not_visible')
+  rescue Autospec::GitlabImporter::IssueNotFound
+    redirect_to('/autospec_drafts/import', alert: 'import_issue_not_found')
   end
 
   # GET /autospec_drafts/:id

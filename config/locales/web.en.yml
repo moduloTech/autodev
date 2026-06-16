@@ -355,3 +355,12 @@ en:
   web_autospec_approval_rejected_title: Draft rejected — switch back to editing to address feedback
   web_autospec_approval_submitted_title: Draft submitted to GitLab
   web_autospec_approval_iteration: "Iteration %{n}"
+
+  # AutoSpec GitLab import (phase D step 12)
+  web_autospec_import_title: Import an existing GitLab issue
+  web_autospec_import_subtitle: Paste the URL of a GitLab issue to pre-populate a new draft with its title and body.
+  web_autospec_import_field_url: GitLab issue URL
+  web_autospec_import_field_url_placeholder: "https://gitlab.example.com/group/project/-/issues/42"
+  web_autospec_import_field_url_hint: The project must appear in your accesses — otherwise ask an owner to add you first.
+  web_autospec_import_submit: Import
+  web_autospec_import_cta: Import from GitLab

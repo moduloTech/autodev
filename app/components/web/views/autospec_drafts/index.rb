@@ -39,11 +39,15 @@ module Web
           )
         end
 
-        def render_topbar
+        def render_topbar # rubocop:disable Metrics/MethodLength
           render Components::Topbar.new(
             title: t_web(:web_autospec_index_title),
             subtitle: t_web(:web_autospec_index_subtitle)
           ) do
+            a(href: '/autospec_drafts/import', class: 'button',
+              style: 'padding: 8px 14px; font-size: 13px;') do
+              t_web(:web_autospec_import_cta)
+            end
             a(href: '/autospec_drafts/new', class: 'button button-primary',
               style: 'padding: 8px 14px; font-size: 13px;') do
               t_web(:web_autospec_new_cta)
