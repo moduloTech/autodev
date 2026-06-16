@@ -32,6 +32,7 @@ class AutospecDraftsControllerTest < ActionDispatch::IntegrationTest # rubocop:d
 
   teardown do
     Autospec::Chat.default_client = nil
+    Autospec::GitlabSubmitter.disabled = false
   end
 
   def stub_chat_response(blocks)
@@ -205,6 +206,192 @@ class AutospecDraftsControllerTest < ActionDispatch::IntegrationTest # rubocop:d
     assert_equal 'chat_unavailable', JSON.parse(response.body)['error']
   ensure
     ENV['ANTHROPIC_API_KEY'] = previous_env if previous_env
+  end
+
+  # --- submit_for_approval (JSON) -----------------------------------
+
+  def test_submit_requires_signed_in_user
+    post "/autospec_drafts/#{@draft.id}/submit_for_approval",
+         params: { destination: 'human' }, as: :json
+
+    assert_response :unauthorized
+  end
+
+  def test_submit_forbids_non_author
+    sign_in @other
+    post "/autospec_drafts/#{@draft.id}/submit_for_approval",
+         params: { destination: 'human' }, as: :json
+
+    assert_response :forbidden
+  end
+
+  def test_submit_rejects_invalid_destination
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/submit_for_approval",
+         params: { destination: 'banana' }, as: :json
+
+    assert_response :unprocessable_entity
+    assert_equal 'destination_invalid', JSON.parse(response.body)['error']
+  end
+
+  def test_submit_with_human_destination_flips_status
+    ProjectMembership.create!(user: @author, project: @project, role: 'contributor')
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/submit_for_approval",
+         params: { destination: 'human' }, as: :json
+
+    assert_response :success
+    @draft.reload
+
+    assert_equal 'pending_approval', @draft.status
+    assert_equal 'human', @draft.destination
+  end
+
+  def test_submit_with_autodev_destination_blocked_for_contributor_author
+    ProjectMembership.create!(user: @author, project: @project, role: 'contributor')
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/submit_for_approval",
+         params: { destination: 'autodev' }, as: :json
+
+    assert_response :forbidden
+    assert_equal 'destination_forbidden', JSON.parse(response.body)['error']
+  end
+
+  def test_submit_with_autodev_destination_allowed_for_owner_author
+    ProjectMembership.create!(user: @author, project: @project, role: 'owner')
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/submit_for_approval",
+         params: { destination: 'autodev' }, as: :json
+
+    assert_response :success
+    assert_equal 'autodev', @draft.reload.destination
+  end
+
+  def test_submit_returns_conflict_when_not_drafting
+    ProjectMembership.create!(user: @author, project: @project, role: 'owner')
+    @draft.submit_for_approval!
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/submit_for_approval",
+         params: { destination: 'human' }, as: :json
+
+    assert_response :conflict
+    assert_equal 'draft_not_drafting', JSON.parse(response.body)['error']
+  end
+
+  # --- retract (JSON) -----------------------------------------------
+
+  def test_retract_forbids_non_author
+    sign_in @other
+    post "/autospec_drafts/#{@draft.id}/retract", as: :json
+
+    assert_response :forbidden
+  end
+
+  def test_retract_returns_conflict_when_not_pending_approval
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/retract", as: :json
+
+    assert_response :conflict
+    assert_equal 'draft_not_pending_approval', JSON.parse(response.body)['error']
+  end
+
+  def test_retract_flips_status_back_to_drafting
+    ProjectMembership.create!(user: @author, project: @project, role: 'owner')
+    @draft.update!(destination: 'human')
+    @draft.submit_for_approval!
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/retract", as: :json
+
+    assert_response :success
+    assert_equal 'drafting', @draft.reload.status
+  end
+
+  # --- approve / reject (JSON) --------------------------------------
+
+  def submit_draft_for_approval!
+    ProjectMembership.create!(user: @author, project: @project, role: 'owner')
+    @draft.update!(destination: 'human')
+    @draft.submit_for_approval!
+  end
+
+  def test_approve_requires_owner_role
+    submit_draft_for_approval!
+    ProjectMembership.create!(user: @other, project: @project, role: 'contributor')
+    sign_in @other
+    post "/autospec_drafts/#{@draft.id}/approve", as: :json
+
+    assert_response :forbidden
+  end
+
+  def test_approve_finalizes_when_all_owners_approved
+    Autospec::GitlabSubmitter.disabled = true # don't hit the GitLab API
+    submit_draft_for_approval! # @author is the only owner — their vote finalises.
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/approve", as: :json
+
+    assert_response :success
+    assert_equal 'submitted', @draft.reload.status
+  end
+
+  def test_approve_returns_conflict_when_already_voted
+    Autospec::GitlabSubmitter.disabled = true # the first vote finalises the draft
+    submit_draft_for_approval!
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/approve", as: :json
+    # second vote at same iteration — author is now the only owner
+    # but the draft already finalised, so the "votable_by?" gate
+    # returns 403 (not pending_approval any more).
+    post "/autospec_drafts/#{@draft.id}/approve", as: :json
+
+    assert_response :forbidden
+  end
+
+  def test_reject_requires_reason
+    submit_draft_for_approval!
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/reject", params: { reason: '' }, as: :json
+
+    assert_response :unprocessable_entity
+    assert_equal 'reason_required', JSON.parse(response.body)['error']
+  end
+
+  def test_reject_marks_draft_rejected
+    submit_draft_for_approval!
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/reject",
+         params: { reason: 'pas assez précis' }, as: :json
+
+    assert_response :success
+    assert_equal 'rejected', @draft.reload.status
+  end
+
+  # --- show visibility per autospec.md §J ---------------------------
+
+  def test_show_forbids_contributor_non_author
+    ProjectMembership.create!(user: @other, project: @project, role: 'contributor')
+    sign_in @other
+    get "/autospec_drafts/#{@draft.id}", as: :json
+
+    assert_response :forbidden
+  end
+
+  def test_show_forbids_owner_non_author_for_drafting_draft
+    ProjectMembership.create!(user: @other, project: @project, role: 'owner')
+    sign_in @other
+    get "/autospec_drafts/#{@draft.id}", as: :json
+
+    assert_response :forbidden
+  end
+
+  def test_show_allows_owner_non_author_for_pending_approval_draft
+    ProjectMembership.create!(user: @author, project: @project, role: 'owner')
+    ProjectMembership.create!(user: @other, project: @project, role: 'owner')
+    @draft.update!(destination: 'human')
+    @draft.submit_for_approval!
+    sign_in @other
+    get "/autospec_drafts/#{@draft.id}"
+
+    assert_response :success
   end
 
   def test_update_returns_serialised_draft

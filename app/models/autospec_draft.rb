@@ -91,6 +91,66 @@ class AutospecDraft < ApplicationRecord
     user
   end
 
+  # ── Permission matrix (autospec.md §J) ───────────────────────────
+  # The model owns these because they combine state + author + role —
+  # all of which are draft-specific. Controllers call them; views call
+  # them to decide which buttons to render.
+
+  # Can this user see this draft on /autospec_drafts/:id ?
+  # - admins: always
+  # - author: always (any state)
+  # - other contributors of the project: never (they can't see drafts
+  #   they didn't author — even on a project they're a member of)
+  # - other owners of the project: only once submitted for approval
+  def viewable_by?(user)
+    return false unless user
+    return true if user.admin?
+    return true if user_id == user.id
+    return false unless user.owner_of?(project)
+
+    pending_approval? || submitted? || rejected?
+  end
+
+  # Can this user edit / chat / apply suggestions on this draft?
+  # Author-only, and only in `drafting`. Once submitted, the author
+  # must `retract!` first.
+  def editable_by?(user)
+    user && user_id == user.id && drafting?
+  end
+
+  # Can this user submit the draft for approval?
+  # Author + drafting (same as editable_by?, but spelled out for the
+  # symmetry with retractable_by? + readability at call sites).
+  def submittable_by?(user)
+    editable_by?(user)
+  end
+
+  # Can this user choose the given destination at submission time?
+  # Contributor-author: only 'human'. Owner-author: 'human' or
+  # 'autodev'. Anything else → false (defence in depth — the
+  # controller validates the same).
+  def destination_choosable_by?(user, destination)
+    return false unless DESTINATIONS.include?(destination)
+    return false unless submittable_by?(user)
+    return user.owner_of?(project) if destination == DESTINATION_AUTODEV
+
+    user.contributor_of?(project)
+  end
+
+  # Can this user pull the draft back to `drafting` from
+  # `pending_approval`? Author-only.
+  def retractable_by?(user)
+    user && user_id == user.id && pending_approval?
+  end
+
+  # Can this user record an approval/rejection on this draft right now?
+  # Owner of the project + draft in `pending_approval`. Idempotency
+  # (already voted at current_iteration) is checked at the recorder
+  # level, not here — this predicate gates UI button visibility.
+  def votable_by?(user)
+    user && pending_approval? && user.owner_of?(project)
+  end
+
   # AASM after_all_transitions hook. Same `save!` pattern as Issue —
   # validation failures raise into the caller; the state machine cannot
   # silently drop a transition.

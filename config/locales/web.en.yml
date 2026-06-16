@@ -328,6 +328,9 @@ en:
   web_autospec_chat_unavailable_hint: The Anthropic API key is not configured. Markdown and meta-chips remain editable — ask an admin to add `anthropic.api_key` to the config.
   web_dashboard_anthropic_missing_title: Anthropic API key missing
   web_dashboard_anthropic_missing_hint: AutoSpec chat is disabled. Set ANTHROPIC_API_KEY or add `anthropic.api_key` to ~/.autodev/config.yml then restart autodev.
+  web_dashboard_drafts_to_vote: Drafts to vote on
+  web_dashboard_drafts_to_vote_author: "author: %{email}"
+  web_dashboard_drafts_to_vote_cta: Vote
 
   # AutoSpec attachments (phase D step 10c)
   web_autospec_attachments_label:
@@ -340,3 +343,15 @@ en:
   web_autospec_attachment_upload_error: Capture upload failed
   web_autospec_tab_mobile_edit: Edit
   web_autospec_tab_mobile_chat: Chat
+
+  # AutoSpec submission workflow (phase D step 11a)
+  web_autospec_submit_human: Send to a dev
+  web_autospec_submit_autodev: Send to AutoDev
+  web_autospec_retract: Retract
+  web_autospec_approve: Approve
+  web_autospec_reject: Reject
+  web_autospec_reject_reason_placeholder: Explain why the draft needs another round…
+  web_autospec_approval_pending_title: Waiting for owner approval
+  web_autospec_approval_rejected_title: Draft rejected — switch back to editing to address feedback
+  web_autospec_approval_submitted_title: Draft submitted to GitLab
+  web_autospec_approval_iteration: "Iteration %{n}"

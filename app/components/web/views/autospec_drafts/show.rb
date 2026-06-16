@@ -41,12 +41,16 @@ module Web
         ].freeze
         private_constant :META_CHIPS
 
-        def initialize(draft:, messages:, attachments: [], chat_enabled: true, **)
+        def initialize(draft:, messages:, attachments: [], chat_enabled: true, # rubocop:disable Metrics/ParameterLists
+                       capabilities: {}, current_iteration_votes: [], already_voted: false, **)
           super(**)
           @draft = draft
           @messages = messages
           @attachments = attachments
           @chat_enabled = chat_enabled
+          @capabilities = capabilities
+          @current_iteration_votes = current_iteration_votes
+          @already_voted = already_voted
         end
 
         def view_template
@@ -107,11 +111,53 @@ module Web
         end
 
         def render_topbar
-          render Components::Topbar.new(
-            title: @draft.title.presence || t_web(:web_autospec_untitled),
-            subtitle: @draft.project.gitlab_path,
-            breadcrumb: t_web(:web_autospec_index_title)
-          )
+          render(Components::Topbar.new(
+                   title: @draft.title.presence || t_web(:web_autospec_untitled),
+                   subtitle: @draft.project.gitlab_path,
+                   breadcrumb: t_web(:web_autospec_index_title)
+                 )) do
+            render_topbar_actions
+          end
+        end
+
+        # Action slot on the right of the topbar. Buttons rendered depend
+        # on (state, capabilities). Submit destinations: contributor-author
+        # gets 1 button (human); owner-author gets 2. Retract appears
+        # whenever pending_approval + author. Approval buttons (owner +
+        # pending_approval) ship in step 11b.
+        def render_topbar_actions
+          if @capabilities[:can_submit_autodev]
+            render_submit_form('human', :web_autospec_submit_human, kind: :secondary)
+            render_submit_form('autodev', :web_autospec_submit_autodev, kind: :primary)
+          elsif @capabilities[:can_submit_human]
+            render_submit_form('human', :web_autospec_submit_human, kind: :primary)
+          end
+          render_retract_form if @capabilities[:can_retract]
+        end
+
+        def render_submit_form(destination, label_key, kind:)
+          form(action: "/autospec_drafts/#{@draft.id}/submit_for_approval",
+               method: 'post', style: 'display: inline;') do
+            csrf_input_tag
+            input(type: 'hidden', name: 'destination', value: destination)
+            button(type: 'submit',
+                   class: "button button-#{kind}",
+                   style: 'padding: 7px 14px; font-size: 13px;') do
+              t_web(label_key)
+            end
+          end
+        end
+
+        def render_retract_form
+          form(action: "/autospec_drafts/#{@draft.id}/retract",
+               method: 'post', style: 'display: inline;') do
+            csrf_input_tag
+            button(type: 'submit',
+                   class: 'button button-secondary',
+                   style: 'padding: 7px 14px; font-size: 13px;') do
+              t_web(:web_autospec_retract)
+            end
+          end
         end
 
         # ── Editor column ─────────────────────────────────────────
@@ -121,6 +167,7 @@ module Web
               data: { 'autospec-editor-col' => 'true' }) do
             render_editor_toolbar
             div(class: 'autospec-editor-body') do
+              render_approval_banner if show_approval_banner?
               render_meta_chips_row
               render_title_input
               render_editor_pane
@@ -129,6 +176,88 @@ module Web
               render_footer_hint
             end
             render_dropzone_overlay
+          end
+        end
+
+        # Banner appears at the top of the editor body whenever the
+        # draft is in `pending_approval` (so the author sees the votes
+        # rolling in, and so any owner viewing the draft sees the vote
+        # buttons). It's also rendered in `rejected` / `submitted` so
+        # the author understands why edits are locked.
+        def show_approval_banner?
+          %w[pending_approval rejected submitted].include?(@draft.status)
+        end
+
+        def render_approval_banner # rubocop:disable Metrics/MethodLength
+          div(class: 'autospec-approval-banner',
+              data: { 'autospec-approval-state' => @draft.status }) do
+            div(class: 'autospec-approval-header') do
+              span(class: 'autospec-approval-title') { plain t_web(approval_banner_title_key) }
+              span(class: 'autospec-approval-iteration') do
+                plain t_web(:web_autospec_approval_iteration, n: @draft.current_iteration)
+              end
+            end
+            render_approval_vote_form if show_vote_form?
+            render_approval_votes_list if @current_iteration_votes.any?
+          end
+        end
+
+        APPROVAL_BANNER_TITLE_KEYS = {
+          'pending_approval' => :web_autospec_approval_pending_title,
+          'rejected' => :web_autospec_approval_rejected_title,
+          'submitted' => :web_autospec_approval_submitted_title
+        }.freeze
+        private_constant :APPROVAL_BANNER_TITLE_KEYS
+
+        def approval_banner_title_key
+          APPROVAL_BANNER_TITLE_KEYS.fetch(@draft.status, :web_autospec_approval_pending_title)
+        end
+
+        def show_vote_form?
+          @capabilities[:can_vote] && !@already_voted
+        end
+
+        def render_approval_vote_form # rubocop:disable Metrics/MethodLength
+          div(class: 'autospec-approval-vote') do
+            form(action: "/autospec_drafts/#{@draft.id}/approve", method: 'post',
+                 style: 'display: inline;') do
+              csrf_input_tag
+              button(type: 'submit', class: 'button button-primary',
+                     style: 'padding: 7px 14px; font-size: 13px;') do
+                t_web(:web_autospec_approve)
+              end
+            end
+            form(action: "/autospec_drafts/#{@draft.id}/reject", method: 'post',
+                 class: 'autospec-approval-reject-form') do
+              csrf_input_tag
+              textarea(name: 'reason', required: true, rows: '2',
+                       placeholder: t_web(:web_autospec_reject_reason_placeholder),
+                       class: 'autospec-approval-reason')
+              button(type: 'submit', class: 'button button-danger',
+                     style: 'padding: 7px 14px; font-size: 13px;') do
+                t_web(:web_autospec_reject)
+              end
+            end
+          end
+        end
+
+        def render_approval_votes_list
+          div(class: 'autospec-approval-votes') do
+            @current_iteration_votes.each { |vote| render_approval_vote_row(vote) }
+          end
+        end
+
+        def render_approval_vote_row(vote) # rubocop:disable Metrics/MethodLength
+          icon = vote.approved? ? '✓' : '✗'
+          color = vote.approved? ? 'var(--ok-fg)' : 'var(--err-fg)'
+          div(class: 'autospec-approval-vote-row') do
+            span(style: "color: #{color}; font-weight: 600;") { plain icon }
+            span(class: 'autospec-approval-voter') { plain vote.user.email }
+            if vote.rejected? && vote.reason.present?
+              span(class: 'autospec-approval-reason-text') do
+                plain vote.reason.to_s
+              end
+            end
           end
         end
 

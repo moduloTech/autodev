@@ -328,6 +328,9 @@ fr:
   web_autospec_chat_unavailable_hint: La clé Anthropic n'est pas configurée. Le markdown et les meta-chips restent éditables — demandez à un admin d'ajouter `anthropic.api_key` à la configuration.
   web_dashboard_anthropic_missing_title: Clé Anthropic manquante
   web_dashboard_anthropic_missing_hint: AutoSpec chat est désactivé. Définissez ANTHROPIC_API_KEY ou ajoutez `anthropic.api_key` à ~/.autodev/config.yml puis redémarrez autodev.
+  web_dashboard_drafts_to_vote: Brouillons à valider
+  web_dashboard_drafts_to_vote_author: "auteur : %{email}"
+  web_dashboard_drafts_to_vote_cta: Voter
 
   # AutoSpec attachments (phase D step 10c)
   web_autospec_attachments_label:
@@ -340,3 +343,15 @@ fr:
   web_autospec_attachment_upload_error: Échec de l'envoi de la capture
   web_autospec_tab_mobile_edit: Édition
   web_autospec_tab_mobile_chat: Discussion
+
+  # AutoSpec submission workflow (phase D step 11a)
+  web_autospec_submit_human: Envoyer à un dev
+  web_autospec_submit_autodev: Envoyer à AutoDev
+  web_autospec_retract: Rétracter
+  web_autospec_approve: Approuver
+  web_autospec_reject: Rejeter
+  web_autospec_reject_reason_placeholder: Expliquez pourquoi le brouillon doit être revu…
+  web_autospec_approval_pending_title: En attente d'approbation des owners
+  web_autospec_approval_rejected_title: Brouillon refusé — reprenez en édition pour corriger
+  web_autospec_approval_submitted_title: Brouillon soumis sur GitLab
+  web_autospec_approval_iteration: "Itération %{n}"

@@ -7,7 +7,7 @@ module Web
     class Dashboard < Base # rubocop:disable Metrics/ClassLength
       # rubocop:disable Metrics/ParameterLists
       def initialize(active:, errored:, kpis:, weekly_activity:, by_project:,
-                     anthropic_configured: true, **)
+                     anthropic_configured: true, drafts_awaiting_my_vote: [], **)
         super(**)
         @active = active
         @errored = errored
@@ -15,6 +15,7 @@ module Web
         @weekly_activity = weekly_activity
         @by_project = by_project
         @anthropic_configured = anthropic_configured
+        @drafts_awaiting_my_vote = drafts_awaiting_my_vote
       end
       # rubocop:enable Metrics/ParameterLists
 
@@ -27,6 +28,7 @@ module Web
               div(style: 'flex: 1; overflow: auto; padding: 32px;') do
                 render_anthropic_missing_banner if show_anthropic_banner?
                 render_kpis
+                render_drafts_awaiting_my_vote if @drafts_awaiting_my_vote.any?
                 render_split
                 render_error_banner if @errored.any?
               end
@@ -253,6 +255,44 @@ module Web
                 t_web(:web_dashboard_view_failures)
               end
             end
+          end
+        end
+      end
+
+      # AutoSpec drafts awaiting the current user's vote (step 11c).
+      # Hidden when empty — only owners of at least one project + a
+      # pending draft + no vote yet at current_iteration land here.
+      def render_drafts_awaiting_my_vote # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+        div(style: 'margin-top: 20px;') do
+          render(Components::Card.new(padding: 0)) do
+            div(style: card_header_style) do
+              h3(style: card_title_style) { t_web(:web_dashboard_drafts_to_vote) }
+              span(style: 'font-size: 12px; color: var(--text-muted);') do
+                plain @drafts_awaiting_my_vote.size.to_s
+              end
+            end
+            div do
+              @drafts_awaiting_my_vote.each_with_index do |d, idx|
+                render_draft_to_vote_row(d, idx == @drafts_awaiting_my_vote.size - 1)
+              end
+            end
+          end
+        end
+      end
+
+      def render_draft_to_vote_row(draft, last) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+        a(href: "/autospec_drafts/#{draft.id}", style: active_row_style(last)) do
+          div(style: iid_chip_style) { plain "##{draft.current_iteration}" }
+          div(style: 'min-width: 0;') do
+            div(style: row_title_style) { plain(draft.title.presence || t_web(:web_autospec_untitled)) }
+            div(style: row_meta_style) do
+              plain "#{draft.project.gitlab_path} · #{t_web(:web_dashboard_drafts_to_vote_author,
+                                                            email: draft.user.email)}"
+            end
+          end
+          span(style: 'font-size: 11px; color: var(--warn-fg); background: var(--warn-bg); ' \
+                      'padding: 2px 7px; border-radius: var(--r-pill);') do
+            t_web(:web_dashboard_drafts_to_vote_cta)
           end
         end
       end

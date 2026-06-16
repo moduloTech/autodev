@@ -1038,6 +1038,90 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
   text-align: center;
   box-shadow: var(--shadow-md);
 }
+
+/* Approval banner (step 11b): shown at the top of the editor body
+   whenever the draft is in pending_approval / rejected / submitted.
+   Owners of the project see vote buttons + a reject-reason textarea
+   inline when they haven't voted yet at the current iteration. */
+.autospec-approval-banner {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.autospec-approval-banner[data-autospec-approval-state="pending_approval"] {
+  border-color: var(--warn-200);
+  background: linear-gradient(180deg, var(--warn-bg), var(--paper) 60%);
+}
+.autospec-approval-banner[data-autospec-approval-state="rejected"] {
+  border-color: var(--err-200);
+  background: linear-gradient(180deg, var(--err-bg), var(--paper) 60%);
+}
+.autospec-approval-banner[data-autospec-approval-state="submitted"] {
+  border-color: var(--accent-bg-strong);
+  background: linear-gradient(180deg, var(--accent-bg), var(--paper) 60%);
+}
+.autospec-approval-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.autospec-approval-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.autospec-approval-iteration {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.autospec-approval-vote {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.autospec-approval-reject-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  flex: 1;
+  min-width: 240px;
+}
+.autospec-approval-reason {
+  flex: 1;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 34px;
+  box-sizing: border-box;
+}
+.autospec-approval-votes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.autospec-approval-vote-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.autospec-approval-voter {
+  color: var(--text-strong);
+}
+.autospec-approval-reason-text {
+  font-style: italic;
+}
 .autospec-mobile-tabs {
   display: none;
   grid-column: 1 / -1;

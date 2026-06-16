@@ -55,8 +55,12 @@ Rails.application.routes.draw do
   # re-apply). Token-level SSE streaming on chat deferred per
   # autospec.md §L — see AutospecDraftsController for the rationale.
   resources :autospec_drafts, only: %i[index new create show update], constraints: { id: /\d+/ } do
-    post :chat,              on: :member
-    post :apply_suggestion,  on: :member
+    post :chat,                on: :member
+    post :apply_suggestion,    on: :member
+    post :submit_for_approval, on: :member
+    post :retract,             on: :member
+    post :approve,             on: :member
+    post :reject,              on: :member
     resources :autospec_attachments, only: %i[create destroy], constraints: { id: /\d+/ }
   end
 

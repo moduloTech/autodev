@@ -20,11 +20,13 @@
 # with no test customer. Step 10b/10c can rebind `chat` to
 # ActionController::Live + the SDK's `messages.stream(…)` once the
 # typing-effect UX is validated.
-class AutospecDraftsController < ApplicationController
+class AutospecDraftsController < ApplicationController # rubocop:disable Metrics/ClassLength
   include ::Web::Helpers
 
   before_action :load_draft, except: %i[index new create]
-  before_action :authorize_author!, except: %i[index new create]
+  before_action :authorize_view!, only: :show
+  before_action :authorize_voter!, only: %i[approve reject]
+  before_action :authorize_author!, except: %i[index new create show approve reject]
 
   rescue_from Autospec::SuggestionApplier::AlreadyApplied,
               with: -> { render_apply_error('already_applied', :conflict) }
@@ -32,6 +34,12 @@ class AutospecDraftsController < ApplicationController
               with: -> { render_apply_error('tool_use_not_found', :not_found) }
   rescue_from Autospec::SuggestionApplier::UnsupportedTool,
               with: -> { render_apply_error('unsupported_tool', :unprocessable_entity) }
+  rescue_from Autospec::ApprovalRecorder::AlreadyVoted,
+              with: -> { render_apply_error('already_voted', :conflict) }
+  rescue_from Autospec::ApprovalRecorder::DraftNotPending,
+              with: -> { render_apply_error('draft_not_pending_approval', :conflict) }
+  rescue_from Autospec::ApprovalRecorder::NotAnOwner,
+              with: -> { render_apply_error('not_an_owner', :forbidden) }
 
   # GET /autospec_drafts
   def index
@@ -63,7 +71,10 @@ class AutospecDraftsController < ApplicationController
     render html: Web::Views::AutospecDrafts::Show.new(
       draft: @draft, messages: @draft.autospec_messages.order(:id),
       attachments: @draft.autospec_attachments.with_attached_file.order(:created_at),
-      chat_enabled: Autospec::Chat.api_key_configured?, **view_kwargs
+      chat_enabled: Autospec::Chat.api_key_configured?,
+      capabilities: draft_capabilities,
+      current_iteration_votes: current_iteration_votes,
+      already_voted: already_voted?, **view_kwargs
     ).call.html_safe, layout: false
   end
 
@@ -109,6 +120,61 @@ class AutospecDraftsController < ApplicationController
     render_apply_result(result)
   end
 
+  # POST /autospec_drafts/:id/submit_for_approval — author clicks
+  # "Créer le ticket". Destination ('human' or 'autodev') is set on the
+  # draft transactionally before the AASM transition so the post-finalize
+  # GitlabSubmitter (step 11d) can read it from the row. The 'autodev'
+  # choice is owner-only (autospec.md §J — the "send to AutoDev" gate
+  # is a deliberate product lock).
+  def submit_for_approval # rubocop:disable Metrics/MethodLength
+    return render_apply_error('draft_not_drafting', :conflict) unless @draft.drafting?
+
+    destination = params[:destination].to_s
+    unless AutospecDraft::DESTINATIONS.include?(destination)
+      return render_apply_error('destination_invalid', :unprocessable_entity)
+    end
+    unless @draft.destination_choosable_by?(current_user, destination)
+      return render_apply_error('destination_forbidden', :forbidden)
+    end
+
+    @draft.transaction do
+      @draft.update!(destination: destination)
+      @draft.submit_for_approval!
+    end
+    render_draft_response
+  end
+
+  # POST /autospec_drafts/:id/retract — author pulls a pending_approval
+  # draft back to drafting. The iteration is intentionally NOT decremented
+  # (cf. AutospecDraft#retract — old approvals stay tagged with the older
+  # iteration so the audit trail is intact; the next submit bumps the
+  # iteration further and stale rows are ignored).
+  def retract
+    return render_apply_error('draft_not_pending_approval', :conflict) unless @draft.pending_approval?
+
+    @draft.retract!
+    render_draft_response
+  end
+
+  # POST /autospec_drafts/:id/approve — owner records an approval vote.
+  # Quorum (all owners approved at current_iteration) triggers
+  # `finalize!` on the draft through the ApprovalRecorder service.
+  def approve
+    Autospec::ApprovalRecorder.new(@draft, current_user).record_approval!
+    render_draft_response
+  end
+
+  # POST /autospec_drafts/:id/reject — owner records a rejection vote
+  # with a mandatory reason. First rejection at the current iteration
+  # immediately flips the draft to `rejected`.
+  def reject
+    reason = params[:reason].to_s.strip
+    return render_apply_error('reason_required', :unprocessable_entity) if reason.empty?
+
+    Autospec::ApprovalRecorder.new(@draft, current_user).record_rejection!(reason)
+    render_draft_response
+  end
+
   private
 
   def load_draft
@@ -121,6 +187,68 @@ class AutospecDraftsController < ApplicationController
     respond_to do |format|
       format.html { head :forbidden }
       format.json { render json: { error: 'forbidden' }, status: :forbidden }
+    end
+  end
+
+  # Approve / reject endpoints are owner-only — author may or may not
+  # be an owner (an owner-author validates their own draft per §A).
+  # `votable_by?` encodes both the role AND the `pending_approval`
+  # state requirement. We surface both as 403 from the gate; the
+  # already-voted (409) check is enforced inside ApprovalRecorder.
+  def authorize_voter!
+    return if @draft.votable_by?(current_user)
+
+    respond_to do |format|
+      format.html { head :forbidden }
+      format.json { render json: { error: 'not_an_owner' }, status: :forbidden }
+    end
+  end
+
+  # Looser than `authorize_author!` — owners of the project can also
+  # see the draft once it reaches pending_approval / submitted /
+  # rejected (autospec.md §J matrix). Plain contributors who aren't
+  # the author never see another user's draft.
+  def authorize_view!
+    return if @draft.viewable_by?(current_user)
+
+    respond_to do |format|
+      format.html { head :forbidden }
+      format.json { render json: { error: 'forbidden' }, status: :forbidden }
+    end
+  end
+
+  # Capabilities the Show view needs to decide which buttons to render.
+  # Computed server-side so the view stays a pure function of plain data
+  # (no direct access to the User object).
+  def draft_capabilities
+    {
+      can_submit_human: @draft.destination_choosable_by?(current_user, AutospecDraft::DESTINATION_HUMAN),
+      can_submit_autodev: @draft.destination_choosable_by?(current_user, AutospecDraft::DESTINATION_AUTODEV),
+      can_retract: @draft.retractable_by?(current_user),
+      can_vote: @draft.votable_by?(current_user),
+      can_edit: @draft.editable_by?(current_user)
+    }
+  end
+
+  # Votes recorded at the current iteration — shown in the approval
+  # banner as an audit trail (who voted what, when). Older iterations'
+  # votes stay in the DB but aren't surfaced here.
+  def current_iteration_votes
+    @draft.autospec_approvals
+          .where(iteration: @draft.current_iteration)
+          .includes(:user)
+          .order(:acted_at)
+  end
+
+  def already_voted?
+    @draft.autospec_approvals.exists?(user: current_user,
+                                      iteration: @draft.current_iteration)
+  end
+
+  def render_draft_response
+    respond_to do |format|
+      format.html { redirect_to "/autospec_drafts/#{@draft.id}" }
+      format.json { render json: { draft: serialise_draft(@draft) } }
     end
   end
 

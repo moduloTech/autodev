@@ -179,6 +179,40 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
     assert_equal 'New', draft.reload.title
   end
 
+  # --- submit/retract buttons in Show -------------------------------
+
+  def test_show_renders_single_submit_button_for_contributor_author
+    # setup already creates the contributor membership.
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'X')
+    sign_in @author
+    get "/autospec_drafts/#{draft.id}"
+
+    assert_includes response.body, 'Envoyer à un dev'
+    refute_includes response.body, 'Envoyer à AutoDev'
+  end
+
+  def test_show_renders_both_submit_buttons_for_owner_author
+    @author.project_memberships.find_by(project: @project).update!(role: 'owner')
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'X')
+    sign_in @author
+    get "/autospec_drafts/#{draft.id}"
+
+    assert_includes response.body, 'Envoyer à un dev'
+    assert_includes response.body, 'Envoyer à AutoDev'
+  end
+
+  def test_show_renders_retract_button_when_pending_approval
+    @author.project_memberships.find_by(project: @project).update!(role: 'owner')
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'X',
+                                  destination: 'human')
+    draft.submit_for_approval!
+    sign_in @author
+    get "/autospec_drafts/#{draft.id}"
+
+    assert_includes response.body, 'Rétracter'
+    refute_includes response.body, 'Envoyer à un dev'
+  end
+
   # --- update redirect flow -----------------------------------------
 
   def test_update_html_redirects_to_show
