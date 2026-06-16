@@ -1,8 +1,8 @@
 # AutoSpec — Handoff
 
-**Last updated:** 2026-06-12 (after step 10a + CSRF fix at SHA `e4133fb`)
+**Last updated:** 2026-06-15 (after step 10b — editor + meta chips + autosave)
 **Canonical plan:** [`autospec.md`](autospec.md) §C (12-step attack order, marked ⬜/✅)
-**Latest release tag:** `v1.0.0-alpha.17` (phase D not yet released — 4 commits ahead of master)
+**Latest release tag:** `v1.0.0-alpha.17` (phase D not yet released — 5 commits ahead of master, 10b pending commit)
 
 This document is the *resume-anywhere* state of phase D (AutoSpec). It assumes
 you have **no memory of previous sessions** and gives you:
@@ -34,8 +34,8 @@ sessions:
 |---|---|---|
 | **9** | Backend: schema, models, Chat service, suggestion applier, markdown patcher | ✅ done at SHA `fd5b9c6` (3 internal sub-slices 9a/9b/9c bundled into one commit) |
 | **10a** | Frontend backbone: index/new/create/show, sidebar entry, CTA wire-ups | ✅ done at SHA `d2db3d6` |
-| **10b** | Markdown editor (toggle Édition/Aperçu, ⌘+B/I/K, autosave) + meta-chip editing + title editing + two-column desktop layout | ⬜ next |
-| **10c** | Drag-drop attachments via ActiveStorage + AttachmentCard grid + mobile responsive (tabs) + dark-mode polish | ⬜ |
+| **10b** | Markdown editor (toggle Édition/Aperçu, ⌘+B/I/K, autosave) + meta-chip editing + title editing + two-column desktop layout | ✅ done (working tree, pending commit) |
+| **10c** | Drag-drop attachments via ActiveStorage + AttachmentCard grid + mobile responsive (tabs) + dark-mode polish | ⬜ next |
 | **11** | Workflow approbation: owners' encart, vote orchestration, GitLab issue creation pipeline | ⬜ |
 | **12** | Import an existing GitLab issue as a draft (lowest priority — §A "very nice to have") | ⬜ |
 
@@ -48,6 +48,8 @@ to be precise about WHICH part of step 9 you're touching.
 ## 1. State at this commit
 
 ```
+(working tree) feat(autospec): editor + meta chips + autosave (step 10b)
+6904257 docs(autospec): add handoff doc for resuming phase D work across sessions
 e4133fb fix(web): emit CSRF token on Phlex forms — form_authenticity_token is private
 d2db3d6 feat(autospec): frontend backbone (step 10a) + CTA wire-ups
 fd5b9c6 feat(autospec): backend (step 9) — schema, models, chat service, suggestion applier
@@ -55,14 +57,14 @@ fd5b9c6 feat(autospec): backend (step 9) — schema, models, chat service, sugge
 da2ce03 Release v1.0.0-alpha.17   ← latest tag, master HEAD before phase D
 ```
 
-Not pushed to origin. Branch is 4 commits ahead. No release tag yet.
+Not pushed to origin. Branch is 5 commits ahead (10b still uncommitted). No release tag yet.
 
 Mapping to [`autospec.md`](autospec.md) §C:
 
 | Step | Title | Status |
 |---|---|---|
 | **9** | Backend AutoSpec | ✅ done (`fd5b9c6`) |
-| **10** | Frontend AutoSpec | 🟡 backbone done (10a `d2db3d6`); editor + attachments + responsive layout remain |
+| **10** | Frontend AutoSpec | 🟡 backbone (10a `d2db3d6`) + editor (10b WIP) done; attachments + mobile responsive (10c) remain |
 | **11** | Workflow approbation | ⬜ open |
 | **12** | Import GitLab d'un ticket existant | ⬜ open |
 
@@ -107,6 +109,7 @@ migration.
 | `Chat` | One chat turn: persist user → request → parse content (text + tool_use) → persist assistant. Default model `claude-sonnet-4-6`. API key resolves from `ENV['ANTHROPIC_API_KEY']` then `~/.autodev/config.yml` `anthropic.api_key`. SDK loaded lazily via `require 'anthropic'` inside `#build_default_client`. |
 | `SuggestionApplier` | Idempotent: applies a tool_use to the draft (markdown patch / full rewrite / title / meta) + stamps `applied_at`. Raises `AlreadyApplied`, `ToolUseNotFound`, `UnsupportedTool`. |
 | `MarkdownPatcher` | 4 ops (append_to_end, create_section, insert_after_heading, replace_section) with case-insensitive + whitespace-trimmed heading matching; falls back to `append_to_end` on miss and reports `fell_back?` in the Result struct. |
+| `MarkdownRenderer` | Thin Redcarpet wrapper used by the Aperçu pane of the editor + the `preview_html` field in the PATCH JSON response. **`escape_html: true`** (user content, contra `HelpDoc` which renders trusted in-app docs). Tables intentionally absent at MVP. |
 
 ### HTTP layer
 
@@ -115,11 +118,12 @@ migration.
 | `GET /autospec_drafts` | `#index` | Lists `current_user.autospec_drafts` |
 | `GET /autospec_drafts/new` | `#new` | Form scoped to `current_user.visible_projects` |
 | `POST /autospec_drafts` | `#create` | Rejects project_id outside visibility |
-| `GET /autospec_drafts/:id` | `#show` | Single-column layout |
+| `GET /autospec_drafts/:id` | `#show` | Two-column workspace (editor + chat). Loads `/assets/js/autospec.js`. |
+| `PATCH /autospec_drafts/:id` | `#update` | Autosave from the editor (title, markdown, meta_chips). `respond_to`: HTML redirect / JSON. **409 if not in `drafting`** (edits frozen once submitted; author must `retract!` first). `meta_chips` is server-side sliced to `META_KEYS` ∩ permitted keys. |
 | `POST /autospec_drafts/:id/chat` | `#chat` | `respond_to`: HTML redirect / JSON |
 | `POST /autospec_drafts/:id/apply_suggestion` | `#apply_suggestion` | `respond_to`: HTML redirect / JSON (409 on re-apply, 404 if tool_use_id absent) |
 
-Mounted via `resources :autospec_drafts, only: %i[index new create show]`
+Mounted via `resources :autospec_drafts, only: %i[index new create show update]`
 + two `:member` POSTs. Author-only auth check (`@draft.user_id ==
 current_user.id`). Wider owner/contributor matrix (autospec.md §J) is
 step 11.
@@ -133,55 +137,62 @@ typing-effect UX is worth it.
 
 - `Index` — list of drafts, empty state, "Nouveau brouillon" CTA
 - `New` — project picker + title + initial markdown
-- `Show` — meta card (status/iteration/destination/project) +
-  read-only markdown card + conversation card (messages + composer +
-  apply buttons per tool_call, disabled when `applied_at` set)
+- `Show` — two-column workspace (10b): editor column (sticky toolbar
+  with Édition|Aperçu tabs + format buttons + save indicator → meta
+  chips row → inline title input → markdown textarea OR server-rendered
+  preview pane → footer hint) + chat column (380 px desktop, 320 px
+  tablet) keeping the 10a conversation card content (messages +
+  composer + apply buttons per tool_call, disabled when `applied_at`
+  set). Mobile-tabs layout (Édition | Discussion) is 10c.
 
 All three extend `Web::Views::Base` and reuse `Components::{Card,
 Sidebar, Topbar}`. The `csrf_input_tag` helper on Base emits the
 hidden authenticity_token input — see §4 for the fix story.
+
+### Frontend JS (`/assets/js/autospec.js`)
+
+Step 10b ships a small vanilla-JS module loaded by the Show view (`<script
+defer>` at the end of the page). Served via `AssetsController` from
+`app/assets/static/js/autospec.js` (Propshaft load_path). Responsibilities:
+
+- Tab toggle Édition ↔ Aperçu — hides/shows the two `[data-autospec-pane]` nodes.
+- Format buttons (B / I / `</>` / H / list / quote / link) — caret-aware insertion via `selectionStart/End`.
+- Keyboard shortcuts: ⌘+B / ⌘+I / ⌘+K (link) + ⌘+Enter flushes the autosave debounce.
+- Autosave with **2 s debounce**: PATCH `/autospec_drafts/:id` carrying the dirty fields (`title`, `markdown`, `meta_chips`). The JSON response updates the preview pane's HTML in place.
+- localStorage backup keyed `autodev:draft:<id>:<field>` (markdown, title, meta_chips). On load, any value differing from the server-rendered input is restored + immediately queued for save. Cleared after each successful PATCH.
+- Save indicator (idle / saving / error / locked) via `data-state`. The label dictionary is built once from the initial server-rendered text via an FR/EN heuristic — fine because locale doesn't switch mid-page.
+- Meta-chip inline edit: click a chip → swap value span for a `<select>` (when `data-autospec-chip-options` is set, e.g. type/priority) or `<input>` (tags, comma-separated). Commit on blur / Enter, Escape cancels.
 
 ### Test surface
 
 | Area | File(s) | Count |
 |---|---|---|
 | Models | `test/models/autospec_*.rb` (5 files) | 32 |
-| Services | `test/services/autospec/*.rb` (6 files) | 48 |
-| Controllers (JSON) | `test/controllers/autospec_drafts_controller_test.rb` | 10 |
-| Controllers (HTML) | `test/controllers/autospec_drafts_html_test.rb` | 11 |
-| **Total added at phase D** | | **101** |
+| Services | `test/services/autospec/*.rb` (7 files incl. `markdown_renderer_test.rb`) | 54 |
+| Controllers (JSON) | `test/controllers/autospec_drafts_controller_test.rb` | 16 |
+| Controllers (HTML) | `test/controllers/autospec_drafts_html_test.rb` | 13 |
+| **Total added at phase D** | | **115** |
 
-Suite total at HEAD: **638 runs, 1172 assertions, 0 failures**.
+Suite total at HEAD: **653 runs, 1209 assertions, 0 failures**.
 
 ---
 
 ## 3. Pattern for the next slices
 
-### Step 10b — markdown editor + meta chips + title editing + two-col layout
+### Step 10b — markdown editor + meta chips + title editing + two-col layout — ✅ done
 
-**What's missing** on the Show page (cf. `design/spec_update/README.md` §2-6):
+**What landed** (working tree, pending commit):
 
-- Toolbar with **Édition | Aperçu** segmented tabs (sticky top of editor column)
-- FormatToolbar (B / I / `</>` / H / list / quote / 📎 / 🖼️) when in Édition
-- Markdown textarea (mono 13.5px, min-height 320px, resize vertical)
-- Markdown preview render when in Aperçu (Redcarpet is already vendored — see `app/services/help_doc.rb` for the GFM pipeline)
-- Title input editable in place (28px / 600)
-- Meta chips clickable → open menu to edit (Type, Priorité, Assigné, Tags)
-- Keyboard shortcuts: `⌘+B` / `⌘+I` / `⌘+K` (link) / `⌘+Enter` (submit "Créer le ticket")
-- Autosave to a new endpoint every 2s + localStorage backup keyed `autodev:draft:<id>`
-- Two-column desktop layout: editor centre `max-width: 820px`, chat right `0 0 380px`
+- Two-column workspace in `Web::Views::AutospecDrafts::Show`: editor centre (max-width 820 px, `autospec-editor-col`) + chat right (`autospec-chat-col`, 380 px desktop / 320 px tablet / collapsed under 960 px). CSS lives in `app/assets/static/css/app.css` under the `/* ── AutoSpec editor workspace ──` block.
+- Sticky toolbar with pill-style Édition|Aperçu tabs, format buttons (B / I / `</>` / H / list / quote / link 🔗), and save indicator (idle / saving / error / locked).
+- Inline title input (26 px / 600 — slightly smaller than the design's 28 px to leave room next to the chips), markdown textarea (mono 13.5 px, min-height 320 px), server-rendered preview pane (hidden by default; toggled via `hidden` attribute by JS).
+- Meta-chip editing for `type`, `priority` (selects with `bug/feature/improvement` and `low/medium/high/critical` from locale strings), `tags` (free-text comma-separated input). Static read-only chips for `status` + `iteration` follow the editable ones. **No `assignee` chip** — `Autospec::Tools::META_CHANGE` explicitly excludes it ("assignment stays a human decision"), and `SuggestionApplier::META_KEYS` matches.
+- Vanilla-JS module at `app/assets/static/js/autospec.js` (served via `/assets/js/autospec.js`) handling toggle / shortcuts / autosave / localStorage / chip editing. No build step.
+- New `Autospec::MarkdownRenderer` service (Redcarpet with `escape_html: true`) used by both the server-rendered preview pane AND the `preview_html` field included in the PATCH JSON response — autosave refreshes the preview in place.
+- New PATCH `/autospec_drafts/:id` endpoint with strong params (`:title, :markdown, meta_chips: [:type, :priority, { tags: [] }]`), server-side `slice` against `META_KEYS` for defence in depth, **409 + `error: 'draft_locked'` when the draft is not in `drafting`** (autosave loop reacts by disabling inputs and switching the indicator).
+- 14 new tests (6 renderer, 6 update JSON, 2 update HTML).
 
-**Where to add code:**
-
-- View: extend `Web::Views::AutospecDrafts::Show` — replace `render_markdown_card` with the editor; the conversation card moves to a right column.
-- Controller: add `#update` action with PATCH `/autospec_drafts/:id` carrying `title`, `markdown`, `meta_chips`. Extend `resources :autospec_drafts` with `:update`.
-- JS: Layout's `APP_JS` is the obvious place for now (mirrors the SSE+heartbeat code from alpha.16). For step 10b's complexity, consider extracting an `autospec.js` served via `AssetsController`.
-
-**Reference patterns:**
-
-- For the toggle Édition/Aperçu UI, look at `Web::Views::Issues` tabs (`render_tab` / `tab_style`) — same pill-style segmented tabs.
-- For Redcarpet rendering with auto-link + GFM, copy from `HelpDoc.render` (sanitisation already wired).
-- For inline-edit forms posting via JS, look at the existing dashboard refresh pattern; nothing fancier than `fetch` + replace HTML chunk.
+**What's deferred to 10c** (covered below): drag-drop attachments, the mobile **Édition | Discussion** tabs layout, dark-mode polish on the new components, the explicit "Créer le ticket" button + ⌘+Enter submit (currently ⌘+Enter just flushes the autosave debounce — the actual submit transition is step 11 work).
 
 ### Step 10c — drag-drop attachments + responsive
 
@@ -334,6 +345,78 @@ Temporarily added then removed. The real fix is at the
 serialises it correctly along with the rest of the form data. Don't
 reach for `data-turbo="false"` as a CSRF workaround on AutoSpec forms.
 
+### Edits only legal in `drafting` state — autosave must respect 409
+
+PATCH `/autospec_drafts/:id` (`#update`) guards on `@draft.drafting?`
+and returns **409 + `{ error: 'draft_locked' }`** otherwise. `autospec.js`'s
+`flushSave` catches that, sets `ctx.locked = true`, disables both inputs,
+and flips the save indicator to `locked`. If you change the lock policy
+(e.g. allow edits during `pending_approval` with a "retract first?"
+warning), update **both** the controller guard AND the JS error branch —
+the indicator label dictionary uses `locked` as a state key, not a fragile
+HTTP-status check.
+
+### `meta_chips` is server-side sliced — never trust the form
+
+The PATCH strong-params permit `meta_chips: [:type, :priority, { tags: [] }]`,
+but the controller then runs another pass: `attrs[:meta_chips].slice(*META_KEYS)`.
+Reason: a future tool (e.g. `propose_assignee`) might bump META_KEYS and
+the strong-params list could fall out of sync, leaving stale fields the
+model wouldn't understand. The slice keeps the JSON column matching
+exactly what `SuggestionApplier` knows about. Mirror that pattern if you
+add new editable meta fields.
+
+### localStorage key includes the draft id
+
+The design (`design/spec_update/README.md` §5) suggests
+`autodev:draft:new` as the localStorage key. We use
+**`autodev:draft:<id>:<field>`** instead — keyed by the draft's database
+id so multiple tabs editing different drafts don't trample each other.
+The `new` page (POST /autospec_drafts) doesn't currently autosave; once
+the draft is created the user is redirected to `/autospec_drafts/:id`
+and the JS picks it up from there. If you wire pre-creation autosave on
+the `new` page, scope the key under `autodev:draft:new:<csrf-token>`
+(or similar) to avoid the collision between two tabs starting new drafts.
+
+### Missing Anthropic key is a 503, not a 500 — and surfaces in 3 places
+
+The Anthropic API key resolution chain is `ENV['ANTHROPIC_API_KEY']` →
+`Web.config.dig('anthropic', 'api_key')` → `Autospec::Chat.default_client`
+(test seam). `Autospec::Chat.api_key_configured?` rolls all three into one
+class-level predicate; the test seam intentionally counts as "configured"
+so existing controller tests don't need to set ENV vars.
+
+When the predicate returns false:
+
+- `AutospecDraftsController#chat` short-circuits to **503 +
+  `{ error: 'chat_unavailable' }`** (via `render_apply_error`). Without
+  this guard, instantiating `Autospec::Chat#client` raises `ConfigError`
+  and Rails default-rescues to a 500.
+- `Web::Views::AutospecDrafts::Show` renders the chat composer with
+  `disabled` on both the textarea and the send button, plus an inline
+  warn-styled notice ("Chat indisponible") above the message list. The
+  markdown editor + meta-chip editing still work — they have no
+  Anthropic dependency.
+- `Web::Views::Dashboard` renders an **admin-only** warn banner above
+  the KPI grid linking to the config (`ANTHROPIC_API_KEY` env var or
+  `~/.autodev/config.yml` `anthropic.api_key`). Non-admin users don't
+  see it — they can't fix the key.
+
+If you add a new endpoint that talks to Anthropic, gate it on
+`api_key_configured?` and follow the same 503 pattern. Don't catch
+`ConfigError` higher up — the predicate is the contract.
+
+### Save-indicator label dictionary is built once, from initial text
+
+`autospec.js`'s `setIndicator` switches the label text by reading from
+a per-element `_dict` cache built on first call. The dictionary is
+chosen via an FR-vs-EN heuristic on the **initial** server-rendered
+label ("Enregistré" → FR, otherwise EN). That works because the locale
+cookie doesn't change mid-page. If you ever introduce a runtime locale
+switcher that updates the page in place without a reload, replace the
+heuristic with an explicit `data-autospec-save-labels='{"idle": "…", …}'`
+attribute populated server-side from the locale files.
+
 ---
 
 ## 5. Fresh-session sanity checks
@@ -362,7 +445,7 @@ mise x ruby -- bundle exec rake test TEST=test/models/autospec_draft_aasm_test.r
 
 # 4. Full suite still green
 mise x ruby -- bundle exec rake test 2>&1 | tail -3
-# expect 638+ runs, 0 failures, 0 errors
+# expect 653+ runs, 0 failures, 0 errors
 
 # 5. Rubocop clean on the AutoSpec surface
 mise x ruby -- bundle exec rubocop \
@@ -394,13 +477,17 @@ mise x ruby -- bundle exec rubocop \
 | The 4 tool schemas | [`app/services/autospec/tools.rb`](../app/services/autospec/tools.rb) |
 | The synthetic tool_result trick | [`app/services/autospec/message_builder.rb`](../app/services/autospec/message_builder.rb) |
 | The markdown patcher | [`app/services/autospec/markdown_patcher.rb`](../app/services/autospec/markdown_patcher.rb) |
+| The markdown renderer (Aperçu pane) | [`app/services/autospec/markdown_renderer.rb`](../app/services/autospec/markdown_renderer.rb) |
 | The view tree | [`app/components/web/views/autospec_drafts/`](../app/components/web/views/autospec_drafts/) |
+| The editor JS (step 10b) | [`app/assets/static/js/autospec.js`](../app/assets/static/js/autospec.js) |
+| Editor CSS (workspace grid, chips, panes) | grep `AutoSpec editor workspace` in [`app/assets/static/css/app.css`](../app/assets/static/css/app.css) |
 | Existing similar Phlex view (Card + Topbar + Sidebar pattern) | [`app/components/web/views/issue_show.rb`](../app/components/web/views/issue_show.rb) |
 | How the `csrf_input_tag` helper works | [`app/components/web/views/base.rb`](../app/components/web/views/base.rb) |
 | Where `view_kwargs` lives (the CSRF fix) | [`app/helpers/web/helpers.rb`](../app/helpers/web/helpers.rb) |
 | Step-9 commit | `fd5b9c6` |
 | Step-10a commit | `d2db3d6` |
 | CSRF fix commit | `e4133fb` |
+| Step-10b commit | _(pending — working tree)_ |
 
 ---
 
@@ -409,7 +496,7 @@ mise x ruby -- bundle exec rubocop \
 1. Read this file end-to-end (you're doing it now).
 2. Skim [`autospec.md`](autospec.md) §C to confirm step status.
 3. Run [§5 sanity checks](#5-fresh-session-sanity-checks) — every one.
-4. Pick the next step from [§3](#3-pattern-for-the-next-slices). Default: 10b (markdown editor — biggest UX gap).
+4. Pick the next step from [§3](#3-pattern-for-the-next-slices). Default: 10c (drag-drop attachments + mobile responsive — the only UX gap left before workflow).
 5. **Update this handoff at the end of the session** — §1 (state at this commit), §3 (mark the step done, append gotchas if any), §4 (any new traps). Future-you (or the next agent) will thank you.
 
-— Last touched 2026-06-12 after step 10a + CSRF fix.
+— Last touched 2026-06-15 after step 10b (editor + meta chips + autosave).

@@ -299,3 +299,32 @@ en:
   web_autospec_status_pending_approval: Pending approval
   web_autospec_status_rejected: Rejected
   web_autospec_status_submitted: Submitted to GitLab
+
+  # AutoSpec editor (phase D step 10b)
+  web_autospec_tab_edit: Edit
+  web_autospec_tab_preview: Preview
+  web_autospec_title_placeholder: Ticket title
+  web_autospec_format_bold: Bold
+  web_autospec_format_italic: Italic
+  web_autospec_format_code: Code
+  web_autospec_format_heading: Heading
+  web_autospec_format_list: List
+  web_autospec_format_quote: Quote
+  web_autospec_format_link: Link
+  web_autospec_save_idle: Saved
+  web_autospec_save_saving: Saving…
+  web_autospec_save_error: Save failed
+  web_autospec_save_locked: Draft locked
+  web_autospec_meta_chip_type: Type
+  web_autospec_meta_chip_priority: Priority
+  web_autospec_meta_chip_tags: Tags
+  web_autospec_meta_chip_empty: —
+  web_autospec_meta_chip_tags_placeholder: "frontend, ux, …"
+  web_autospec_meta_chip_type_options: bug,feature,improvement
+  web_autospec_meta_chip_priority_options: low,medium,high,critical
+  web_autospec_footer_hint: Markdown supported. ⌘+B / ⌘+I / ⌘+K to format, ⌘+↵ to submit.
+  web_autospec_preview_empty: (nothing to show — the draft is empty)
+  web_autospec_chat_unavailable_title: Chat unavailable
+  web_autospec_chat_unavailable_hint: The Anthropic API key is not configured. Markdown and meta-chips remain editable — ask an admin to add `anthropic.api_key` to the config.
+  web_dashboard_anthropic_missing_title: Anthropic API key missing
+  web_dashboard_anthropic_missing_hint: AutoSpec chat is disabled. Set ANTHROPIC_API_KEY or add `anthropic.api_key` to ~/.autodev/config.yml then restart autodev.

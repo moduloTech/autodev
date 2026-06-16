@@ -3,7 +3,7 @@
 require_relative '../../rails_helper'
 
 module Autospec
-  class ChatTest < ActiveSupport::TestCase
+  class ChatTest < ActiveSupport::TestCase # rubocop:disable Metrics/ClassLength
     # Tiny stand-in for Anthropic::Resources::Messages — captures the
     # params passed to `create` and returns a canned `content` array.
     StubClient = Struct.new(:response, :calls) do
@@ -121,6 +121,63 @@ module Autospec
       input = @draft.autospec_messages.where(role: 'assistant').last.tool_calls.first['input']
 
       assert_equal({ 'priority' => 'high' }, input)
+    end
+
+    # --- api_key_configured? -----------------------------------------
+
+    def test_api_key_configured_true_when_default_client_set
+      Autospec::Chat.default_client = stub_client([text('hi')])
+
+      assert_predicate Autospec::Chat, :api_key_configured?
+    ensure
+      Autospec::Chat.default_client = nil
+    end
+
+    def test_api_key_configured_true_when_env_var_set
+      Autospec::Chat.default_client = nil
+      with_env('ANTHROPIC_API_KEY' => 'sk-fake') do
+        with_web_config(nil) do
+          assert_predicate Autospec::Chat, :api_key_configured?
+        end
+      end
+    end
+
+    def test_api_key_configured_true_when_web_config_set
+      Autospec::Chat.default_client = nil
+      with_env('ANTHROPIC_API_KEY' => nil) do
+        with_web_config({ 'anthropic' => { 'api_key' => 'sk-fake' } }) do
+          assert_predicate Autospec::Chat, :api_key_configured?
+        end
+      end
+    end
+
+    def test_api_key_configured_false_when_nothing_set
+      Autospec::Chat.default_client = nil
+      with_env('ANTHROPIC_API_KEY' => nil) do
+        with_web_config(nil) do
+          refute_predicate Autospec::Chat, :api_key_configured?
+        end
+      end
+    end
+
+    private
+
+    def with_env(vars)
+      previous = vars.each_with_object({}) { |(k, _), h| h[k] = ENV.fetch(k, :__unset__) }
+      vars.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
+      yield
+    ensure
+      previous.each do |k, v|
+        v == :__unset__ ? ENV.delete(k) : ENV[k] = v
+      end
+    end
+
+    def with_web_config(config)
+      previous = ::Web.respond_to?(:config) ? ::Web.config : nil
+      ::Web.config = config
+      yield
+    ensure
+      ::Web.config = previous
     end
   end
 end

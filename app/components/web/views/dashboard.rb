@@ -6,13 +6,15 @@ module Web
     # Mirrors design/screen-dashboard.jsx.
     class Dashboard < Base # rubocop:disable Metrics/ClassLength
       # rubocop:disable Metrics/ParameterLists
-      def initialize(active:, errored:, kpis:, weekly_activity:, by_project:, **)
+      def initialize(active:, errored:, kpis:, weekly_activity:, by_project:,
+                     anthropic_configured: true, **)
         super(**)
         @active = active
         @errored = errored
         @kpis = kpis
         @weekly_activity = weekly_activity
         @by_project = by_project
+        @anthropic_configured = anthropic_configured
       end
       # rubocop:enable Metrics/ParameterLists
 
@@ -23,6 +25,7 @@ module Web
             main do
               render_topbar
               div(style: 'flex: 1; overflow: auto; padding: 32px;') do
+                render_anthropic_missing_banner if show_anthropic_banner?
                 render_kpis
                 render_split
                 render_error_banner if @errored.any?
@@ -252,6 +255,42 @@ module Web
             end
           end
         end
+      end
+
+      # Surface a setup warning to admins when the AutoSpec chat cannot
+      # run. Hidden from non-admin users — they can't fix it, so the
+      # banner would just be noise. Mirrors the `render_error_banner`
+      # treatment but in the warn palette.
+      def show_anthropic_banner?
+        @current_user_admin && !@anthropic_configured
+      end
+
+      def render_anthropic_missing_banner # rubocop:disable Metrics/MethodLength
+        banner_style = 'border-color: var(--warn-200); ' \
+                       'background: linear-gradient(180deg, var(--warn-bg), var(--paper) 60%);'
+        div(style: 'margin-bottom: 20px;') do
+          render(Components::Card.new(padding: 0, extra_style: banner_style)) do
+            div(style: 'display: flex; align-items: center; gap: 14px; padding: 16px 20px;') do
+              span(style: warn_icon_box_style) do
+                render Components::Icon.new(name: 'alert-tri', size: 18)
+              end
+              div(style: 'flex: 1;') do
+                div(style: 'font-size: 14px; font-weight: 600; color: var(--text-strong);') do
+                  t_web(:web_dashboard_anthropic_missing_title)
+                end
+                div(style: 'font-size: 12px; color: var(--text-muted); margin-top: 2px;') do
+                  t_web(:web_dashboard_anthropic_missing_hint)
+                end
+              end
+            end
+          end
+        end
+      end
+
+      def warn_icon_box_style
+        'width: 36px; height: 36px; border-radius: 10px; background: var(--warn-bg); ' \
+          'color: var(--warn-fg); display: inline-flex; align-items: center; justify-content: center; ' \
+          'flex: 0 0 auto;'
       end
 
       def error_icon_box_style

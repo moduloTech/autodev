@@ -54,7 +54,7 @@ Rails.application.routes.draw do
   # (HTML redirect or JSON) and apply_suggestion (idempotent, 409 on
   # re-apply). Token-level SSE streaming on chat deferred per
   # autospec.md §L — see AutospecDraftsController for the rationale.
-  resources :autospec_drafts, only: %i[index new create show], constraints: { id: /\d+/ } do
+  resources :autospec_drafts, only: %i[index new create show update], constraints: { id: /\d+/ } do
     post :chat,              on: :member
     post :apply_suggestion,  on: :member
   end

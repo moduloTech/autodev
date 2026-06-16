@@ -299,3 +299,32 @@ fr:
   web_autospec_status_pending_approval: En attente d'approbation
   web_autospec_status_rejected: Refusé
   web_autospec_status_submitted: Soumis sur GitLab
+
+  # AutoSpec editor (phase D step 10b)
+  web_autospec_tab_edit: Édition
+  web_autospec_tab_preview: Aperçu
+  web_autospec_title_placeholder: Titre du ticket
+  web_autospec_format_bold: Gras
+  web_autospec_format_italic: Italique
+  web_autospec_format_code: Code
+  web_autospec_format_heading: Titre
+  web_autospec_format_list: Liste
+  web_autospec_format_quote: Citation
+  web_autospec_format_link: Lien
+  web_autospec_save_idle: Enregistré
+  web_autospec_save_saving: Enregistrement…
+  web_autospec_save_error: Échec de l'enregistrement
+  web_autospec_save_locked: Brouillon verrouillé
+  web_autospec_meta_chip_type: Type
+  web_autospec_meta_chip_priority: Priorité
+  web_autospec_meta_chip_tags: Étiquettes
+  web_autospec_meta_chip_empty: —
+  web_autospec_meta_chip_tags_placeholder: "frontend, ux, …"
+  web_autospec_meta_chip_type_options: bug,feature,improvement
+  web_autospec_meta_chip_priority_options: low,medium,high,critical
+  web_autospec_footer_hint: Markdown supporté. ⌘+B / ⌘+I / ⌘+K pour formater, ⌘+↵ pour soumettre.
+  web_autospec_preview_empty: (rien à afficher — le brouillon est vide)
+  web_autospec_chat_unavailable_title: Chat indisponible
+  web_autospec_chat_unavailable_hint: La clé Anthropic n'est pas configurée. Le markdown et les meta-chips restent éditables — demandez à un admin d'ajouter `anthropic.api_key` à la configuration.
+  web_dashboard_anthropic_missing_title: Clé Anthropic manquante
+  web_dashboard_anthropic_missing_hint: AutoSpec chat est désactivé. Définissez ANTHROPIC_API_KEY ou ajoutez `anthropic.api_key` à ~/.autodev/config.yml puis redémarrez autodev.

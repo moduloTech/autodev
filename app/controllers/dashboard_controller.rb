@@ -19,6 +19,7 @@ class DashboardController < ApplicationController
       kpis: dashboard_kpis,
       weekly_activity: weekly_activity_counts,
       by_project: project_breakdown,
+      anthropic_configured: Autospec::Chat.api_key_configured?,
       **view_kwargs
     ).call
   end

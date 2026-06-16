@@ -35,6 +35,35 @@ module Autospec
       # restore to nil in `teardown`. The Chat service tests pass `client:`
       # directly via the constructor and ignore this hook.
       attr_accessor :default_client
+
+      # True when a chat turn could plausibly succeed: a test stub is
+      # installed, OR an env var carries the key, OR `~/.autodev/config.yml`
+      # carries one under `anthropic.api_key`. Used by the controller to
+      # short-circuit `#chat` with 503 instead of 500'ing inside the
+      # service, and by the view layer to grey out the composer + show
+      # an admin banner on the dashboard.
+      def api_key_configured?
+        return true if default_client
+
+        resolved_api_key.present?
+      end
+
+      # Returns the configured key (string) or nil. Folded here so both
+      # the predicate above and the instance-side `#api_key` use one
+      # lookup. `Web.config` may not be loaded at boot (e.g. rake tasks
+      # running before the initializer fires); the guard keeps the call
+      # safe in that path.
+      def resolved_api_key
+        ENV['ANTHROPIC_API_KEY'].presence || web_config_api_key
+      end
+
+      private
+
+      def web_config_api_key
+        return nil unless defined?(::Web) && ::Web.respond_to?(:config) && ::Web.config
+
+        ::Web.config.dig('anthropic', 'api_key').presence
+      end
     end
 
     attr_reader :draft
@@ -125,8 +154,7 @@ module Autospec
     end
 
     def api_key
-      key = ENV['ANTHROPIC_API_KEY'].presence ||
-            (defined?(::Web) && ::Web.respond_to?(:config) && ::Web.config&.dig('anthropic', 'api_key'))
+      key = self.class.resolved_api_key
       if key.blank?
         raise ConfigError,
               'Missing Anthropic API key (set ANTHROPIC_API_KEY or anthropic.api_key in ~/.autodev/config.yml)'

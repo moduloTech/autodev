@@ -3,39 +3,76 @@
 module Web
   module Views
     module AutospecDrafts
-      # GET /autospec_drafts/:id — main draft workspace (step 10a).
+      # GET /autospec_drafts/:id — editor workspace (step 10b).
       #
-      # Single column for 10a: meta card → markdown read-only card →
-      # conversation card (message history + composer + inline
-      # apply-suggestion buttons). The two-column desktop layout
-      # (editor centre, chat right) is the visual target of 10b/10c
-      # along with the markdown editor + drag-drop attachments.
+      # Two-column layout: editor centre (toolbar + meta chips + title +
+      # markdown textarea/preview + footer hint) and chat right (kept
+      # identical to step 10a — message bubbles + composer + inline
+      # apply-suggestion buttons). The mobile-tabs layout (Édition |
+      # Discussion under the topbar) is 10c work.
+      #
+      # The textarea + preview pane are both rendered server-side so the
+      # view is usable without JS — the textarea is the default visible
+      # pane and `autospec.js` toggles `hidden` on each pane to switch
+      # modes. Autosave (PATCH /autospec_drafts/:id) and the format
+      # buttons / ⌘+B/I/K shortcuts live in autospec.js too.
       class Show < Web::Views::Base # rubocop:disable Metrics/ClassLength
-        def initialize(draft:, messages:, **)
+        FORMAT_BUTTONS = [
+          { key: 'bold',    label: 'B',    label_key: :web_autospec_format_bold,    style: 'font-weight: 700;' },
+          { key: 'italic',  label: 'I',    label_key: :web_autospec_format_italic,  style: 'font-style: italic;' },
+          { key: 'code',    label: '</>',  label_key: :web_autospec_format_code,
+            style: 'font-family: var(--font-mono); font-size: 11px;' },
+          { key: 'heading', label: 'H',    label_key: :web_autospec_format_heading, style: '' },
+          { key: 'list',    label: '•',    label_key: :web_autospec_format_list,    style: 'font-size: 14px;' },
+          { key: 'quote',   label: '“',    label_key: :web_autospec_format_quote,   style: 'font-size: 16px;' },
+          { key: 'link',    label: '🔗', label_key: :web_autospec_format_link, style: 'font-size: 11px;' }
+        ].freeze
+        private_constant :FORMAT_BUTTONS
+
+        # Static editable meta-chip definitions. Mirrors
+        # `Autospec::SuggestionApplier::META_KEYS` minus tags (handled
+        # separately as a list). `:options` drives the inline <select>
+        # JS swaps in on click; `nil` → free-text <input>.
+        META_CHIPS = [
+          { key: 'type',     label_key: :web_autospec_meta_chip_type,
+            options_key: :web_autospec_meta_chip_type_options },
+          { key: 'priority', label_key: :web_autospec_meta_chip_priority,
+            options_key: :web_autospec_meta_chip_priority_options }
+        ].freeze
+        private_constant :META_CHIPS
+
+        def initialize(draft:, messages:, chat_enabled: true, **)
           super(**)
           @draft = draft
           @messages = messages
+          @chat_enabled = chat_enabled
         end
 
-        def view_template # rubocop:disable Metrics/MethodLength
-          with_layout(nav: false, shell: false) do
-            div(class: 'app-shell') do
-              render_sidebar
-              main do
-                render_topbar
-                div(style: 'flex: 1; overflow: auto; padding: 28px; max-width: 920px;') do
-                  div(style: 'display: grid; gap: 16px;') do
-                    render_meta_card
-                    render_markdown_card
-                    render_conversation_card
-                  end
-                end
-              end
-            end
-          end
+        def view_template
+          with_layout(nav: false, shell: false) { render_page }
         end
 
         private
+
+        def render_page
+          div(class: 'app-shell') do
+            render_sidebar
+            main do
+              render_topbar
+              render_workspace
+            end
+          end
+          script(src: '/assets/js/autospec.js', defer: true)
+        end
+
+        def render_workspace
+          div(class: 'autospec-workspace',
+              data: { 'autospec-draft-id' => @draft.id.to_s,
+                      'autospec-locked' => (@draft.drafting? ? 'false' : 'true') }) do
+            render_editor_column
+            render_chat_column
+          end
+        end
 
         def render_sidebar
           render Components::Sidebar.new(
@@ -54,50 +91,185 @@ module Web
           )
         end
 
-        def render_meta_card # rubocop:disable Metrics/AbcSize
-          render Components::Card.new(padding: 16) do
-            div(style: 'display: flex; flex-wrap: wrap; gap: 18px; font-size: 12px;') do
-              meta_field(t_web(:web_autospec_meta_status), t_web(status_label_key))
-              meta_field(t_web(:web_autospec_meta_iteration), @draft.current_iteration.to_s)
-              meta_field(t_web(:web_autospec_meta_destination),
-                         @draft.destination.presence || '—')
-              meta_field(t_web(:web_autospec_meta_project), @draft.project.gitlab_path)
+        # ── Editor column ─────────────────────────────────────────
+
+        def render_editor_column
+          div(class: 'autospec-editor-col') do
+            render_editor_toolbar
+            div(class: 'autospec-editor-body') do
+              render_meta_chips_row
+              render_title_input
+              render_editor_pane
+              render_preview_pane
+              render_footer_hint
             end
           end
         end
 
-        def meta_field(label, value)
-          div do
-            div(class: 'muted', style: 'font-size: 10.5px; text-transform: uppercase; ' \
-                                       'letter-spacing: 0.04em;') { label }
-            div(style: 'font-weight: 500; margin-top: 2px;') { plain value }
+        def render_editor_toolbar
+          div(class: 'autospec-editor-toolbar') do
+            render_tabs
+            render_format_bar
+            render_save_indicator
           end
         end
 
-        def render_markdown_card
-          render Components::Card.new(padding: 20) do
-            div(class: 'muted', style: 'font-size: 11px; text-transform: uppercase; ' \
-                                       'letter-spacing: 0.04em; margin-bottom: 10px;') do
-              t_web(:web_autospec_section_markdown)
+        def render_tabs
+          div(class: 'autospec-tabs', role: 'tablist') do
+            tab_button('edit', :web_autospec_tab_edit, selected: true)
+            tab_button('preview', :web_autospec_tab_preview, selected: false)
+          end
+        end
+
+        def tab_button(key, label_key, selected:)
+          button(type: 'button', role: 'tab',
+                 class: 'autospec-tab',
+                 'aria-selected' => selected.to_s,
+                 data: { 'autospec-tab' => key }) do
+            t_web(label_key)
+          end
+        end
+
+        def render_format_bar
+          div(class: 'autospec-format-bar', data: { 'autospec-format-bar' => 'true' }) do
+            FORMAT_BUTTONS.each { |btn| format_button(btn) }
+          end
+        end
+
+        def format_button(btn)
+          button(type: 'button', class: 'autospec-format-btn',
+                 'aria-label' => t_web(btn[:label_key]), title: t_web(btn[:label_key]),
+                 data: { 'autospec-format' => btn[:key] },
+                 style: btn[:style]) { plain btn[:label] }
+        end
+
+        def render_save_indicator
+          state = @draft.drafting? ? 'idle' : 'locked'
+          label_key = @draft.drafting? ? :web_autospec_save_idle : :web_autospec_save_locked
+          div(class: 'autospec-save-indicator',
+              data: { 'autospec-save-indicator' => 'true', state: state }) do
+            span(class: 'autospec-save-dot')
+            span(data: { 'autospec-save-label' => 'true' }) { t_web(label_key) }
+          end
+        end
+
+        # ── Meta chips ────────────────────────────────────────────
+
+        def render_meta_chips_row
+          div(class: 'autospec-meta-row') do
+            META_CHIPS.each { |chip| render_meta_chip(chip) }
+            render_tags_chip
+            render_static_meta
+          end
+        end
+
+        def render_meta_chip(chip)
+          value = (@draft.meta_chips || {})[chip[:key]].to_s
+          options = t_web(chip[:options_key]).to_s
+          div(class: 'autospec-chip',
+              data: { 'autospec-chip' => chip[:key], 'autospec-chip-options' => options }) do
+            span(class: 'autospec-chip-label') { t_web(chip[:label_key]) }
+            span(class: 'autospec-chip-value', data: { 'autospec-chip-value' => 'true' }) do
+              plain(value.presence || t_web(:web_autospec_meta_chip_empty))
             end
-            pre(style: pre_style) { plain(@draft.markdown.presence || t_web(:web_autospec_markdown_empty)) }
           end
         end
 
-        def render_conversation_card
-          render Components::Card.new(padding: 0) do
-            div(style: 'padding: 16px 20px; border-bottom: 1px solid var(--border); ' \
+        def render_tags_chip
+          tags = Array((@draft.meta_chips || {})['tags']).compact_blank
+          div(class: 'autospec-chip', data: { 'autospec-chip' => 'tags' }) do
+            span(class: 'autospec-chip-label') { t_web(:web_autospec_meta_chip_tags) }
+            span(class: 'autospec-chip-value', data: { 'autospec-chip-value' => 'true' }) do
+              plain(tags.any? ? tags.map { |t| "##{t}" }.join(' ') : t_web(:web_autospec_meta_chip_empty))
+            end
+          end
+        end
+
+        # Read-only context chips (status + iteration) — these are
+        # state, not editable metadata. Iteration is bumped by the
+        # AASM event `submit_for_approval`, status by every transition.
+        def render_static_meta
+          span(class: 'autospec-chip',
+               style: 'cursor: default; background: var(--paper-2);') do
+            span(class: 'autospec-chip-label') { t_web(:web_autospec_meta_status) }
+            span(class: 'autospec-chip-value') { plain t_web(status_label_key) }
+          end
+          span(class: 'autospec-chip',
+               style: 'cursor: default; background: var(--paper-2);') do
+            span(class: 'autospec-chip-label') { t_web(:web_autospec_meta_iteration) }
+            span(class: 'autospec-chip-value') { plain @draft.current_iteration.to_s }
+          end
+        end
+
+        # ── Title + editor + preview panes ────────────────────────
+
+        def render_title_input
+          input(type: 'text', class: 'autospec-title-input',
+                value: @draft.title.to_s,
+                placeholder: t_web(:web_autospec_title_placeholder),
+                data: { 'autospec-field' => 'title' },
+                disabled: @draft.drafting? ? nil : 'disabled')
+        end
+
+        def render_editor_pane
+          div(class: 'autospec-pane', data: { 'autospec-pane' => 'edit' }) do
+            textarea(class: 'autospec-textarea',
+                     data: { 'autospec-field' => 'markdown' },
+                     placeholder: t_web(:web_autospec_markdown_empty),
+                     disabled: @draft.drafting? ? nil : 'disabled') do
+              plain(@draft.markdown.to_s)
+            end
+          end
+        end
+
+        # Server-rendered preview HTML. Hidden by default — clicking
+        # Aperçu toggles `hidden`. `autospec.js` refreshes the inner
+        # HTML after every autosave so the preview matches whatever is
+        # in the textarea.
+        def render_preview_pane
+          div(class: 'autospec-pane', data: { 'autospec-pane' => 'preview' }, hidden: true) do
+            div(class: 'autospec-preview', data: { 'autospec-preview' => 'true' }) do
+              if @draft.markdown.present?
+                raw safe(Autospec::MarkdownRenderer.render(@draft.markdown))
+              else
+                p(class: 'muted', style: 'margin: 0;') { t_web(:web_autospec_preview_empty) }
+              end
+            end
+          end
+        end
+
+        def render_footer_hint
+          div(class: 'autospec-footer-hint') { plain t_web(:web_autospec_footer_hint) }
+        end
+
+        # ── Chat column ───────────────────────────────────────────
+
+        def render_chat_column
+          div(class: 'autospec-chat-col') do
+            div(style: 'padding: 14px 18px; border-bottom: 1px solid var(--border); ' \
                        'font-size: 11px; text-transform: uppercase; ' \
                        'letter-spacing: 0.04em; color: var(--text-muted);') do
               t_web(:web_autospec_section_conversation)
             end
-            render_messages
+            render_chat_disabled_notice unless @chat_enabled
+            div(style: 'flex: 1; overflow: auto;') { render_messages }
             render_composer
           end
         end
 
+        def render_chat_disabled_notice
+          div(style: 'padding: 12px 18px; border-bottom: 1px solid var(--border); ' \
+                     'background: var(--warn-bg); color: var(--warn-fg); ' \
+                     'font-size: 12px; line-height: 1.5;') do
+            div(style: 'font-weight: 600; margin-bottom: 2px;') do
+              t_web(:web_autospec_chat_unavailable_title)
+            end
+            div { plain t_web(:web_autospec_chat_unavailable_hint) }
+          end
+        end
+
         def render_messages
-          div(style: 'padding: 16px 20px; display: flex; flex-direction: column; gap: 14px;') do
+          div(style: 'padding: 16px 18px; display: flex; flex-direction: column; gap: 14px;') do
             if @messages.empty?
               p(class: 'muted', style: 'margin: 0; font-size: 13px;') do
                 t_web(:web_autospec_conversation_empty)
@@ -141,20 +313,34 @@ module Web
 
         def render_composer # rubocop:disable Metrics/MethodLength
           form(action: "/autospec_drafts/#{@draft.id}/chat", method: 'post',
-               style: 'padding: 12px 20px; border-top: 1px solid var(--border); ' \
+               style: 'padding: 12px 18px; border-top: 1px solid var(--border); ' \
                       'display: grid; gap: 8px;') do
             csrf_input_tag
             textarea(name: 'message', rows: '3',
-                     placeholder: t_web(:web_autospec_composer_placeholder),
-                     required: true, style: composer_textarea_style)
+                     placeholder: composer_placeholder,
+                     required: @chat_enabled ? true : nil,
+                     disabled: @chat_enabled ? nil : 'disabled',
+                     style: composer_textarea_style)
             div(style: 'display: flex; justify-content: flex-end;') do
               button(type: 'submit', class: 'button button-primary',
-                     style: 'padding: 7px 14px; font-size: 13px;') do
+                     disabled: @chat_enabled ? nil : 'disabled',
+                     style: composer_send_style) do
                 t_web(:web_autospec_composer_send)
               end
             end
           end
         end
+
+        def composer_placeholder
+          @chat_enabled ? t_web(:web_autospec_composer_placeholder) : t_web(:web_autospec_chat_unavailable_title)
+        end
+
+        def composer_send_style
+          base = 'padding: 7px 14px; font-size: 13px;'
+          @chat_enabled ? base : "#{base} opacity: 0.55; cursor: not-allowed;"
+        end
+
+        # ── Style helpers ─────────────────────────────────────────
 
         def status_label_key
           {
@@ -165,16 +351,9 @@ module Web
           }.fetch(@draft.status.to_s, :web_autospec_status_drafting)
         end
 
-        def pre_style
-          'margin: 0; padding: 16px; background: var(--paper-2); ' \
-            'border: 1px solid var(--border); border-radius: var(--r-md); ' \
-            'font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55; ' \
-            'white-space: pre-wrap; word-wrap: break-word;'
-        end
-
         def message_row_style(assistant)
           align = assistant ? 'flex-start' : 'flex-end'
-          "display: flex; flex-direction: column; align-items: #{align}; max-width: 80%; " \
+          "display: flex; flex-direction: column; align-items: #{align}; max-width: 86%; " \
             "#{assistant ? 'margin-right: auto;' : 'margin-left: auto;'}"
         end
 

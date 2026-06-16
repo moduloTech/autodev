@@ -61,12 +61,39 @@ class AutospecDraftsController < ApplicationController
   # GET /autospec_drafts/:id
   def show
     render html: Web::Views::AutospecDrafts::Show.new(
-      draft: @draft, messages: @draft.autospec_messages.order(:id), **view_kwargs
+      draft: @draft, messages: @draft.autospec_messages.order(:id),
+      chat_enabled: Autospec::Chat.api_key_configured?, **view_kwargs
     ).call.html_safe, layout: false
   end
 
-  # POST /autospec_drafts/:id/chat
+  # PATCH /autospec_drafts/:id — inline + autosave updates from the
+  # editor (title, markdown, meta_chips). Edits are only legal while the
+  # draft is in `drafting`; once it moves to `pending_approval` the
+  # author must `retract!` first (step 11). 409 + a stable error key let
+  # the autosave loop surface "this draft is locked" without scraping HTML.
+  #
+  # `meta_chips` is sliced to the keys SuggestionApplier knows about
+  # (cf. META_KEYS) — anything else would silently expand the JSON
+  # column and confuse the model on the next chat turn.
+  def update
+    return render_apply_error('draft_locked', :conflict) unless @draft.drafting?
+
+    attrs = update_attrs
+    attrs[:meta_chips] = attrs[:meta_chips].slice(*Autospec::SuggestionApplier::META_KEYS) if attrs[:meta_chips]
+    @draft.update!(attrs)
+    respond_to do |format|
+      format.html { redirect_to "/autospec_drafts/#{@draft.id}" }
+      format.json { render json: { draft: serialise_draft(@draft) } }
+    end
+  end
+
+  # POST /autospec_drafts/:id/chat — short-circuits to 503 instead of
+  # 500'ing inside the service when the Anthropic key isn't set. The
+  # autosave loop / chat composer disabled state already cover the
+  # client-side; this is the server-side guard.
   def chat
+    return render_apply_error('chat_unavailable', :service_unavailable) unless Autospec::Chat.api_key_configured?
+
     message = Autospec::Chat.new(@draft).reply(user_content: params.require(:message).to_s)
     respond_to do |format|
       format.html { redirect_to "/autospec_drafts/#{@draft.id}" }
@@ -96,6 +123,13 @@ class AutospecDraftsController < ApplicationController
     end
   end
 
+  # Only fields the editor is allowed to change. `permit` flattens nested
+  # meta_chips hash; tags arrive as an array of strings.
+  def update_attrs
+    params.permit(:title, :markdown, meta_chips: [:type, :priority, { tags: [] }])
+          .to_h.symbolize_keys
+  end
+
   def render_apply_error(key, status)
     respond_to do |format|
       format.html { redirect_to "/autospec_drafts/#{@draft.id}", alert: key }
@@ -120,7 +154,8 @@ class AutospecDraftsController < ApplicationController
     {
       id: draft.id, title: draft.title, markdown: draft.markdown,
       meta_chips: draft.meta_chips, status: draft.status,
-      current_iteration: draft.current_iteration
+      current_iteration: draft.current_iteration,
+      preview_html: Autospec::MarkdownRenderer.render(draft.markdown)
     }
   end
 end

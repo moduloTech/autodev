@@ -122,6 +122,30 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
     assert_includes response.body, 'Bonjour CSM'
   end
 
+  # --- show: chat_enabled state -------------------------------------
+
+  def test_show_disables_composer_when_anthropic_key_missing
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'X')
+    sign_in @author
+    Autospec::Chat.default_client = nil
+    previous_env = ENV.delete('ANTHROPIC_API_KEY')
+    get "/autospec_drafts/#{draft.id}"
+
+    assert_match(/<textarea[^>]*name="message"[^>]*disabled/, response.body)
+    assert_includes response.body, 'Chat indisponible'
+  ensure
+    ENV['ANTHROPIC_API_KEY'] = previous_env if previous_env
+  end
+
+  def test_show_enables_composer_when_anthropic_key_present
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'X')
+    Autospec::Chat.default_client = StubClient.new(Response.new([]), [])
+    sign_in @author
+    get "/autospec_drafts/#{draft.id}"
+
+    refute_match(/<textarea[^>]*name="message"[^>]*disabled/, response.body)
+  end
+
   # --- chat redirect flow -------------------------------------------
 
   def test_chat_html_redirects_to_show
@@ -153,5 +177,28 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
     assert_response :redirect
     assert_equal "/autospec_drafts/#{draft.id}", URI.parse(response.location).path
     assert_equal 'New', draft.reload.title
+  end
+
+  # --- update redirect flow -----------------------------------------
+
+  def test_update_html_redirects_to_show
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'Old')
+    sign_in @author
+    patch "/autospec_drafts/#{draft.id}", params: { title: 'New' }
+
+    assert_response :redirect
+    assert_equal "/autospec_drafts/#{draft.id}", URI.parse(response.location).path
+    assert_equal 'New', draft.reload.title
+  end
+
+  def test_update_html_locked_draft_redirects_with_alert
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'Old')
+    draft.submit_for_approval!
+    sign_in @author
+    patch "/autospec_drafts/#{draft.id}", params: { title: 'X' }
+
+    assert_response :redirect
+    assert_equal 'draft_locked', flash[:alert]
+    assert_equal 'Old', draft.reload.title
   end
 end

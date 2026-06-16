@@ -688,3 +688,229 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
   background: var(--paper-2);
   color: var(--text-muted);
 }
+
+/* ── AutoSpec editor workspace (phase D, step 10b) ─────────────────
+   Two-column grid: editor centre (flex), chat right (0 0 380px).
+   Collapses to single column under 960px — the mobile tabs layout
+   (Édition | Discussion) is 10c. */
+.autospec-workspace {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 0;
+  overflow: hidden;
+  min-height: 0;
+}
+.autospec-editor-col {
+  overflow: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.autospec-editor-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--paper);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.autospec-editor-body {
+  padding: 20px 24px;
+  max-width: 820px;
+  width: 100%;
+  margin: 0 auto;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+.autospec-tabs {
+  display: inline-flex;
+  background: var(--paper-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 2px;
+  gap: 2px;
+}
+.autospec-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 14px;
+  border-radius: var(--r-pill);
+  cursor: pointer;
+}
+.autospec-tab[aria-selected="true"] {
+  background: var(--paper);
+  color: var(--text-strong);
+  box-shadow: var(--shadow-xs);
+}
+.autospec-format-bar {
+  display: inline-flex;
+  gap: 2px;
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+  margin-left: 4px;
+}
+.autospec-format-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.autospec-format-btn:hover { background: var(--paper-2); color: var(--text-strong); }
+.autospec-save-indicator {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.autospec-save-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok-fg);
+}
+.autospec-save-indicator[data-state="saving"] .autospec-save-dot { background: var(--warn-fg); }
+.autospec-save-indicator[data-state="error"]  .autospec-save-dot { background: var(--err-fg); }
+.autospec-save-indicator[data-state="locked"] .autospec-save-dot { background: var(--text-subtle); }
+.autospec-title-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  color: var(--text-strong);
+  padding: 4px 0;
+  width: 100%;
+}
+.autospec-title-input::placeholder { color: var(--text-subtle); }
+.autospec-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.autospec-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-strong);
+  box-shadow: var(--shadow-xs);
+}
+.autospec-chip-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.autospec-chip-value { font-weight: 500; }
+.autospec-chip-edit {
+  background: var(--paper-2);
+  border: 1px solid var(--accent-bg-strong);
+  outline: none;
+  padding: 4px 8px;
+  border-radius: var(--r-md);
+  font-size: 12px;
+  font-family: inherit;
+}
+.autospec-pane {
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 16px 20px;
+  box-shadow: var(--shadow-xs);
+}
+.autospec-textarea {
+  width: 100%;
+  min-height: 320px;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-strong);
+  box-sizing: border-box;
+}
+.autospec-preview {
+  min-height: 320px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-strong);
+}
+.autospec-preview h1 { font-size: 22px; font-weight: 600; margin: 0 0 12px; }
+.autospec-preview h2 { font-size: 18px; font-weight: 600; margin: 18px 0 10px; }
+.autospec-preview h3 { font-size: 15px; font-weight: 600; margin: 14px 0 8px; }
+.autospec-preview p { margin: 0 0 12px; }
+.autospec-preview ul, .autospec-preview ol { padding-left: 22px; margin: 0 0 12px; }
+.autospec-preview blockquote {
+  margin: 0 0 12px;
+  padding: 6px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-muted);
+}
+.autospec-preview code {
+  background: var(--paper-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.autospec-preview pre {
+  background: var(--paper-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  overflow-x: auto;
+}
+.autospec-preview pre code { background: transparent; border: none; padding: 0; }
+.autospec-footer-hint {
+  background: var(--paper-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.autospec-chat-col {
+  border-left: 1px solid var(--border);
+  background: var(--paper);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+@media (max-width: 1279px) {
+  .autospec-workspace { grid-template-columns: 1fr 320px; }
+}
+@media (max-width: 959px) {
+  .autospec-workspace { grid-template-columns: 1fr; }
+  .autospec-chat-col { border-left: none; border-top: 1px solid var(--border); }
+}
