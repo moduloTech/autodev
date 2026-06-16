@@ -29,6 +29,16 @@ default: &default
     class: SyncGitlabMembershipsJob
     queue: default
     schedule: "0 3 * * *"
+  # Hourly project briefing refresh (phase D follow-up). Clones the
+  # `staging` branch of every Project, runs danger-claude with a
+  # briefing prompt, stores the markdown on `Project.briefing_text`
+  # so the AutoSpec chat system prompt has project-aware context
+  # without paying clone+LLM latency on every CSM message. Hour 0,
+  # minute 0 — staggered from the 03:00 sync and the */5 poll.
+  refresh_project_briefings:
+    class: RefreshProjectBriefingsJob
+    queue: default
+    schedule: "0 * * * *"
 
 development:
   # Recurring jobs are intentionally disabled in development so a local

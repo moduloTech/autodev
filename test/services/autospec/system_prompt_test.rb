@@ -56,5 +56,32 @@ module Autospec
 
       refute blocks[1].key?(:cache_control)
     end
+
+    # --- project briefing (3rd block, optional) -------------------
+
+    def test_build_inserts_briefing_block_when_project_has_one
+      @project.update!(briefing_text: "# Project briefing\n\nDomain: invoices.",
+                       briefing_generated_at: Time.current)
+      blocks = Autospec::SystemPrompt.build(@draft)
+
+      assert_equal 3, blocks.size
+      assert_match(/Project briefing/, blocks[1][:text])
+      assert_equal({ type: 'ephemeral' }, blocks[1][:cache_control])
+    end
+
+    def test_build_omits_briefing_block_when_briefing_blank
+      @project.update!(briefing_text: nil)
+      blocks = Autospec::SystemPrompt.build(@draft)
+
+      assert_equal 2, blocks.size
+    end
+
+    def test_briefing_block_carries_generated_at_marker
+      ts = Time.utc(2026, 6, 16, 12, 0, 0)
+      @project.update!(briefing_text: 'briefing body', briefing_generated_at: ts)
+      blocks = Autospec::SystemPrompt.build(@draft)
+
+      assert_includes blocks[1][:text], '2026-06-16T12:00:00Z'
+    end
   end
 end

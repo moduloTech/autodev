@@ -1,8 +1,8 @@
 # AutoSpec — Handoff
 
-**Last updated:** 2026-06-16 (after step 12 — GitLab issue import; phase D complete)
+**Last updated:** 2026-06-16 (after the hourly project briefing — phase D + briefing addon shipped)
 **Canonical plan:** [`autospec.md`](autospec.md) §C (12-step attack order, marked ⬜/✅)
-**Latest release tag:** `v1.0.0-alpha.17` (phase D complete — 11 commits ahead of master, step 12 pending commit; ready to cut a release)
+**Latest release tag:** `v1.0.0-alpha.17` (phase D complete + project-briefing addon — 13 commits ahead of master, briefing pending commit)
 
 This document is the *resume-anywhere* state of phase D (AutoSpec). It assumes
 you have **no memory of previous sessions** and gives you:
@@ -116,6 +116,7 @@ migration.
 | `ApprovalRecorder` | Records one owner vote (approve / reject) per draft per iteration, atomically. On rejection → `mark_rejected!`. On approval, if every owner has an `approved` row at `current_iteration` → calls `GitlabSubmitter#submit!` then `finalize!`. Raises `NotAnOwner`, `AlreadyVoted`, `DraftNotPending`. |
 | `GitlabSubmitter` | At finalize: uploads each AutospecAttachment blob via `client.upload_file(project_path, tmp_path)`, rewrites the draft markdown to swap `/rails/active_storage/...` URLs for the returned GitLab `/uploads/...` paths, then `client.create_issue(project_path, title, description:, labels:)`. `labels_todo` from the project config is sent only when `destination == 'autodev'`. Stamps `gitlab_issue_iid` + `gitlab_issue_url` + `submitted_at`. **Test seam:** `Autospec::GitlabSubmitter.disabled = true` makes `#submit!` a no-op (the workflow tests use this). |
 | `GitlabImporter` | Step 12 backfill path: parses a GitLab issue URL (`https://host/group/.../proj/-/issues/N`, supports nested namespaces + trailing slashes/queries), looks up the matching `Project` row, checks `user.contributor_of?(project)` (admin bypass), fetches via `client.issue(path, iid)`, creates an `AutospecDraft` pre-populated with `title` + `description`. Raises `InvalidUrl`, `ProjectNotFound`, `ProjectNotVisible`, `IssueNotFound`. **Test seam:** `Autospec::GitlabImporter.default_client = stub` (same pattern as `Autospec::Chat.default_client`). |
+| `ProjectBriefer` | Hourly project briefing generator (post-phase-D addon). Shallow-clones the project's `staging` branch (fallback to remote HEAD via `git ls-remote --symref`) into a `Dir.mktmpdir`, invokes `danger-claude -p <prompt>` with the work_dir as cwd, stores the markdown output on `Project.briefing_text` + stamps `briefing_generated_at`. Failure: stamps `briefing_error`, keeps stale `briefing_text` intact (a stale briefing beats no briefing). Triggered by `RefreshProjectBriefingsJob` from `config/recurring.yml` (`0 * * * *`). Read at chat time by `SystemPrompt#project_briefing` and injected as a 2nd cached block of the system prompt. **Test seam:** `Autospec::ProjectBriefer.stub_invoker = ->(work_dir, prompt) { … }` bypasses the danger-claude shell-out. |
 
 ### HTTP layer
 
@@ -194,16 +195,16 @@ defer>` at the end of the page). Served via `AssetsController` from
 | Area | File(s) | Count |
 |---|---|---|
 | Models | `test/models/autospec_*.rb` (5 files) | 32 |
-| Services | `test/services/autospec/*.rb` (10 files incl. `gitlab_importer_test.rb`) | 78 |
+| Services | `test/services/autospec/*.rb` (11 files incl. `project_briefer_test.rb` + 3 briefing tests on `system_prompt_test.rb`) | 85 |
 | Controllers (JSON drafts) | `test/controllers/autospec_drafts_controller_test.rb` | 29 |
 | Controllers (HTML drafts) | `test/controllers/autospec_drafts_html_test.rb` | 18 |
 | Controllers (attachments) | `test/controllers/autospec_attachments_controller_test.rb` | 9 |
 | Controllers (import) | `test/controllers/autospec_drafts_import_test.rb` | 5 |
 | Controllers (dashboard banner) | `test/controllers/dashboard_anthropic_banner_test.rb` | 3 |
 | Controllers (dashboard owner widget) | `test/controllers/dashboard_owner_widget_test.rb` | 4 |
-| **Total added at phase D** | | **178** |
+| **Total added at phase D + briefing** | | **185** |
 
-Suite total at HEAD: **727 runs, 1353 assertions, 0 failures**.
+Suite total at HEAD: **734 runs, 1368 assertions, 0 failures**.
 
 ---
 
@@ -465,6 +466,29 @@ teardown is the failure mode** — a stale flag would silently skip the
 GitLab call in subsequent tests. The test file for the submitter
 itself has its own per-test `ensure` block restoring the flag.
 
+### Hourly project briefing — clone the `staging` branch, not main
+
+The `RefreshProjectBriefingsJob` ticks every hour. For each `Project`,
+it shallow-clones the **`staging`** branch (with a `git ls-remote --symref`
+fallback to whatever the remote `HEAD` is — typically `main` / `master`)
+into a `Dir.mktmpdir` and runs `danger-claude -p <prompt>` with the
+work_dir as cwd. The briefing is stored on `Project.briefing_text` and
+injected as a 2nd cached block of the AutoSpec chat system prompt by
+`SystemPrompt#project_briefing`.
+
+Rationale for `staging` over `main`: the briefing should reflect what
+ships next, not what's been merged and is waiting for a release. If
+a project doesn't follow the staging convention, the symref fallback
+keeps things working without configuration.
+
+Failure mode: keep the previous `briefing_text` intact, stamp the
+error on `briefing_error`. The chat path is read-only and doesn't
+care about staleness — a stale briefing beats no briefing.
+
+Tests can't realistically shell out to `danger-claude`; use the
+`Autospec::ProjectBriefer.stub_invoker = ->(work_dir, prompt) { … }`
+class-level seam.
+
 ### `:payload_too_large` is deprecated — use `:content_too_large`
 
 Rack 3 / Rails 8.1 renamed the 413 status symbol. `render status:
@@ -513,7 +537,7 @@ mise x ruby -- bundle exec rake test TEST=test/models/autospec_draft_aasm_test.r
 
 # 4. Full suite still green
 mise x ruby -- bundle exec rake test 2>&1 | tail -3
-# expect 727+ runs, 0 failures, 0 errors
+# expect 734+ runs, 0 failures, 0 errors
 
 # 5. Rubocop clean on the AutoSpec surface
 mise x ruby -- bundle exec rubocop \
@@ -563,6 +587,7 @@ mise x ruby -- bundle exec rubocop \
 | Approval recorder | [`app/services/autospec/approval_recorder.rb`](../app/services/autospec/approval_recorder.rb) |
 | GitLab submitter | [`app/services/autospec/gitlab_submitter.rb`](../app/services/autospec/gitlab_submitter.rb) |
 | GitLab importer | [`app/services/autospec/gitlab_importer.rb`](../app/services/autospec/gitlab_importer.rb) |
+| Project briefer | [`app/services/autospec/project_briefer.rb`](../app/services/autospec/project_briefer.rb) + [`app/jobs/refresh_project_briefings_job.rb`](../app/jobs/refresh_project_briefings_job.rb) |
 | Permission matrix on the model | grep `Permission matrix` in [`app/models/autospec_draft.rb`](../app/models/autospec_draft.rb) |
 
 ---

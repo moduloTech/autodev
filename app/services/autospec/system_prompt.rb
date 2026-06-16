@@ -3,17 +3,21 @@
 module Autospec
   # Builds the `system` parameter for an Anthropic Messages API call.
   #
-  # Two blocks (cf. autodev/docs/autospec.md §G "System prompt cacheable"):
+  # Up to three blocks:
   #
   #   1. persona + tool-usage guidance — stable across the entire session,
   #      tagged `cache_control: { type: 'ephemeral' }` so Anthropic caches
   #      it for the 5-minute TTL and subsequent turns in the same chat
   #      hit the cache.
-  #   2. draft state (title + markdown + meta_chips) — changes whenever
-  #      the CSM edits, so we don't cache it. §G notes this could ALSO
-  #      be cached as a second breakpoint if measurements show the cost
-  #      matters; left as an optimisation for later (one extra
-  #      `cache_control` line + a cache-key invalidation on draft update).
+  #   2. project briefing (OPTIONAL) — refreshed hourly by
+  #      `RefreshProjectBriefingsJob` from the `staging` branch via
+  #      `Autospec::ProjectBriefer`. Stored on `Project.briefing_text`;
+  #      omitted when nil (e.g. fresh project, danger-claude unavailable,
+  #      tests). Also `cache_control: ephemeral` — Anthropic's cache lets
+  #      us stack two breakpoints, and the briefing changes at most once
+  #      an hour so cache hits are the common case across draft turns.
+  #   3. draft state (title + markdown + meta_chips) — changes whenever
+  #      the CSM edits, so we don't cache it.
   module SystemPrompt
     module_function
 
@@ -82,15 +86,36 @@ module Autospec
       meta_chips.map { |k, v| "#{k}=#{Array(v).join(',')}" }.join(' ')
     end
 
-    # Final `system` payload for `Anthropic::Resources::Messages#create`.
-    # Order matters: the cached block is first so the API can match it
-    # against the cache before reading the (variable) draft state.
-    def build(draft)
+    # The project briefing (when present) tells Claude WHAT the project
+    # is — its domain, conventions, lexicon. Refreshed hourly so the
+    # chat path is read-only, no clone/danger-claude latency at message
+    # time.
+    def project_briefing(project)
+      return nil if project.nil? || project.briefing_text.blank?
+
       [
+        '# Project briefing',
+        "_Generated at #{project.briefing_generated_at&.iso8601 || 'unknown'}._",
+        '',
+        project.briefing_text
+      ].join("\n")
+    end
+
+    # Final `system` payload for `Anthropic::Resources::Messages#create`.
+    # Order matters: the cached blocks come first so the API can match
+    # them against the cache before reading the (variable) draft state.
+    def build(draft) # rubocop:disable Metrics/MethodLength
+      blocks = [
         { type: 'text', text: persona_and_guidance,
-          cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: draft_state(draft) }
+          cache_control: { type: 'ephemeral' } }
       ]
+      briefing = project_briefing(draft.project)
+      if briefing
+        blocks << { type: 'text', text: briefing,
+                    cache_control: { type: 'ephemeral' } }
+      end
+      blocks << { type: 'text', text: draft_state(draft) }
+      blocks
     end
   end
 end
