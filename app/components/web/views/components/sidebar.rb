@@ -134,7 +134,8 @@ module Web
         # separate constant so non-admin sidebars stay byte-identical to before.
         ADMIN_ITEMS = [
           { id: 'admin', label_key: :web_nav_admin_users, icon: 'users', href: '/admin/users' },
-          { id: 'jobs',  label_key: :web_nav_admin_jobs,  icon: 'settings', href: '/admin/jobs' },
+          { id: 'admin_health', label_key: :web_nav_admin_health, icon: 'bell', href: '/admin/health' },
+          { id: 'jobs', label_key: :web_nav_admin_jobs, icon: 'settings', href: '/admin/jobs' },
           { id: 'admin_help', label_key: :web_nav_admin_help, icon: 'info', href: '/admin/help' }
         ].freeze
         private_constant :ITEMS, :ADMIN_ITEMS

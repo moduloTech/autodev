@@ -43,6 +43,42 @@ class AutodevPollJobTest < ActiveSupport::TestCase
     assert_equal %w[group/foo group/bar], dispatched
   end
 
+  test 'records a poller heartbeat (issue_id nil, usage_ok true) on a successful cycle' do
+    run_with_stubs(usage_available: true)
+
+    event = ActivityEvent.where(kind: 'poller').order(:id).last
+
+    assert event, 'expected a poller heartbeat event'
+    assert_nil event.issue_id
+    assert event.payload['usage_ok']
+  end
+
+  test 'records a usage-paused heartbeat with usage_ok false' do
+    run_with_stubs(usage_available: false)
+
+    event = ActivityEvent.where(kind: 'poller').order(:id).last
+
+    assert event
+    refute event.payload['usage_ok']
+    assert_equal 'warn', event.level
+  end
+
+  test 'records a cycle error and re-raises when the cycle blows up' do
+    fake_checker = build_fake_checker(true)
+    assert_raises(StandardError) do
+      Config.stub(:load, ->(*) { raise StandardError, 'boom' }) do
+        UsageChecker.stub(:new, fake_checker) do
+          AutodevPollJob.new.perform
+        end
+      end
+    end
+
+    event = ActivityEvent.where(kind: 'error').order(:id).last
+
+    assert event, 'expected a cycle-failure event'
+    assert_equal [nil, 'error'], [event.issue_id, event.level]
+  end
+
   private
 
   def run_with_stubs(usage_available:) # rubocop:disable Metrics/MethodLength

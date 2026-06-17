@@ -2,7 +2,7 @@
 
 # Post-railsification routes. Every URL the embedded dashboard serves is
 # Rails-native; `lib/autodev/web/` (the legacy Sinatra app) is gone.
-Rails.application.routes.draw do
+Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   # === Devise / Entra ID SSO (step 3) ==============================
   # /users/auth/entra_id           → omniauth strategy (redirect to Entra)
   # /users/auth/entra_id/callback  → Users::OmniauthCallbacksController#entra_id
@@ -86,6 +86,17 @@ Rails.application.routes.draw do
   # `javascript_importmap_tags` helpers emit.
   get '/assets/*path', to: 'assets#show', format: false
 
+  # === Monitoring (unauthenticated — for external probes) ==========
+  # /up        → Rails' own liveness endpoint (process boots + responds).
+  # /healthz   → Autodev::HealthReport as JSON; HTTP 200 if ok else 503.
+  # /healthz/:check → a single component (poller, workers, queue, …).
+  # These skip the SSO gate (cf. MonitoringController) so Datadog /
+  # BetterStack can scrape them; an optional `monitoring.token` gates access.
+  get '/up', to: 'rails/health#show'
+  get '/healthz', to: 'monitoring#show', defaults: { format: :json }
+  get '/healthz/:check', to: 'monitoring#component', defaults: { format: :json },
+                         constraints: { check: /poller|workers|queue|claude_usage|issues_error|database/ }
+
   # === Admin =======================================================
   # /admin/users — read-only audit of users × memberships (PR2 of the
   # users-rollout chantier). Guarded by `current_user&.admin?` in the
@@ -97,6 +108,10 @@ Rails.application.routes.draw do
   # AdminApplicationController. Image refs in both docs point at
   # /help/images/* — that endpoint is shared and lives on HelpController.
   get '/admin/help', to: 'admin/help#show'
+
+  # /admin/health — system health dashboard (Autodev::HealthReport). Human
+  # view of the same data the unauthenticated /healthz endpoints serve.
+  get '/admin/health', to: 'admin/health#show'
 
   # Mission Control — Jobs: Solid Queue inspector + administration UI.
   # No auth gate (cf. config/initializers/mission_control.rb) — same

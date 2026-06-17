@@ -47,9 +47,13 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/users/sign_out` (DELETE) | `Users::SessionsController#destroy` | Sign-out custom — `devise_for :users` n'émet pas la ressource `sessions` (le model `User` n'a pas `:database_authenticatable`), ce contrôleur comble le trou |
 | `/sign_in` | `SignInController#new` | Page d'atterrissage avec form POST CSRF |
 | `/admin/users` | `Admin::UsersController#index` | Audit users + memberships (admin only) |
+| `/admin/health` | `Admin::HealthController#show` | Tableau de bord santé système (admin only) |
 | `/admin/jobs` | Mission Control | Inspecteur Solid Queue (admin only) |
+| `/up` | `Rails::HealthController#show` | Liveness (le process répond) — **non authentifié** |
+| `/healthz(.json)` | `MonitoringController#show` | Santé JSON pour sondes externes, HTTP 200/503 — **non authentifié** |
+| `/healthz/:check` | `MonitoringController#component` | Un seul composant (`poller`, `workers`, `queue`, …) — **non authentifié** |
 
-Toutes les routes hors `/sign_in` et SSO sont gatées par le `before_action :authenticate_user!` global (PR3 du chantier *users-rollout*). Les routes `/admin/*` ajoutent un check `current_user&.admin?` au-dessus.
+Toutes les routes hors `/sign_in`, SSO et les endpoints de monitoring (`/up`, `/healthz*`) sont gatées par le `before_action :authenticate_user!` global (PR3 du chantier *users-rollout*). Les routes `/admin/*` ajoutent un check `current_user&.admin?` au-dessus. Les endpoints de monitoring sautent volontairement le gate (une sonde externe ne peut pas faire le handshake SSO) — voir `docs/observability.md`.
 
 Pas de chrome custom sur `/admin/jobs` — c'est l'UI fournie par la gem `mission_control-jobs`.
 
@@ -105,6 +109,23 @@ Sections :
 4. La file *Failed jobs* est vide.
 
 Auth : `current_user&.admin?` requis (cf. `config/initializers/mission_control.rb`).
+
+\newpage
+
+# Admin — Santé du système
+
+URL `/admin/health`. Tableau de bord passif (aucune sonde active : pas de shell-out danger-claude, pas d'appel GitLab au chargement) qui agrège l'état du système via `Autodev::HealthReport`. Accès restreint aux comptes `admin = true`.
+
+Une carte par composant, avec une pastille `OK` / `Attention` / `Hors service` :
+
+- **Poller** — fraîcheur du dernier heartbeat (`ActivityEvent` `kind: 'poller'`). `Hors service` si plus vieux que `poll_interval × monitoring.poll_stale_factor` (plancher 15 min).
+- **Workers** — process Solid Queue vivants (heartbeat < 5 min).
+- **File de jobs** — jobs en échec / en attente (Solid Queue).
+- **Quota Claude** — dernier état connu du `UsageChecker` (lu sur le dernier heartbeat, pas re-sondé).
+- **Issues en erreur** — nombre d'issues `error` / `post_completion_error` (lien vers `/errors`).
+- **Base de données** — primaire + queue joignables.
+
+Les mêmes données sont servies en JSON, **sans authentification**, sur `/healthz` (HTTP 200 si sain, 503 sinon) pour brancher des sondes Datadog / BetterStack. Référence complète (endpoints, heartbeat, configuration, exemples de sondes, TODO) : **`docs/observability.md`**.
 
 \newpage
 

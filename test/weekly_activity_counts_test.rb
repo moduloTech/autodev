@@ -25,11 +25,13 @@ class WeeklyActivityCountsTest < Minitest::Test
   end
 
   # Raw insert so the test pins `created_at` exactly, bypassing AR's timestamp
-  # + timezone machinery — the grouping logic under test is pure SQL.
-  def insert_event(created_at)
+  # + timezone machinery — the grouping logic under test is pure SQL. Defaults
+  # to a work kind ('transition'); 'poller'/'error' are system kinds excluded
+  # from the sparkline.
+  def insert_event(created_at, kind: 'transition')
     ActiveRecord::Base.connection.execute(
       'INSERT INTO activity_events (issue_id, kind, level, payload_json, created_at) ' \
-      "VALUES (#{@issue.id}, 'poller', 'info', '{}', '#{created_at}')"
+      "VALUES (#{@issue.id}, '#{kind}', 'info', '{}', '#{created_at}')"
     )
   end
 
@@ -63,6 +65,17 @@ class WeeklyActivityCountsTest < Minitest::Test
 
     assert_equal 1, @helper.weekly_activity_counts.last,
                  'a " UTC"-suffixed row must still land in today\'s bucket'
+  end
+
+  # System kinds (poller heartbeats, cycle-error markers) must not inflate the
+  # sparkline — only real work (transition/danger_claude) counts.
+  def test_excludes_system_kinds
+    insert_event("#{Time.zone.today} 12:00:00", kind: 'transition')
+    insert_event("#{Time.zone.today} 12:00:00", kind: 'poller')
+    insert_event("#{Time.zone.today} 12:00:00", kind: 'error')
+
+    assert_equal 1, @helper.weekly_activity_counts.last,
+                 'only the work event counts; poller/error are excluded'
   end
 
   # An event at 00:30 Europe/Paris is stored ~22:30/23:30 the previous UTC day.

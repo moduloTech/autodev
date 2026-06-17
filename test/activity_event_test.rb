@@ -76,4 +76,17 @@ class ActivityEventTest < Minitest::Test
 
     refute_nil ActivityEvent.find(event.id).created_at
   end
+
+  # System events (issue_id nil — poller heartbeats, cycle-error markers) feed
+  # the health surface, not the per-issue SSE feed, so they are not broadcast.
+  def test_system_event_is_not_broadcast_to_event_bus
+    issue = create_issue
+    published = []
+    Web::EventBus.stub(:publish, ->(event) { published << event }) do
+      ActivityEvent.create!(issue_id: nil, kind: 'poller', payload_json: '{}')
+      ActivityEvent.create!(issue_id: issue.id, kind: 'transition', payload_json: '{}')
+    end
+
+    assert_equal [issue.id], published.map(&:issue_id)
+  end
 end

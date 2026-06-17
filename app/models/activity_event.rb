@@ -45,6 +45,10 @@ class ActivityEvent < ApplicationRecord
   # job-only contexts the constant is undefined and we silently skip.
   def broadcast_to_event_bus
     return unless defined?(Web::EventBus)
+    # System events (poller heartbeats, cycle-failure markers) carry no issue_id.
+    # They feed Autodev::HealthReport, not the per-issue SSE activity feed — and
+    # broadcasting a 5-minute heartbeat would spam /stream. Skip them here.
+    return if issue_id.nil?
 
     Web::EventBus.publish(self)
   rescue StandardError

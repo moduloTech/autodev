@@ -15,6 +15,22 @@ en:
   web_nav_admin_help: Technical help
   web_admin_help_title: Technical guide
   web_admin_help_subtitle: Admin routes, project config, CLI, state machine
+  web_nav_admin_health: Health
+  web_admin_health_title: System health
+  web_admin_health_subtitle: Poller, workers, queue and quota status — passive read
+  web_admin_health_breadcrumb: Administration
+  web_admin_health_overall: Overall status
+  web_admin_health_view_jobs: Jobs inspector
+  web_admin_health_view_json: JSON
+  web_admin_health_status_ok: OK
+  web_admin_health_status_warn: Warning
+  web_admin_health_status_down: Down
+  web_admin_health_check_poller: Poller
+  web_admin_health_check_workers: Workers
+  web_admin_health_check_queue: Job queue
+  web_admin_health_check_claude_usage: Claude quota
+  web_admin_health_check_issues_error: Issues in error
+  web_admin_health_check_database: Database
   web_theme_toggle: Toggle theme
   web_sign_out: Sign out
   web_sign_in_title: Sign in

@@ -153,6 +153,7 @@ module Web
     def weekly_activity_counts
       bounds = weekly_activity_day_bounds
       row = activity_events_dataset
+            .where.not(kind: %w[poller error]) # exclude system heartbeats/markers (issue_id nil)
             .where('created_at >= ? AND created_at < ?', bounds.first, bounds.last)
             .pick(*weekly_activity_buckets(bounds))
       Array(row).map(&:to_i)

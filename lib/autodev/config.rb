@@ -23,6 +23,9 @@ module Config # rubocop:disable Metrics/ModuleLength
     log_level: INFO                                # DEBUG, INFO, WARN, ERROR (default: INFO)
     # database_url: sqlite://~/.autodev/autodev.db  # default
     web: { enabled: true, port: 4567, locale: fr, bind: '127.0.0.1' }  # embedded web UI; bind: 0.0.0.0 or NetBird IP to expose
+    # Health/monitoring (see docs/observability.md). Unauthenticated /healthz
+    # endpoints for external probes (Datadog, BetterStack). Optional token gate.
+    # monitoring: { token: null, poll_stale_factor: 3 }  # poll stale after factor × poll_interval
 
     # Microsoft 365 SSO credentials (Entra ID / Azure AD). Required as of
     # v1.0.0-alpha.7 — without these the gated dashboard can't complete
@@ -90,7 +93,12 @@ module Config # rubocop:disable Metrics/ModuleLength
     'log_level' => 'INFO',
     'database_url' => "sqlite://#{DEFAULT_DB}",
     'projects' => [],
-    'web' => { 'enabled' => true, 'port' => 4567, 'locale' => 'fr', 'bind' => '127.0.0.1' }
+    'web' => { 'enabled' => true, 'port' => 4567, 'locale' => 'fr', 'bind' => '127.0.0.1' },
+    # Health/monitoring surface (cf. docs/observability.md). `token` (nil =
+    # open, matching the 127.0.0.1/NetBird trust model) optionally gates the
+    # unauthenticated /healthz endpoints. `poll_stale_factor` × poll_interval
+    # is when a missing poller heartbeat flips the health check to "down".
+    'monitoring' => { 'token' => nil, 'poll_stale_factor' => 3 }
   }.freeze
 
   ENV_MAPPING = {

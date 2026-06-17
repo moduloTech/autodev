@@ -15,6 +15,22 @@ fr:
   web_nav_admin_help: Aide technique
   web_admin_help_title: Guide technique
   web_admin_help_subtitle: Routes admin, configuration projet, CLI, machine à états
+  web_nav_admin_health: Santé
+  web_admin_health_title: Santé du système
+  web_admin_health_subtitle: État du poller, des workers, de la file et du quota — lecture passive
+  web_admin_health_breadcrumb: Administration
+  web_admin_health_overall: État global
+  web_admin_health_view_jobs: Inspecteur des jobs
+  web_admin_health_view_json: JSON
+  web_admin_health_status_ok: OK
+  web_admin_health_status_warn: Attention
+  web_admin_health_status_down: Hors service
+  web_admin_health_check_poller: Poller
+  web_admin_health_check_workers: Workers
+  web_admin_health_check_queue: File de jobs
+  web_admin_health_check_claude_usage: Quota Claude
+  web_admin_health_check_issues_error: Issues en erreur
+  web_admin_health_check_database: Base de données
   web_theme_toggle: Changer le thème
   web_sign_out: Se déconnecter
   web_sign_in_title: Connexion
