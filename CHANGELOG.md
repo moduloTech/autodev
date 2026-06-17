@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.21] - 2026-06-17
+
+### Added
+
+- Usage docs now cover AutoSpec end-to-end (shipped at `1.0.0-alpha.18` but undocumented in the guides). **Functional guide** (`/help`) gains a "Rédiger une demande avec Autodev" section — starting a draft (new / GitLab import), shaping it by chat, attachments, choosing a destination (à un dev / à Autodev), and the owner validation flow — and the "Conversations" / "Nouvelle demande" entries are no longer labelled *(à venir)*. **Technical guide** (`/admin/help`) gains an "AutoSpec — rédaction assistée de tickets" section (the `AutospecDraft` AASM states, the §J permission matrix, the `Autospec::*` services, the project-briefing job + columns, and the new tables), plus the `/autospec_drafts*`, `/help`, and `/admin/help` routes in the routes table.
+
+### Changed
+
+- Synced the technical guide with the current code: Mission Control "Recurring tasks" now lists all four recurring jobs (`AutodevPollJob`, `SyncGitlabMembershipsJob`, `RefreshProjectBriefingsJob`, `clear_solid_queue_finished_jobs`); the on-disk primary-DB table list includes the AutoSpec + ActiveStorage tables. Functional guide: the `needs_clarification` status pill now reads "En attente d'une précision de ta part" to match `web.fr.yml`. Both guides' `date:` bumped to 2026-06-17. Four new screenshots added (`11-autospec-list`, `12-autospec-new`, `13-autospec-editor`, `14-autospec-approval`), captured at 1440×900 light/FR.
+
 ## [1.0.0-alpha.20] - 2026-06-17
 
 ### Fixed

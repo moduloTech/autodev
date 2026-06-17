@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-06-12
+date: 2026-06-17
 lang: fr
 documentclass: article
 papersize: a4
@@ -43,11 +43,23 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/projects/:slug` | `ProjectsController#show` | Slug = `group/sub/name` encodé en `group__sub__name` |
 | `/stream` | `StreamController#show` | Server-Sent Events, `ActionController::Live` |
 | `/locale/:lang` | `LocaleController#update` | Set le cookie `locale`, redirige sur `back` |
+| `/autospec_drafts` | `AutospecDraftsController#index` | Brouillons de l'utilisateur courant (AutoSpec) |
+| `/autospec_drafts/new` (+ POST `create`) | `AutospecDraftsController` | Formulaire de création + persistance |
+| `/autospec_drafts/import` (+ POST `create_from_import`) | `AutospecDraftsController` | Backfill depuis une URL d'issue GitLab |
+| `/autospec_drafts/:id` | `AutospecDraftsController#show` | Éditeur + chat + bandeau d'approbation |
+| `/autospec_drafts/:id` (PATCH) | `AutospecDraftsController#update` | Autosave titre/markdown/meta_chips (409 hors `drafting`) |
+| `/autospec_drafts/:id/chat` (POST) | `AutospecDraftsController#chat` | Tour de chat (`Autospec::Chat`), 503 si clé Anthropic absente |
+| `/autospec_drafts/:id/apply_suggestion` (POST) | `AutospecDraftsController#apply_suggestion` | Applique un `tool_use` proposé par le modèle |
+| `/autospec_drafts/:id/{submit_for_approval,retract,approve,reject}` (POST) | `AutospecDraftsController` | Workflow d'approbation (§J) |
+| `/autospec_drafts/:id/autospec_attachments` (POST + DELETE `:id`) | `AutospecAttachmentsController` | Pièces jointes image (ActiveStorage, ≤ 10 Mo) |
+| `/help` | `HelpController#show` | Guide utilisateur rendu (`HelpDoc.render(:functional)`) |
+| `/help/images/:filename` | `HelpController#image` | Captures d'écran des deux guides (partagé) |
 | `/users/auth/entra_id` (+ callback) | Devise | OmniAuth Microsoft 365 |
 | `/users/sign_out` (DELETE) | `Users::SessionsController#destroy` | Sign-out custom — `devise_for :users` n'émet pas la ressource `sessions` (le model `User` n'a pas `:database_authenticatable`), ce contrôleur comble le trou |
 | `/sign_in` | `SignInController#new` | Page d'atterrissage avec form POST CSRF |
 | `/admin/users` | `Admin::UsersController#index` | Audit users + memberships (admin only) |
 | `/admin/health` | `Admin::HealthController#show` | Tableau de bord santé système (admin only) |
+| `/admin/help` | `Admin::HelpController#show` | Ce guide technique rendu (`HelpDoc.render(:technical)`, admin only) |
 | `/admin/jobs` | Mission Control | Inspecteur Solid Queue (admin only) |
 | `/up` | `Rails::HealthController#show` | Liveness (le process répond) — **non authentifié** |
 | `/healthz(.json)` | `MonitoringController#show` | Santé JSON pour sondes externes, HTTP 200/503 — **non authentifié** |
@@ -99,7 +111,7 @@ Sections :
 - **Scheduled jobs** — jobs programmés via `enqueue_at`.
 - **Finished jobs** — historique (5K+ en prod).
 - **Workers** — les workers Solid Queue actifs (forks de `bin/jobs start`).
-- **Recurring tasks** — `AutodevPollJob` programmé selon `config/recurring.yml`.
+- **Recurring tasks** — programmées via `config/recurring.yml` : `AutodevPollJob` (poll, `*/N * * * *`), `SyncGitlabMembershipsJob` (réconciliation memberships, `0 3 * * *`), `RefreshProjectBriefingsJob` (briefing AutoSpec horaire, `0 * * * *`), et en prod `clear_solid_queue_finished_jobs` (purge horaire). Le bloc `development:` est vide — un supervisor local n'auto-poll pas.
 
 À vérifier en cas de souci :
 
@@ -353,6 +365,60 @@ Clone la branche de la MR, récupère les discussions non résolues, en fixe une
 
 \newpage
 
+# AutoSpec — rédaction assistée de tickets
+
+Feature de la phase D (`docs/autospec.md` §A/E/G/J), livrée end-to-end à `v1.0.0-alpha.18`. Permet à un utilisateur de **rédiger un futur ticket en discutant avec Claude**, puis de le router vers un développeur humain ou vers Autodev après validation des owners. Distinct du moteur d'implémentation décrit plus haut — c'est une UI de cadrage en amont.
+
+![Éditeur AutoSpec — le brouillon à gauche, le chat avec Autodev à droite.](screenshots/13-autospec-editor.png)
+
+## Modèle et états
+
+`AutospecDraft` (`app/models/autospec_draft.rb`) monte AASM (`column: :status`, `whiny_transitions: false`). 4 états :
+
+| État | Événement entrant | Sens |
+|---|---|---|
+| `drafting` (initial) | `retract` / `resume_from_rejection` | rédaction / chat / autosave |
+| `pending_approval` | `submit_for_approval` (incrémente `current_iteration`) | en attente du vote des owners |
+| `rejected` | `mark_rejected` | un owner a refusé (motif sur la row `autospec_approvals`) |
+| `submitted` | `finalize` | quorum atteint, issue GitLab créée |
+
+`destination` ∈ {`human`, `autodev`} (nullable jusqu'à la soumission). `meta_chips` est un JSON (`type`, `priority`, `tags`).
+
+## Matrice de permissions (§J)
+
+Prédicats portés par le modèle (appelés par le contrôleur ET les vues pour décider des boutons) :
+
+- `viewable_by?` — admin OU auteur (tout état) OU owner du projet (uniquement `pending_approval`/`submitted`/`rejected`). Un contributeur non-auteur ne voit jamais le brouillon d'autrui.
+- `editable_by?` / `submittable_by?` — auteur + `drafting`.
+- `destination_choosable_by?` — contributeur-auteur → `human` seulement ; owner-auteur → `human` ou `autodev` (le « envoyer à AutoDev » est un verrou produit owner-only).
+- `retractable_by?` — auteur + `pending_approval`.
+- `votable_by?` — owner du projet + `pending_approval` (l'idempotence « déjà voté à cette itération » est vérifiée par `ApprovalRecorder`, pas ici).
+
+`AutospecDraftsController` applique trois before-actions : `authorize_view!` (show), `authorize_voter!` (approve/reject), `authorize_author!` (le reste).
+
+## Services
+
+| Service | Rôle |
+|---|---|
+| `Autospec::Chat` | Tour de chat via le SDK Anthropic. `api_key_configured?` (ENV `ANTHROPIC_API_KEY` > `anthropic.api_key` config > test seam) gate l'UI et renvoie un 503 côté contrôleur si absente. |
+| `Autospec::SystemPrompt` | Construit le prompt système (persona + briefing projet + état du brouillon) avec breakpoints de cache `ephemeral`. |
+| `Autospec::ProjectBriefer` | Clone `staging` (fallback HEAD distant via `git ls-remote --symref`), lance `danger-claude -p <briefing>`, stocke `Project.briefing_text`. |
+| `Autospec::SuggestionApplier` | Applique un `tool_use` du modèle au brouillon (titre/markdown/meta_chips). Erreurs typées → 409 / 404 / 422. |
+| `Autospec::ApprovalRecorder` | Enregistre un vote owner par itération (transactionnel). 1er refus → `mark_rejected!` ; quorum (tous les owners ont approuvé à `current_iteration`) → `GitlabSubmitter#submit!` puis `finalize!`. |
+| `Autospec::GitlabSubmitter` | Upload des pièces jointes, réécrit les URLs `/rails/active_storage/...` → `/uploads/...`, crée l'issue (`labels_todo` envoyé seulement si `destination == 'autodev'`). Stamp `gitlab_issue_iid` / `gitlab_issue_url` / `submitted_at`. |
+| `Autospec::GitlabImporter` | Parse une URL d'issue GitLab, vérifie l'accès (admin OU `contributor_of?`), pré-remplit un brouillon. 4 erreurs typées → clés `flash[:alert]`. |
+| `Autospec::MarkdownRenderer` | Rendu HTML de l'aperçu du brouillon. |
+
+## Briefing projet
+
+Trois colonnes sur `projects` (`db/migrate/20260616000001`) : `briefing_text`, `briefing_generated_at`, `briefing_error`. `RefreshProjectBriefingsJob` (`0 * * * *`, bloc prod uniquement) régénère le briefing sur `staging` — échec par projet non bloquant (le briefing précédent reste, l'erreur est stockée sur `briefing_error`). `SystemPrompt#build` insère le briefing comme 3e bloc `text` (2e breakpoint cache) quand présent, ce qui laisse l'état du brouillon comme seul chunk non caché de l'appel LLM.
+
+## Tables
+
+DB primaire : `autospec_drafts`, `autospec_messages`, `autospec_attachments`, `autospec_approvals`, plus les 3 tables ActiveStorage (`active_storage_blobs`, `active_storage_attachments`, `active_storage_variant_records`) pour les pièces jointes image. Migrations `db/migrate/20260612000001..05`.
+
+\newpage
+
 # Catalogue d'erreurs
 
 | Cas | Comportement |
@@ -388,7 +454,7 @@ Tout est sous `~/.autodev/` (override via `AUTODEV_HOME`) :
 | Path | Rôle |
 |---|---|
 | `~/.autodev/config.yml` | Projets + credentials GitLab |
-| `~/.autodev/autodev.db` | SQLite primaire — `issues`, `activity_events`, `users`, `projects`, `project_app_commands`, `project_memberships`, `sessions`, `schema_migrations`, `ar_internal_metadata`, `audits` |
+| `~/.autodev/autodev.db` | SQLite primaire — `issues`, `activity_events`, `users`, `projects`, `project_app_commands`, `project_memberships`, `sessions`, `schema_migrations`, `ar_internal_metadata`, `audits`, les tables AutoSpec (`autospec_drafts`, `autospec_messages`, `autospec_attachments`, `autospec_approvals`) et ActiveStorage (`active_storage_blobs`, `active_storage_attachments`, `active_storage_variant_records`) |
 | `~/.autodev/autodev_queue.db` | SQLite Solid Queue — 10 tables CRUD-heavy isolées du WAL primaire |
 | `~/.autodev/secret_key_base` | Secret Devise + session (généré au premier boot, 0600) |
 | `~/.autodev/log/production.log` | Log Rails |
