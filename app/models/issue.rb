@@ -18,7 +18,11 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # callers can pass Time.current / N.seconds.from_now and AR emits the same
   # 'YYYY-MM-DD HH:MM:SS' format that comparisons like `next_retry_at <=
   # datetime('now')` still understand.
-  %i[started_at finished_at next_retry_at clarification_requested_at pipeline_poll_since].each do |col|
+  # `created_at` is in this list for the same reason: it's a TEXT column too,
+  # so without the override AR would store `Time#to_s` ("… UTC") on the next
+  # AR-written Issue, breaking any `date(created_at)`/`datetime(created_at)`
+  # SQL the way it broke the activity_events sparkline.
+  %i[started_at finished_at next_retry_at clarification_requested_at pipeline_poll_since created_at].each do |col|
     attribute col, :datetime
   end
 

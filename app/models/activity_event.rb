@@ -13,6 +13,16 @@ class ActivityEvent < ApplicationRecord
 
   belongs_to :issue, optional: true
 
+  # The legacy Sequel migration created `created_at` as a TEXT column (the
+  # Rails migration's `create_table … if_not_exists: true` is a no-op on the
+  # pre-existing prod table), so AR otherwise treats it as :string and stores
+  # `Time#to_s` — i.e. "2026-06-11 11:13:03 UTC", with a literal " UTC" that
+  # SQLite's `date()` can't parse (returns NULL). That silently zeroed the
+  # dashboard "Activité de la semaine" sparkline. Declaring it :datetime makes
+  # AR emit the suffix-free 'YYYY-MM-DD HH:MM:SS' format `date()` understands —
+  # same fix the Issue model already applies to its timestamp columns.
+  attribute :created_at, :datetime
+
   after_create_commit :broadcast_to_event_bus
 
   def payload

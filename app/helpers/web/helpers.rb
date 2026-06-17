@@ -137,10 +137,18 @@ module Web
 
     # Activity counts per day for the past 7 days, oldest first.
     # Used by the dashboard sparkline.
+    #
+    # The `replace(created_at, ' UTC', '')` is defence-in-depth: AR used to
+    # store a " UTC"-suffixed string on the TEXT `created_at` column, and
+    # SQLite's `date()` returns NULL on that format — which silently bucketed
+    # every recent row under a NULL key and zeroed the whole sparkline. The
+    # models now write the suffix-free format and a migration backfilled the
+    # old rows, but normalizing here too means a stray suffixed row can never
+    # vanish from the chart again.
     def weekly_activity_counts
       since = (Date.today - 6).to_s
       rows = activity_events_dataset.where('created_at >= ?', since)
-                                    .group('date(created_at)')
+                                    .group("date(replace(created_at, ' UTC', ''))")
                                     .count
       (0..6).map { |offset| rows[(Date.today - 6 + offset).to_s] || 0 }
     end

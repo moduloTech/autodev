@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Dashboard "Activité de la semaine" sparkline silently showed all-zero bars in production despite thousands of daily activity events. Root cause: `activity_events.created_at` (and `issues.created_at`) are TEXT columns inherited from the pre-rails Sequel schema — the Rails migration's `create_table … if_not_exists: true` is a no-op on the existing prod tables, so the column type stayed TEXT. Because neither model declared `attribute :created_at, :datetime`, ActiveRecord treated `created_at` as a `:string` and serialized the timestamp via `Time#to_s`, storing `"2026-06-11 11:13:03 UTC"` — with a literal ` UTC` suffix. SQLite's `date()` returns NULL on that format, so `weekly_activity_counts`' `GROUP BY date(created_at)` collapsed every recent row under a NULL bucket and the per-day lookup `rows["2026-06-17"]` always missed → `[0,0,0,0,0,0,0]`. (Pre-rails Sequel-written rows were stored without the suffix, so the chart degraded only as AR-written rows accumulated.) Three-part fix: (1) `ActivityEvent` and `Issue` now declare `attribute :created_at, :datetime` so AR emits the suffix-free `'YYYY-MM-DD HH:MM:SS'` format `date()` understands — `Issue` already did this for its other timestamp columns but omitted `created_at` (a latent identical bug on the next AR-written issue). (2) New migration `20260617000001_normalize_created_at_utc_suffix` backfills existing rows (`UPDATE … SET created_at = replace(created_at, ' UTC', '') WHERE created_at LIKE '% UTC'`) on both tables, idempotently. (3) `weekly_activity_counts` now groups on `date(replace(created_at, ' UTC', ''))` as defence-in-depth so a stray suffixed row can never silently vanish from the chart again. The method was previously untested; new `test/weekly_activity_counts_test.rb` covers the bucketing (oldest-first, today rightmost), the 7-day window boundary, the empty case, and the ` UTC`-suffix regression directly (4 tests).
+
 ## [1.0.0-alpha.18] - 2026-06-16
 
 Phase D (AutoSpec) shipped end-to-end + project briefing addon.
