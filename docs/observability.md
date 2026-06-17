@@ -68,10 +68,12 @@ La colonne `activity_events.issue_id` est nullable depuis la migration `20260617
 | Endpoint | Rôle | Code HTTP |
 |---|---|---|
 | `GET /up` | Liveness pure (le process Rails répond) — `Rails::HealthController` | 200 |
-| `GET /healthz(.json)` | `HealthReport` complet en JSON | **200 si `ok`, sinon 503** |
-| `GET /healthz/:check` | Un seul composant (`poller`, `workers`, `queue`, `claude_usage`, `issues_error`, `database`) | 200 / 503 |
+| `GET /healthz(.json)` | `HealthReport` complet en JSON | **503 seulement si `down`** ; `ok` **et** `warn` → 200 |
+| `GET /healthz/:check` | Un seul composant (`poller`, `workers`, `queue`, `claude_usage`, `issues_error`, `database`) | idem (503 si `down`) |
 
 Les sondes alertent sur le **code HTTP** ; le corps JSON sert au diagnostic.
+
+**503 = vraie panne uniquement** (`down` : poller périmé, 0 worker, base injoignable). Un `warn` (jobs en échec, issues en erreur) est un état *dégradé mais debout* et renvoie **200** — sinon une sonde uptime sonnerait en permanence sur des conditions opérationnelles normales (p. ex. des tickets en erreur). Pour alerter aussi sur `warn`, brancher une sonde secondaire (basse sévérité) sur le corps JSON — voir « Sondes » plus bas.
 
 ### Token optionnel
 
@@ -93,9 +95,12 @@ curl -s -H "Authorization: Bearer $AUTODEV_HEALTH_TOKEN" https://autodev.interne
 curl -i https://autodev.interne/healthz/poller
 ```
 
-**BetterStack** : créer un *Heartbeat/HTTP monitor* sur `/healthz` (ou `/healthz/poller`), alerte si le code ≠ 200. Pour un endpoint protégé, ajouter le header `Authorization`.
+**BetterStack** :
 
-**Datadog** : *Synthetic HTTP test* sur `/healthz`, assertion `status is 200`. Optionnellement, parser le JSON et alerter sur `checks.poller.status`.
+- *Monitor critique (paging)* : HTTP monitor sur `/healthz`, type « expect status code 200 ». Ne sonne que sur une **vraie panne** (`down`), pas sur un `warn`. Ajouter le header `Authorization: Bearer <token>` si `monitoring.token` est posé. `check_frequency` 180 s, `confirmation_period` 120 s (anti-flapping).
+- *Monitor basse sévérité (optionnel, email)* : HTTP monitor sur `/healthz` avec `required_keyword` = `"status":"ok"` → alerte dès que le corps n'est plus `ok` (donc aussi sur `warn` : jobs en échec, issues en erreur).
+
+**Datadog** : *Synthetic HTTP test* sur `/healthz`. Assertion `status is 200` pour le paging (down only) ; pour un check plus strict, ajouter une assertion JSONPath `$.status is "ok"` (warn + down) sur un test à seuil d'alerte plus bas.
 
 ## Page admin `/admin/health`
 

@@ -29,10 +29,12 @@ class MonitoringController < ApplicationController
 
   private
 
-  # 200 when healthy, 503 otherwise — external probes alert on the status code,
-  # the JSON body carries the per-component breakdown for debugging.
+  # 503 only on a real outage (`down`: poller stale, no worker, DB unreachable);
+  # `ok` AND `warn` both return 200. `warn` is a degraded-but-up condition
+  # (failed jobs, issues in error) and must not page an uptime probe — the JSON
+  # body still carries the warn so a secondary check can alert on it.
   def render_report(report)
-    code = report[:status] == :ok ? :ok : :service_unavailable
+    code = report[:status] == :down ? :service_unavailable : :ok
     render json: report, status: code
   end
 

@@ -11,6 +11,8 @@ class MonitoringControllerTest < ActionDispatch::IntegrationTest
                 checks: { poller: { status: :ok, detail: 'fresh', meta: {} } } }.freeze
   DOWN_REPORT = { status: :down, generated_at: '2026-06-17T00:00:00Z',
                   checks: { poller: { status: :down, detail: 'stale', meta: {} } } }.freeze
+  WARN_REPORT = { status: :warn, generated_at: '2026-06-17T00:00:00Z',
+                  checks: { issues_error: { status: :warn, detail: '6 in error', meta: {} } } }.freeze
 
   def with_report(report, &)
     fake = Object.new
@@ -36,11 +38,18 @@ class MonitoringControllerTest < ActionDispatch::IntegrationTest
     assert_equal 'ok', JSON.parse(response.body)['status']
   end
 
-  test 'healthz returns 503 when degraded' do
+  test 'healthz returns 503 only on a real outage (down)' do
     with_report(DOWN_REPORT) { get '/healthz' }
 
     assert_response :service_unavailable
     assert_equal 'down', JSON.parse(response.body)['status']
+  end
+
+  test 'healthz returns 200 on warn (degraded but up — no uptime page)' do
+    with_report(WARN_REPORT) { get '/healthz' }
+
+    assert_response :ok
+    assert_equal 'warn', JSON.parse(response.body)['status']
   end
 
   test 'healthz is reachable anonymously (not redirected to SSO)' do

@@ -125,7 +125,7 @@ Une carte par composant, avec une pastille `OK` / `Attention` / `Hors service` :
 - **Issues en erreur** — nombre d'issues `error` / `post_completion_error` (lien vers `/errors`).
 - **Base de données** — primaire + queue joignables.
 
-Les mêmes données sont servies en JSON, **sans authentification**, sur `/healthz` (HTTP 200 si sain, 503 sinon) pour brancher des sondes Datadog / BetterStack. Référence complète (endpoints, heartbeat, configuration, exemples de sondes, TODO) : **`docs/observability.md`**.
+Les mêmes données sont servies en JSON sur `/healthz` (HTTP 503 uniquement si `down` — vraie panne ; `ok` et `warn` renvoient 200) pour brancher des sondes Datadog / BetterStack. Référence complète (endpoints, heartbeat, configuration, exemples de sondes, TODO) : **`docs/observability.md`**.
 
 \newpage
 

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.20] - 2026-06-17
+
+### Fixed
+
+- `/healthz` now returns **503 only on a real outage** (`down`: poller stale, no worker alive, database unreachable). A `warn` status (failed jobs, issues in error) now returns **200** — it's a degraded-but-up condition, and mapping it to 503 made an uptime probe fire permanently on routine operational states (e.g. tickets sitting in `error`). The JSON body still carries the `warn` status so a secondary, lower-severity probe can alert on it (e.g. BetterStack `required_keyword: "status":"ok"`). `HealthReport` is unchanged; only the HTTP status mapping in `MonitoringController` changed. Docs updated (`docs/observability.md`, technical guide).
+
 ## [1.0.0-alpha.19] - 2026-06-17
 
 ### Added
