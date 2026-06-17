@@ -6,7 +6,9 @@ require_relative 'autodev_test_helper'
 # the dashboard "Activité de la semaine" sparkline. In production it silently
 # returned [0,0,0,0,0,0,0] despite thousands of events, because AR stored
 # `created_at` as "2026-06-11 11:13:03 UTC" and SQLite's `date()` returns NULL
-# on that format, collapsing every row under a NULL bucket.
+# on that format, collapsing every row under a NULL bucket. The helper now
+# range-counts each local day instead of relying on date(), and buckets in the
+# configured display zone.
 class WeeklyActivityCountsTest < Minitest::Test
   include DatabaseTestHelper
 
@@ -35,9 +37,11 @@ class WeeklyActivityCountsTest < Minitest::Test
     assert_equal [0, 0, 0, 0, 0, 0, 0], @helper.weekly_activity_counts
   end
 
+  # Default zone in the test env is UTC, so the inserted noon-UTC timestamps
+  # bucket on the UTC calendar day matching Time.zone.today.
   def test_buckets_oldest_first_with_today_rightmost
-    2.times { insert_event("#{Date.today} 12:00:00") }
-    insert_event("#{Date.today - 3} 12:00:00")
+    2.times { insert_event("#{Time.zone.today} 12:00:00") }
+    insert_event("#{Time.zone.today - 3} 12:00:00")
 
     counts = @helper.weekly_activity_counts
 
@@ -47,17 +51,33 @@ class WeeklyActivityCountsTest < Minitest::Test
   end
 
   def test_events_older_than_the_window_are_excluded
-    insert_event("#{Date.today - 10} 12:00:00")
+    insert_event("#{Time.zone.today - 10} 12:00:00")
 
     assert_equal [0, 0, 0, 0, 0, 0, 0], @helper.weekly_activity_counts
   end
 
   # The actual prod bug: a " UTC"-suffixed timestamp must still be counted.
-  # date('… UTC') is NULL in SQLite; the helper strips the suffix first.
+  # date('… UTC') is NULL in SQLite; the range bucketing sidesteps date().
   def test_utc_suffixed_rows_are_still_counted
-    insert_event("#{Date.today} 11:13:03 UTC")
+    insert_event("#{Time.zone.today} 11:13:03 UTC")
 
     assert_equal 1, @helper.weekly_activity_counts.last,
                  'a " UTC"-suffixed row must still land in today\'s bucket'
+  end
+
+  # An event at 00:30 Europe/Paris is stored ~22:30/23:30 the previous UTC day.
+  # UTC-day bucketing would file it under yesterday; the zone-aware helper must
+  # place it in today's (rightmost) bar.
+  def test_buckets_by_local_day_not_utc_day
+    paris = ActiveSupport::TimeZone['Europe/Paris']
+    utc_string = paris.now.change(hour: 0, min: 30, sec: 0).utc.strftime('%F %T')
+    insert_event(utc_string)
+
+    @helper.stub(:app_config, { 'web' => { 'timezone' => 'Europe/Paris' } }) do
+      counts = @helper.weekly_activity_counts
+
+      assert_equal 1, counts.last,  'today (Paris) is the rightmost bucket'
+      assert_equal 0, counts[5],    'must not leak into yesterday'
+    end
   end
 end

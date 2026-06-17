@@ -135,22 +135,54 @@ module Web
         delivered_week: delivered_week }
     end
 
-    # Activity counts per day for the past 7 days, oldest first.
-    # Used by the dashboard sparkline.
+    # Activity counts per day for the past 7 days, oldest first — the data
+    # behind the dashboard sparkline.
     #
-    # The `replace(created_at, ' UTC', '')` is defence-in-depth: AR used to
-    # store a " UTC"-suffixed string on the TEXT `created_at` column, and
-    # SQLite's `date()` returns NULL on that format — which silently bucketed
-    # every recent row under a NULL key and zeroed the whole sparkline. The
-    # models now write the suffix-free format and a migration backfilled the
-    # old rows, but normalizing here too means a stray suffixed row can never
-    # vanish from the chart again.
+    # Buckets by *local* calendar day in the configured display zone (see
+    # #activity_time_zone), not by UTC day: created_at is stored in UTC, so an
+    # event at 00:30 Paris time belongs to today's bar, not yesterday's.
+    #
+    # The 7 day boundaries are computed in Ruby (DST-correct via
+    # ActiveSupport::TimeZone) and turned into UTC instants; a single
+    # SUM(CASE …) range-counts each bucket. We deliberately avoid SQLite's
+    # date(): a per-row UTC→local conversion in SQL can't follow DST, and
+    # date() also returns NULL on the legacy " UTC"-suffixed rows. Comparing
+    # the TEXT created_at against 'YYYY-MM-DD HH:MM:SS' UTC bounds is a correct
+    # lexical range test for the clean, the fractional, and the suffixed format
+    # alike (the date+time prefix dominates the ordering).
     def weekly_activity_counts
-      since = (Date.today - 6).to_s
-      rows = activity_events_dataset.where('created_at >= ?', since)
-                                    .group("date(replace(created_at, ' UTC', ''))")
-                                    .count
-      (0..6).map { |offset| rows[(Date.today - 6 + offset).to_s] || 0 }
+      bounds = weekly_activity_day_bounds
+      row = activity_events_dataset
+            .where('created_at >= ? AND created_at < ?', bounds.first, bounds.last)
+            .pick(*weekly_activity_buckets(bounds))
+      Array(row).map(&:to_i)
+    end
+
+    # The 8 UTC day boundaries ('YYYY-MM-DD HH:MM:SS') for the 7-day window,
+    # local-midnight in #activity_time_zone converted to the UTC instants
+    # actually stored in created_at. bounds[i]..bounds[i+1] is local day i.
+    def weekly_activity_day_bounds
+      zone = activity_time_zone
+      (0..7).map { |offset| (zone.today - 6 + offset).in_time_zone(zone).utc.strftime('%F %T') }
+    end
+
+    # One SUM(CASE …) aggregate per day, range-counting created_at into the
+    # bucket whose [start, next_start) UTC window contains it.
+    def weekly_activity_buckets(bounds)
+      conn = ActiveRecord::Base.connection
+      (0..6).map do |i|
+        Arel.sql("SUM(CASE WHEN created_at >= #{conn.quote(bounds[i])} " \
+                 "AND created_at < #{conn.quote(bounds[i + 1])} THEN 1 ELSE 0 END)")
+      end
+    end
+
+    # Display zone for day-bucketing the activity sparkline: the `web.timezone`
+    # config key if set (e.g. "Europe/Paris"), else Rails' Time.zone, else UTC.
+    # Lets the operator align the chart to their working day without changing
+    # how AR stores timestamps (which stays UTC).
+    def activity_time_zone
+      name = app_config.dig('web', 'timezone')
+      (name && ActiveSupport::TimeZone[name]) || Time.zone || ActiveSupport::TimeZone['UTC']
     end
 
     def gitlab_issue_url(issue)
