@@ -6,8 +6,9 @@ module Web
     # Same shell as the rest of the app; chat panel from screen-issue-detail.jsx
     # is deliberately out of scope.
     class IssueShow < Base # rubocop:disable Metrics/ClassLength
-      def initialize(issue:, issue_model:, events:, kpis:, **)
-        super(**)
+      def initialize(issue:, issue_model:, events:, kpis:, **opts)
+        @can_close = opts.delete(:can_close) || false
+        super(**opts)
         @issue = issue
         @issue_model = issue_model
         @events = events
@@ -143,8 +144,24 @@ module Web
         render(Components::Card.new) do
           h3(class: 'sidecard-title') { t_web(:web_issue_actions) }
           div(style: 'display: flex; flex-direction: column; gap: 10px;') do
+            render_close_form
             render_reset_form
             render_transition_section
+          end
+        end
+      end
+
+      # Manual close — only for a project collaborator (the controller passes
+      # can_close) and only when the ticket isn't already closed.
+      def render_close_form
+        return unless @can_close && @issue[:status] != 'closed'
+
+        form(method: 'post', action: "/issues/#{@issue[:id]}/close",
+             data: { confirm: t_web(:web_issue_confirm_close) }) do
+          csrf_input_tag
+          render Components::Button.new(kind: :secondary, size: :md, full: true, type: 'submit',
+                                        icon: Components::Icon.new(name: 'x', size: 13)) do
+            t_web(:web_issue_close)
           end
         end
       end

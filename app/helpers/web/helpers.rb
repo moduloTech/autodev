@@ -360,8 +360,12 @@ module Web
       text.to_s.gsub(/:([a-z_]+):/) { |match| EMOJI_SHORTCODES[Regexp.last_match(1)] || match }
     end
 
+    # AASM events fireable from the issue's current state, minus `:close` —
+    # closing has its own membership-gated action (IssuesController#close) and
+    # a dedicated button, so it must not appear in the generic transition
+    # dropdown (nor be accepted by IssuesController#transition).
     def permitted_events_for(issue)
-      issue.aasm.events(permitted: true).map(&:name)
+      issue.aasm.events(permitted: true).map(&:name) - [:close]
     end
 
     def screenshot_dir_for(issue)

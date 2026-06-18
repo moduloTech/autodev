@@ -49,7 +49,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     state :creating_mr, :reviewing, :checking_pipeline
     state :fixing_discussions, :fixing_pipeline, :running_post_completion
     state :answering_question, :needs_clarification
-    state :done, :error
+    state :done, :error, :closed
 
     after_all_transitions :persist_status_change!, :emit_activity_event!, :emit_audit_log!
 
@@ -109,6 +109,20 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
     event(:retry_processing) { transitions from: :error, to: :pending }
     event(:retry_pipeline)   { transitions from: :error, to: :checking_pipeline }
+
+    # === Manual close ===
+    #
+    # A project collaborator can manually close a ticket from any state
+    # (IssuesController#close, gated on project membership). `closed` is
+    # terminal — the poller skips any status != 'pending'. Reopen via the
+    # manual #reset action, which forces the row back to `pending`.
+    event :close do
+      transitions from: %i[pending cloning checking_spec implementing committing
+                           pushing creating_mr reviewing checking_pipeline
+                           fixing_discussions fixing_pipeline running_post_completion
+                           answering_question needs_clarification done error],
+                  to: :closed
+    end
   end
 
   # -- Guard methods (read the instance flags set by the workflow) --

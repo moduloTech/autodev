@@ -39,6 +39,7 @@ module Dashboard
     when 'needs_clarification'  then 'En attente de clarification'
     when 'done'                 then 'Terminée'
     when 'error'                then 'Erreur'
+    when 'closed'               then 'Clôturée'
     else status
     end
   end
@@ -86,7 +87,7 @@ module Dashboard
 
   def fetch_issues(config)
     scope = ::Issue.order(id: :desc)
-    scope = scope.where.not(status: 'done') unless config['status_all']
+    scope = scope.where.not(status: %w[done closed]) unless config['status_all']
     scope.to_a
   end
 

@@ -6,7 +6,7 @@ module Web
   module IssuesFilter
     PER_PAGE_OPTIONS = [20, 50, 100].freeze
     DEFAULT_PER_PAGE = 50
-    TABS = %w[active pending errors waiting done all].freeze
+    TABS = %w[active pending errors waiting done closed all].freeze
 
     def filter_issues(params, base = issues_dataset)
       ds = apply_tab(base, tab_param(params))
@@ -28,6 +28,7 @@ module Web
       when 'errors'  then dataset.where(status: 'error')
       when 'waiting' then dataset.where(status: 'needs_clarification')
       when 'done'    then dataset.where(status: 'done')
+      when 'closed'  then dataset.where(status: 'closed')
       else dataset
       end
     end
@@ -42,6 +43,7 @@ module Web
         errors: ds.where(status: 'error').count,
         waiting: ds.where(status: 'needs_clarification').count,
         done: ds.where(status: 'done').count,
+        closed: ds.where(status: 'closed').count,
         all: ds.count
       }
     end

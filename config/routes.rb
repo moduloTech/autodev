@@ -43,6 +43,9 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   get  '/issues/:id',            to: 'issues#show',       constraints: { id: /\d+/ }
   post '/issues/:id/reset',      to: 'issues#reset',      constraints: { id: /\d+/ }
   post '/issues/:id/transition', to: 'issues#transition', constraints: { id: /\d+/ }
+  # /issues/:id/close → IssuesController#close (manual close by a project
+  # collaborator; AASM `close` event, gated on project membership).
+  post '/issues/:id/close',      to: 'issues#close',      constraints: { id: /\d+/ }
   get  '/errors',                to: 'errors#index'
   get  '/projects',              to: 'projects#index'
   get  '/projects/:slug',        to: 'projects#show'

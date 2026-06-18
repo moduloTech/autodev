@@ -118,6 +118,7 @@ en:
   web_status_done: Delivered
   web_status_done_attention: Delivered (needs a check)
   web_status_error: Blocked — needs your attention
+  web_status_closed: Closed
   web_dashboard_title: autodev — Dashboard
   web_dashboard_counters: Counters
   web_dashboard_active_issues: Active issues (%{count})
@@ -145,6 +146,8 @@ en:
   web_issue_actions: Actions
   web_issue_reset: Reset
   web_issue_confirm_reset: Restart this request from the beginning?
+  web_issue_close: Close
+  web_issue_confirm_close: Close this ticket? It will move to the "Closed" tab.
   web_confirm_title: Confirm action
   web_confirm_ok: Confirm
   web_confirm_cancel: Cancel
@@ -174,6 +177,7 @@ en:
   web_event_clarification_received: Clarification received
   web_event_reenter: Resume from delivery
   web_event_reenter_to_check_pipeline: Resume at test stage
+  web_event_close: Manual close
   web_event_mark_failed: Mark as blocked
   web_event_retry_processing: Retry from start
   web_event_retry_pipeline: Retry tests
@@ -260,6 +264,7 @@ en:
   web_tab_errors: Failures
   web_tab_waiting: Awaiting answer
   web_tab_done: Delivered
+  web_tab_closed: Closed
   web_tab_all: All
   web_issues_col_title: Title
   web_issues_col_status: Status

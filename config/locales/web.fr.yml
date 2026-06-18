@@ -118,6 +118,7 @@ fr:
   web_status_done: Livrée
   web_status_done_attention: Livrée (à vérifier)
   web_status_error: Bloquée, intervention nécessaire
+  web_status_closed: Clôturée
   web_dashboard_title: autodev — Dashboard
   web_dashboard_counters: Compteurs
   web_dashboard_active_issues: Issues actives (%{count})
@@ -145,6 +146,8 @@ fr:
   web_issue_actions: Actions
   web_issue_reset: Réinitialiser
   web_issue_confirm_reset: Relancer cette demande depuis le début ?
+  web_issue_close: Clôturer
+  web_issue_confirm_close: Clôturer ce ticket ? Il passera dans l'onglet « Clôs ».
   web_confirm_title: Confirmer l'action
   web_confirm_ok: Confirmer
   web_confirm_cancel: Annuler
@@ -174,6 +177,7 @@ fr:
   web_event_clarification_received: Précision reçue
   web_event_reenter: Reprendre depuis la livraison
   web_event_reenter_to_check_pipeline: Reprendre au stade des tests
+  web_event_close: Clôture manuelle
   web_event_mark_failed: Marquer comme bloquée
   web_event_retry_processing: Réessayer depuis le début
   web_event_retry_pipeline: Réessayer les tests
@@ -260,6 +264,7 @@ fr:
   web_tab_errors: Échecs
   web_tab_waiting: Question en attente
   web_tab_done: Livrés
+  web_tab_closed: Clôs
   web_tab_all: Tous
   web_issues_col_title: Titre
   web_issues_col_status: Statut

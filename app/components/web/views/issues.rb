@@ -11,6 +11,7 @@ module Web
         { id: 'errors',  label_key: :web_tab_errors,  count_key: :errors,  tone: :err },
         { id: 'waiting', label_key: :web_tab_waiting, count_key: :waiting, tone: :warn },
         { id: 'done',    label_key: :web_tab_done,    count_key: :done },
+        { id: 'closed',  label_key: :web_tab_closed,  count_key: :closed },
         { id: 'all',     label_key: :web_tab_all,     count_key: :all }
       ].freeze
       private_constant :TABS

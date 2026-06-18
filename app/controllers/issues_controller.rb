@@ -93,7 +93,44 @@ class IssuesController < ApplicationController
     redirect_to "/issues/#{issue.id}"
   end
 
+  # POST /issues/:id/close
+  #
+  # Manual close by a project collaborator (the issue lands in the "Clôs"
+  # tab). Distinct from #transition: gated on project membership rather than
+  # just authentication, so only someone who works on the project can close
+  # its tickets. Fires the AASM `close` event (terminal state; the poller
+  # skips any status != 'pending'), then clears the needs_attention flag so a
+  # closed ticket no longer shows under "À surveiller". Reopen via #reset.
+  def close
+    issue = find_issue(params[:id])
+    return head :not_found unless issue
+    return head :forbidden unless can_close?(issue)
+    return redirect_to "/issues/#{issue.id}" unless issue.may_close?
+
+    close_issue!(issue)
+    redirect_to "/issues/#{issue.id}"
+  end
+
   private
+
+  def close_issue!(issue)
+    issue._audit_actor = current_user
+    issue._audit_origin = :manual
+    issue.close!
+    Issue.where(id: issue.id).update_all(finished_at: Time.current,
+                                         needs_attention: false, attention_reason: nil)
+  end
+
+  # A ticket can be closed by an admin or by a collaborator (contributor or
+  # owner) of its project. Returns false when the project isn't in the table
+  # or the user has no membership on it.
+  def can_close?(issue)
+    return false unless current_user
+    return true if current_user.admin?
+
+    project = Project.find_by(gitlab_path: issue.project_path)
+    project.present? && current_user.contributor_of?(project)
+  end
 
   def render_issues_index
     per_page = per_page_for(params)
@@ -121,6 +158,7 @@ class IssuesController < ApplicationController
       issue_model: issue_model,
       events: events_for(issue_model),
       kpis: dashboard_kpis,
+      can_close: can_close?(issue_model),
       **view_kwargs
     ).call
   end

@@ -30,7 +30,8 @@ module Web
           # Synthetic status (not an AASM state): a `done` issue that gave up
           # with a manual-intervention alert. Surfaced by Web::I18nHelpers#issue_status.
           'done_attention' => { label_key: :web_status_done_attention, tone: :warn },
-          'error' => { label_key: :web_status_error, tone: :err }
+          'error' => { label_key: :web_status_error, tone: :err },
+          'closed' => { label_key: :web_status_closed, tone: :neutral }
         }.freeze
 
         TONE_VARS = {
