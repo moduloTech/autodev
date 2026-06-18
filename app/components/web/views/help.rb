@@ -70,11 +70,18 @@ module Web
         )
       end
 
+      # Both help pages show the running Autodev version in the topbar's
+      # right-hand slot. "Autodev v<x>" is a technical token (brand + version),
+      # so it is not localized.
       def render_topbar
         render Components::Topbar.new(
           title: t_web(@title_key),
           subtitle: t_web(@subtitle_key)
-        )
+        ) do
+          span(style: 'font-size: 12px; color: var(--text-muted); white-space: nowrap;') do
+            plain "Autodev v#{::Autodev::VERSION}"
+          end
+        end
       end
     end
   end

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Both in-app help pages (`/help` functional + `/admin/help` technical) now show the running Autodev version (`Autodev::VERSION`) as a muted `Autodev v…` badge in the topbar's right-hand slot — rendered once in the shared `Web::Views::Help#render_topbar`, so both pages get it. Not localized (brand + version is a technical token). New test: `test/help_version_test.rb`.
+
 - **Manual close** — a project collaborator can now close a ticket in Autodev, and it moves to a new **"Clôs"** tab. New terminal AASM state `closed` + `close` event (fireable from any non-closed state), a membership-gated `POST /issues/:id/close` action (`IssuesController#close` → admin or `contributor_of?` the issue's project; outsiders can't see the issue so they get a 404), and a "Clôturer" button on the issue detail page (shown only to those who can close, hidden once closed). Closing clears the `needs_attention` flag and stamps `finished_at`; reopen via the existing reset action (→ `pending`). The poller already skips any status != `pending`, so a closed ticket is never re-picked even if its GitLab label/assignment is untouched — by design, close is Autodev-side only (no GitLab mutation). The `close` event is excluded from the generic "force transition" dropdown (`permitted_events_for`) so closing only happens through the gated button. New "Clôs" tab in the issues list (`IssuesFilter` TABS / `apply_tab` / `tab_counts`), a neutral `closed` status pill, CLI `--status` hides closed issues unless `--all`, and i18n strings in both locales. New tests: `test/issue_close_test.rb` (AASM + filter + dropdown exclusion) and `test/controllers/issues_controller_close_test.rb` (membership gating, needs_attention clearing, audit log).
 
 ### Fixed
