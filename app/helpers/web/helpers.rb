@@ -123,6 +123,51 @@ module Web
       Array(app_config['projects']).find { |p| p['path'] == project_path } || {}
     end
 
+    # Extracts the GitLab label triplet (`label_todo`/`label_doing`/`label_done`)
+    # from a project's config block, for injection into the `/help` guide.
+    # `labels_todo` is a list (multiple trigger labels) — we surface the
+    # canonical first one. Blank/missing keys are dropped so HelpDoc falls
+    # back to the inline defaults.
+    def help_labels_for(cfg)
+      {
+        'label_todo' => Array(cfg['labels_todo']).first,
+        'label_doing' => cfg['label_doing'],
+        'label_done' => cfg['label_done']
+      }.compact
+    end
+
+    # Resolves which label names the `/help` guide should display (B+C):
+    # - no configured project visible to the user  → {} (inline defaults)
+    # - all visible projects share one label set    → that set, no selector
+    # - sets differ                                  → selected project's set
+    #   plus a `selector` payload so the view can offer a project dropdown.
+    # `selected_path` (from `params[:project]`) is honored only when it maps
+    # to a project the user can see; otherwise the first one wins — so an
+    # arbitrary `?project=` value can't surface a hidden project's labels.
+    def help_label_resolution(selected_path = nil)
+      cfgs = visible_project_paths.map { |p| project_for(p) }.reject(&:empty?)
+      distinct = cfgs.map { |c| help_labels_for(c) }.uniq
+
+      return { labels: {}, selector: nil } if distinct.empty?
+      return { labels: distinct.first, selector: nil } if distinct.size == 1
+
+      help_label_selection(cfgs, selected_path)
+    end
+
+    # Builds the resolution payload for the ambiguous case (projects with
+    # differing label sets): the chosen project's labels plus a selector
+    # descriptor for the dropdown.
+    def help_label_selection(cfgs, selected_path)
+      chosen = cfgs.find { |c| c['path'] == selected_path } || cfgs.first
+      {
+        labels: help_labels_for(chosen),
+        selector: {
+          projects: cfgs.map { |c| { path: c['path'], todo: Array(c['labels_todo']).first } },
+          selected: chosen['path']
+        }
+      }
+    end
+
     # Counts used by the dashboard KPI cards.
     def dashboard_kpis
       counts = issues_dataset.group(:status).count

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The functional guide (`/help`) now shows each project's **real GitLab label names** instead of the hardcoded French descriptions *à traiter* / *en cours* / *livré*, which confused users whose projects use other label names (e.g. GitLab's default *To Do*). The guide's label references became `{{label_todo|à traiter}}`-style tokens that `HelpDoc.render(:functional, labels:)` substitutes with the configured `labels_todo`/`label_doing`/`label_done` values (falling back to the inline default when a project leaves them unset — the default also keeps the raw markdown readable on disk). Which project's labels are shown follows a B+C rule (`Web::Helpers#help_label_resolution`): nothing configured → defaults; all of the user's visible projects share one label set → that set, no UI; sets differ → the selected project's labels plus a project dropdown on the page (`web_help_project_selector`, GET `?project=`, validated against `visible_project_paths` so an arbitrary value can't surface a hidden project's labels). The technical guide (`/admin/help`) and the on-disk PDFs are unchanged — they already presented the names as configurable config keys. New tests: `test/help_doc_test.rb` (token substitution + technical-doc-untouched), `test/help_label_resolution_test.rb` (the three B+C branches + selected-path validation).
+
 ## [1.0.0-alpha.21] - 2026-06-17
 
 ### Added

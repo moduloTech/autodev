@@ -30,22 +30,44 @@ class HelpDoc
   # Anything not matching this is treated as a 404.
   ALLOWED_IMAGE_NAME = /\A[\w-]+\.png\z/
 
-  def self.render(kind)
-    new(kind).render
+  # Project-aware label tokens embedded in the functional guide:
+  #   {{label_todo|à traiter}}  {{label_doing|en cours}}  {{label_done|livré}}
+  # The web render swaps each token for the project's configured label name
+  # (passed via `labels:`); when no value is supplied the inline default
+  # (after `|`) is used — that default also keeps the raw markdown readable
+  # on disk / GitHub. Only the functional doc carries these tokens; the
+  # technical doc renders verbatim.
+  LABEL_TOKEN = /\{\{(label_todo|label_doing|label_done)\|([^}]*)\}\}/
+
+  def self.render(kind, labels: {})
+    new(kind, labels: labels).render
   end
 
-  def initialize(kind)
+  def initialize(kind, labels: {})
     @kind = kind.to_sym
+    @labels = labels || {}
     @source_path = SOURCES.fetch(@kind) { raise ArgumentError, "unknown help kind: #{kind.inspect}" }
   end
 
   def render
     markdown = strip_pandoc_only(File.read(@source_path))
     markdown = rewrite_image_paths(markdown)
+    markdown = substitute_labels(markdown)
     renderer.render(markdown).html_safe
   end
 
   private
+
+  # Replace each `{{key|default}}` token with the configured label value,
+  # falling back to the inline default when the value is blank or absent.
+  def substitute_labels(text)
+    text.gsub(LABEL_TOKEN) do
+      key = ::Regexp.last_match(1)
+      default = ::Regexp.last_match(2)
+      value = @labels[key].to_s.strip
+      value.empty? ? default : value
+    end
+  end
 
   # `---\n…\n---\n` block at the top of the file (pandoc YAML frontmatter)
   # plus any `\newpage` line scattered through.

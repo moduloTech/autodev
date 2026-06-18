@@ -18,10 +18,12 @@ class HelpController < ApplicationController
 
   # GET /help
   def show
-    @html = HelpDoc.render(:functional)
+    resolution = help_label_resolution(params[:project].presence)
+    @html = HelpDoc.render(:functional, labels: resolution[:labels])
     render html: ::Web::Views::Help.new(
       content: @html, active: 'help',
       title_key: :web_help_title, subtitle_key: :web_help_subtitle,
+      label_selector: resolution[:selector],
       **view_kwargs
     ).call.html_safe, layout: false
   end

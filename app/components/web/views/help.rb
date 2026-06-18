@@ -9,8 +9,9 @@ module Web
     # `active` sidebar key to highlight, and the locale keys for the
     # topbar title + subtitle.
     class Help < Base
-      def initialize(content:, active:, title_key:, subtitle_key:, **)
-        super(**)
+      def initialize(content:, active:, title_key:, subtitle_key:, **opts)
+        @label_selector = opts.delete(:label_selector)
+        super(**opts)
         @content = content
         @active = active
         @title_key = title_key
@@ -29,11 +30,36 @@ module Web
       def render_main
         render_topbar
         div(class: 'help-doc-content', style: 'flex: 1; overflow: auto; padding: 28px 40px;') do
+          render_label_selector
           article(class: 'help-doc') { raw safe(@content) }
         end
       end
 
       private
+
+      # Shown only when the user's visible projects use differing label sets
+      # (`HelpController` passes a `label_selector` payload). A GET form that
+      # re-renders the guide with the chosen project's label names; submits
+      # on change so there's no extra button.
+      def render_label_selector
+        return unless @label_selector
+
+        form(method: 'get', action: '/help', class: 'help-project-picker', style: 'margin-bottom: 20px;') do
+          label(style: 'margin-right: 8px;') { plain t_web(:web_help_project_selector) }
+          select(name: 'project') do
+            @label_selector[:projects].each { |p| render_label_option(p) }
+          end
+          button(type: 'submit', class: 'btn btn-primary-sm', style: 'margin-left: 8px;') do
+            plain t_web(:web_help_project_apply)
+          end
+        end
+      end
+
+      def render_label_option(proj)
+        attrs = { value: proj[:path] }
+        attrs[:selected] = true if proj[:path] == @label_selector[:selected]
+        option(**attrs) { plain "#{proj[:path]} (#{proj[:todo]})" }
+      end
 
       def render_sidebar
         render Components::Sidebar.new(

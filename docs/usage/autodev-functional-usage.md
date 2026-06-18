@@ -29,10 +29,10 @@ Ce guide explique comment lui confier une demande et comment suivre l'avancement
 Tout part de GitLab. Trois gestes suffisent :
 
 1. **Assignez le ticket à *autodev*** (comme à n'importe quel développeur).
-2. **Mettez le label *à traiter*** sur le ticket.
+2. **Mettez le label *{{label_todo|à traiter}}*** sur le ticket.
 3. **Attendez quelques minutes** : Autodev vérifie ses tickets régulièrement et démarre dès qu'il en voit un.
 
-C'est tout. Autodev change le label en **en cours** dès qu'il commence, et le mettra à **livré** quand il aura terminé.
+C'est tout. Autodev change le label en **{{label_doing|en cours}}** dès qu'il commence, et le mettra à **{{label_done|livré}}** quand il aura terminé.
 
 **Pas encore de ticket sous la main ?** Vous pouvez aussi rédiger la demande directement depuis le tableau de bord, en discutant avec Autodev pour la mettre en forme, puis l'envoyer à un développeur ou à Autodev une fois validée. Voir la section *Rédiger une demande avec Autodev*.
 
@@ -44,7 +44,7 @@ C'est tout. Autodev change le label en **en cours** dès qu'il commence, et le m
 4. **Ouverture de la *Merge Request*.** La MR est créée automatiquement avec le numéro de votre ticket.
 5. **Tests.** La pipeline d'intégration tourne. Si elle échoue, Autodev corrige et recommence.
 6. **Relecture.** Une relecture automatique est faite ; Autodev applique les retours.
-7. **Livraison.** Quand tout est vert, le label passe à **livré** et la MR est prête à merger.
+7. **Livraison.** Quand tout est vert, le label passe à **{{label_done|livré}}** et la MR est prête à merger.
 
 Pendant tout ce temps, vous pouvez suivre l'avancement sur le dashboard.
 
