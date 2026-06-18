@@ -35,7 +35,7 @@ module Web
       def render_sidebar
         render Components::Sidebar.new(
           active: 'errors', locale: web_locale, request_path: @request_path,
-          counts: { issues: @kpis[:active], errors: @kpis[:errors], chat: 0 },
+          counts: { issues: @kpis[:active], errors: @kpis[:to_watch], chat: 0 },
           translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin,
           current_user_email: @current_user_email, csrf_token: @csrf_token
         )
@@ -93,7 +93,7 @@ module Web
         div(class: 'error-card-header') do
           span(class: 'iid-mono') { plain "##{row[:issue_iid]}" }
           span(class: 'project-meta') { row[:project_path] }
-          render status_pill(row[:status], size: :sm)
+          render status_pill(issue_status(row), size: :sm)
           span(class: 'when-meta') { relative_time(row[:created_at]) }
         end
       end
@@ -115,6 +115,7 @@ module Web
       def cause_key(row)
         return :web_errors_cause_post_completion if row[:post_completion_error]
         return :web_errors_cause_clarification   if row[:status] == 'needs_clarification'
+        return :web_errors_cause_attention       if row[:needs_attention]
 
         :web_errors_cause_failure
       end
@@ -122,6 +123,7 @@ module Web
       def explain_key(row)
         return :web_errors_explain_post_completion if row[:post_completion_error]
         return :web_errors_explain_clarification   if row[:status] == 'needs_clarification'
+        return :"web_errors_explain_attention_#{row[:attention_reason]}" if row[:needs_attention]
 
         :web_errors_explain_failure
       end

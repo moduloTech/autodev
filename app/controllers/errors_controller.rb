@@ -19,11 +19,14 @@ class ErrorsController < ApplicationController
     ).call
   end
 
-  # status in (error, needs_clarification) OR post_completion_error IS NOT NULL,
-  # ordered by id desc. Scoped via issues_dataset for non-admin users.
+  # The "À surveiller" set: anything needing a human. status in
+  # (error, needs_clarification) OR a failed post-completion hook OR a
+  # "gave-up done" issue flagged needs_attention (review limit / review
+  # failures / stagnation). Ordered by id desc, scoped via issues_dataset.
   def errored_issues
     issues_dataset
-      .where("status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL")
+      .where("status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL " \
+             'OR needs_attention = ?', true)
       .order(id: :desc)
       .to_a
   end

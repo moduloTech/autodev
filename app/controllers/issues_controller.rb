@@ -58,7 +58,8 @@ class IssuesController < ApplicationController
     previous_state = issue.status
     Issue.where(id: issue.id).update_all(
       status: 'pending', retry_count: 0, error_message: nil,
-      next_retry_at: nil, started_at: nil
+      next_retry_at: nil, started_at: nil,
+      needs_attention: false, attention_reason: nil
     )
     Audit.record!(
       resource: issue, action: 'issue.reset_manual', actor: current_user,

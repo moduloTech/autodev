@@ -34,7 +34,7 @@ module Web
       def render_sidebar
         render Components::Sidebar.new(
           active: 'issues', locale: web_locale, request_path: @request_path,
-          counts: { issues: @kpis[:active], errors: @kpis[:errors], chat: 0 },
+          counts: { issues: @kpis[:active], errors: @kpis[:to_watch], chat: 0 },
           translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin,
           current_user_email: @current_user_email, csrf_token: @csrf_token
         )
@@ -64,7 +64,7 @@ module Web
       def render_status_band # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
         div(class: 'issue-status-band') do
           span(id: "status_#{@issue[:id]}", style: 'display: inline-flex;') do
-            render status_pill(@issue[:status], size: :lg)
+            render status_pill(issue_status(@issue), size: :lg)
           end
           if @issue[:branch_name] && !@issue[:branch_name].empty?
             span(class: 'muted', style: 'display: inline-flex; align-items: center; gap: 6px;') do

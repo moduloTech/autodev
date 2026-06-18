@@ -33,6 +33,17 @@ module Web
       t_web(data[:label_key])
     end
 
+    # Effective display status for an issue row: a `done` issue flagged
+    # needs_attention renders as the synthetic `done_attention` status (warn
+    # pill), so a "gave-up done" is visually distinct from a clean delivery.
+    # Reads needs_attention defensively so it works for AR rows and hashes alike.
+    def issue_status(row)
+      status = row[:status].to_s
+      return 'done_attention' if status == 'done' && row[:needs_attention]
+
+      status
+    end
+
     # Build a StatusPill component ready for `render`. Resolves the
     # localized label here so the component itself stays presentation-only.
     def status_pill(status, size: :md, with_dot: true)

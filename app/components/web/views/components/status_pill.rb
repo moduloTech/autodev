@@ -27,6 +27,9 @@ module Web
           'running_post_completion' => { label_key: :web_status_running_post_completion, tone: :working },
           'answering_question' => { label_key: :web_status_answering_question, tone: :working },
           'done' => { label_key: :web_status_done, tone: :ok },
+          # Synthetic status (not an AASM state): a `done` issue that gave up
+          # with a manual-intervention alert. Surfaced by Web::I18nHelpers#issue_status.
+          'done_attention' => { label_key: :web_status_done_attention, tone: :warn },
           'error' => { label_key: :web_status_error, tone: :err }
         }.freeze
 

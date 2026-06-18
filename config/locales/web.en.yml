@@ -116,6 +116,7 @@ en:
   web_status_answering_question: Answering a question
   web_status_needs_clarification: Waiting on your input
   web_status_done: Delivered
+  web_status_done_attention: Delivered (needs a check)
   web_status_error: Blocked — needs your attention
   web_dashboard_title: autodev — Dashboard
   web_dashboard_counters: Counters
@@ -195,9 +196,14 @@ en:
   web_errors_cause_failure: Technical failure
   web_errors_cause_clarification: Awaiting answer
   web_errors_cause_post_completion: Post-completion error
+  web_errors_cause_attention: Manual intervention required
   web_errors_explain_failure: An error stopped autodev from making progress. Check the technical details for the root cause.
   web_errors_explain_clarification: Autodev asked a question to refine the request and is waiting on a reply before resuming.
   web_errors_explain_post_completion: The post-completion hook failed after delivery. The request is done but the follow-up command exited with an error.
+  web_errors_explain_attention_review_limit_reached: The review-round limit (3) was reached. The request is marked delivered but unresolved discussions remain and need manual intervention.
+  web_errors_explain_attention_review_failures_exhausted: Automated review failed several times in a row. The request is marked delivered but review could not complete — check the MR manually.
+  web_errors_explain_attention_stagnation_pipeline: The pipeline kept failing on the same jobs despite fixes. The request is marked delivered but the MR needs manual intervention.
+  web_errors_explain_attention_stagnation_discussions: The same discussions stayed unresolved despite fixes. The request is marked delivered but the MR needs manual intervention.
   web_errors_show_technical: Show technical details
   web_errors_view_detail: See details
   web_errors_action_retry: Retry now

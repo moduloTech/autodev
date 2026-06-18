@@ -79,6 +79,17 @@ class DashboardErrorsTest < Minitest::Test
     assert_match(/deploy script failed/, out)
   end
 
+  def test_shows_needs_attention_issues
+    create_issue(issue_iid: 740, issue_title: 'Gave up', project_path: 'group/proj',
+                 status: 'done', needs_attention: true, attention_reason: 'stagnation_pipeline')
+
+    out = capture_io { Dashboard.show_errors({ 'database_url' => 'sqlite://:memory:' }) }.first
+
+    assert_match(/#740/, out)
+    assert_match(/intervention manuelle/, out)
+    assert_match(/stagnation_pipeline/, out)
+  end
+
   def test_shows_mr_info_on_error
     create_issue(issue_iid: 730, issue_title: 'MR error', project_path: 'group/proj',
                  status: 'error', error_message: 'fail', mr_iid: 55, mr_url: 'https://example.com/mr/55')

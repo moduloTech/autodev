@@ -54,6 +54,17 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     assert_equal 'done', @issue.status
   end
 
+  def test_threshold_reached_flags_needs_attention
+    @issue.update(review_failure_count: PipelineMonitor::Reviewer::REVIEW_FAILURE_THRESHOLD - 1)
+    stub_mr_review(success: false)
+
+    @monitor.send(:launch_review, @issue)
+    @issue.reload
+
+    assert @issue.needs_attention, 'a gave-up done must be flagged for attention'
+    assert_equal 'review_failures_exhausted', @issue.attention_reason
+  end
+
   def test_successful_review_resets_failure_counter
     @issue.update(review_failure_count: 3)
     stub_mr_review(success: true)

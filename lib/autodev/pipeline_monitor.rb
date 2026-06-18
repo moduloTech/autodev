@@ -101,7 +101,8 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     issue.pipeline_green!
     apply_label_done(issue.issue_iid)
     reassign_to_author(issue)
-    Issue.where(id: issue.id).update_all(finished_at: Time.current)
+    Issue.where(id: issue.id).update_all(finished_at: Time.current, needs_attention: true,
+                                         attention_reason: 'review_limit_reached')
     notify_localized(issue.issue_iid, :review_limit_reached, mr_url: issue.mr_url)
     log_activity(issue, :review_limit_reached)
     log "Issue ##{issue.issue_iid}: max review rounds reached → done"

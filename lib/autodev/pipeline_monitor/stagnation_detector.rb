@@ -40,7 +40,8 @@ class PipelineMonitor
 
     def handle_stagnation(issue, type)
       log "Issue ##{issue.issue_iid}: #{type} stagnation detected → done"
-      issue.update(status: 'done', finished_at: Time.current)
+      issue.update(status: 'done', finished_at: Time.current,
+                   needs_attention: true, attention_reason: "stagnation_#{type}")
       apply_label_done(issue.issue_iid)
       notify_localized(issue.issue_iid, :"stagnation_#{type}", mr_url: issue.mr_url)
       log_activity(issue, :"stagnation_#{type}")

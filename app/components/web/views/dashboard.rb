@@ -42,7 +42,7 @@ module Web
       def render_sidebar
         render Components::Sidebar.new(
           active: 'dashboard', locale: web_locale, request_path: @request_path,
-          counts: { issues: @kpis[:active], errors: @kpis[:errors], chat: 0 },
+          counts: { issues: @kpis[:active], errors: @kpis[:to_watch], chat: 0 },
           translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin,
           current_user_email: @current_user_email, csrf_token: @csrf_token
         )
@@ -69,7 +69,7 @@ module Web
           label_key: :web_kpi_in_progress,         hint_key: :web_kpi_in_progress_hint },
         { metric: :pending,        tone: :working, icon: 'clock', href: '/issues?tab=pending',
           label_key: :web_kpi_pending,             hint_key: :web_kpi_pending_hint },
-        { metric: :errors,         tone: :err,     icon: 'alert-tri', href: '/issues?tab=errors',
+        { metric: :to_watch,       tone: :err,     icon: 'alert-tri', href: '/errors',
           label_key: :web_kpi_to_watch,            hint_key: :web_kpi_to_watch_hint },
         { metric: :awaiting,       tone: :warn,    icon: 'messages', href: '/issues?tab=waiting',
           label_key: :web_kpi_awaiting_response,   hint_key: :web_kpi_awaiting_response_hint },
@@ -143,7 +143,7 @@ module Web
               plain row[:project_path]
             end
           end
-          render status_pill(row[:status], size: :sm)
+          render status_pill(issue_status(row), size: :sm)
         end
       end
 

@@ -57,7 +57,7 @@ module Web
       def render_sidebar
         render Components::Sidebar.new(
           active: 'issues', locale: web_locale, request_path: @request_path,
-          counts: { issues: @kpis[:active], errors: @kpis[:errors], chat: 0 },
+          counts: { issues: @kpis[:active], errors: @kpis[:to_watch], chat: 0 },
           translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin,
           current_user_email: @current_user_email, csrf_token: @csrf_token
         )
@@ -175,7 +175,7 @@ module Web
             div(class: 'title') { row[:issue_title] }
             div(class: 'meta') { row[:project_path] }
           end
-          render status_pill(row[:status], size: :sm)
+          render status_pill(issue_status(row), size: :sm)
           span(class: 'activity-cell') { relative_time(row[:created_at]) }
         end
       end
@@ -196,7 +196,7 @@ module Web
         a(class: 'issue-card', href: "/issues/#{row[:id]}") do
           div(class: 'issue-card-header') do
             span(class: 'iid-meta') { plain "##{row[:issue_iid]} · #{row[:project_path]}" }
-            render status_pill(row[:status], size: :sm)
+            render status_pill(issue_status(row), size: :sm)
           end
           div(class: 'issue-card-title') { row[:issue_title] }
           div(class: 'issue-card-footer') do

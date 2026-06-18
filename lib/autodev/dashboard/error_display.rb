@@ -7,18 +7,30 @@ module Dashboard
 
     def print_all(config, pastel)
       issues = fetch_error_issues(config)
+      pc_issues = fetch_post_completion_issues(config)
+      na_issues = fetch_needs_attention_issues(config)
+
+      print_error_entries(issues, pastel)
+      print_extra_entries(pc_issues, na_issues, pastel, issues.any?)
+
+      puts empty_message(config) if (issues + pc_issues + na_issues).empty?
+    end
+
+    # -- Private ---------------------------------------------------------------
+
+    def print_error_entries(issues, pastel)
       issues.each_with_index do |row, idx|
         print_entry(row, pastel)
         puts '' if idx < issues.size - 1
       end
-
-      pc_issues = fetch_post_completion_issues(config)
-      pc_issues.each { |row| print_pc_entry(row, pastel, issues.any?) }
-
-      puts empty_message(config) if issues.empty? && pc_issues.empty?
     end
 
-    # -- Private ---------------------------------------------------------------
+    # Post-completion + needs-attention groups, each separated from whatever
+    # printed before it.
+    def print_extra_entries(pc_issues, na_issues, pastel, had_errors)
+      pc_issues.each { |row| print_pc_entry(row, pastel, had_errors) }
+      na_issues.each { |row| print_na_entry(row, pastel, had_errors || pc_issues.any?) }
+    end
 
     def fetch_error_issues(config)
       scope = ::Issue.where(status: 'error')
@@ -28,6 +40,14 @@ module Dashboard
 
     def fetch_post_completion_issues(config)
       scope = ::Issue.where.not(post_completion_error: nil)
+      scope = scope.where(issue_iid: config['errors_iid']) if config['errors_iid']
+      scope.order(id: :desc).to_a
+    end
+
+    # "Gave-up done" issues (review limit / review failures / stagnation):
+    # delivered but flagged as needing a manual intervention on GitLab.
+    def fetch_needs_attention_issues(config)
+      scope = ::Issue.where(needs_attention: true)
       scope = scope.where(issue_iid: config['errors_iid']) if config['errors_iid']
       scope.order(id: :desc).to_a
     end
@@ -88,8 +108,21 @@ module Dashboard
       )
     end
 
-    private_class_method :fetch_error_issues, :fetch_post_completion_issues, :empty_message,
-                         :print_entry, :print_header, :print_metadata, :print_stderr,
-                         :print_pc_entry, :print_pc_header
+    def print_na_entry(row, pastel, separator)
+      project_short = row[:project_path].to_s.split('/').last
+      na_label = pastel.yellow('intervention manuelle')
+      puts '' if separator
+      puts pastel.bold(
+        "#{pastel.yellow('▲')} Issue ##{row[:issue_iid]}: " \
+        "#{row[:issue_title]} (#{project_short}) [#{na_label}]"
+      )
+      print_metadata(row)
+      puts "  Raison: #{row[:attention_reason]}"
+    end
+
+    private_class_method :fetch_error_issues, :fetch_post_completion_issues,
+                         :fetch_needs_attention_issues, :empty_message, :print_error_entries,
+                         :print_extra_entries, :print_entry, :print_header, :print_metadata,
+                         :print_stderr, :print_pc_entry, :print_pc_header, :print_na_entry
   end
 end

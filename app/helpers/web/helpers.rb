@@ -171,13 +171,27 @@ module Web
     # Counts used by the dashboard KPI cards.
     def dashboard_kpis
       counts = issues_dataset.group(:status).count
-      active = Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 }
-      delivered_week = issues_dataset.where(status: 'done')
-                                     .where('created_at >= ?', (Date.today - 7).to_s).count
-      { active: active, pending: counts['pending'] || 0,
+      { active: Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 },
+        pending: counts['pending'] || 0,
         errors: counts['error'] || 0,
+        to_watch: to_watch_count,
         awaiting: counts['needs_clarification'] || 0,
-        delivered_week: delivered_week }
+        delivered_week: delivered_this_week_count }
+    end
+
+    def delivered_this_week_count
+      issues_dataset.where(status: 'done').where('created_at >= ?', (Date.today - 7).to_s).count
+    end
+
+    # Count of the "À surveiller" set — must match ErrorsController#errored_issues:
+    # error / needs_clarification states, a failed post-completion hook, or a
+    # "gave-up done" issue flagged needs_attention. Feeds the dashboard KPI card
+    # and the sidebar badge (both labelled "À surveiller").
+    def to_watch_count
+      issues_dataset.where(
+        "status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL " \
+        'OR needs_attention = ?', true
+      ).count
     end
 
     # Activity counts per day for the past 7 days, oldest first — the data

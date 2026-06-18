@@ -41,7 +41,7 @@ module Web
       def render_sidebar
         render Components::Sidebar.new(
           active: 'projects', locale: web_locale, request_path: @request_path,
-          counts: { issues: @kpis[:active], errors: @kpis[:errors], chat: 0 },
+          counts: { issues: @kpis[:active], errors: @kpis[:to_watch], chat: 0 },
           translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin,
           current_user_email: @current_user_email, csrf_token: @csrf_token
         )
@@ -188,7 +188,7 @@ module Web
             div(class: 'recent-title') { row[:issue_title] }
             div(class: 'recent-meta') { relative_time(row[:created_at]) }
           end
-          render status_pill(row[:status], size: :sm)
+          render status_pill(issue_status(row), size: :sm)
         end
       end
 
@@ -261,7 +261,7 @@ module Web
             div(class: 'recent-title') { row[:issue_title] }
             div(class: 'recent-meta') { relative_time(row[:created_at]) }
           end
-          render status_pill(row[:status], size: :sm)
+          render status_pill(issue_status(row), size: :sm)
         end
       end
 
