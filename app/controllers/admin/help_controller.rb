@@ -11,9 +11,9 @@ module Admin
 
     # GET /admin/help
     def show
-      @html = ::HelpDoc.render(:technical)
+      doc = ::HelpDoc.new(:technical)
       render html: ::Web::Views::Help.new(
-        content: @html, active: 'admin_help',
+        content: doc.render, toc: doc.toc, active: 'admin_help',
         title_key: :web_admin_help_title, subtitle_key: :web_admin_help_subtitle,
         **view_kwargs
       ).call.html_safe, layout: false

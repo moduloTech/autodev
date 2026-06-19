@@ -14,6 +14,7 @@ fr:
   web_help_subtitle: Comment confier une demande à Autodev et suivre son travail
   web_help_project_selector: "Afficher les labels du projet :"
   web_help_project_apply: Afficher
+  web_help_toc_title: Sommaire
   web_nav_admin_help: Aide technique
   web_admin_help_title: Guide technique
   web_admin_help_subtitle: Routes admin, configuration projet, CLI, machine à états

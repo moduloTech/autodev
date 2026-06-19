@@ -27,4 +27,16 @@ class HelpVersionTest < Minitest::Test
 
     assert_includes html, "Autodev v#{Autodev::VERSION}"
   end
+
+  def test_help_renders_the_table_of_contents_when_provided
+    html = Web::Views::Help.new(
+      content: '<h1 id="intro">Intro</h1>', toc: '<ul><li><a href="#intro">Intro</a></li></ul>',
+      active: 'help', title_key: :web_help_title, subtitle_key: :web_help_subtitle,
+      locale: :fr, request_path: '/help', current_user_email: 't@modulotech.fr',
+      current_user_admin: true, csrf_token: 'x'
+    ).call
+
+    assert_includes html, 'Sommaire'
+    assert_includes html, 'href="#intro"'
+  end
 end

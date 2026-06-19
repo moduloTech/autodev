@@ -14,6 +14,7 @@ en:
   web_help_subtitle: How to delegate a request to Autodev and follow its progress
   web_help_project_selector: "Show labels for project:"
   web_help_project_apply: Show
+  web_help_toc_title: Contents
   web_nav_admin_help: Technical help
   web_admin_help_title: Technical guide
   web_admin_help_subtitle: Admin routes, project config, CLI, state machine

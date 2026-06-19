@@ -35,4 +35,23 @@ class HelpDocTest < Minitest::Test
   def test_technical_doc_is_unaffected
     refute_includes HelpDoc.render(:technical, labels: { 'label_todo' => 'To Do' }), '{{'
   end
+
+  # Every ToC anchor must point at a heading id that actually exists in the
+  # body — the reason the ToC is built from the rendered body rather than
+  # Redcarpet's HTML_TOC (which disagrees on apostrophes/accents).
+  def test_toc_anchors_all_resolve_to_body_headings
+    body = HelpDoc.render(:functional)
+    hrefs = HelpDoc.toc(:functional).scan(/href="#([^"]+)"/).flatten
+    ids = body.scan(/id="([^"]+)"/).flatten
+
+    refute_empty hrefs, 'the functional doc should yield a non-empty ToC'
+    assert_empty (hrefs - ids), 'ToC anchors with no matching heading id'
+  end
+
+  def test_toc_is_built_for_the_technical_doc
+    toc = HelpDoc.toc(:technical)
+
+    assert_includes toc, '<ul'
+    assert_match(/href="#/, toc)
+  end
 end
