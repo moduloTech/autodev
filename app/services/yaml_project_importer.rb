@@ -47,6 +47,14 @@ class YamlProjectImporter
 
   APP_COMMAND_CATEGORIES = %w[setup test lint run].freeze
 
+  # Scalar/list per-project config keys mirrored onto `projects` columns
+  # (task #9 phase 1). `app:` is handled separately (project_app_commands);
+  # `path`/`name` map to gitlab_path/name; the advanced keys (model, effort,
+  # parallel_agents, …) stay YAML-only for now.
+  CONFIG_KEYS = %w[target_branch labels_todo label_doing label_done extra_prompt
+                   dc_timeout max_retries retry_backoff stagnation_threshold
+                   clone_depth sparse_checkout post_completion post_completion_timeout].freeze
+
   def initialize(yaml:)
     @yaml = yaml || {}
     @projects_yaml = Array(@yaml['projects'])
@@ -83,10 +91,18 @@ class YamlProjectImporter
     project = Project.find_or_initialize_by(gitlab_path: gitlab_path)
     was_new = project.new_record?
     project.assign_attributes(slug: slug_for(gitlab_path), name: name_for(entry, gitlab_path))
+    assign_config_fields(project, entry)
     project.save!
 
     was_new ? counts[:created] += 1 : counts[:updated] += 1
     rebuild_app_commands(project, entry['app'], counts)
+  end
+
+  # Copy each config key the YAML sets onto the matching column; clear the
+  # column when the key is absent, so a re-import stays an exact mirror of the
+  # YAML (same contract as the destroy_all+rebuild for app commands).
+  def assign_config_fields(project, entry)
+    CONFIG_KEYS.each { |key| project[key] = entry[key] }
   end
 
   def slug_for(path)
