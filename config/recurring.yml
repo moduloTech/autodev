@@ -65,3 +65,11 @@ production:
     class: LogJanitorJob
     queue: default
     schedule: "30 4 * * *"
+  # Discards transient process-lifecycle failures (worker pruned/exited on box
+  # sleep or supervisor restart) so they don't accumulate in the "Failed" tab
+  # (Autodev::FailedJobReaper). Hourly at minute 18 — staggered from the other
+  # cleanups. Real application failures are left untouched.
+  reap_transient_failed_jobs:
+    class: ReapFailedJobsJob
+    queue: default
+    schedule: "18 * * * *"

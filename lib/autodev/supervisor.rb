@@ -7,7 +7,7 @@ module Autodev
   # poll loop in-process. The parent owns signal handling and lifecycle —
   # if any child dies it tears the whole thing down so systemd / launchd /
   # the operator can restart cleanly.
-  class Supervisor
+  class Supervisor # rubocop:disable Metrics/ClassLength
     TERM_GRACE_SECONDS = 10
 
     # Per-child handle. `command` and `env` are passed to `Process.spawn`
@@ -74,10 +74,22 @@ module Autodev
     else
       return unless pid
 
-      crashed = @children.find { |c| c.pid == pid }
-      label = crashed&.name || "pid=#{pid}"
+      handle_child_exit(pid, status)
+    end
+
+    # A non-zero exit is a crash → tear everything down (launchd restarts). A
+    # clean exit (status 0) leaves the surviving children running: tearing
+    # down on every orderly stop just churns restarts, each stranding the
+    # worker's in-flight Solid Queue jobs as pruned "failed" executions.
+    def handle_child_exit(pid, status)
+      child = @children.find { |c| c.pid == pid }
+      label = child&.name || "pid=#{pid}"
+      child&.pid = nil
+      if status.exitstatus&.zero?
+        return @logger.info("[supervisor] child #{label} exited cleanly (status=0); peers kept")
+      end
+
       @logger.error("[supervisor] child #{label} exited (status=#{status.exitstatus.inspect}); shutting down peers")
-      crashed&.pid = nil
       @shutdown = true
     end
 

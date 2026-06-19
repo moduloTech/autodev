@@ -91,7 +91,32 @@ class SupervisorTest < Minitest::Test
     refute_predicate child, :alive?
   end
 
+  def test_clean_child_exit_does_not_shut_down_peers
+    child = build_child('queue')
+    child.pid = 90_500
+    supervisor = build_supervisor([child])
+
+    supervisor.send(:handle_child_exit, 90_500, fake_status(0))
+
+    refute supervisor.instance_variable_get(:@shutdown), 'a clean exit must not tear peers down'
+    assert_nil child.pid
+  end
+
+  def test_crashing_child_shuts_down_peers
+    child = build_child('queue')
+    child.pid = 90_500
+    supervisor = build_supervisor([child])
+
+    supervisor.send(:handle_child_exit, 90_500, fake_status(1))
+
+    assert supervisor.instance_variable_get(:@shutdown), 'a non-zero exit tears peers down'
+  end
+
   private
+
+  def fake_status(code)
+    Struct.new(:exitstatus).new(code)
+  end
 
   def build_child(name, command: nil, env: {})
     Autodev::Supervisor::Child.new(name: name, command: command || [name], env: env)
