@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.22] - 2026-06-19
+
 ### Added
 
 - **Per-project config can now live in the DB (phase 1 of moving it out of `config.yml`).** New flat columns on `projects` (migration `20260619000001`) for the 13 per-project keys — `target_branch`, `labels_todo`/`label_doing`/`label_done`, `extra_prompt`, `dc_timeout`/`max_retries`/`retry_backoff`/`stagnation_threshold`, `clone_depth`, `sparse_checkout`, `post_completion`/`post_completion_timeout` (lists as JSON; the `app:` block already lived in `project_app_commands`). `Project` gains validations mirroring `lib/autodev/project_validator.rb` (positive-int fields, clone_depth ≥ 0, label-workflow completeness, string arrays, post_completion pairing) and a `#to_project_config` method that rebuilds the YAML-shaped hash (including `app:` from `project_app_commands`). `YamlProjectImporter` now mirrors these keys onto the columns on import (clearing dropped keys on re-import, same exact-mirror contract as app commands). **Additive only** — the runtime still reads the YAML hash (`IssueProcessJob#lookup_project_config`); switching the read path onto `Project#to_project_config`, the web edit form, and removing the YAML `projects:` block are later phases of task #9. Advanced keys (`model`, `effort`, `parallel_agents`, `split_implementation`, `*_agent`) stay YAML-only for now. New tests: `test/models/project_config_test.rb`, `test/services/yaml_project_importer_config_test.rb`.
