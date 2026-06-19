@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Usage docs synced with the manual-close feature.** Both guides (`docs/usage/`, rendered at `/help` and `/admin/help`) now cover the `closed` state: the functional guide adds the **"Clôs"** issues-list tab, the **"Clôturer"** issue-detail action, the **"Clôturée"** + **"Livrée (à vérifier)"** state pills, and an updated "comment annuler" FAQ; the technical guide adds the `POST /issues/:id/close` route, bumps the AASM state count to 17, documents the `close` event (any state → terminal `closed`, membership-gated) plus the `emit_audit_log!` transition hook. Refreshed two screenshots (`02-issues-list` showing the new "Clôs" tab, `06-issue-detail` showing the "Clôturer" action). Dates bumped to 2026-06-19.
+
 ## [1.0.0-alpha.22] - 2026-06-19
 
 ### Added

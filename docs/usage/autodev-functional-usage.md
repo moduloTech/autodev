@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-06-17
+date: 2026-06-19
 lang: fr
 documentclass: article
 papersize: a4
@@ -125,6 +125,7 @@ Toutes les demandes suivies par Autodev, sur tous les projets confondus.
 | **Échecs** | Les tickets bloqués par une erreur. |
 | **Question en attente** | Les tickets où Autodev attend une précision. |
 | **Livrés** | Les tickets terminés. |
+| **Clôs** | Les tickets clôturés à la main (mis de côté sans être livrés). |
 | **Tous** | Aucun filtre — l'historique complet. |
 
 Le compteur à côté de chaque onglet est mis à jour en direct.
@@ -208,6 +209,7 @@ L'historique remonte les 200 dernières entrées par défaut.
 
 - **Réinitialiser** — repart à zéro sur cette demande.
 - **Forcer la transition** — fait passer manuellement la demande à l'étape suivante. Utile si vous voulez court-circuiter une attente.
+- **Clôturer** — met la demande de côté sans la livrer. Elle bascule dans l'onglet *Clôs* et Autodev ne la reprend plus. Réservé aux personnes ayant accès au projet. Pour la relancer plus tard, utilisez *Réinitialiser*.
 
 ## Quand Autodev pose une question
 
@@ -323,7 +325,9 @@ Au fil des écrans, chaque demande porte une pastille colorée qui indique où e
 | **En attente d'une précision de ta part** | Autodev a posé une question, il attend votre réponse. |
 | **Finalisation** | Dernières opérations après la livraison. |
 | **Livrée** | Terminé, la MR est prête à merger. |
+| **Livrée (à vérifier)** | Livrée, mais Autodev a atteint une limite (trop de corrections ou de relectures) : la MR a été livrée telle quelle et mérite un coup d'œil. |
 | **Bloquée, intervention nécessaire** | Quelque chose a échoué, il faut regarder. |
+| **Clôturée** | Mise de côté à la main, sans être livrée. |
 
 \newpage
 
@@ -339,7 +343,7 @@ Plusieurs, mais pas en illimité. Si vous lui en confiez beaucoup d'un coup, cer
 Répondez directement sur le ticket GitLab en commentaire, comme à n'importe quel collègue. Il verra votre réponse au prochain tour.
 
 **Autodev s'est trompé ou a fait n'importe quoi, je peux annuler ?**
-Oui. Désassignez-le du ticket : il s'arrête. Vous pouvez ensuite reprendre la main et l'assigner à un humain. La MR créée reste disponible — vous pouvez la fermer ou la modifier librement.
+Oui. Deux options : désassignez-le du ticket sur GitLab (il s'arrête, vous reprenez la main), ou ouvrez le détail de la demande et cliquez sur **Clôturer** pour la mettre de côté directement depuis le tableau de bord. Dans les deux cas vous pouvez ensuite l'assigner à un humain. La MR créée reste disponible — vous pouvez la fermer ou la modifier librement.
 
 **La MR n'est pas mergée, est-ce qu'il faut que je le fasse moi ?**
 Oui. Autodev livre une MR prête à merger, mais le merge final reste à un humain (validation finale, déploiement, etc.).

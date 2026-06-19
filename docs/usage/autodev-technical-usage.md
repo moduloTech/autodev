@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-06-17
+date: 2026-06-19
 lang: fr
 documentclass: article
 papersize: a4
@@ -38,6 +38,7 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/issues/:id.json` | `IssuesController#show` | Mêmes données, format JSON |
 | `/issues/:id/reset` (POST) | `IssuesController#reset` | Reset brut (raw SQL, pas une transition AASM) |
 | `/issues/:id/transition` (POST) | `IssuesController#transition` | Déclenche un événement AASM (`?event=...`) |
+| `/issues/:id/close` (POST) | `IssuesController#close` | Clôture manuelle (événement AASM `close`, gatée sur le membership projet) — `closed` depuis n'importe quel état |
 | `/errors` | `ErrorsController#index` | Issues en `error` + `needs_clarification` + `post_completion_error IS NOT NULL` |
 | `/projects` | `ProjectsController#index` | Union des projets YAML + projets ayant des rows |
 | `/projects/:slug` | `ProjectsController#show` | Slug = `group/sub/name` encodé en `group__sub__name` |
@@ -241,7 +242,7 @@ Exécute un cycle de poll complet de façon synchrone, en réutilisant le code d
 
 # Machine à états (AASM)
 
-Le modèle `Issue` (`app/models/issue.rb`) embarque AASM. 16 états, transitions garanties par `after_all_transitions :persist_status_change!, :emit_activity_event!` qui sauve la row et insère un événement dans `activity_events`.
+Le modèle `Issue` (`app/models/issue.rb`) embarque AASM. 17 états, transitions garanties par `after_all_transitions :persist_status_change!, :emit_activity_event!, :emit_audit_log!` qui sauve la row, insère un événement dans `activity_events`, et trace une ligne d'`audits` (`issue.transition_manual` avec acteur si déclenchée depuis l'UI, sinon `issue.transition_auto` avec acteur NULL).
 
 ## Vocabulaire technique → métier
 
@@ -260,8 +261,9 @@ Le modèle `Issue` (`app/models/issue.rb`) embarque AASM. 16 états, transitions
 | `running_post_completion` | Finalisation |
 | `answering_question` | Réponse à une question |
 | `needs_clarification` | En attente d'une précision |
-| `done` | Livrée |
+| `done` | Livrée (libellé *Livrée (à vérifier)* quand un cap/stagnation a forcé la livraison) |
 | `error` | Bloquée, intervention nécessaire |
+| `closed` | Clôturée |
 
 ## Diagramme
 
@@ -297,11 +299,13 @@ pending → cloning → checking_spec → implementing → committing → pushin
 - `done` + désassigné au poll + `post_completion` configuré → `running_post_completion` → `done`.
 - `error` (depuis n'importe quel état actif) → `pending` (retry avec backoff).
 - `needs_clarification` (depuis `checking_spec`) → `pending` quand un commentaire de clarification est posté.
+- `close` (événement manuel, depuis n'importe quel état) → `closed`. État terminal : le poller ignore toute issue dont le `status != 'pending'`. Pour rouvrir, utiliser `#reset` qui force la row à `pending`.
 
 ## Reset vs Transition (UI)
 
 - **`POST /issues/:id/reset`** — raw SQL `UPDATE` qui force `status = 'pending'`, vide `retry_count`, `error_message`, `next_retry_at`, `started_at`. **N'est pas une transition AASM** — les hooks `after_all_transitions` ne sont pas tirés. Une row est écrite directement dans `audits` via `Audit.record!`.
 - **`POST /issues/:id/transition?event=<aasm_event>`** — tire `issue.send("#{event}!")`, qui passe par AASM et déclenche les hooks. Le contrôleur vérifie que l'événement fait partie de `permitted_events_for(issue)` (extracteur AASM des transitions sortantes valides depuis l'état courant).
+- **`POST /issues/:id/close`** — clôture manuelle par un collaborateur du projet (gatée sur le membership). Tire l'événement AASM `close` depuis n'importe quel état → `closed` (terminal). Passe par les hooks (trace un audit). Rouvrir via `#reset`.
 
 \newpage
 
