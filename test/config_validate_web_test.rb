@@ -15,24 +15,12 @@ class ConfigValidateWebTest < Minitest::Test
     ConfigValidator.validate_globals!(config)
   end
 
-  def test_disabled_web_block_passes_without_port
-    config = BASE.merge('web' => { 'enabled' => false })
-
-    ConfigValidator.validate_globals!(config)
-  end
-
   def test_omitted_web_block_passes
     ConfigValidator.validate_globals!(BASE)
   end
 
   def test_non_hash_web_block_rejected
     config = BASE.merge('web' => 'enabled')
-
-    assert_raises(ConfigError) { ConfigValidator.validate_globals!(config) }
-  end
-
-  def test_non_boolean_enabled_rejected
-    config = BASE.merge('web' => { 'enabled' => 'yes', 'port' => 4567 })
 
     assert_raises(ConfigError) { ConfigValidator.validate_globals!(config) }
   end

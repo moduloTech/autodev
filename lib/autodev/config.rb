@@ -14,15 +14,9 @@ module Config # rubocop:disable Metrics/ModuleLength
     gitlab_token: glpat-xxxxxxxxxxxxxxxxxxxx   # or set GITLAB_API_TOKEN env var
     poll_interval: 300                          # seconds between poll cycles
     max_workers: 3                              # concurrent worker threads
-    dc_timeout: 600                               # danger-claude timeout in seconds (default: 600 = 10min)
-    max_retries: 1                                 # max retry attempts per issue (default: 1)
-    retry_backoff: 10                              # base backoff in seconds, doubles each retry (default: 10)
-    pickup_delay: 600                               # seconds before processing a new issue (default: 600 = 10min)
-    stagnation_threshold: 5                         # consecutive identical failures before giving up (default: 5)
     log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
     log_level: INFO                                # DEBUG, INFO, WARN, ERROR (default: INFO)
-    # database_url: sqlite://~/.autodev/autodev.db  # default
-    web: { enabled: true, port: 4567, locale: fr, bind: '127.0.0.1' }  # embedded web UI; bind: 0.0.0.0 or NetBird IP to expose
+    web: { port: 4567, locale: fr, bind: '127.0.0.1' }  # embedded web UI; bind: 0.0.0.0 or NetBird IP to expose
     # Health/monitoring (see docs/observability.md). Unauthenticated /healthz
     # endpoints for external probes (Datadog, BetterStack). Optional token gate.
     # monitoring: { token: null, poll_stale_factor: 3 }  # poll stale after factor × poll_interval
@@ -48,10 +42,6 @@ module Config # rubocop:disable Metrics/ModuleLength
         #   - "todo"
         # label_doing: "Development::Doing"      # set during active processing
         # label_done: "Development::Awaiting CR"  # set when issue reaches done state
-        #
-        # -- Deprecated (use label workflow instead) --
-        # labels_to_remove: []
-        # label_to_add: ""
         #
         # extra_prompt: "Use RSpec for tests"   # additional instructions for Claude
         # dc_timeout: 600                         # danger-claude timeout in seconds (overrides global)
@@ -91,9 +81,8 @@ module Config # rubocop:disable Metrics/ModuleLength
     'stagnation_threshold' => 5,
     'log_dir' => File.join(CONFIG_DIR, 'logs'),
     'log_level' => 'INFO',
-    'database_url' => "sqlite://#{DEFAULT_DB}",
     'projects' => [],
-    'web' => { 'enabled' => true, 'port' => 4567, 'locale' => 'fr', 'bind' => '127.0.0.1' },
+    'web' => { 'port' => 4567, 'locale' => 'fr', 'bind' => '127.0.0.1' },
     # Health/monitoring surface (cf. docs/observability.md). `token` (nil =
     # open, matching the 127.0.0.1/NetBird trust model) optionally gates the
     # unauthenticated /healthz endpoints. `poll_stale_factor` × poll_interval
@@ -106,7 +95,14 @@ module Config # rubocop:disable Metrics/ModuleLength
     'GITLAB_URL' => 'gitlab_url'
   }.freeze
 
-  DEPRECATED_GLOBAL_FIELDS = %w[trigger_label max_fix_rounds].freeze
+  # Global keys no longer read from config.yml. The tunables among them
+  # (dc_timeout / max_retries / retry_backoff / stagnation_threshold) keep
+  # applying through their per-project overrides and the baked DEFAULTS;
+  # `pickup_delay` falls back to its default; `database_url` is vestigial (AR
+  # uses config/database.yml). Setting any of these in YAML — or `web.enabled`
+  # — is ignored and emits a deprecation warning.
+  IGNORED_GLOBAL_FIELDS = %w[dc_timeout max_retries retry_backoff
+                             stagnation_threshold pickup_delay database_url].freeze
 
   INTEGER_FIELDS = %w[poll_interval max_workers dc_timeout max_retries retry_backoff pickup_delay
                       stagnation_threshold].freeze
@@ -115,12 +111,13 @@ module Config # rubocop:disable Metrics/ModuleLength
   def self.load(cli_overrides = {})
     config_path = cli_overrides.delete('config_path') || CONFIG_PATH
     config = DEFAULTS.dup
-    merge_yaml!(config, config_path)
+    yaml = parse_yaml(config_path)
+    merge_yaml!(config, yaml)
     merge_env!(config)
     cli_overrides.each { |k, v| config[k] = v unless v.nil? }
     config['_config_path'] = config_path
     coerce_integers!(config)
-    warn_deprecated!(config)
+    warn_ignored!(yaml)
     config
   end
 
@@ -177,11 +174,22 @@ module Config # rubocop:disable Metrics/ModuleLength
 
   # -- load helpers --
 
-  def self.merge_yaml!(config, config_path)
-    return unless File.exist?(config_path)
+  def self.parse_yaml(config_path)
+    return {} unless File.exist?(config_path)
 
-    yaml = YAML.safe_load_file(config_path, permitted_classes: [Symbol]) || {}
-    yaml.each { |k, v| config[k] = v unless v.nil? }
+    YAML.safe_load_file(config_path, permitted_classes: [Symbol]) || {}
+  end
+  private_class_method :parse_yaml
+
+  # Shallow-merge the YAML over the defaults, skipping the keys we no longer
+  # read (IGNORED_GLOBAL_FIELDS) and dropping the retired `web.enabled` subkey.
+  def self.merge_yaml!(config, yaml)
+    yaml.each do |k, v|
+      next if v.nil? || IGNORED_GLOBAL_FIELDS.include?(k)
+
+      config[k] = v
+    end
+    config['web'] = config['web'].except('enabled') if config['web'].is_a?(Hash)
   end
   private_class_method :merge_yaml!
 
@@ -197,12 +205,16 @@ module Config # rubocop:disable Metrics/ModuleLength
   end
   private_class_method :coerce_integers!
 
-  def self.warn_deprecated!(config)
-    DEPRECATED_GLOBAL_FIELDS.each do |field|
-      next unless config.key?(field) && !DEFAULTS.key?(field)
-
-      warn "[DEPRECATION] '#{field}' is deprecated and will be removed in a future version."
+  # Warn when a now-ignored key is still present in the YAML, so operators
+  # know to remove it. The value has no effect (DEFAULTS / per-project config
+  # are used instead).
+  def self.warn_ignored!(yaml)
+    IGNORED_GLOBAL_FIELDS.each do |field|
+      warn "[DEPRECATION] '#{field}' is no longer read from config.yml and is ignored." if yaml.key?(field)
     end
+    return unless yaml['web'].is_a?(Hash) && yaml['web'].key?('enabled')
+
+    warn "[DEPRECATION] 'web.enabled' is no longer read from config.yml (the web UI is always on)."
   end
-  private_class_method :warn_deprecated!
+  private_class_method :warn_ignored!
 end

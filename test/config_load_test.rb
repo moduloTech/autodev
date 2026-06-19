@@ -20,12 +20,45 @@ class ConfigLoadTest < Minitest::Test
   def test_yaml_overrides_defaults
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'config.yml')
-      File.write(path, YAML.dump('poll_interval' => 60, 'pickup_delay' => 120,
-                                 'projects' => [{ 'path' => 'g/p' }]))
+      File.write(path, YAML.dump('poll_interval' => 60, 'projects' => [{ 'path' => 'g/p' }]))
       config = Config.load('config_path' => path)
 
       assert_equal 60, config['poll_interval']
-      assert_equal 120, config['pickup_delay']
+    end
+  end
+
+  # IGNORED_GLOBAL_FIELDS (pickup_delay, dc_timeout, database_url, …) are no
+  # longer read from the YAML — they keep their baked default and warn.
+  def test_ignored_global_field_keeps_its_default
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'config.yml')
+      File.write(path, YAML.dump('pickup_delay' => 120, 'projects' => []))
+      config = nil
+      capture_io { config = Config.load('config_path' => path) }
+
+      assert_equal 600, config['pickup_delay']
+    end
+  end
+
+  def test_ignored_global_field_warns
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'config.yml')
+      File.write(path, YAML.dump('dc_timeout' => 999, 'projects' => []))
+      err = capture_io { Config.load('config_path' => path) }.last
+
+      assert_match(/DEPRECATION.*dc_timeout/, err)
+    end
+  end
+
+  def test_web_enabled_is_ignored_and_warns
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'config.yml')
+      File.write(path, YAML.dump('web' => { 'enabled' => false, 'port' => 4567 }, 'projects' => []))
+      config = nil
+      err = capture_io { config = Config.load('config_path' => path) }.last
+
+      refute config['web'].key?('enabled')
+      assert_match(/DEPRECATION.*web\.enabled/, err)
     end
   end
 

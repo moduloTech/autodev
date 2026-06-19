@@ -73,7 +73,6 @@ Settings are resolved in 4 layers (highest priority wins):
 ### CLI flags
 
 - `-c` / `--config PATH` — Config file path
-- `-d` / `--database-url URL` — SQLite connection URL (legacy; AR uses `config/database.yml`)
 - `-t` / `--token TOKEN` — GitLab API token
 - `-n` / `--max-workers N` — Solid Queue worker threads (forwarded as `AUTODEV_MAX_WORKERS`)
 - `-i` / `--interval SECONDS` — Poll interval (forwarded as `AUTODEV_POLL_INTERVAL`; rounded up to the nearest minute for cron)

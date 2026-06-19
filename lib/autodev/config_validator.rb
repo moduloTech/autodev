@@ -48,8 +48,6 @@ module ConfigValidator
     return if web.nil?
 
     raise ConfigError, "'web' must be a hash, got: #{web.inspect}" unless web.is_a?(Hash)
-    raise ConfigError, "'web.enabled' must be true or false" unless [true, false].include?(web['enabled'])
-    return unless web['enabled']
 
     validate_web_port!(web['port'])
     validate_web_locale!(web['locale'])

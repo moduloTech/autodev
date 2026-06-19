@@ -45,25 +45,16 @@ class ConfigValidateLabelsTest < Minitest::Test
     Config.validate!(config)
   end
 
-  def test_deprecated_label_mr_warns
+  # Previously-deprecated label fields (label_mr, label_blocked, …) are now
+  # silently ignored — no warning, and validation still passes.
+  def test_legacy_label_fields_are_ignored_without_warning
     config = base_config([{
                            'path' => 'g/p', 'labels_todo' => ['todo'],
                            'label_doing' => 'doing', 'label_done' => 'done',
-                           'label_mr' => 'mr'
+                           'label_mr' => 'mr', 'label_blocked' => 'blocked'
                          }])
     output = capture_io { Config.validate!(config) }[1]
 
-    assert_match(/DEPRECATION.*label_mr/, output)
-  end
-
-  def test_deprecated_label_blocked_warns
-    config = base_config([{
-                           'path' => 'g/p', 'labels_todo' => ['todo'],
-                           'label_doing' => 'doing', 'label_done' => 'mr',
-                           'label_blocked' => 'blocked'
-                         }])
-    output = capture_io { Config.validate!(config) }[1]
-
-    assert_match(/DEPRECATION.*label_blocked/, output)
+    refute_match(/DEPRECATION/, output)
   end
 end

@@ -66,12 +66,6 @@ class ParseArgsTest < Minitest::Test
     assert_equal 60, config['poll_interval']
   end
 
-  def test_database_url_override
-    config = parse_args(['-d', 'sqlite:///tmp/test.db'])
-
-    assert_equal 'sqlite:///tmp/test.db', config['database_url']
-  end
-
   def test_combined_flags
     config = parse_args(['-n', '2', '-i', '30'])
 

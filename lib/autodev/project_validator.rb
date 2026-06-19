@@ -82,22 +82,12 @@ module ProjectValidator
 
   def self.validate_labels!(project_config, path)
     present = ConfigValidator::LABEL_FIELDS.select { |f| project_config[f] }
-    warn_deprecated_label_fields!(project_config, path)
     return if present.empty?
 
     validate_label_completeness!(present, path)
     validate_label_types!(project_config, path)
   end
   private_class_method :validate_labels!
-
-  def self.warn_deprecated_label_fields!(project_config, path)
-    %w[labels_to_remove label_to_add label_mr label_blocked max_fix_rounds].each do |field|
-      next unless project_config[field]
-
-      warn "[DEPRECATION] #{path}: '#{field}' is deprecated and will be removed in a future version."
-    end
-  end
-  private_class_method :warn_deprecated_label_fields!
 
   def self.validate_label_completeness!(present, path)
     missing = ConfigValidator::LABEL_FIELDS - present

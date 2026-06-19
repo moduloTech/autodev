@@ -20,10 +20,9 @@
 #   autodev -c ~/.autodev/custom.yml                       # Custom config path
 #
 # Embedded web UI:
-#   When `web.enabled: true` (default) and not running with --once, autodev
-#   exposes a live monitoring UI on http://<web.bind>:<web.port> (defaults
-#   127.0.0.1:4567). Set `web.bind: 0.0.0.0` (or a NetBird interface IP) to
-#   expose it beyond loopback. Disable entirely via `web: { enabled: false }`.
+#   autodev exposes a live monitoring UI on http://<web.bind>:<web.port>
+#   (defaults 127.0.0.1:4567). Set `web.bind: 0.0.0.0` (or a NetBird interface
+#   IP) to expose it beyond loopback.
 #   Set `AUTODEV_WEB_RELOAD=1` to hot-reload Sinatra routes + Phlex views
 #   on every request (dev only — restart still required for poller / DB code).
 #
@@ -69,7 +68,6 @@ end
 
 def define_connection_options(opts, overrides)
   opts.on('-c', '--config PATH', 'Config file (default: ~/.autodev/config.yml)') { |v| overrides['config_path'] = v }
-  opts.on('-d', '--database-url URL', 'SQLite database URL') { |v| overrides['database_url'] = v }
   opts.on('-t', '--token TOKEN', 'GitLab API token') { |v| overrides['gitlab_token'] = v }
   opts.on('-n', '--max-workers N', Integer, 'Concurrent workers (default: 3)') { |v| overrides['max_workers'] = v }
   opts.on('-i', '--interval SECONDS', Integer, 'Poll interval in seconds') { |v| overrides['poll_interval'] = v }
