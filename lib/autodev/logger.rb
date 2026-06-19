@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'redactor'
+
 # Structured logger with per-project and global log files.
 class AppLogger
   LEVELS = { 'DEBUG' => 0, 'INFO' => 1, 'WARN' => 2, 'ERROR' => 3 }.freeze
@@ -37,6 +39,9 @@ class AppLogger
   def write(level, msg, project: nil, **context)
     return if LEVELS[level] < @level
 
+    # Defense in depth: scrub any secret (GitLab PAT in a clone URL, auth
+    # header) before it hits the console or the log files (task #10).
+    msg = Redactor.scrub(msg)
     @mutex.synchronize do
       print_console(level, msg, project)
       write_log_files(level, msg, project, context)
