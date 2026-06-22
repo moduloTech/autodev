@@ -62,6 +62,28 @@ class ConfigLoadTest < Minitest::Test
     end
   end
 
+  def test_db_backed_project_field_warns
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'config.yml')
+      File.write(path, YAML.dump('projects' => [{ 'path' => 'g/p', 'target_branch' => 'develop',
+                                                  'parallel_agents' => true }]))
+      err = capture_io { Config.load('config_path' => path) }.last
+
+      assert_match(/DEPRECATION.*per-project 'target_branch'/, err)
+      assert_match(/DEPRECATION.*per-project 'parallel_agents'/, err)
+    end
+  end
+
+  def test_project_path_alone_does_not_warn
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'config.yml')
+      File.write(path, YAML.dump('projects' => [{ 'path' => 'g/p' }]))
+      err = capture_io { Config.load('config_path' => path) }.last
+
+      refute_match(/per-project/, err)
+    end
+  end
+
   def test_env_overrides_yaml
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'config.yml')

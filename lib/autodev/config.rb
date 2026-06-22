@@ -115,6 +115,19 @@ module Config # rubocop:disable Metrics/ModuleLength
 
   INTEGER_FIELDS = %w[poll_interval max_workers dc_timeout max_retries retry_backoff pickup_delay
                       stagnation_threshold].freeze
+
+  # Per-project config keys that now live in the DB (task #9 phase 2) and are
+  # read from there at runtime (IssueProcessJob#lookup_project_config). Setting
+  # one under `projects:` in config.yml still works — the value seeds the DB via
+  # `autodev:migrate_projects_from_yaml` and is the runtime fallback for a
+  # project with no DB row yet — but it's deprecated and will stop being read
+  # once the YAML `projects:` block is removed (task #9 phase 4). `path` is the
+  # project identity, not config, so it's excluded.
+  DB_BACKED_PROJECT_FIELDS = %w[target_branch labels_todo label_doing label_done extra_prompt
+                                dc_timeout max_retries retry_backoff stagnation_threshold clone_depth
+                                sparse_checkout post_completion post_completion_timeout model effort
+                                parallel_agents split_implementation implementer_agent
+                                test_writer_agent mr_fixer_agent app].freeze
   VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
 
   def self.load(cli_overrides = {})
@@ -221,9 +234,25 @@ module Config # rubocop:disable Metrics/ModuleLength
     IGNORED_GLOBAL_FIELDS.each do |field|
       warn "[DEPRECATION] '#{field}' is no longer read from config.yml and is ignored." if yaml.key?(field)
     end
+    warn_db_backed_project_fields!(yaml)
     return unless yaml['web'].is_a?(Hash) && yaml['web'].key?('enabled')
 
     warn "[DEPRECATION] 'web.enabled' is no longer read from config.yml (the web UI is always on)."
   end
   private_class_method :warn_ignored!
+
+  # Warn once per per-project key that has moved to the DB and is now read from
+  # there at runtime. Fires at config load (not in the importer, which is the
+  # one place the YAML value is meant to be consumed): the point is to catch an
+  # operator who edits config.yml expecting it to take effect when the DB row is
+  # already authoritative.
+  def self.warn_db_backed_project_fields!(yaml)
+    present = Array(yaml['projects']).flat_map { |p| p.is_a?(Hash) ? p.keys : [] }.uniq
+    (DB_BACKED_PROJECT_FIELDS & present).each do |field|
+      warn "[DEPRECATION] per-project '#{field}' in config.yml is now stored in the database and read " \
+           'from there at runtime; the YAML value only seeds the DB via ' \
+           'autodev:migrate_projects_from_yaml and will stop being read in a future version.'
+    end
+  end
+  private_class_method :warn_db_backed_project_fields!
 end
