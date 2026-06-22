@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.24] - 2026-06-22
+
 ### Deprecated
 
 - **Per-project config under `projects:` in `config.yml` now emits a deprecation warning at load.** Every per-project key is read from the DB at runtime (task #9 phase 2), so editing one in the YAML alone has no effect once the project has a DB row — the dangerous silent case. `Config.load` now warns (`[DEPRECATION] per-project '<key>' in config.yml is now stored in the database…`) once per DB-backed key found under `projects:` (`Config::DB_BACKED_PROJECT_FIELDS` — the 20 config keys plus `app`; `path` is excluded as project identity). The warning fires at config load (the runtime boot path), **not** in `YamlProjectImporter` — the importer is the one place the YAML value is meant to be consumed, and warning there would be self-defeating. The YAML value still seeds the DB via `autodev:migrate_projects_from_yaml` and remains the runtime fallback for a project with no row yet; it stops being read entirely when the `projects:` block is removed (phase 4). New tests in `test/config_load_test.rb` (warns for `target_branch`/`parallel_agents`; `path`-only entry stays quiet).
