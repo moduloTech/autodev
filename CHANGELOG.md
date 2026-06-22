@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Per-project config is now read from the DB at runtime (phase 2 of task #9).** `IssueProcessJob#lookup_project_config` no longer reads the `projects:` array of `~/.autodev/config.yml` directly — it now resolves `Project.find_by(gitlab_path:)&.to_project_config`. When a `projects` row exists it is **authoritative** for the columnized keys (the phase-1 importer mirrors the YAML into columns, so the cutover is behaviour-neutral on a DB that has been imported); the still-YAML-only advanced keys (`model`, `effort`, `parallel_agents`, `split_implementation`, `implementer_agent`/`test_writer_agent`/`mr_fixer_agent`, listed in `IssueProcessJob::YAML_ONLY_CONFIG_KEYS`) are layered on top from the matching YAML entry so a project that sets them isn't silently regressed. With **no** row yet (e.g. a project added to the YAML before the next `autodev:migrate_projects_from_yaml` run) the full YAML entry is used — a soft transition that never regresses a project. Consequence to note during the transition: once a project has a DB row, editing a *columnized* key in the YAML alone has no effect until the importer is re-run (the DB-side edit form is phase 3); the YAML-only advanced keys keep being read from the YAML. New tests in `test/jobs/issue_process_job_test.rb` cover the three branches (DB row authoritative, YAML-only keys layered, YAML fallback with no row).
+
+### Fixed
+
+- **The per-project `stagnation_threshold` override actually applies now.** It is a documented per-project key (a `projects` column, validated on `Project`, emitted by `#to_project_config`, advertised as "overrides global" in the config template), but both stagnation sites read only the **global** value — `PipelineMonitor::StagnationDetector#stagnated?` and `MrFixer::StagnationChecker#discussion_stagnated?` resolved `@config['stagnation_threshold']`, never `@project_config`'s. A project that tuned its own threshold was silently ignored and fell back to the global default of 5. Both now resolve `@project_config['stagnation_threshold'] || @config['stagnation_threshold'] || 5` (the standard project-over-global precedence used by `dc_timeout`/`max_retries`/`retry_backoff`). Surfaced while auditing the phase-2 read path for keys that are columnized but not consumed per-project. New tests: `test/pipeline_monitor_stagnation_threshold_test.rb`, `test/mr_fixer_stagnation_threshold_test.rb`.
+
 ## [1.0.0-alpha.23] - 2026-06-19
 
 ### Changed

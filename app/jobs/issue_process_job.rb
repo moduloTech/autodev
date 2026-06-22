@@ -24,6 +24,16 @@ class IssueProcessJob < ApplicationJob
 
   ACTIONS = %i[process check_pipeline fix_discussions post_completion retry_errored retry_stuck].freeze
 
+  # Per-project keys NOT yet columnized on `projects` (task #9 — they're
+  # undocumented/unvalidated and rarely tuned, so phase 1 left them in YAML).
+  # `Project#to_project_config` doesn't emit them, so when a DB row exists we
+  # layer them back from the matching YAML entry to avoid silently dropping a
+  # project's tuning during the cutover. `*_agent` keys are the per-agent
+  # overrides read in IssueProcessor::Agents#detect_agent (`<name>_agent`) and
+  # MrFixer::AgentInjector (`mr_fixer_agent`).
+  YAML_ONLY_CONFIG_KEYS = %w[model effort parallel_agents split_implementation
+                             implementer_agent test_writer_agent mr_fixer_agent].freeze
+
   def perform(project_path, issue_iid, action)
     action = action.to_sym
     raise ArgumentError, "unknown action #{action.inspect}" unless ACTIONS.include?(action)
@@ -40,8 +50,19 @@ class IssueProcessJob < ApplicationJob
 
   private
 
+  # Phase 2 of task #9: the per-project config now comes from the DB. When a
+  # `projects` row exists it is authoritative for the columnized keys (the
+  # phase-1 importer mirrors the YAML into columns, so this is behaviour-neutral
+  # at the cutover); the still-YAML-only advanced keys are layered on top from
+  # the matching `projects:` entry. With no row yet (e.g. a project added to the
+  # YAML before the next `autodev:migrate_projects_from_yaml` run) we fall back
+  # to the full YAML entry — a soft transition that never regresses a project.
   def lookup_project_config(config, project_path)
-    Array(config['projects']).find { |p| p['path'] == project_path }
+    yaml_entry = Array(config['projects']).find { |p| p['path'] == project_path }
+    db_config = ::Project.find_by(gitlab_path: project_path)&.to_project_config
+    return yaml_entry unless db_config
+
+    yaml_entry ? db_config.merge(yaml_entry.slice(*YAML_ONLY_CONFIG_KEYS)) : db_config
   end
 
   def build_client(config)

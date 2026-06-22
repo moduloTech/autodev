@@ -13,10 +13,14 @@ class MrFixer
       data = JSON.parse(issue.stagnation_signatures || '{}') rescue {} # rubocop:disable Style/RescueModifier
       entry = update_stagnation_entry(data, 'discussions', signature)
       issue.update(stagnation_signatures: JSON.generate(data))
-      return false unless entry['count'] >= (@config['stagnation_threshold'] || 5)
+      return false unless entry['count'] >= stagnation_threshold
 
       transition_to_done_stagnation!(issue)
       true
+    end
+
+    def stagnation_threshold
+      (@project_config['stagnation_threshold'] || @config['stagnation_threshold'] || 5).to_i
     end
 
     def update_stagnation_entry(data, key, signature)

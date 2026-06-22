@@ -75,6 +75,36 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
     end
   end
 
+  # -- lookup_project_config (task #9 phase 2: DB read path) --
+
+  test 'lookup_project_config reads the columnized keys from the DB row' do
+    Project.create!(gitlab_path: PROJECT_PATH, slug: 'group__foo', target_branch: 'develop', dc_timeout: 900)
+    cfg = IssueProcessJob.new.send(:lookup_project_config, @config, PROJECT_PATH)
+
+    assert_equal 'develop', cfg['target_branch']
+    assert_equal 900, cfg['dc_timeout']
+    # DB is authoritative once a row exists: a standard key set only in the
+    # YAML entry is NOT layered back.
+    refute cfg.key?('max_retries')
+  end
+
+  test 'lookup_project_config layers YAML-only advanced keys over the DB row' do
+    Project.create!(gitlab_path: PROJECT_PATH, slug: 'group__foo', target_branch: 'main')
+    @config['projects'] = [{ 'path' => PROJECT_PATH, 'target_branch' => 'ignored-from-yaml',
+                             'model' => 'opus', 'mr_fixer_agent' => 'custom' }]
+    cfg = IssueProcessJob.new.send(:lookup_project_config, @config, PROJECT_PATH)
+
+    assert_equal 'main', cfg['target_branch']  # columnized key: DB wins
+    assert_equal 'opus', cfg['model']          # YAML-only key: layered in
+    assert_equal 'custom', cfg['mr_fixer_agent']
+  end
+
+  test 'lookup_project_config falls back to the full YAML entry when no DB row exists' do
+    cfg = IssueProcessJob.new.send(:lookup_project_config, @config, PROJECT_PATH)
+
+    assert_equal({ 'path' => PROJECT_PATH, 'max_retries' => 5 }, cfg)
+  end
+
   test ':process delegates to IssueProcessor#process' do
     assert_action_routes(:process, klass: IssueProcessor, method: :process)
   end

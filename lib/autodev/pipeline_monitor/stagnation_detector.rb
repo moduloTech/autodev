@@ -17,7 +17,11 @@ class PipelineMonitor
       data = parse_stagnation(issue)
       entry = data[type.to_s] || {}
       entry['signature'] == signature &&
-        (entry['count'] || 0) >= (@config['stagnation_threshold'] || 5)
+        (entry['count'] || 0) >= stagnation_threshold
+    end
+
+    def stagnation_threshold
+      (@project_config['stagnation_threshold'] || @config['stagnation_threshold'] || 5).to_i
     end
 
     def update_stagnation_signature(issue, type, signature)
