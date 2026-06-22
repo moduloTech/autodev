@@ -89,4 +89,23 @@ class ConfigValidateProjectsTest < Minitest::Test
     config = base_config([{ 'path' => 'g/p', 'sparse_checkout' => ['src/', 'lib/'] }])
     Config.validate!(config)
   end
+
+  # -- advanced keys (phase 2) --
+
+  def test_advanced_string_blank_raises
+    config = base_config([{ 'path' => 'g/p', 'model' => '  ' }])
+    assert_raises(ConfigError) { Config.validate!(config) }
+  end
+
+  def test_advanced_boolean_non_boolean_raises
+    config = base_config([{ 'path' => 'g/p', 'parallel_agents' => 'yes' }])
+    assert_raises(ConfigError) { Config.validate!(config) }
+  end
+
+  def test_advanced_keys_valid_pass
+    config = base_config([{ 'path' => 'g/p', 'model' => 'opus', 'effort' => 'high',
+                            'parallel_agents' => true, 'split_implementation' => false,
+                            'mr_fixer_agent' => 'custom' }])
+    Config.validate!(config)
+  end
 end

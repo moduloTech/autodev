@@ -88,14 +88,15 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
     refute cfg.key?('max_retries')
   end
 
-  test 'lookup_project_config layers YAML-only advanced keys over the DB row' do
-    Project.create!(gitlab_path: PROJECT_PATH, slug: 'group__foo', target_branch: 'main')
-    @config['projects'] = [{ 'path' => PROJECT_PATH, 'target_branch' => 'ignored-from-yaml',
-                             'model' => 'opus', 'mr_fixer_agent' => 'custom' }]
+  test 'lookup_project_config reads the advanced keys from the DB row too' do
+    Project.create!(gitlab_path: PROJECT_PATH, slug: 'group__foo', target_branch: 'main',
+                    model: 'opus', parallel_agents: true, mr_fixer_agent: 'custom')
+    # A divergent YAML entry must NOT leak in once a row exists.
+    @config['projects'] = [{ 'path' => PROJECT_PATH, 'model' => 'ignored-from-yaml' }]
     cfg = IssueProcessJob.new.send(:lookup_project_config, @config, PROJECT_PATH)
 
-    assert_equal 'main', cfg['target_branch']  # columnized key: DB wins
-    assert_equal 'opus', cfg['model']          # YAML-only key: layered in
+    assert_equal 'opus', cfg['model']
+    assert cfg['parallel_agents']
     assert_equal 'custom', cfg['mr_fixer_agent']
   end
 

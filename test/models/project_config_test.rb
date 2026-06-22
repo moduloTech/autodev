@@ -48,6 +48,20 @@ class ProjectConfigTest < ActiveSupport::TestCase
     assert_predicate project, :valid?
   end
 
+  # -- advanced keys (phase 2) --
+
+  def test_advanced_string_fields_reject_blank_but_allow_nil
+    assert_predicate project(model: 'opus'), :valid? # set + non-blank is fine
+    refute_predicate project(model: '  '), :valid?
+    refute_predicate project(mr_fixer_agent: ''), :valid?
+  end
+
+  def test_boolean_fields_accept_true_false_and_nil
+    assert_predicate project(parallel_agents: true), :valid?
+    assert_predicate project(split_implementation: false), :valid?
+    assert_predicate project, :valid?
+  end
+
   # -- to_project_config --
 
   def test_to_project_config_omits_blank_keys
@@ -64,6 +78,14 @@ class ProjectConfigTest < ActiveSupport::TestCase
     assert_equal({ 'path' => 'g/p', 'target_branch' => 'develop', 'dc_timeout' => 900,
                    'label_doing' => 'doing', 'label_done' => 'done', 'labels_todo' => ['todo'] },
                  p.to_project_config)
+  end
+
+  def test_to_project_config_emits_advanced_keys
+    p = project(model: 'opus', parallel_agents: true, mr_fixer_agent: 'custom')
+    p.save!
+
+    assert_equal({ 'path' => 'g/p', 'model' => 'opus', 'parallel_agents' => true,
+                   'mr_fixer_agent' => 'custom' }, p.to_project_config)
   end
 
   def test_to_project_config_rebuilds_app_block_from_app_commands

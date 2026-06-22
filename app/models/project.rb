@@ -27,9 +27,17 @@ class Project < ApplicationRecord
   # configure none of them and fall back to the global defaults).
   POSITIVE_INT_FIELDS = %i[dc_timeout max_retries retry_backoff stagnation_threshold
                            post_completion_timeout].freeze
+  # "Advanced" keys columnized in phase 2 (were YAML-only in phase 1).
+  STRING_CONFIG_FIELDS = %i[model effort implementer_agent test_writer_agent mr_fixer_agent].freeze
+  BOOLEAN_CONFIG_FIELDS = %i[parallel_agents split_implementation].freeze
 
   validates(*POSITIVE_INT_FIELDS, numericality: { only_integer: true, greater_than: 0 }, allow_nil: true)
   validates :clone_depth, numericality: { only_integer: true, greater_than_or_equal_to: 0 }, allow_nil: true
+  # `presence: true, allow_nil: true` = "if set, must not be blank" (rejects ""
+  # / whitespace but lets an unset field through). The boolean columns are
+  # type-cast by AR, so a NULL stays nil and only true/false survive.
+  validates(*STRING_CONFIG_FIELDS, presence: true, allow_nil: true)
+  validates(*BOOLEAN_CONFIG_FIELDS, inclusion: { in: [true, false] }, allow_nil: true)
   validate :validate_label_workflow
   validate :validate_string_arrays
   validate :validate_post_completion_pairing
@@ -51,7 +59,9 @@ class Project < ApplicationRecord
 
   SCALAR_CONFIG_KEYS = %i[target_branch label_doing label_done extra_prompt dc_timeout
                           max_retries retry_backoff stagnation_threshold clone_depth
-                          post_completion_timeout].freeze
+                          post_completion_timeout model effort parallel_agents
+                          split_implementation implementer_agent test_writer_agent
+                          mr_fixer_agent].freeze
   LIST_CONFIG_KEYS = %i[labels_todo sparse_checkout post_completion].freeze
   LABEL_FIELDS = %i[labels_todo label_doing label_done].freeze
 

@@ -47,13 +47,16 @@ class YamlProjectImporter
 
   APP_COMMAND_CATEGORIES = %w[setup test lint run].freeze
 
-  # Scalar/list per-project config keys mirrored onto `projects` columns
-  # (task #9 phase 1). `app:` is handled separately (project_app_commands);
-  # `path`/`name` map to gitlab_path/name; the advanced keys (model, effort,
-  # parallel_agents, …) stay YAML-only for now.
+  # Scalar/list per-project config keys mirrored onto `projects` columns.
+  # `app:` is handled separately (project_app_commands); `path`/`name` map to
+  # gitlab_path/name. Phase 1 columnized the documented keys; phase 2 added the
+  # "advanced" ones (model, effort, parallel_agents, split_implementation,
+  # *_agent) — every per-project key now has a column.
   CONFIG_KEYS = %w[target_branch labels_todo label_doing label_done extra_prompt
                    dc_timeout max_retries retry_backoff stagnation_threshold
-                   clone_depth sparse_checkout post_completion post_completion_timeout].freeze
+                   clone_depth sparse_checkout post_completion post_completion_timeout
+                   model effort parallel_agents split_implementation
+                   implementer_agent test_writer_agent mr_fixer_agent].freeze
 
   def initialize(yaml:)
     @yaml = yaml || {}

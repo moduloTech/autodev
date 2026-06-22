@@ -55,6 +55,15 @@ module Config # rubocop:disable Metrics/ModuleLength
         # post_completion: ["./bin/deploy", "--env", "staging"]  # command run after pipeline green (Docker CMD format)
         # post_completion_timeout: 300                            # timeout in seconds (default: 300)
         #
+        # -- Advanced (override globally-tuned danger-claude / agent behaviour) --
+        # model: sonnet                          # danger-claude model override (-m); falls back to global, then per-call default
+        # effort: high                            # danger-claude reasoning effort override (-e)
+        # parallel_agents: false                  # split complex issues across parallel agents (worktrees)
+        # split_implementation: false             # implement code + tests in separate passes
+        # implementer_agent: my-implementer      # override the implementer agent definition (name or path in .claude/agents)
+        # test_writer_agent: my-test-writer      # override the test-writer agent definition
+        # mr_fixer_agent: my-mr-fixer            # override the mr-fixer agent definition
+        #
         # app:                                    # app environment instructions for danger-claude
         #   setup:                                # dependency installation commands
         #     - ["bundle", "install"]

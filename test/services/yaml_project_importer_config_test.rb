@@ -32,6 +32,17 @@ class YamlProjectImporterConfigTest < ActiveSupport::TestCase
     assert_equal ['./bin/deploy'], project.post_completion
   end
 
+  def test_imports_advanced_config_columns
+    yaml = { 'projects' => [{ 'path' => 'group/adv', 'model' => 'opus',
+                              'parallel_agents' => true, 'mr_fixer_agent' => 'custom' }] }
+    YamlProjectImporter.new(yaml: yaml).import!
+    project = Project.find_by!(gitlab_path: 'group/adv')
+
+    assert_equal 'opus', project.model
+    assert project.parallel_agents
+    assert_equal 'custom', project.mr_fixer_agent
+  end
+
   def test_re_import_clears_dropped_config_keys
     YamlProjectImporter.new(yaml: CONFIG_YAML).import!
     YamlProjectImporter.new(yaml: { 'projects' => [{ 'path' => 'group/cfg' }] }).import!
