@@ -247,6 +247,45 @@ en:
   web_project_behavior_section: Behavior
   web_project_security_section: Security
   web_project_no_recent: No recent request for this project.
+  web_project_edit_button: Edit configuration
+  web_project_edit_title: Configuration — %{path}
+  web_project_edit_subtitle: Per-project Autodev configuration, stored in the database.
+  web_project_edit_section_basic: General
+  web_project_edit_section_execution: Execution
+  web_project_edit_section_advanced: Advanced
+  web_project_edit_default: "Default: %{value}"
+  web_project_edit_desc_target_branch: "Target branch for merge requests. Default: the repository's default branch (usually master)."
+  web_project_edit_desc_labels_todo: GitLab labels that trigger processing by Autodev. One entry per line; required with label_doing and label_done.
+  web_project_edit_desc_label_doing: Label set on the issue throughout processing. Required with labels_todo and label_done.
+  web_project_edit_desc_label_done: Label set when the issue is delivered (done state). Required with labels_todo and label_doing.
+  web_project_edit_desc_extra_prompt: "Extra instructions injected into the danger-claude prompts. Default: none."
+  web_project_edit_desc_dc_timeout: Maximum time for a single danger-claude call, in seconds.
+  web_project_edit_desc_max_retries: Maximum number of attempts on an issue after a failure.
+  web_project_edit_desc_retry_backoff: Base delay between two attempts, in seconds.
+  web_project_edit_desc_stagnation_threshold: Number of consecutive identical failures (pipeline or discussions) before giving up.
+  web_project_edit_desc_clone_depth: Git clone depth (0 = full history clone).
+  web_project_edit_desc_sparse_checkout: "Paths to fetch via sparse checkout (handy for monorepos). One entry per line. Default: full clone."
+  web_project_edit_desc_post_completion: "Command run after a green pipeline (Docker CMD format). One entry per line. Default: no hook."
+  web_project_edit_desc_post_completion_timeout: Maximum time for the post_completion command, in seconds.
+  web_project_edit_desc_model: "danger-claude model (-m option). Default: danger-claude's default model."
+  web_project_edit_desc_effort: "danger-claude reasoning effort (-e option). Default: danger-claude's default effort."
+  web_project_edit_desc_parallel_agents: Split complex issues across multiple agents in parallel (git worktrees).
+  web_project_edit_desc_split_implementation: Implement the code, then the tests, in two separate danger-claude passes.
+  web_project_edit_desc_implementer_agent: "Agent used for implementation (name or path under .claude/agents). Default: the built-in agent."
+  web_project_edit_desc_test_writer_agent: "Agent used for writing tests. Default: the built-in agent."
+  web_project_edit_desc_mr_fixer_agent: "Agent used for fixing MR review discussions. Default: the built-in agent."
+  web_project_edit_help_title: Configuration help
+  web_project_edit_help_precedence: "Precedence: the project value, else the global value, else the baked default."
+  web_project_edit_help_blank: An empty field falls back to the global default (shown under each field).
+  web_project_edit_help_lists: "Lists (labels, sparse_checkout, post_completion): one entry per line."
+  web_project_edit_help_booleans: "Booleans: “Default” lets Autodev follow the global value."
+  web_project_edit_help_link: See the technical guide
+  web_project_edit_bool_default: Default
+  web_project_edit_bool_true: Enabled
+  web_project_edit_bool_false: Disabled
+  web_project_edit_save: Save
+  web_project_edit_cancel: Cancel
+  web_project_edit_error_banner: "The configuration could not be saved:"
   web_projects_index_title: Projects
   web_projects_index_subtitle: Every project autodev keeps an eye on.
   web_projects_index_empty: No project configured yet.

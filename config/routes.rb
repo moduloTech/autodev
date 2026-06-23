@@ -48,6 +48,12 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   post '/issues/:id/close',      to: 'issues#close',      constraints: { id: /\d+/ }
   get  '/errors',                to: 'errors#index'
   get  '/projects',              to: 'projects#index'
+  # /projects/:slug/edit → ProjectsController#edit (per-project config form,
+  # gated on project membership/admin); PATCH /projects/:slug → #update
+  # persists it onto the projects row (task #9 phase 3). Declared before the
+  # bare show route for clarity; they don't overlap (distinct segment/verb).
+  get   '/projects/:slug/edit',  to: 'projects#edit'
+  patch '/projects/:slug',       to: 'projects#update'
   get  '/projects/:slug',        to: 'projects#show'
   get  '/stream',                to: 'stream#show'
   get  '/locale/:lang',          to: 'locale#update'

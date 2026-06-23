@@ -10,13 +10,14 @@ module Web
 
       # rubocop:disable Metrics/ParameterLists
       def initialize(project_path:, project_config:, project_issues:,
-                     stats:, kpis:, tab:, **)
+                     stats:, kpis:, tab:, can_edit: false, **)
         super(**)
         @project_path = project_path
         @project_config = project_config
         @project_issues = project_issues
         @stats = stats
         @kpis = kpis
+        @can_edit = can_edit
         @tab = TABS.include?(tab) ? tab : 'overview'
       end
       # rubocop:enable Metrics/ParameterLists
@@ -274,24 +275,43 @@ module Web
         end
       end
 
-      def render_yaml_card # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+      def render_yaml_card
         render(Components::Card.new(padding: 0)) do
-          div(class: 'yaml-header') do
-            div(style: 'display: flex; align-items: center; gap: 8px;') do
-              render Components::Icon.new(name: 'settings', size: 14, color: 'var(--text-muted)')
-              span(class: 'yaml-filename') { t_web(:web_project_config_yaml_title) }
-            end
-            span(class: 'coming-soon', title: t_web(:web_coming_soon_tooltip)) do
-              render Components::Button.new(size: :sm, href: '#',
-                                            icon: Components::Icon.new(name: 'copy', size: 12)) do
-                t_web(:web_project_config_copy)
-              end
-            end
-          end
+          render_yaml_header
           if @project_config.empty?
             div(class: 'empty-state') { p(class: 'muted') { t_web(:web_project_no_config) } }
           else
             pre(class: 'yaml-pre') { YAML.dump(@project_config) }
+          end
+        end
+      end
+
+      def render_yaml_header
+        div(class: 'yaml-header') do
+          div(style: 'display: flex; align-items: center; gap: 8px;') do
+            render Components::Icon.new(name: 'settings', size: 14, color: 'var(--text-muted)')
+            span(class: 'yaml-filename') { t_web(:web_project_config_yaml_title) }
+          end
+          div(style: 'display: flex; align-items: center; gap: 8px;') do
+            render_edit_button if @can_edit
+            render_copy_button
+          end
+        end
+      end
+
+      def render_edit_button
+        render Components::Button.new(kind: :primary, size: :sm,
+                                      href: "/projects/#{project_slug(@project_path)}/edit",
+                                      icon: Components::Icon.new(name: 'settings', size: 12)) do
+          t_web(:web_project_edit_button)
+        end
+      end
+
+      def render_copy_button
+        span(class: 'coming-soon', title: t_web(:web_coming_soon_tooltip)) do
+          render Components::Button.new(size: :sm, href: '#',
+                                        icon: Components::Icon.new(name: 'copy', size: 12)) do
+            t_web(:web_project_config_copy)
           end
         end
       end

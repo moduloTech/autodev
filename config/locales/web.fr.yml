@@ -247,6 +247,45 @@ fr:
   web_project_behavior_section: Comportement
   web_project_security_section: Sécurité
   web_project_no_recent: Aucune demande récente pour ce projet.
+  web_project_edit_button: Modifier la configuration
+  web_project_edit_title: Configuration — %{path}
+  web_project_edit_subtitle: Configuration Autodev par projet, stockée en base.
+  web_project_edit_section_basic: Général
+  web_project_edit_section_execution: Exécution
+  web_project_edit_section_advanced: Avancé
+  web_project_edit_default: "Défaut : %{value}"
+  web_project_edit_desc_target_branch: "Branche cible des merge requests. Défaut : branche par défaut du dépôt (généralement master)."
+  web_project_edit_desc_labels_todo: Labels GitLab qui déclenchent le traitement par Autodev. Une entrée par ligne ; requis avec label_doing et label_done.
+  web_project_edit_desc_label_doing: Label posé sur l'issue pendant tout le traitement. Requis avec labels_todo et label_done.
+  web_project_edit_desc_label_done: Label posé quand l'issue est livrée (état done). Requis avec labels_todo et label_doing.
+  web_project_edit_desc_extra_prompt: "Instructions supplémentaires injectées dans les prompts danger-claude. Défaut : aucune."
+  web_project_edit_desc_dc_timeout: Délai maximum d'un appel danger-claude, en secondes.
+  web_project_edit_desc_max_retries: Nombre maximum de tentatives sur une issue en cas d'échec.
+  web_project_edit_desc_retry_backoff: Délai de base entre deux tentatives, en secondes.
+  web_project_edit_desc_stagnation_threshold: Nombre d'échecs identiques consécutifs (pipeline ou discussions) avant abandon.
+  web_project_edit_desc_clone_depth: Profondeur du git clone (0 = clone complet de l'historique).
+  web_project_edit_desc_sparse_checkout: "Chemins à récupérer en sparse checkout (utile pour les monorepos). Une entrée par ligne. Défaut : clone complet."
+  web_project_edit_desc_post_completion: "Commande exécutée après un pipeline vert (format CMD Docker). Une entrée par ligne. Défaut : aucun hook."
+  web_project_edit_desc_post_completion_timeout: Délai maximum de la commande post_completion, en secondes.
+  web_project_edit_desc_model: "Modèle danger-claude (option -m). Défaut : modèle par défaut de danger-claude."
+  web_project_edit_desc_effort: "Effort de raisonnement danger-claude (option -e). Défaut : effort par défaut de danger-claude."
+  web_project_edit_desc_parallel_agents: Découpe les issues complexes sur plusieurs agents en parallèle (worktrees git).
+  web_project_edit_desc_split_implementation: Implémente le code puis les tests en deux passes danger-claude distinctes.
+  web_project_edit_desc_implementer_agent: "Agent utilisé pour l'implémentation (nom ou chemin dans .claude/agents). Défaut : agent intégré."
+  web_project_edit_desc_test_writer_agent: "Agent utilisé pour l'écriture des tests. Défaut : agent intégré."
+  web_project_edit_desc_mr_fixer_agent: "Agent utilisé pour la correction des reviews de MR. Défaut : agent intégré."
+  web_project_edit_help_title: Aide à la configuration
+  web_project_edit_help_precedence: "Précédence : valeur du projet, sinon valeur globale, sinon défaut intégré."
+  web_project_edit_help_blank: Un champ vide retombe sur la valeur globale par défaut (indiquée sous chaque champ).
+  web_project_edit_help_lists: "Listes (labels, sparse_checkout, post_completion) : une entrée par ligne."
+  web_project_edit_help_booleans: "Booléens : « Défaut » laisse Autodev suivre la valeur globale."
+  web_project_edit_help_link: Voir le guide technique
+  web_project_edit_bool_default: Défaut
+  web_project_edit_bool_true: Activé
+  web_project_edit_bool_false: Désactivé
+  web_project_edit_save: Enregistrer
+  web_project_edit_cancel: Annuler
+  web_project_edit_error_banner: "La configuration n'a pas pu être enregistrée :"
   web_projects_index_title: Projets
   web_projects_index_subtitle: Tous les projets suivis par autodev.
   web_projects_index_empty: Aucun projet configuré pour le moment.

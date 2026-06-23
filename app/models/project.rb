@@ -65,6 +65,16 @@ class Project < ApplicationRecord
   LIST_CONFIG_KEYS = %i[labels_todo sparse_checkout post_completion].freeze
   LABEL_FIELDS = %i[labels_todo label_doing label_done].freeze
 
+  # Editable per-project config fields grouped by input type. Single source
+  # of truth for both the dashboard edit form (Web::Views::ProjectEdit, which
+  # renders an input per field) and the controller param normalizer
+  # (ProjectsController#project_config_params, which casts each group). The
+  # boolean group is BOOLEAN_CONFIG_FIELDS and the array group LIST_CONFIG_KEYS
+  # (both above). `app:` (project_app_commands) is structured/nested and is
+  # edited separately — it's not part of this set (task #9 phase 3).
+  CONFIG_INTEGER_FIELDS = (POSITIVE_INT_FIELDS + %i[clone_depth]).freeze
+  CONFIG_STRING_FIELDS = (SCALAR_CONFIG_KEYS - CONFIG_INTEGER_FIELDS - BOOLEAN_CONFIG_FIELDS).freeze
+
   private
 
   def add_present(cfg, key, value)

@@ -26,18 +26,108 @@ class ProjectsController < ApplicationController
     render html: render_project_show(project_path).html_safe, layout: false
   end
 
+  # GET /projects/:slug/edit
+  #
+  # Per-project config edit form (task #9 phase 3). Gated on project
+  # membership/admin like IssuesController#close — editing config is a write to
+  # how Autodev runs the project, so only a collaborator (or admin) may do it.
+  # Requires a `projects` row to edit (a YAML-only project with no row yet —
+  # the soft-transition case — has nothing to edit until the next
+  # `autodev:migrate_projects_from_yaml` seeds it), so a missing row is a 404.
+  def edit
+    project = Project.find_by(gitlab_path: project_unslug(params[:slug]))
+    return head :not_found unless project
+    return head :forbidden unless can_edit_project?(project)
+
+    render html: render_project_edit(project).html_safe, layout: false
+  end
+
+  # PATCH /projects/:slug
+  #
+  # Persists the edited per-project config onto the projects row. Attributes
+  # are built field-by-field by #project_config_params (never mass-assigned
+  # from params), so only the known config columns can be written — not
+  # gitlab_path/slug/identity. The model carries the validations (phase 1), so
+  # an invalid edit re-renders the form with errors (422) instead of saving.
+  def update
+    project = Project.find_by(gitlab_path: project_unslug(params[:slug]))
+    return head :not_found unless project
+    return head :forbidden unless can_edit_project?(project)
+
+    if project.update(project_config_params)
+      redirect_to "/projects/#{params[:slug]}?tab=config"
+    else
+      render html: render_project_edit(project).html_safe, layout: false, status: :unprocessable_entity
+    end
+  end
+
   private
 
-  def render_project_show(project_path)
+  # A project's config can be edited by an admin or by a collaborator
+  # (contributor or owner) of the project. Mirrors IssuesController#can_close?.
+  def can_edit_project?(project)
+    return false unless current_user
+    return true if current_user.admin?
+
+    current_user.contributor_of?(project)
+  end
+
+  # Builds the attributes hash for #update field-by-field, casting each group
+  # by type and normalizing "unset" to nil so a cleared field falls back to the
+  # global default (exactly like an absent YAML key): blank string → nil,
+  # blank/invalid number → nil, the boolean select's "" → nil (tri-state:
+  # unset / true / false), and an empty textarea → nil for the list fields
+  # (one entry per line otherwise).
+  def project_config_params # rubocop:disable Metrics/AbcSize
+    attrs = {}
+    Project::CONFIG_STRING_FIELDS.each { |f| attrs[f] = presence_or_nil(params[f]) }
+    Project::CONFIG_INTEGER_FIELDS.each { |f| attrs[f] = integer_or_nil(params[f]) }
+    Project::BOOLEAN_CONFIG_FIELDS.each { |f| attrs[f] = boolean_or_nil(params[f]) }
+    Project::LIST_CONFIG_KEYS.each { |f| attrs[f] = lines_or_nil(params[f]) }
+    attrs
+  end
+
+  def presence_or_nil(raw)
+    value = raw.to_s.strip
+    value.empty? ? nil : value
+  end
+
+  def integer_or_nil(raw)
+    value = raw.to_s.strip
+    return nil if value.empty?
+
+    Integer(value, exception: false)
+  end
+
+  # Tri-state: the form's <select> offers "" (default/unset), "true", "false".
+  def boolean_or_nil(raw)
+    case raw.to_s
+    when 'true'  then true
+    when 'false' then false
+    end
+  end
+
+  def lines_or_nil(raw)
+    items = raw.to_s.split("\n").map(&:strip).reject(&:empty?)
+    items.empty? ? nil : items
+  end
+
+  def render_project_show(project_path) # rubocop:disable Metrics/MethodLength
+    record = Project.find_by(gitlab_path: project_path)
     ::Web::Views::ProjectShow.new(
       project_path: project_path,
-      project_config: project_for(project_path),
+      project_config: record ? record.to_project_config : project_for(project_path),
       project_issues: project_issues_for(project_path),
       stats: project_overview_stats(project_path),
       kpis: dashboard_kpis,
       tab: params[:tab].to_s,
+      can_edit: record.present? && can_edit_project?(record),
       **view_kwargs
     ).call
+  end
+
+  def render_project_edit(project)
+    ::Web::Views::ProjectEdit.new(project: project, **view_kwargs).call
   end
 
   def project_issues_for(project_path)
