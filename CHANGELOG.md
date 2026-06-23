@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Projects can be created and managed entirely in the DB — the `config.yml` `projects:` block is no longer required (phase 4 of task #9, completing the migration).** An admin can add a project from the dashboard (**Projets → Nouveau projet**, `GET /projects/new` + `POST /projects`): `gitlab_path` drives the derived `slug`/`name`, `default_locale` the per-issue language, and every per-project option is set on the same form as the phase-3 editor. Creation is admin-only (a non-admin's access derives from memberships on projects that already exist); on success the membership sync (`SyncGitlabMembershipsJob`) is enqueued so the new project's collaborators populate. Project **discovery** now reads the DB: `AutodevPollJob` and `bin/autodev`'s boot validation resolve projects via the new `Project.runtime_configs` (every `projects` row, unioned with any not-yet-imported YAML `projects:` entry as a soft fallback, same DB-then-YAML precedence as the phase-2 read path) instead of `config['projects']` directly. Consequently the supervisor no longer refuses to boot when `config.yml` has no `projects:` block, as long as the DB has at least one project. `Config::TEMPLATE` drops the `projects:` example (replaced by a note pointing at the dashboard / the still-supported `autodev:migrate_projects_from_yaml` seed rake), so a fresh config is much shorter. New tests: `test/controllers/projects_controller_create_test.rb` (admin gating, derived slug/name, membership-sync enqueue, invalid → 422), plus `Project.runtime_configs` coverage in `project_config_test.rb` and a DB-discovery case in `autodev_poll_job_test.rb`.
+
 ## [1.0.0-alpha.25] - 2026-06-23
 
 ### Added

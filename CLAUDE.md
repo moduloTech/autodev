@@ -55,7 +55,7 @@ The repo runs the exact same code path as production — same Devise + Entra ID 
 
 4. **GitLab token**. Set `gitlab_token` in `~/.autodev/config.yml` (or `GITLAB_API_TOKEN` env var) to a real PAT with `api` scope. `Users::OmniauthCallbacksController#entra_id` calls `Autodev::GitlabMembershipSync.for_user!` synchronously on every login — without a working token the first sign-in raises `SyncFailed` and rolls back the new User row. Same scope as prod's token.
 
-5. **Projects table populated**. Copy the `projects:` block from your prod `~/.autodev/config.yml` into the local one, then `bin/rails autodev:migrate_projects_from_yaml`. Without this the table is empty; `GitlabMembershipSync` will then compute zero memberships for your user, mark you `disabled`, and Devise will refuse the sign-in (401). The sync logs `[gitlab_sync] WARNING: projects table is empty…` when this happens — that's the symptom.
+5. **Projects table populated**. Projects live in the DB (task #9). Add them from the dashboard (**Projets → Nouveau projet**, admin-only) once you can sign in, or seed from YAML by copying the `projects:` block from your prod `~/.autodev/config.yml` and running `bin/rails autodev:migrate_projects_from_yaml`. Without at least one project row the table is empty; `GitlabMembershipSync` will then compute zero memberships for your user, mark you `disabled`, and Devise will refuse the sign-in (401) — chicken-and-egg, so for a fresh local DB seed via the rake first. The sync logs `[gitlab_sync] WARNING: projects table is empty…` when this happens — that's the symptom.
 
 6. **Boot the dev server**. `RAILS_ENV=development bin/autodev` runs the full supervisor (Rails + Solid Queue), or `RAILS_ENV=development bin/rails server -p 4567` if you only need the web UI and will trigger jobs by hand.
 
@@ -109,8 +109,10 @@ Routes (declared in `config/routes.rb`, all served by Rails controllers):
 - `GET /issues` → `IssuesController#index` — paginated + filterable list.
 - `GET /errors` → `ErrorsController#index` — `error` + `needs_clarification` + non-null `post_completion_error`, with reset buttons.
 - `GET /projects` → `ProjectsController#index` — union of YAML-configured + tracked projects.
-- `GET /projects/:slug` → `ProjectsController#show` — project's `app:` config + 100 most recent issues. Slug encoding: `group/project` ↔ `group__project`.
-- `POST /issues/:id/reset` / `transition` — write actions.
+- `GET /projects/new` + `POST /projects` → `ProjectsController#new`/`#create` — admin-only project creation in the DB (task #9 phase 4).
+- `GET /projects/:slug` → `ProjectsController#show` — project's config (DB row via `Project#to_project_config`, YAML fallback) + 100 most recent issues. Slug encoding: `group/project` ↔ `group__project`.
+- `GET /projects/:slug/edit` + `PATCH /projects/:slug` → `ProjectsController#edit`/`#update` — per-project config edit form, gated on project membership/admin (task #9 phase 3).
+- `POST /issues/:id/reset` / `transition` / `close` — write actions.
 - `GET /stream` → `StreamController#show` — SSE feed via `ActionController::Live`. Emits Turbo Stream HTML for each `activity_events` row.
 - `GET /assets/css/*`, `/assets/turbo.js`, `/assets/vendor/fonts/*` → `AssetsController` — `send_file` from `app/assets/static/`.
 - `GET /users/auth/entra_id` (+ callback) — Devise OmniAuth (Microsoft 365 SSO).

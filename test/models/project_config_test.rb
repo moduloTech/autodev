@@ -98,4 +98,23 @@ class ProjectConfigTest < ActiveSupport::TestCase
     assert_equal [%w[bundle install]], cfg['app']['setup']
     assert_equal [{ 'command' => ['bin/rails', 's'], 'port' => 3000 }], cfg['app']['run']
   end
+
+  # -- runtime_configs (phase 4 discovery) --
+
+  def test_runtime_configs_returns_db_rows_authoritatively
+    project(target_branch: 'develop').save!
+    configs = Project.runtime_configs(nil)
+
+    assert_equal 1, configs.size
+    assert_equal 'develop', configs.first['target_branch']
+  end
+
+  def test_runtime_configs_unions_yaml_only_projects_not_in_the_db
+    project.save! # g/p exists in the DB
+    yaml = [{ 'path' => 'g/p', 'target_branch' => 'ignored' }, { 'path' => 'other/repo' }]
+    paths = Project.runtime_configs(yaml).map { |c| c['path'] }
+
+    assert_includes paths, 'other/repo' # YAML-only project kept
+    assert_equal 1, paths.count('g/p') # DB row wins, not duplicated by YAML
+  end
 end

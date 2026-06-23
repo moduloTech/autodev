@@ -32,50 +32,12 @@ module Config # rubocop:disable Metrics/ModuleLength
     #   tenant_id: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 
 
-    projects:
-      - path: group/project-name
-        # target_branch: develop                # optional, defaults to project default branch
-        #
-        # -- Label workflow (all 3 required) --
-        # labels_todo:                           # labels that trigger full processing
-        #   - "development::todo"
-        #   - "todo"
-        # label_doing: "Development::Doing"      # set during active processing
-        # label_done: "Development::Awaiting CR"  # set when issue reaches done state
-        #
-        # extra_prompt: "Use RSpec for tests"   # additional instructions for Claude
-        # dc_timeout: 600                         # danger-claude timeout in seconds (overrides global)
-        # max_retries: 1                          # max retries per issue (overrides global)
-        # retry_backoff: 10                       # base backoff seconds (overrides global)
-        # stagnation_threshold: 5                  # consecutive identical failures threshold (overrides global)
-        # clone_depth: 1                         # git clone depth (0 = full clone, default: 1)
-        # sparse_checkout:                       # sparse checkout paths (for monorepos)
-        #   - "src/"
-        #   - "lib/"
-        # post_completion: ["./bin/deploy", "--env", "staging"]  # command run after pipeline green (Docker CMD format)
-        # post_completion_timeout: 300                            # timeout in seconds (default: 300)
-        #
-        # -- Advanced (override globally-tuned danger-claude / agent behaviour) --
-        # model: sonnet                          # danger-claude model override (-m); falls back to global, then per-call default
-        # effort: high                            # danger-claude reasoning effort override (-e)
-        # parallel_agents: false                  # split complex issues across parallel agents (worktrees)
-        # split_implementation: false             # implement code + tests in separate passes
-        # implementer_agent: my-implementer      # override the implementer agent definition (name or path in .claude/agents)
-        # test_writer_agent: my-test-writer      # override the test-writer agent definition
-        # mr_fixer_agent: my-mr-fixer            # override the mr-fixer agent definition
-        #
-        # app:                                    # app environment instructions for danger-claude
-        #   setup:                                # dependency installation commands
-        #     - ["bundle", "install"]
-        #     - ["yarn", "install"]
-        #   test:                                 # test commands
-        #     - ["bin/test"]
-        #   lint:                                 # lint / auto-fix commands
-        #     - ["bundle", "exec", "rubocop", "-A"]
-        #   run:                                  # background servers (port exposed to host for Chrome)
-        #     - command: ["bin/rails", "s"]
-        #       port: 3000
-        #     - command: ["bin/vite", "dev"]
+    # Projects are managed in the database (task #9): add and configure them
+    # from the dashboard (Projets → Nouveau projet), where every per-project
+    # option (labels, target_branch, app:, danger-claude overrides, …) is
+    # edited per field. A legacy `projects:` block here still works as a
+    # one-time seed — run `bin/rails autodev:migrate_projects_from_yaml` to
+    # import it — but it is deprecated and no longer required.
   YAML
 
   DEFAULTS = {

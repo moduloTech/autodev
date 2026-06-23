@@ -5,7 +5,7 @@
 # (YAML config + DB-distinct paths), zero-filled placeholder for
 # configured-but-quiet projects. Show: decode slug via project_unslug,
 # render the same page even for unknown projects (Sinatra parity).
-class ProjectsController < ApplicationController
+class ProjectsController < ApplicationController # rubocop:disable Metrics/ClassLength
   include ::Web::Helpers
 
   # GET /projects
@@ -24,6 +24,36 @@ class ProjectsController < ApplicationController
     return head :forbidden unless admin_or_no_session? || visible_project_paths.include?(project_path)
 
     render html: render_project_show(project_path).html_safe, layout: false
+  end
+
+  # GET /projects/new
+  #
+  # Admin-only form to create a project in the DB (task #9 phase 4 — the
+  # replacement for adding a `projects:` entry to config.yml). Renders the
+  # same form as #edit on a fresh, unsaved record.
+  def new
+    return head :forbidden unless can_create_project?
+
+    render html: render_project_edit(Project.new).html_safe, layout: false
+  end
+
+  # POST /projects
+  #
+  # Creates the project from the form. gitlab_path + default_locale come from
+  # #project_identity_params (slug/name derived from the path); the per-project
+  # config columns from #project_config_params (same field-by-field build as
+  # #update — no mass-assignment). On success the membership sync is enqueued
+  # so the new project's collaborators populate, then we land on its page.
+  def create
+    return head :forbidden unless can_create_project?
+
+    project = Project.new
+    if project.update(project_identity_params.merge(project_config_params))
+      SyncGitlabMembershipsJob.perform_later
+      redirect_to "/projects/#{project.slug}?tab=config"
+    else
+      render html: render_project_edit(project).html_safe, layout: false, status: :unprocessable_entity
+    end
   end
 
   # GET /projects/:slug/edit
@@ -70,6 +100,27 @@ class ProjectsController < ApplicationController
     return true if current_user.admin?
 
     current_user.contributor_of?(project)
+  end
+
+  # Creating a project is admin-only: a non-admin's access is derived from
+  # memberships on existing projects, so there's no project to be a member of
+  # before it exists. (Editing an existing one stays open to collaborators.)
+  def can_create_project?
+    current_user&.admin? || false
+  end
+
+  # Identity attributes for a new project: gitlab_path (required) drives the
+  # derived slug (`group/x` → `group__x`, same as project_slug / the importer)
+  # and a default name (last path segment); default_locale is fr/en. The
+  # per-project config columns are added separately by #project_config_params.
+  def project_identity_params
+    path = params[:gitlab_path].to_s.strip
+    {
+      gitlab_path: path,
+      slug: project_slug(path),
+      name: path.split('/').last,
+      default_locale: params[:default_locale].presence || 'fr'
+    }
   end
 
   # Builds the attributes hash for #update field-by-field, casting each group

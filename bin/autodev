@@ -189,8 +189,13 @@ def validate_config(config, config_path, logger)
 end
 
 def validate_config_entries(config, config_path)
-  unless config['projects'].is_a?(Array) && config['projects'].any?
-    raise ConfigError, "No projects configured in #{config_path}. Add at least one entry under 'projects:'."
+  # Projects now live in the DB (task #9). Accept a project from either the
+  # `projects` table (the authoritative source — add one in the dashboard or
+  # seed via `bin/rails autodev:migrate_projects_from_yaml`) or a still-present
+  # YAML `projects:` block (deprecated fallback).
+  unless Project.exists? || (config['projects'].is_a?(Array) && config['projects'].any?)
+    raise ConfigError, 'No projects configured. Add one in the dashboard (Projets → Nouveau projet) ' \
+                       "or seed from #{config_path} with `bin/rails autodev:migrate_projects_from_yaml`."
   end
 
   return if config['gitlab_url'] && config['gitlab_url'] != 'https://gitlab.example.com'

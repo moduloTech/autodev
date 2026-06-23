@@ -48,6 +48,12 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   post '/issues/:id/close',      to: 'issues#close',      constraints: { id: /\d+/ }
   get  '/errors',                to: 'errors#index'
   get  '/projects',              to: 'projects#index'
+  # /projects/new + POST /projects → ProjectsController#new/#create (admin-only
+  # project creation, task #9 phase 4 — the DB-side replacement for adding a
+  # `projects:` entry to config.yml). `new` is declared before the bare
+  # `:slug` show route so it isn't swallowed as a slug.
+  get  '/projects/new',          to: 'projects#new'
+  post '/projects',              to: 'projects#create'
   # /projects/:slug/edit → ProjectsController#edit (per-project config form,
   # gated on project membership/admin); PATCH /projects/:slug → #update
   # persists it onto the projects row (task #9 phase 3). Declared before the

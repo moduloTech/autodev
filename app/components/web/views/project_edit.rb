@@ -114,11 +114,18 @@ module Web
       end
 
       def render_topbar
-        render Components::Topbar.new(
-          title: t_web(:web_project_edit_title, path: @project.gitlab_path),
-          subtitle: t_web(:web_project_edit_subtitle),
-          breadcrumb: "#{t_web(:web_project_breadcrumb_root)} › #{@project.gitlab_path}"
-        )
+        render(Components::Topbar.new(**topbar_args))
+      end
+
+      def topbar_args
+        root = t_web(:web_project_breadcrumb_root)
+        if @project.new_record?
+          { title: t_web(:web_project_new_title), subtitle: t_web(:web_project_new_subtitle),
+            breadcrumb: "#{root} › #{t_web(:web_project_new_title)}" }
+        else
+          { title: t_web(:web_project_edit_title, path: @project.gitlab_path),
+            subtitle: t_web(:web_project_edit_subtitle), breadcrumb: "#{root} › #{@project.gitlab_path}" }
+        end
       end
 
       def render_error_banner
@@ -135,13 +142,56 @@ module Web
       end
 
       def render_form
-        form(action: "/projects/#{@project.slug}", method: 'post',
-             style: 'display: grid; gap: 22px;') do
+        form(action: form_action, method: 'post', style: 'display: grid; gap: 22px;') do
           csrf_input_tag
-          input(type: 'hidden', name: '_method', value: 'patch')
+          input(type: 'hidden', name: '_method', value: 'patch') unless @project.new_record?
+          render_identity_section if @project.new_record?
           SECTIONS.each { |title_key, keys| render_section(title_key, keys) }
           render_submit_row
         end
+      end
+
+      def form_action
+        @project.new_record? ? '/projects' : "/projects/#{@project.slug}"
+      end
+
+      # Identity fields (new projects only): gitlab_path drives the slug + name,
+      # default_locale the per-issue language. Not config columns, so they're
+      # rendered here rather than via SECTIONS / render_field.
+      def render_identity_section
+        render(Components::Card.new(padding: 24)) do
+          h3(class: 'sidecard-title', style: 'margin: 0 0 16px;') { t_web(:web_project_new_section_identity) }
+          div(style: 'display: grid; gap: 16px;') do
+            render_identity_path
+            render_identity_locale
+          end
+        end
+      end
+
+      def render_identity_path
+        label(style: 'display: grid; gap: 6px;') do
+          span(style: field_label_style) { code { 'gitlab_path' } }
+          input(type: 'text', name: 'gitlab_path', value: @project.gitlab_path.to_s, required: true,
+                placeholder: 'group/sous-groupe/projet', style: input_style)
+          span(class: 'muted', style: 'font-size: 11px;') { t_web(:web_project_new_desc_gitlab_path) }
+        end
+      end
+
+      def render_identity_locale
+        current = @project.default_locale.presence || 'fr'
+        label(style: 'display: grid; gap: 6px;') do
+          span(style: field_label_style) { code { 'default_locale' } }
+          select(name: 'default_locale', style: input_style) do
+            %w[fr en].each { |loc| locale_option(loc, current) }
+          end
+          span(class: 'muted', style: 'font-size: 11px;') { t_web(:web_project_new_desc_default_locale) }
+        end
+      end
+
+      def locale_option(loc, current)
+        opts = { value: loc }
+        opts[:selected] = true if loc == current
+        option(**opts) { loc }
       end
 
       def render_section(title_key, keys)
@@ -230,13 +280,14 @@ module Web
       end
 
       def render_submit_row
+        cancel_href = @project.new_record? ? '/projects' : "/projects/#{@project.slug}?tab=config"
+        save_key = @project.new_record? ? :web_project_new_create : :web_project_edit_save
         div(style: 'display: flex; justify-content: flex-end; gap: 10px;') do
-          a(href: "/projects/#{@project.slug}?tab=config", class: 'button',
-            style: 'padding: 8px 14px; font-size: 13px;') do
+          a(href: cancel_href, class: 'button', style: 'padding: 8px 14px; font-size: 13px;') do
             t_web(:web_project_edit_cancel)
           end
           render Components::Button.new(kind: :primary, size: :md, type: 'submit') do
-            t_web(:web_project_edit_save)
+            t_web(save_key)
           end
         end
       end

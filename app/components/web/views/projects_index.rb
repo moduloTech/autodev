@@ -41,14 +41,26 @@ module Web
       end
 
       def render_topbar
-        render Components::Topbar.new(
-          title: t_web(:web_projects_index_title),
-          subtitle: t_web(:web_projects_index_subtitle)
-        )
+        render(Components::Topbar.new(
+                 title: t_web(:web_projects_index_title),
+                 subtitle: t_web(:web_projects_index_subtitle)
+               )) do
+          render_new_project_button if @current_user_admin
+        end
+      end
+
+      def render_new_project_button
+        render Components::Button.new(kind: :primary, size: :md, href: '/projects/new',
+                                      icon: Components::Icon.new(name: 'plus', size: 14)) do
+          t_web(:web_project_new_button)
+        end
       end
 
       def render_empty
-        div(class: 'empty-state') { p(class: 'muted') { t_web(:web_projects_index_empty) } }
+        div(class: 'empty-state') do
+          p(class: 'muted') { t_web(:web_projects_index_empty) }
+          render_new_project_button if @current_user_admin
+        end
       end
 
       def render_grid

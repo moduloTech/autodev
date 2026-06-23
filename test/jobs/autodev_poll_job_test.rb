@@ -31,6 +31,20 @@ class AutodevPollJobTest < ActiveSupport::TestCase
     assert_equal %w[group/foo group/bar], dispatched
   end
 
+  test 'discovers projects from the DB even when the YAML projects block is absent' do
+    Project.create!(gitlab_path: 'db/only', slug: 'db__only')
+    dispatched = []
+    fake_dispatcher = build_fake_dispatcher(dispatched)
+
+    Config.stub(:load, {}) do # no 'projects' key in the YAML
+      UsageChecker.stub(:new, build_fake_checker(true)) do
+        Autodev::PollDispatcher.stub(:new, fake_dispatcher) { AutodevPollJob.new.perform }
+      end
+    end
+
+    assert_equal ['db/only'], dispatched
+  end
+
   test 'short-circuits the cycle when usage is paused' do
     dispatched = run_with_stubs(usage_available: false)
 

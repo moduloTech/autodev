@@ -75,6 +75,19 @@ class Project < ApplicationRecord
   CONFIG_INTEGER_FIELDS = (POSITIVE_INT_FIELDS + %i[clone_depth]).freeze
   CONFIG_STRING_FIELDS = (SCALAR_CONFIG_KEYS - CONFIG_INTEGER_FIELDS - BOOLEAN_CONFIG_FIELDS).freeze
 
+  # The per-project runtime configs to discover and operate on (task #9
+  # phase 4): every DB row is authoritative (#to_project_config), unioned with
+  # any YAML `projects:` entry not yet imported into the DB — the same
+  # DB-then-YAML precedence IssueProcessJob#lookup_project_config uses, so a
+  # project added to the YAML before the next `autodev:migrate_projects_from_yaml`
+  # still polls, while a config whose projects are all in the DB no longer
+  # needs the YAML block at all. `yaml_projects` is `config['projects']`.
+  def self.runtime_configs(yaml_projects)
+    db_configs = all.map(&:to_project_config)
+    known = db_configs.map { |c| c['path'] }
+    db_configs + Array(yaml_projects).reject { |c| known.include?(c['path']) }
+  end
+
   private
 
   def add_present(cfg, key, value)

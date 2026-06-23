@@ -28,9 +28,11 @@ class AutodevPollJob < ApplicationJob
 
   private
 
-  # Runs one dispatch pass over every configured project; returns the count.
+  # Runs one dispatch pass over every project; returns the count. Projects are
+  # discovered from the DB (`Project.runtime_configs`, task #9 phase 4), with
+  # any not-yet-imported YAML `projects:` entry still picked up as a fallback.
   def run_cycle(config)
-    projects = Array(config['projects'])
+    projects = ::Project.runtime_configs(config['projects'])
     wrapped_logger = ::Autodev::JobLogger.new(logger)
     projects.each do |project_config|
       ::Autodev::PollDispatcher.new(config: config, project_config: project_config,

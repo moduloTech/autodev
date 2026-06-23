@@ -286,6 +286,13 @@ en:
   web_project_edit_save: Save
   web_project_edit_cancel: Cancel
   web_project_edit_error_banner: "The configuration could not be saved:"
+  web_project_new_button: New project
+  web_project_new_title: New project
+  web_project_new_subtitle: Add a project tracked by Autodev.
+  web_project_new_section_identity: Identity
+  web_project_new_create: Create project
+  web_project_new_desc_gitlab_path: Full GitLab path (group/subgroup/project). Identifies the project and cannot change afterwards.
+  web_project_new_desc_default_locale: Language of the GitLab comments Autodev posts for this project.
   web_projects_index_title: Projects
   web_projects_index_subtitle: Every project autodev keeps an eye on.
   web_projects_index_empty: No project configured yet.
