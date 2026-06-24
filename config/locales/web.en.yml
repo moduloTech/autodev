@@ -368,6 +368,10 @@ en:
   web_autospec_section_markdown: Markdown draft
   web_autospec_markdown_empty: (empty — chat with Autodev to build it)
   web_autospec_section_conversation: Conversation with Autodev
+  # Auto-sent as the first user turn right after a draft is created with
+  # some initial content, so Autodev opens with a quality assessment +
+  # the next priority question (task #15). Resolved in the draft's locale.
+  web_autospec_auto_eval_prompt: Assess the quality of the ticket.
   web_autospec_conversation_empty: Start the conversation to shape this ticket.
   web_autospec_composer_placeholder: "Write to Autodev (e.g. \"Help me phrase this bug\")…"
   web_autospec_composer_send: Send
