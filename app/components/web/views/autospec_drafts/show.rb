@@ -600,16 +600,23 @@ module Web
 
         def message_row_style(assistant)
           align = assistant ? 'flex-start' : 'flex-end'
-          "display: flex; flex-direction: column; align-items: #{align}; max-width: 86%; " \
+          # min-width: 0 lets this flex item shrink below its content's
+          # intrinsic width (default min-width: auto). Without it long
+          # tokens/URLs/code force the row wider than the 380px column
+          # and get clipped by the column's overflow: hidden.
+          "display: flex; flex-direction: column; align-items: #{align}; max-width: 86%; min-width: 0; " \
             "#{assistant ? 'margin-right: auto;' : 'margin-left: auto;'}"
         end
 
         def bubble_style(assistant)
           bg = assistant ? 'var(--accent-bg)' : 'var(--paper-2)'
           border = assistant ? 'var(--accent-bg-strong)' : 'var(--border)'
+          # max-width: 100% keeps the bubble inside the (now shrinkable)
+          # row; overflow-wrap: anywhere breaks long unbroken tokens
+          # (URLs, long words, code) instead of overflowing horizontally.
           "background: #{bg}; border: 1px solid #{border}; " \
             'border-radius: 12px; padding: 9px 12px; font-size: 13px; line-height: 1.55; ' \
-            'white-space: pre-wrap; word-wrap: break-word;'
+            'max-width: 100%; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere;'
         end
 
         def apply_button_style(applied)

@@ -2,7 +2,9 @@
 
 ## [Unreleased]
 
-## [1.0.0-alpha.26] - 2026-06-23
+### Fixed
+
+- **AutoSpec chat: long messages no longer get clipped horizontally (task #11).** In the conversation column (`.autospec-chat-col`, fixed 380px with `overflow: hidden`), a message containing a long unbroken token — a very long word, a URL, or a code line — used to overflow its bubble and be cut off. The classic flexbox `min-width: auto` was letting the message row refuse to shrink below its content's intrinsic width. Fix in `Web::Views::AutospecDrafts::Show`: `message_row_style` gains `min-width: 0` (so the row can shrink inside the column) and `bubble_style` gains `max-width: 100%` + `overflow-wrap: anywhere` (so long tokens break instead of overflowing). Messages now wrap inside the bubble; no horizontal page scroll. Holds on desktop and on the mobile tabs layout (≤960px).
 
 ### Added
 
