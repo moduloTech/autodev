@@ -101,9 +101,50 @@ module Autospec
       ].join("\n")
     end
 
+    # The project's ticket template(s) (task #14) — the structure the
+    # CSM's org expects for tickets on this project. When the project
+    # defines templates we list each (name + body) and tell AutoSpec to
+    # follow the matching one, so the CSM no longer copy-pastes a template
+    # into the chat. With none defined we fall back to a generic default
+    # structure rendered in the draft's locale. Always returns a block.
+    def ticket_templates(draft) # rubocop:disable Metrics/MethodLength
+      templates = draft.project ? draft.project.ticket_templates.to_a : []
+      return default_template_block(draft) if templates.empty?
+
+      intro = <<~TXT.chomp
+        # Ticket templates for this project
+
+        This project defines the following ticket template(s). Structure the
+        ticket to follow the relevant template's sections, translating the
+        headings into the draft's language. When several are listed, pick the
+        one matching the request (e.g. an evolution vs a bug) and tell the CSM
+        which you chose; if it's ambiguous, ask which kind it is. Don't invent
+        sections a template doesn't have unless the CSM asks.
+      TXT
+      ([intro] + templates.map { |t| "## #{t.name}\n#{t.body}" }).join("\n\n")
+    end
+
+    def default_template_block(draft)
+      <<~TXT.chomp
+        # Default ticket structure
+
+        This project hasn't defined custom templates. Structure the ticket
+        using these default sections (translate the headings into the draft's
+        language):
+
+        #{Locales.t(:web_autospec_default_template_body, locale: template_locale(draft))}
+      TXT
+    end
+
+    def template_locale(draft)
+      (draft.project&.default_locale.presence || 'fr').to_sym
+    end
+
     # Final `system` payload for `Anthropic::Resources::Messages#create`.
     # Order matters: the cached blocks come first so the API can match
     # them against the cache before reading the (variable) draft state.
+    # The ticket-templates block sits after the cached prefix (it changes
+    # when an admin edits templates) and before the per-turn draft state.
     def build(draft) # rubocop:disable Metrics/MethodLength
       blocks = [
         { type: 'text', text: persona_and_guidance,
@@ -114,6 +155,7 @@ module Autospec
         blocks << { type: 'text', text: briefing,
                     cache_control: { type: 'ephemeral' } }
       end
+      blocks << { type: 'text', text: ticket_templates(draft) }
       blocks << { type: 'text', text: draft_state(draft) }
       blocks
     end

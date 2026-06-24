@@ -60,6 +60,16 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   # bare show route for clarity; they don't overlap (distinct segment/verb).
   get   '/projects/:slug/edit',  to: 'projects#edit'
   patch '/projects/:slug',       to: 'projects#update'
+  # /projects/:slug/ticket_templates → TicketTemplatesController (task #14).
+  # Per-project ticket-template CRUD, gated on project membership/admin like
+  # the config editor. The extra `ticket_templates` path segment keeps these
+  # from overlapping the bare `:slug` show route below. `:id` is numeric.
+  get    '/projects/:slug/ticket_templates',          to: 'ticket_templates#index'
+  get    '/projects/:slug/ticket_templates/new',      to: 'ticket_templates#new'
+  post   '/projects/:slug/ticket_templates',          to: 'ticket_templates#create'
+  get    '/projects/:slug/ticket_templates/:id/edit', to: 'ticket_templates#edit',    constraints: { id: /\d+/ }
+  patch  '/projects/:slug/ticket_templates/:id',      to: 'ticket_templates#update',  constraints: { id: /\d+/ }
+  delete '/projects/:slug/ticket_templates/:id',      to: 'ticket_templates#destroy', constraints: { id: /\d+/ }
   get  '/projects/:slug',        to: 'projects#show'
   get  '/stream',                to: 'stream#show'
   get  '/locale/:lang',          to: 'locale#update'

@@ -86,6 +86,23 @@ module Web
             render_help_items
             render_help_link if @current_user_admin
           end
+          render_templates_card unless @project.new_record?
+        end
+      end
+
+      # Entry point to the per-project ticket templates (task #14) — the
+      # structure AutoSpec follows when drafting on this project. Same
+      # editor gate as this config form, so the link is safe to show here.
+      def render_templates_card
+        render(Components::Card.new(padding: 20)) do
+          h3(class: 'sidecard-title', style: 'margin: 0 0 8px;') { t_web(:web_ticket_templates_title_short) }
+          p(class: 'muted', style: 'margin: 0 0 12px; font-size: 12px; line-height: 1.5;') do
+            t_web(:web_ticket_templates_card_hint)
+          end
+          a(href: "/projects/#{@project.slug}/ticket_templates", class: 'button',
+            style: 'padding: 7px 12px; font-size: 12px;') do
+            t_web(:web_ticket_templates_manage)
+          end
         end
       end
 

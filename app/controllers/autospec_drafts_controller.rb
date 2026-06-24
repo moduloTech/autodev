@@ -52,7 +52,7 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   # GET /autospec_drafts/new
   def new
     render html: Web::Views::AutospecDrafts::New.new(
-      projects: current_user.visible_projects.order(:slug), **view_kwargs
+      projects: current_user.visible_projects.includes(:ticket_templates).order(:slug), **view_kwargs
     ).call.html_safe, layout: false
   end
 
@@ -63,7 +63,7 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
 
     draft = AutospecDraft.create!(user: current_user, project: project,
                                   title: params[:title].presence,
-                                  markdown: params[:markdown].presence)
+                                  markdown: initial_markdown(project))
     redirect_to "/autospec_drafts/#{draft.id}"
   end
 
@@ -200,6 +200,17 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   end
 
   private
+
+  # Body for a new draft: the submitted markdown if any, otherwise the
+  # chosen project template's body. The view's JS pre-fills the textarea
+  # when a template is picked; this is the server-side fallback so the
+  # template still applies when JS is off (task #14).
+  def initial_markdown(project)
+    return params[:markdown] if params[:markdown].present?
+
+    slug = params[:template_slug].to_s
+    slug.present? ? project.ticket_templates.find_by(slug: slug)&.body : nil
+  end
 
   def load_draft
     @draft = AutospecDraft.find(params[:id])
