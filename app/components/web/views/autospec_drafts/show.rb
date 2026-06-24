@@ -499,7 +499,12 @@ module Web
               t_web(:web_autospec_section_conversation)
             end
             render_chat_disabled_notice unless @chat_enabled
-            div(style: 'flex: 1; overflow: auto;') { render_messages }
+            # min-height: 0 is what makes this the scroll container. Without
+            # it a flex item defaults to min-height: auto (= content height),
+            # so the list grows to fit every message and the wheel scroll
+            # falls through to the page/editor instead of scrolling here.
+            # The header above and the composer below stay fixed.
+            div(style: 'flex: 1; min-height: 0; overflow: auto;') { render_messages }
             render_composer
           end
         end

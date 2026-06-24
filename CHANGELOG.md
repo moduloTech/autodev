@@ -5,6 +5,9 @@
 ### Fixed
 
 - **AutoSpec chat: long messages no longer get clipped horizontally (task #11).** In the conversation column (`.autospec-chat-col`, fixed 380px with `overflow: hidden`), a message containing a long unbroken token — a very long word, a URL, or a code line — used to overflow its bubble and be cut off. The classic flexbox `min-width: auto` was letting the message row refuse to shrink below its content's intrinsic width. Fix in `Web::Views::AutospecDrafts::Show`: `message_row_style` gains `min-width: 0` (so the row can shrink inside the column) and `bubble_style` gains `max-width: 100%` + `overflow-wrap: anywhere` (so long tokens break instead of overflowing). Messages now wrap inside the bubble; no horizontal page scroll. Holds on desktop and on the mobile tabs layout (≤960px).
+- **AutoSpec chat: scrolling the conversation no longer scrolls the whole ticket (task #12).** Scrolling the message list used to move the entire page (the ticket editor on the left included) instead of just the conversation. The flex scroll container in `Web::Views::AutospecDrafts::Show#render_chat_column` had `flex: 1; overflow: auto` but no `min-height: 0`, so its default `min-height: auto` let it grow to the full height of all messages — it never became a real scroll container and the wheel event fell through to the page. Adding `min-height: 0` makes the message list scroll inside its own container; the "CONVERSATION AVEC AUTODEV" header and the composer stay fixed, and the editor column on the left no longer moves. The surrounding height chain (`.app-shell` → `main` → `.autospec-workspace`, already bounded — the editor column scrolls on its own) is unchanged. Holds on desktop and the mobile tabs layout (≤960px).
+
+## [1.0.0-alpha.26] - 2026-06-23
 
 ### Added
 
