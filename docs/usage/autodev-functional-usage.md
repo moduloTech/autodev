@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-06-19
+date: 2026-06-24
 lang: fr
 documentclass: article
 papersize: a4
@@ -26,7 +26,15 @@ Ce guide explique comment lui confier une demande et comment suivre l'avancement
 
 ## Comment lui confier une demande
 
-Tout part de GitLab. Trois gestes suffisent :
+Il y a deux façons de confier une demande à Autodev, selon que vous partez d'un ticket déjà rédigé ou d'une idée à mettre en forme.
+
+### Vous voulez écrire une nouvelle demande
+
+Rédigez-la **directement depuis le tableau de bord**, en discutant avec Autodev pour la mettre en forme, puis envoyez-la — à un développeur ou à Autodev — une fois qu'elle vous convient. **Vous n'avez pas besoin de l'écrire d'abord sur GitLab** : tout se rédige ici. C'est le point de départ le plus simple. Voir la section *Rédiger une demande avec Autodev*.
+
+### Vous avez déjà un ticket GitLab
+
+Si la demande est déjà formulée dans un ticket GitLab, trois gestes suffisent :
 
 1. **Assignez le ticket à *autodev*** (comme à n'importe quel développeur).
 2. **Mettez le label *{{label_todo|à traiter}}*** sur le ticket.
@@ -34,7 +42,7 @@ Tout part de GitLab. Trois gestes suffisent :
 
 C'est tout. Autodev change le label en **{{label_doing|en cours}}** dès qu'il commence, et le mettra à **{{label_done|livré}}** quand il aura terminé.
 
-**Pas encore de ticket sous la main ?** Vous pouvez aussi rédiger la demande directement depuis le tableau de bord, en discutant avec Autodev pour la mettre en forme, puis l'envoyer à un développeur ou à Autodev une fois validée. Voir la section *Rédiger une demande avec Autodev*.
+> À noter : rédiger dans Autodev et importer un ticket GitLab existant ne sont pas exclusifs — depuis l'éditeur de demande, vous pouvez aussi **importer** un ticket GitLab déjà créé pour le retravailler. L'import reste optionnel.
 
 ## Ce qui se passe ensuite
 

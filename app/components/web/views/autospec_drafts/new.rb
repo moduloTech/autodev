@@ -7,7 +7,7 @@ module Web
       # the CSM picks a project and optionally a title + initial markdown.
       # The chat conversation and the editor proper live on the show page
       # once the row exists.
-      class New < Web::Views::Base
+      class New < Web::Views::Base # rubocop:disable Metrics/ClassLength
         def initialize(projects:, **)
           super(**)
           @projects = projects
@@ -52,7 +52,8 @@ module Web
           end
         end
 
-        def render_form
+        def render_form # rubocop:disable Metrics/MethodLength
+          render_onboarding_hint
           render Components::Card.new(padding: 24) do
             form(action: '/autospec_drafts', method: 'post',
                  style: 'display: grid; gap: 16px;') do
@@ -61,6 +62,27 @@ module Web
               render_title_field
               render_markdown_field
               render_submit_row
+            end
+          end
+        end
+
+        # Onboarding hint clearing up a recurring confusion (task #13):
+        # users read the GitLab-first part of the guide and think a ticket
+        # must be written on GitLab. It isn't — the request is written here;
+        # importing an existing GitLab ticket is only an optional shortcut.
+        def render_onboarding_hint # rubocop:disable Metrics/MethodLength
+          div(style: 'margin-bottom: 16px; padding: 14px 16px; ' \
+                     'background: var(--accent-bg); border: 1px solid var(--accent-bg-strong); ' \
+                     'border-radius: var(--r-md); font-size: 13px; line-height: 1.55;') do
+            div(style: 'font-weight: 600; margin-bottom: 4px;') do
+              t_web(:web_autospec_new_onboarding_title)
+            end
+            div(class: 'muted', style: 'margin-bottom: 8px;') do
+              t_web(:web_autospec_new_onboarding_body)
+            end
+            a(href: '/autospec_drafts/import',
+              style: 'font-size: 12px; color: var(--accent-fg); text-decoration: none; font-weight: 600;') do
+              plain "→ #{t_web(:web_autospec_new_onboarding_import)}"
             end
           end
         end
