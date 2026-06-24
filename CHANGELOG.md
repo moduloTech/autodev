@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Clarified where a request is written: in AutoSpec, not on GitLab (task #13).** A user reported reading the guide and concluding she had to write her ticket "on Git" — she had actually done the right thing (drafting in AutoSpec) but the doc made her doubt it. The functional guide's "Comment lui confier une demande" section led with "**Tout part de GitLab**" and buried the AutoSpec drafting path in a parenthetical; it now opens with the two entry points as equals — **"Vous voulez écrire une nouvelle demande"** (write it directly in AutoSpec, no need to write it on GitLab first — the simplest starting point) and **"Vous avez déjà un ticket GitLab"** (assign + label) — and a closing note that importing an existing GitLab ticket is an optional way to start, not a requirement (`docs/usage/autodev-functional-usage.md`, `date:` bumped). In-app, the new-draft screen (`GET /autospec_drafts/new`) gains an onboarding hint above the form stating the request is written here and that GitLab import is just an optional shortcut, with a link to the import screen (`Web::Views::AutospecDrafts::New#render_onboarding_hint`; new `web_autospec_new_onboarding_{title,body,import}` keys in fr + en). No screenshots needed (the prose/labels changed, not a screen layout that warrants recapture).
+
 ## [1.0.0-alpha.26] - 2026-06-23
 
 ### Added

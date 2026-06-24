@@ -351,6 +351,9 @@ fr:
   web_autospec_new_cta: Nouveau brouillon
   web_autospec_new_title: Nouveau brouillon
   web_autospec_new_subtitle: Choisissez un projet pour démarrer. Vous pourrez ensuite chater avec Autodev pour cadrer le ticket.
+  web_autospec_new_onboarding_title: Vous rédigez votre demande ici, dans Autodev.
+  web_autospec_new_onboarding_body: Pas besoin de l'écrire d'abord sur GitLab. Si vous partez d'un ticket GitLab déjà existant, l'import est seulement une option pour gagner du temps — sinon, démarrez d'une page blanche et laissez Autodev vous aider à la cadrer.
+  web_autospec_new_onboarding_import: Importer un ticket GitLab existant
   web_autospec_no_projects: Aucun projet ne vous est accessible. Demandez l'ajout d'un membership à un owner avant de continuer.
   web_autospec_field_project: Projet
   web_autospec_field_project_prompt: Sélectionnez un projet…

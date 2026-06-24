@@ -351,6 +351,9 @@ en:
   web_autospec_new_cta: New draft
   web_autospec_new_title: New draft
   web_autospec_new_subtitle: Pick a project to get started. You'll then chat with Autodev to shape the ticket.
+  web_autospec_new_onboarding_title: You write your request right here, in Autodev.
+  web_autospec_new_onboarding_body: No need to write it on GitLab first. If you're starting from a GitLab ticket that already exists, importing it is just an optional shortcut — otherwise start from a blank page and let Autodev help you shape it.
+  web_autospec_new_onboarding_import: Import an existing GitLab ticket
   web_autospec_no_projects: No project is accessible to you. Ask an owner to add a membership before continuing.
   web_autospec_field_project: Project
   web_autospec_field_project_prompt: Pick a project…
