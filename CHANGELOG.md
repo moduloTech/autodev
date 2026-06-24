@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **AutoSpec chat: scrolling the conversation no longer scrolls the whole ticket (task #12).** Scrolling the message list used to move the entire page (the ticket editor on the left included) instead of just the conversation. The flex scroll container in `Web::Views::AutospecDrafts::Show#render_chat_column` had `flex: 1; overflow: auto` but no `min-height: 0`, so its default `min-height: auto` let it grow to the full height of all messages — it never became a real scroll container and the wheel event fell through to the page. Adding `min-height: 0` makes the message list scroll inside its own container; the "CONVERSATION AVEC AUTODEV" header and the composer stay fixed, and the editor column on the left no longer moves. The surrounding height chain (`.app-shell` → `main` → `.autospec-workspace`, already bounded — the editor column scrolls on its own) is unchanged. Holds on desktop and the mobile tabs layout (≤960px).
+
 ## [1.0.0-alpha.26] - 2026-06-23
 
 ### Added
