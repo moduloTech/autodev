@@ -76,8 +76,9 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   end
 
   # POST /autospec_drafts/import
-  def create_from_import
+  def create_from_import # rubocop:disable Metrics/MethodLength
     draft = Autospec::GitlabImporter.new(params[:url].to_s, current_user).call
+    auto_evaluate_quality(draft)
     redirect_to "/autospec_drafts/#{draft.id}"
   rescue Autospec::GitlabImporter::InvalidUrl
     redirect_to('/autospec_drafts/import', alert: 'import_invalid_url')
