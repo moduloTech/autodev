@@ -33,11 +33,15 @@ module Autospec
       attr_accessor :default_client
     end
 
-    # GitLab's standard issue URL shape:
-    # https://<host>/<namespace>/<project>/-/issues/<iid>
-    # The namespace can be deeply nested (`group/sub/sub2/project`),
-    # so the project_path is everything between the hostname and `/-/issues/`.
-    ISSUE_URL_RE = %r{\Ahttps?://[^/]+/(?<path>.+?)/-/issues/(?<iid>\d+)/?(?:[?#].*)?\z}
+    # GitLab issue URL shapes:
+    #   https://<host>/<namespace>/<project>/-/issues/<iid>
+    #   https://<host>/<namespace>/<project>/-/work_items/<iid>
+    # The newer work-items UI links to `/-/work_items/<iid>`, where the
+    # number is still the project-level issue IID — so both forms map to
+    # the same `client.issue(path, iid)` call. The namespace can be deeply
+    # nested (`group/sub/sub2/project`), so the project_path is everything
+    # between the hostname and `/-/(issues|work_items)/`.
+    ISSUE_URL_RE = %r{\Ahttps?://[^/]+/(?<path>.+?)/-/(?:issues|work_items)/(?<iid>\d+)/?(?:[?#].*)?\z}
 
     def initialize(url, user, client: nil, config: nil)
       @url    = url
