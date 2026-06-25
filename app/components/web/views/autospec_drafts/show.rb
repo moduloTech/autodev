@@ -525,10 +525,12 @@ module Web
           end
         end
 
-        def render_messages
-          div(style: 'padding: 16px 18px; display: flex; flex-direction: column; gap: 14px;') do
+        def render_messages # rubocop:disable Metrics/MethodLength
+          div(style: 'padding: 16px 18px; display: flex; flex-direction: column; gap: 14px;',
+              data: { 'autospec-messages' => 'true' }) do
             if @messages.empty?
-              p(class: 'muted', style: 'margin: 0; font-size: 13px;') do
+              p(class: 'muted', style: 'margin: 0; font-size: 13px;',
+                data: { 'autospec-empty' => 'true' }) do
                 t_web(:web_autospec_conversation_empty)
               end
             else
@@ -571,7 +573,8 @@ module Web
         def render_composer # rubocop:disable Metrics/MethodLength
           form(action: "/autospec_drafts/#{@draft.id}/chat", method: 'post',
                style: 'padding: 12px 18px; border-top: 1px solid var(--border); ' \
-                      'display: grid; gap: 8px;') do
+                      'display: grid; gap: 8px;',
+               data: { 'autospec-composer' => 'true', 'thinking-label' => t_web(:web_autospec_thinking) }) do
             csrf_input_tag
             textarea(name: 'message', rows: '3',
                      placeholder: composer_placeholder,

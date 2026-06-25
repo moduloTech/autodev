@@ -15,6 +15,75 @@
   const LS_PREFIX = 'autodev:draft:';
 
   document.addEventListener('DOMContentLoaded', init);
+  wireChatComposer();
+
+  // ── Chat composer: optimistic send feedback ───────────────────
+  //
+  // The chat turn is a blocking request (~10s on the Anthropic call,
+  // streaming is step 9c). Without feedback the UI looks frozen: the
+  // message and reply only appear once the request returns and the page
+  // re-renders. So on submit we immediately echo the user's message and a
+  // "thinking" indicator, then let the form proceed (Turbo/native) — the
+  // re-render replaces this optimistic DOM with the server-rendered truth.
+  //
+  // A single delegated listener on `document` (guarded so it's added once)
+  // survives Turbo body replacements — unlike the DOMContentLoaded-bound
+  // editor handlers, which don't re-init across Turbo visits.
+  function wireChatComposer() {
+    if (window.__autospecChatWired) return;
+    window.__autospecChatWired = true;
+    document.addEventListener('submit', (e) => {
+      const form = e.target;
+      if (form && form.matches && form.matches('[data-autospec-composer]')) {
+        onComposerSubmit(form); // no preventDefault — let the submit proceed
+      }
+    });
+  }
+
+  function onComposerSubmit(form) {
+    const textarea = form.querySelector('textarea[name="message"]');
+    const container = document.querySelector('[data-autospec-messages]');
+    if (!textarea || !container) return;
+    const value = textarea.value.trim();
+    if (!value) return; // the `required` attr already blocks empty sends
+
+    const empty = container.querySelector('[data-autospec-empty]');
+    if (empty) empty.remove();
+
+    container.appendChild(chatBubble(false, value));
+    container.appendChild(chatThinking(form.getAttribute('data-thinking-label') || '…'));
+    scrollMessagesToBottom(container);
+
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+  }
+
+  function chatBubble(assistant, text) {
+    const align = assistant ? 'flex-start' : 'flex-end';
+    const row = document.createElement('div');
+    row.style.cssText = 'display: flex; flex-direction: column; min-width: 0; max-width: 86%; ' +
+      'align-items: ' + align + '; ' + (assistant ? 'margin-right: auto;' : 'margin-left: auto;');
+    const bubble = document.createElement('div');
+    const bg = assistant ? 'var(--accent-bg)' : 'var(--paper-2)';
+    const border = assistant ? 'var(--accent-bg-strong)' : 'var(--border)';
+    bubble.style.cssText = 'background: ' + bg + '; border: 1px solid ' + border + '; ' +
+      'border-radius: 12px; padding: 9px 12px; font-size: 13px; line-height: 1.55; max-width: 100%; ' +
+      'white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere;';
+    bubble.textContent = text;
+    row.appendChild(bubble);
+    return row;
+  }
+
+  function chatThinking(label) {
+    const row = chatBubble(true, label);
+    row.firstChild.classList.add('autospec-thinking');
+    return row;
+  }
+
+  function scrollMessagesToBottom(container) {
+    const scroller = container.parentElement; // the overflow:auto chat scroll div
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  }
 
   function init() {
     const workspace = document.querySelector('[data-autospec-draft-id]');
