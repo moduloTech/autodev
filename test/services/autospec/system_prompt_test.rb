@@ -79,7 +79,7 @@ module Autospec
     # --- ticket templates (task #14) ------------------------------
 
     def templates_block(draft)
-      Autospec::SystemPrompt.build(draft).find { |b| b[:text].match?(/Ticket templates|Default ticket structure/) }
+      Autospec::SystemPrompt.build(draft).find { |b| b[:text].match?(/Ticket template|Default ticket structure/) }
     end
 
     def test_build_injects_default_structure_when_project_has_no_templates
@@ -90,12 +90,26 @@ module Autospec
       assert_match(/## Contexte/, block[:text])
     end
 
-    def test_build_injects_project_templates_when_present
+    # No template chosen but the project defines some → propose the best-fit.
+    def test_build_proposes_a_template_when_none_chosen # rubocop:disable Minitest/MultipleAssertions
       @project.ticket_templates.create!(name: 'Évolution', body: "## Localisation\n## Résultat attendu")
       block = templates_block(@draft)
 
-      assert_match(/Ticket templates for this project/, block[:text])
+      assert_match(/has NOT chosen a template/, block[:text])
+      assert_match(/propose the most appropriate/, block[:text])
       assert_match(/## Évolution/, block[:text])
+      assert_match(/## Localisation/, block[:text])
+    end
+
+    # A chosen template → follow + verify against it.
+    def test_build_verifies_against_the_chosen_template # rubocop:disable Minitest/MultipleAssertions
+      tpl = @project.ticket_templates.create!(name: 'Évolution', body: "## Localisation\n## Résultat attendu")
+      @draft.update!(ticket_template: tpl)
+      block = templates_block(@draft)
+
+      assert_match(/chose the "Évolution" template/, block[:text])
+      assert_match(/verify\s+it against this template/, block[:text])
+      assert_match(/missing or left empty/, block[:text])
       assert_match(/## Localisation/, block[:text])
     end
 

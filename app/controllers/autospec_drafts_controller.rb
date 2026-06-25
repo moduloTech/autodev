@@ -202,20 +202,19 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   private
 
   def build_draft(project)
+    template = chosen_template(project)
     AutospecDraft.create!(user: current_user, project: project,
                           title: params[:title].presence,
-                          markdown: initial_markdown(project))
+                          markdown: params[:markdown].presence || template&.body,
+                          ticket_template: template)
   end
 
-  # Body for a new draft: the submitted markdown if any, otherwise the
-  # chosen project template's body. The view's JS pre-fills the textarea
-  # when a template is picked; this is the server-side fallback so the
-  # template still applies when JS is off (task #14).
-  def initial_markdown(project)
-    return params[:markdown] if params[:markdown].present?
-
+  # The template the CSM picked on the new-draft form (`template_slug`), if
+  # any. Recorded on the draft so AutoSpec verifies the ticket against it
+  # (task #14 follow-up); nil → AutoSpec proposes the best-fit instead.
+  def chosen_template(project)
     slug = params[:template_slug].to_s
-    slug.present? ? project.ticket_templates.find_by(slug: slug)&.body : nil
+    slug.present? ? project.ticket_templates.find_by(slug: slug) : nil
   end
 
   # Right after a draft is created with some initial content, auto-run an
