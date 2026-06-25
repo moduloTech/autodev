@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **AutoSpec auto-evaluates a new draft's quality on creation (task #15).** When a draft is created from `/autospec_drafts/new` with some initial content, the author now lands on the editor with AutoSpec's first turn already in the conversation: a quality assessment (title, type/priority/tags, context, expected behaviour, acceptance criteria, mockup) plus the next priority question to answer — the same result you got by manually sending *"Évalue la qualité du ticket."*, now automatic. `AutospecDraftsController#create` calls a new private `auto_evaluate_quality(draft)` that sends that prompt through the existing `Autospec::Chat` service (resolved in the draft's locale via the new `web_autospec_auto_eval_prompt` key, fr + en). It is **skipped for a blank-canvas draft** (no title and no markdown — nothing to assess yet) and when no Anthropic key is configured, and is **best-effort**: any failure is logged and never blocks or rolls back the draft creation. The assessment relies on the existing AutoSpec persona (no system-prompt change). Runs inline in the create request (consistent with the existing synchronous `#chat` action) so the evaluation is present on first render — there is no live-update plumbing for the conversation yet (deferred to the step 9c streaming work). New tests in `test/controllers/autospec_drafts_controller_test.rb` cover the content-present path (user prompt + assistant turn persisted), the blank-draft skip, and the failure-doesn't-block-creation guarantee.
+
 ## [1.0.0-alpha.28] - 2026-06-25
 
 ### Fixed

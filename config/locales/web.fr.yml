@@ -371,6 +371,10 @@ fr:
   web_autospec_section_markdown: Brouillon markdown
   web_autospec_markdown_empty: (vide — discutez avec Autodev pour le construire)
   web_autospec_section_conversation: Conversation avec Autodev
+  # Auto-sent as the first user turn right after a draft is created with
+  # some initial content, so Autodev opens with a quality assessment +
+  # the next priority question (task #15). Resolved in the draft's locale.
+  web_autospec_auto_eval_prompt: Évalue la qualité du ticket.
   web_autospec_conversation_empty: Démarrez la conversation pour cadrer ce ticket.
   web_autospec_composer_placeholder: "Écrivez à Autodev (ex : « Aide-moi à formuler ce bug »)…"
   web_autospec_composer_send: Envoyer

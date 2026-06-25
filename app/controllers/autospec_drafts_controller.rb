@@ -61,9 +61,8 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
     project = current_user.visible_projects.find_by(id: params[:project_id])
     return redirect_to('/autospec_drafts/new', alert: 'project_unavailable') unless project
 
-    draft = AutospecDraft.create!(user: current_user, project: project,
-                                  title: params[:title].presence,
-                                  markdown: params[:markdown].presence)
+    draft = build_draft(project)
+    auto_evaluate_quality(draft)
     redirect_to "/autospec_drafts/#{draft.id}"
   end
 
@@ -200,6 +199,29 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   end
 
   private
+
+  def build_draft(project)
+    AutospecDraft.create!(user: current_user, project: project,
+                          title: params[:title].presence,
+                          markdown: params[:markdown].presence)
+  end
+
+  # Right after a draft is created with some initial content, auto-run an
+  # AutoSpec quality evaluation so the author lands on the editor with a
+  # first assessment + the next priority question already in the
+  # conversation (task #15) — the same result as manually sending
+  # "Évalue la qualité du ticket." today. Skipped for a blank-canvas draft
+  # (nothing to assess) or when no Anthropic key is configured, and
+  # best-effort: a failure must never block or roll back the creation.
+  def auto_evaluate_quality(draft)
+    return if draft.title.blank? && draft.markdown.blank?
+    return unless Autospec::Chat.api_key_configured?
+
+    locale = draft.project.default_locale.to_sym
+    Autospec::Chat.new(draft).reply(user_content: Locales.t(:web_autospec_auto_eval_prompt, locale: locale))
+  rescue StandardError => e
+    Rails.logger.warn("[autospec] auto quality eval failed for draft #{draft.id}: #{e.class}: #{e.message}")
+  end
 
   def load_draft
     @draft = AutospecDraft.find(params[:id])

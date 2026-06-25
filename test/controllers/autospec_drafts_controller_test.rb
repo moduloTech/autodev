@@ -73,6 +73,57 @@ class AutospecDraftsControllerTest < ActionDispatch::IntegrationTest # rubocop:d
     assert_equal 'Salut !',   body.dig('message', 'content')
   end
 
+  # --- create: auto quality evaluation (task #15) -------------------
+
+  def member_author!
+    ProjectMembership.create!(user: @author, project: @project, role: 'contributor')
+  end
+
+  def test_create_auto_evaluates_quality_when_content_present # rubocop:disable Metrics/AbcSize
+    sign_in @author
+    member_author!
+    stub_chat_response([TextBlock.new('text', '🔴 Qualité : Insuffisante')])
+
+    post '/autospec_drafts',
+         params: { project_id: @project.id, title: 'test', markdown: 'Je veux un bouton.' }
+    draft = AutospecDraft.order(:id).last
+    messages = draft.autospec_messages.order(:id)
+
+    assert_redirected_to "/autospec_drafts/#{draft.id}"
+    # First turn = the auto-sent eval prompt (fr default locale), second =
+    # the assistant assessment.
+    assert_equal %w[user assistant], messages.pluck(:role)
+    assert_equal 'Évalue la qualité du ticket.', messages.first.content
+  end
+
+  def test_create_skips_auto_eval_for_blank_draft
+    sign_in @author
+    member_author!
+    stub_chat_response([TextBlock.new('text', 'should not be called')])
+
+    post '/autospec_drafts', params: { project_id: @project.id, title: '', markdown: '' }
+    draft = AutospecDraft.order(:id).last
+
+    assert_redirected_to "/autospec_drafts/#{draft.id}"
+    assert_equal 0, draft.autospec_messages.count
+  end
+
+  RaisingClient = Struct.new(:noop) do
+    def messages = self
+    def create(_params) = raise(StandardError, 'boom')
+  end
+
+  def test_create_auto_eval_failure_does_not_block_creation
+    sign_in @author
+    member_author!
+    Autospec::Chat.default_client = RaisingClient.new
+
+    assert_difference 'AutospecDraft.count', 1 do
+      post '/autospec_drafts', params: { project_id: @project.id, title: 'test', markdown: 'x' }
+    end
+    assert_response :redirect
+  end
+
   # --- apply_suggestion (JSON) --------------------------------------
 
   def title_tool(id: 'tu1', title: 'New')
