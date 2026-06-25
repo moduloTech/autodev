@@ -243,7 +243,7 @@ class AutospecDraftsControllerTest < ActionDispatch::IntegrationTest # rubocop:d
     assert_equal 'draft_locked', JSON.parse(response.body)['error']
   end
 
-  def test_chat_returns_503_when_anthropic_key_missing
+  def test_chat_returns_503_when_anthropic_key_missing # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
     sign_in @author
     # Don't install the default_client stub — falls through to env/config.
     # Clear any ambient ANTHROPIC_API_KEY (e.g. when the developer runs
@@ -251,12 +251,18 @@ class AutospecDraftsControllerTest < ActionDispatch::IntegrationTest # rubocop:d
     # prod-without-key state deterministically.
     Autospec::Chat.default_client = nil
     previous_env = ENV.delete('ANTHROPIC_API_KEY')
+    # Also strip anthropic.api_key from Web.config: the dev's ~/.autodev/config.yml
+    # may carry one (loaded at boot), which would otherwise satisfy
+    # api_key_configured? and flip this to 200.
+    saved_cfg = Web.config
+    Web.config = (Web.config || {}).deep_dup.tap { |c| c.delete('anthropic') }
     post "/autospec_drafts/#{@draft.id}/chat", params: { message: 'salut' }, as: :json
 
     assert_response :service_unavailable
     assert_equal 'chat_unavailable', JSON.parse(response.body)['error']
   ensure
     ENV['ANTHROPIC_API_KEY'] = previous_env if previous_env
+    Web.config = saved_cfg
   end
 
   # --- submit_for_approval (JSON) -----------------------------------

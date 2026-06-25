@@ -19,11 +19,17 @@ class DashboardAnthropicBannerTest < ActionDispatch::IntegrationTest
                               role: 'contributor')
     @previous_env_key = ENV.delete('ANTHROPIC_API_KEY')
     Autospec::Chat.default_client = nil
+    # The dev's ~/.autodev/config.yml may carry anthropic.api_key (loaded into
+    # Web.config at boot); strip it so the "key missing" state is deterministic
+    # regardless of the machine the suite runs on.
+    @saved_web_config = Web.config
+    Web.config = (Web.config || {}).deep_dup.tap { |c| c.delete('anthropic') }
   end
 
   teardown do
     ENV['ANTHROPIC_API_KEY'] = @previous_env_key if @previous_env_key
     Autospec::Chat.default_client = nil
+    Web.config = @saved_web_config
   end
 
   def test_admin_sees_banner_when_key_missing

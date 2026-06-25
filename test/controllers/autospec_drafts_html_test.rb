@@ -19,6 +19,12 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
   TextBlock = Struct.new(:type, :text)
   Response  = Struct.new(:content)
 
+  # Stub for the GitLab client the importer uses (#issue → title/description).
+  GitlabStub = Struct.new(:issue_obj) do
+    def issue(_path, _iid) = issue_obj
+  end
+  ImportIssue = Struct.new(:title, :description)
+
   setup do
     @author  = User.create!(email: 'csm@modulotech.fr', name: 'CSM')
     @other   = User.create!(email: 'other@modulotech.fr', name: 'Other')
@@ -28,6 +34,7 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
 
   teardown do
     Autospec::Chat.default_client = nil
+    Autospec::GitlabImporter.default_client = nil
   end
 
   # --- index --------------------------------------------------------
@@ -110,6 +117,24 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
     assert_equal '/autospec_drafts/new', URI.parse(response.location).path
   end
 
+  # --- import + auto-evaluation (task #15 over the import path) ------
+
+  def test_import_creates_draft_and_auto_evaluates_quality # rubocop:disable Metrics/AbcSize,Minitest/MultipleAssertions
+    Autospec::GitlabImporter.default_client = GitlabStub.new(ImportIssue.new('Login bug', '## Steps'))
+    Autospec::Chat.default_client = StubClient.new(Response.new([TextBlock.new('text', '🔴 Insuffisante')]), [])
+    sign_in @author
+
+    post '/autospec_drafts/import',
+         params: { url: 'https://gitlab.example.com/group/proj/-/work_items/1380' }
+    draft = AutospecDraft.order(:id).last
+
+    assert_redirected_to "/autospec_drafts/#{draft.id}"
+    assert_equal 'Login bug', draft.title
+    # imported draft has content → the quality eval runs: user prompt + assistant turn
+    assert_equal %w[user assistant], draft.autospec_messages.order(:id).pluck(:role)
+    assert_equal 'Évalue la qualité du ticket.', draft.autospec_messages.order(:id).first.content
+  end
+
   # --- show ---------------------------------------------------------
 
   def test_show_renders_draft_for_author
@@ -144,17 +169,20 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
 
   # --- show: chat_enabled state -------------------------------------
 
-  def test_show_disables_composer_when_anthropic_key_missing
+  def test_show_disables_composer_when_anthropic_key_missing # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
     draft = AutospecDraft.create!(user: @author, project: @project, title: 'X')
     sign_in @author
     Autospec::Chat.default_client = nil
     previous_env = ENV.delete('ANTHROPIC_API_KEY')
+    saved_cfg = Web.config
+    Web.config = (Web.config || {}).deep_dup.tap { |c| c.delete('anthropic') }
     get "/autospec_drafts/#{draft.id}"
 
     assert_match(/<textarea[^>]*name="message"[^>]*disabled/, response.body)
     assert_includes response.body, 'Chat indisponible'
   ensure
     ENV['ANTHROPIC_API_KEY'] = previous_env if previous_env
+    Web.config = saved_cfg
   end
 
   def test_show_enables_composer_when_anthropic_key_present
