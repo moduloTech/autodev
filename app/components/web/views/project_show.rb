@@ -48,7 +48,7 @@ module Web
         )
       end
 
-      def render_topbar # rubocop:disable Metrics/MethodLength
+      def render_topbar # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
         render(Components::Topbar.new(
                  title: @project_path,
                  subtitle: project_description,
@@ -58,6 +58,13 @@ module Web
             render Components::Button.new(kind: :secondary, size: :md, href: url,
                                           icon: Components::Icon.new(name: 'external', size: 14)) do
               t_web(:web_project_view_on_gitlab)
+            end
+          end
+          if @can_edit
+            render Components::Button.new(kind: :secondary, size: :md,
+                                          href: "/projects/#{project_slug(@project_path)}/ticket_templates",
+                                          icon: Components::Icon.new(name: 'list', size: 14)) do
+              t_web(:web_ticket_templates_manage)
             end
           end
           render Components::Button.new(kind: :primary, size: :md,

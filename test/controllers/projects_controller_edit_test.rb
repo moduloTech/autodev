@@ -52,6 +52,15 @@ class ProjectsControllerEditTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
   end
 
+  # -- ticket-templates entry point kept in the config editor (task #14) --
+
+  def test_edit_page_keeps_the_ticket_templates_link
+    sign_in @member
+    get '/projects/group__proj/edit'
+
+    assert_match %r{href="/projects/group__proj/ticket_templates"}, response.body
+  end
+
   def test_unknown_project_is_not_found
     sign_in @admin
     get '/projects/no__such/edit'
