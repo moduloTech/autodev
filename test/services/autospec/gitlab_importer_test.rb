@@ -49,6 +49,15 @@ module Autospec
       assert_equal 7, client.calls.first[:iid]
     end
 
+    def test_supports_work_items_url_form
+      client = stub_client
+      GitlabImporter.new('https://gitlab.example.com/group/proj/-/work_items/1380',
+                         @user, client: client).call
+
+      assert_equal 'group/proj', client.calls.first[:project]
+      assert_equal 1380, client.calls.first[:iid]
+    end
+
     def test_handles_trailing_slash_and_query_string
       client = stub_client
       GitlabImporter.new('https://gitlab.example.com/group/proj/-/issues/42/?notes_filter=0',
