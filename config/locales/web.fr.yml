@@ -376,6 +376,7 @@ fr:
   # the next priority question (task #15). Resolved in the draft's locale.
   web_autospec_auto_eval_prompt: Évalue la qualité du ticket.
   web_autospec_conversation_empty: Démarrez la conversation pour cadrer ce ticket.
+  web_autospec_thinking: AutoSpec réfléchit…
   web_autospec_composer_placeholder: "Écrivez à Autodev (ex : « Aide-moi à formuler ce bug »)…"
   web_autospec_composer_send: Envoyer
   web_autospec_status_drafting: En rédaction

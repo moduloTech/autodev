@@ -919,6 +919,11 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
   min-height: 0;
 }
 
+/* Optimistic "AutoSpec is thinking…" bubble shown while a chat turn is in
+   flight (autospec.js), pulsing until the reply re-renders the conversation. */
+.autospec-thinking { animation: autospec-pulse 1.3s ease-in-out infinite; }
+@keyframes autospec-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+
 /* Attachments grid (10c): one card per attachment + a perpetual
    drop-target slot at the end so the affordance is always visible. */
 .autospec-attachments { margin-top: 4px; }
