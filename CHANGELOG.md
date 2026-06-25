@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.30] - 2026-06-25
+
+### Changed
+
+- **Usage docs synced with the alpha.25→.29 features (refresh-usage-docs).** Refreshed both in-app guides (`docs/usage/`, `date:` bumped to 2026-06-25). Technical guide (`/admin/help`): added the new routes (`/projects/new` + `POST /projects`, `/projects/:slug/edit` + PATCH, `/projects/:slug/ticket_templates/*`); rewrote "Configuration d'un projet" for the now DB-backed per-project config (full editable-field table, `/projects/:slug/edit` access gates, DB-vs-YAML resolution via `IssueProcessJob#lookup_project_config` / `Project.runtime_configs`, `autodev:migrate_projects_from_yaml`); documented per-project ticket templates (`ProjectTicketTemplate`, `TicketTemplatesController`, the three-way `SystemPrompt#ticket_templates` branch, `autospec_drafts.ticket_template_id`), AutoSpec auto-evaluation on draft creation/import (task #15), the `/-/work_items/<iid>` import URL form; completed the recurring-tasks list (`LogJanitorJob`, `ReapFailedJobsJob`) and the primary-DB table list (`project_ticket_templates`). Functional guide (`/help`): documented the ticket-template picker + "Gérer les modèles", Autodev's automatic quality assessment on a new draft, the dashboard "Brouillons à valider" block for owners, and the work-item import URL. Added four screenshots (`15-project-edit`, `16-project-new`, `17-ticket-templates-list` — populated, `18-ticket-template-form`) to the technical guide (`17` also illustrates the functional guide's templates section) and re-shot `12-autospec-new` (now shows the per-project template picker); all normalized to 1440px-wide to match the existing pool. Registered screens 15–18 in the `refresh-usage-docs` skill's screen→file mapping.
+
 ## [1.0.0-alpha.29] - 2026-06-25
 
 ### Added

@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-06-24
+date: 2026-06-25
 lang: fr
 documentclass: article
 papersize: a4
@@ -93,6 +93,7 @@ Chaque carte est un raccourci vers la liste filtrée correspondante.
 - **En traitement** — les 10 demandes sur lesquelles Autodev travaille actuellement. Chaque ligne montre le projet, le titre du ticket, et son état du moment.
 - **Activité de la semaine** — un mini-graphe du nombre d'opérations menées chaque jour sur les 7 derniers jours. Utile pour repérer une journée creuse ou un pic.
 - **Vos projets** — un récap par projet avec le nombre de demandes actives et le nombre d'erreurs en cours.
+- **Brouillons à valider** — si vous êtes responsable d'un projet, ce bloc liste les brouillons de demande en attente de votre validation (que vous n'avez pas encore validés). Chaque ligne montre le titre, le projet, l'auteur, et un bouton **Voter** qui ouvre le brouillon.
 - **Banderole d'alerte** — si au moins une demande est en échec, un bandeau rouge en bas vous le rappelle avec un lien direct.
 
 ## Le menu de gauche
@@ -277,9 +278,15 @@ Chaque brouillon porte un titre, le projet concerné, et son état (en rédactio
 Deux possibilités :
 
 - **Nouveau brouillon** — vous choisissez le projet concerné, et vous pouvez donner un titre et un début de description (ou partir d'une page blanche).
-- **Importer depuis GitLab** — collez l'adresse d'un ticket GitLab existant : son titre et son contenu pré-remplissent un nouveau brouillon, que vous pouvez ensuite retravailler.
+- **Importer depuis GitLab** — collez l'adresse d'un ticket GitLab existant : son titre et son contenu pré-remplissent un nouveau brouillon, que vous pouvez ensuite retravailler. L'adresse fonctionne, que le ticket s'ouvre dans l'ancienne ou la nouvelle vue de GitLab.
 
 ![Démarrer un nouveau brouillon : on choisit d'abord le projet.](screenshots/12-autospec-new.png)
+
+Si le projet a des **modèles de ticket** (par exemple *Évolution* ou *Bug*), un sélecteur vous laisse en choisir un : sa structure pré-remplit la description, et Autodev s'appuiera dessus pour vous aider à la compléter. À défaut de modèle, Autodev part d'une structure générale (Contexte, Comportement attendu, Critères d'acceptation, Notes). Voir *Les modèles de ticket* plus bas.
+
+## Autodev évalue d'emblée votre brouillon
+
+Dès qu'un brouillon est créé avec un minimum de contenu (un titre ou une description, ou un ticket importé), Autodev ouvre la conversation tout seul par une **évaluation de la qualité du ticket** : ce qui est clair, ce qui manque (contexte, comportement attendu, critères d'acceptation…), et la première question à laquelle répondre pour avancer. Si un modèle de ticket est choisi, l'évaluation indique aussi en quoi le brouillon respecte ou non ce modèle. Un brouillon parti d'une page blanche n'est pas évalué (il n'y a encore rien à juger).
 
 ## Discuter pour mettre en forme
 
@@ -309,6 +316,17 @@ Une demande envoyée passe d'abord par une **validation des responsables du proj
 - Quand **tous** ont approuvé, le ticket est créé sur GitLab (et confié à Autodev si c'était la destination choisie).
 
 Vous pouvez aussi **rétracter** un brouillon en attente pour le modifier avant qu'il soit validé.
+
+## Les modèles de ticket
+
+Pour qu'Autodev rédige des tickets cohérents sur un projet, les responsables du projet peuvent définir un ou plusieurs **modèles** (par exemple *Évolution*, *Bug*). Chaque modèle décrit la structure attendue (les sections à remplir).
+
+![Les modèles de ticket d'un projet.](screenshots/17-ticket-templates-list.png)
+
+- On les gère depuis le bouton **Gérer les modèles**, sur la page du projet (et depuis la page de configuration du projet).
+- À la création d'un brouillon, le sélecteur de modèle pré-remplit la description avec la structure choisie.
+- Pendant la rédaction, Autodev suit le modèle retenu et signale les sections manquantes. Si vous n'avez pas choisi de modèle alors que le projet en propose, il vous suggère le plus adapté.
+- Si le projet n'a aucun modèle, Autodev utilise une structure générale par défaut.
 
 \newpage
 

@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-06-19
+date: 2026-06-25
 lang: fr
 documentclass: article
 papersize: a4
@@ -40,7 +40,11 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/issues/:id/transition` (POST) | `IssuesController#transition` | Déclenche un événement AASM (`?event=...`) |
 | `/issues/:id/close` (POST) | `IssuesController#close` | Clôture manuelle (événement AASM `close`, gatée sur le membership projet) — `closed` depuis n'importe quel état |
 | `/errors` | `ErrorsController#index` | Issues en `error` + `needs_clarification` + `post_completion_error IS NOT NULL` |
-| `/projects` | `ProjectsController#index` | Union des projets YAML + projets ayant des rows |
+| `/projects` | `ProjectsController#index` | Union des rows `projects` + entrées YAML pas encore importées |
+| `/projects/new` (+ POST `create`) | `ProjectsController#new`/`#create` | Création d'un projet en base (admin only) — enfile `SyncGitlabMembershipsJob` au succès |
+| `/projects/:slug/edit` (+ PATCH `update`) | `ProjectsController#edit`/`#update` | Édition de la config per-projet en base (gatée membership/admin) |
+| `/projects/:slug/ticket_templates` (index/new/create) | `TicketTemplatesController` | Modèles de ticket AutoSpec du projet (gaté membership/admin, 404 si pas de row projet) |
+| `/projects/:slug/ticket_templates/:id` (edit/update/destroy) | `TicketTemplatesController` | Édition / suppression d'un modèle (`:id` numérique) |
 | `/projects/:slug` | `ProjectsController#show` | Slug = `group/sub/name` encodé en `group__sub__name` |
 | `/stream` | `StreamController#show` | Server-Sent Events, `ActionController::Live` |
 | `/locale/:lang` | `LocaleController#update` | Set le cookie `locale`, redirige sur `back` |
@@ -112,7 +116,7 @@ Sections :
 - **Scheduled jobs** — jobs programmés via `enqueue_at`.
 - **Finished jobs** — historique (5K+ en prod).
 - **Workers** — les workers Solid Queue actifs (forks de `bin/jobs start`).
-- **Recurring tasks** — programmées via `config/recurring.yml` : `AutodevPollJob` (poll, `*/N * * * *`), `SyncGitlabMembershipsJob` (réconciliation memberships, `0 3 * * *`), `RefreshProjectBriefingsJob` (briefing AutoSpec horaire, `0 * * * *`), et en prod `clear_solid_queue_finished_jobs` (purge horaire). Le bloc `development:` est vide — un supervisor local n'auto-poll pas.
+- **Recurring tasks** — programmées via `config/recurring.yml` : `AutodevPollJob` (poll, `*/N * * * *`), `SyncGitlabMembershipsJob` (réconciliation memberships, `0 3 * * *`), `RefreshProjectBriefingsJob` (briefing AutoSpec horaire, `0 * * * *`), et **en prod uniquement** `clear_solid_queue_finished_jobs` (purge horaire des jobs terminés, minute 12), `LogJanitorJob` (`prune_logs`, rotation/purge des logs, `30 4 * * *`) et `ReapFailedJobsJob` (`reap_transient_failed_jobs`, écarte les échecs process transitoires, `18 * * * *`). Le bloc `development:` est vide — un supervisor local n'auto-poll pas.
 
 À vérifier en cas de souci :
 
@@ -144,46 +148,53 @@ Les mêmes données sont servies en JSON sur `/healthz` (HTTP 503 uniquement si 
 
 # Configuration d'un projet
 
-Toute la config projet vit dans `~/.autodev/config.yml`, sous le bloc `projects:`. Chaque entrée porte le `path` GitLab et un sous-bloc optionnel `app:` qui injecte des instructions d'environnement dans les prompts `danger-claude` (priorité sur les `CLAUDE.md` du projet et sur les skills).
+Depuis le task #9 (phases 3-4, `v1.0.0-alpha.25`/`.26`), la config par projet vit **en base**, sur la row `projects`, et s'édite depuis le dashboard. Le bloc `projects:` de `~/.autodev/config.yml` **n'est plus requis** : `~/.autodev/config.yml` ne sert plus que pour les credentials (`gitlab_token`, bloc `azure:`) et comme fallback transitoire pour les projets pas encore importés en base.
 
-Exemple complet :
+## Créer / éditer un projet
 
-```yaml
-projects:
-  - path: modulosource/powerpanne/powerpanne/core
-    app:
-      setup:
-        - ["bundle", "install"]
-        - ["yarn", "install"]
-      test:
-        - ["bin/test"]
-      lint:
-        - ["bundle", "exec", "rubocop", "-A"]
-      run:
-        - command: ["bin/rails", "s"]
-          port: 3000
-        - command: ["bin/vite", "dev"]
-      post_completion:
-        - ["bin/notify_teams.sh"]
-      additional_prompt: |
-        Quand tu modifies un fichier de migration, ajoute toujours
-        un test de la rollback.
-```
+- **Créer** : `GET /projects/new` + `POST /projects` (`ProjectsController#new/#create`), **admin uniquement** (`can_create_project?`). `gitlab_path` (immuable) dérive le `slug`/`name`, `default_locale` fixe la langue des commentaires. Au succès, `SyncGitlabMembershipsJob` est enfilé pour peupler les memberships.
+- **Éditer** : `GET /projects/:slug/edit` + `PATCH /projects/:slug` (`ProjectsController#edit/#update`), gaté **admin ou collaborateur** du projet (`can_edit_project?` → `current_user.contributor_of?`). Une row `projects` doit exister (sinon 404). Seules les colonnes de config sont persistées (jamais de mass-assignment) ; un champ vidé retombe sur le défaut global.
 
-## Blocs disponibles
+![Formulaire de création d'un projet (`/projects/new`, admin only).](screenshots/16-project-new.png)
 
-| Bloc | Effet |
-|---|---|
-| `setup` | Commandes pour installer les dépendances. Lancées avant chaque cycle. |
-| `test` | Comment lancer la suite de tests. Utilisé par le pipeline fixer. |
-| `lint` | Comment auto-fixer (`rubocop -A`, `eslint --fix`, etc.). |
-| `run` | Serveurs à lancer pour les captures d'écran. Si au moins une commande a un `port`, Chrome DevTools est auto-activé pour permettre à `danger-claude` de screenshoter les pages impactées et de les uploader en commentaire d'issue. |
-| `post_completion` | Hook(s) lancés après livraison (sur désassignation, voir cycle de vie). |
-| `additional_prompt` | Texte ajouté à tous les prompts `danger-claude` pour ce projet. |
+![Édition de la config per-projet (`/projects/:slug/edit`).](screenshots/15-project-edit.png)
+
+## Champs de config (formulaire `/projects/:slug/edit`)
+
+| Section | Champ | Effet |
+|---|---|---|
+| Général | `target_branch` | Branche cible des MRs (défaut : branche par défaut du dépôt). |
+| Général | `labels_todo` / `label_doing` / `label_done` | Les 3 labels du cycle de vie GitLab (listes, une entrée par ligne). |
+| Général | `extra_prompt` | Texte ajouté à tous les prompts `danger-claude` du projet. |
+| Exécution | `dc_timeout` | Délai max d'un appel `danger-claude` (s). |
+| Exécution | `max_retries` | Nb max de tentatives sur échec. |
+| Exécution | `retry_backoff` | Délai de base entre deux tentatives (s). |
+| Exécution | `stagnation_threshold` | Échecs identiques consécutifs avant abandon. |
+| Exécution | `clone_depth` | Profondeur du `git clone` (0 = historique complet). |
+| Exécution | `sparse_checkout` | Chemins du sparse checkout (liste, pour monorepos). |
+| Exécution | `post_completion` | Commande(s) lancée(s) après livraison (sur désassignation). |
+| Exécution | `post_completion_timeout` | Délai max de la commande `post_completion` (s). |
+| Avancé | `model` | Modèle `danger-claude` (option `-m`). |
+| Avancé | `effort` | Effort de raisonnement `danger-claude` (option `-e`). |
+| Avancé | `parallel_agents` | Découpe les issues complexes sur plusieurs agents (worktrees git). |
+| Avancé | `split_implementation` | Implémente code puis tests en deux passes distinctes. |
+| Avancé | `implementer_agent` / `test_writer_agent` / `mr_fixer_agent` | Agents custom (nom ou chemin dans `.claude/agents`). |
+
+Les commandes d'environnement (`setup`/`test`/`lint`/`run`) vivent à part dans la table `project_app_commands` (sous-bloc `app:` en YAML), reconstruites par `Project#to_project_config`. Le `run` avec au moins un `port` auto-active Chrome DevTools pour les captures d'écran. Tri-état des booléens : *Défaut* (suit le global) / *Activé* / *Désactivé*.
+
+## Résolution DB vs YAML
+
+`IssueProcessJob#lookup_project_config` résout dans cet ordre :
+
+1. **Row `projects`** → `Project#to_project_config` (autoritaire ; n'émet que les clés présentes, se superpose proprement aux défauts globaux).
+2. **Fallback YAML** : entrée `projects:` de `config.yml` correspondant au path, si aucune row.
+3. Ni l'un ni l'autre → l'issue est skippée.
+
+`Project.runtime_configs` (discovery côté poller / boot) fait la même union DB-puis-YAML. Pour migrer un bloc `projects:` YAML en base : `bin/rails autodev:migrate_projects_from_yaml` (transactionnel, `DRY_RUN=1` pour un essai à blanc).
 
 ## Synchronisation GitLab
 
-La table `projects` est alimentée par le poller (chaque nouveau ticket crée la row si elle manque). Les memberships sont alimentés par `autodev --sync-memberships` (qui doit être lancée manuellement ou via une tâche planifiée).
+Les memberships sont alimentés par `autodev --sync-memberships` (manuel ou via la tâche planifiée `0 3 * * *`).
 
 Attention : un `--sync-memberships` lancé sur une base `projects` vide désactive silencieusement tous les users. Toujours vérifier `Project.count > 0` avant de lancer la sync.
 
@@ -410,16 +421,38 @@ Prédicats portés par le modèle (appelés par le contrôleur ET les vues pour 
 | `Autospec::SuggestionApplier` | Applique un `tool_use` du modèle au brouillon (titre/markdown/meta_chips). Erreurs typées → 409 / 404 / 422. |
 | `Autospec::ApprovalRecorder` | Enregistre un vote owner par itération (transactionnel). 1er refus → `mark_rejected!` ; quorum (tous les owners ont approuvé à `current_iteration`) → `GitlabSubmitter#submit!` puis `finalize!`. |
 | `Autospec::GitlabSubmitter` | Upload des pièces jointes, réécrit les URLs `/rails/active_storage/...` → `/uploads/...`, crée l'issue (`labels_todo` envoyé seulement si `destination == 'autodev'`). Stamp `gitlab_issue_iid` / `gitlab_issue_url` / `submitted_at`. |
-| `Autospec::GitlabImporter` | Parse une URL d'issue GitLab, vérifie l'accès (admin OU `contributor_of?`), pré-remplit un brouillon. 4 erreurs typées → clés `flash[:alert]`. |
+| `Autospec::GitlabImporter` | Parse une URL d'issue GitLab, vérifie l'accès (admin OU `contributor_of?`), pré-remplit un brouillon. `ISSUE_URL_RE` accepte les deux formes `/-/issues/<iid>` **et** `/-/work_items/<iid>` (même IID, même appel `client.issue`). 4 erreurs typées → clés `flash[:alert]`. |
 | `Autospec::MarkdownRenderer` | Rendu HTML de l'aperçu du brouillon. |
 
 ## Briefing projet
 
 Trois colonnes sur `projects` (`db/migrate/20260616000001`) : `briefing_text`, `briefing_generated_at`, `briefing_error`. `RefreshProjectBriefingsJob` (`0 * * * *`, bloc prod uniquement) régénère le briefing sur `staging` — échec par projet non bloquant (le briefing précédent reste, l'erreur est stockée sur `briefing_error`). `SystemPrompt#build` insère le briefing comme 3e bloc `text` (2e breakpoint cache) quand présent, ce qui laisse l'état du brouillon comme seul chunk non caché de l'appel LLM.
 
+## Modèles de ticket (task #14)
+
+Un projet peut définir des modèles de ticket nommés qu'AutoSpec suit automatiquement. Modèle `ProjectTicketTemplate` (`belongs_to :project`) : colonnes `name`, `slug` (dérivé du nom, minuscule/sans accents, unique par projet, format `\A[a-z0-9]+(?:-[a-z0-9]+)*\z`), `body` (markdown), `position`. Migration `db/migrate/20260624000001`.
+
+CRUD : `/projects/:slug/ticket_templates` (`TicketTemplatesController`, index/new/create/edit/update/destroy), gaté **comme l'éditeur de config** (admin ou collaborateur, 404 si pas de row projet). Deux points d'entrée pour les éditeurs : bouton **« Gérer les modèles »** sur la topbar de `/projects/:slug` et carte sur la page de config.
+
+![Liste des modèles de ticket d'un projet (Évolution, Bug, Question).](screenshots/17-ticket-templates-list.png)
+
+![Édition d'un modèle de ticket (nom, slug, structure markdown).](screenshots/18-ticket-template-form.png)
+
+Le choix du modèle à la création d'un brouillon est persisté : `autospec_drafts.ticket_template_id` (FK nullable, `on_delete: :nullify`, migration `20260625000001`). `Autospec::SystemPrompt#ticket_templates` branche en trois :
+
+1. **Modèle choisi** → AutoSpec le suit et, à chaque évaluation qualité, vérifie le ticket contre lui (sections manquantes / vides / en trop).
+2. **Aucun choix mais le projet en a** → AutoSpec propose le mieux adapté et offre de restructurer.
+3. **Projet sans modèle** → structure générale par défaut (clé i18n `web_autospec_default_template_body` : Contexte / Comportement attendu / Critères d'acceptation / Notes, dans la locale du brouillon).
+
+Sur `/autospec_drafts/new`, le picker pré-remplit le markdown côté client (`autospec_new.js`, map JSON embarquée) et côté serveur (`#chosen_template`) pour fonctionner JS off. Le champ est envoyé en `template_slug` pour ne pas heurter le `:slug` (projet) de la route.
+
+## Auto-évaluation à la création (task #15)
+
+`AutospecDraftsController#create` (et `#create_from_import`) appelle `auto_evaluate_quality(draft)` : un premier tour de chat via `Autospec::Chat` avec le prompt `web_autospec_auto_eval_prompt` (« Évalue la qualité du ticket. ») dans la locale du projet, de sorte que l'auteur arrive avec une évaluation déjà postée. **Skippé** si le brouillon est vierge (ni titre ni markdown) et si aucune clé Anthropic n'est configurée. **Best-effort** : toute erreur est loggée et ne bloque jamais la création. Exécuté inline (pas de plumbing live-update — déféré au streaming step 9c).
+
 ## Tables
 
-DB primaire : `autospec_drafts`, `autospec_messages`, `autospec_attachments`, `autospec_approvals`, plus les 3 tables ActiveStorage (`active_storage_blobs`, `active_storage_attachments`, `active_storage_variant_records`) pour les pièces jointes image. Migrations `db/migrate/20260612000001..05`.
+DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`, `autospec_attachments`, `autospec_approvals`, `project_ticket_templates`, plus les 3 tables ActiveStorage (`active_storage_blobs`, `active_storage_attachments`, `active_storage_variant_records`) pour les pièces jointes image. Migrations `db/migrate/20260612000001..05`, `20260624000001` (templates), `20260625000001` (lien brouillon→modèle).
 
 \newpage
 
@@ -458,7 +491,7 @@ Tout est sous `~/.autodev/` (override via `AUTODEV_HOME`) :
 | Path | Rôle |
 |---|---|
 | `~/.autodev/config.yml` | Projets + credentials GitLab |
-| `~/.autodev/autodev.db` | SQLite primaire — `issues`, `activity_events`, `users`, `projects`, `project_app_commands`, `project_memberships`, `sessions`, `schema_migrations`, `ar_internal_metadata`, `audits`, les tables AutoSpec (`autospec_drafts`, `autospec_messages`, `autospec_attachments`, `autospec_approvals`) et ActiveStorage (`active_storage_blobs`, `active_storage_attachments`, `active_storage_variant_records`) |
+| `~/.autodev/autodev.db` | SQLite primaire — `issues`, `activity_events`, `users`, `projects`, `project_app_commands`, `project_ticket_templates`, `project_memberships`, `sessions`, `schema_migrations`, `ar_internal_metadata`, `audits`, les tables AutoSpec (`autospec_drafts`, `autospec_messages`, `autospec_attachments`, `autospec_approvals`) et ActiveStorage (`active_storage_blobs`, `active_storage_attachments`, `active_storage_variant_records`) |
 | `~/.autodev/autodev_queue.db` | SQLite Solid Queue — 10 tables CRUD-heavy isolées du WAL primaire |
 | `~/.autodev/secret_key_base` | Secret Devise + session (généré au premier boot, 0600) |
 | `~/.autodev/log/production.log` | Log Rails |
