@@ -56,6 +56,11 @@
 
     const btn = form.querySelector('button[type="submit"]');
     if (btn) btn.disabled = true;
+
+    // Clear the composer once the message is on screen. Deferred a tick so
+    // the in-flight submit (native or Turbo) has already serialized the
+    // field — clearing it synchronously here would POST an empty message.
+    setTimeout(() => { textarea.value = ''; }, 0);
   }
 
   function chatBubble(assistant, text) {
