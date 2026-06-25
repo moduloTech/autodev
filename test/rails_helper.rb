@@ -70,6 +70,7 @@ module ActiveRecordTestCleanup
     issues
     project_memberships
     project_app_commands
+    project_ticket_templates
     projects
     users
   ].freeze

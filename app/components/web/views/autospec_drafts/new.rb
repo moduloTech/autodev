@@ -24,6 +24,10 @@ module Web
                 end
               end
             end
+            if @projects.any?
+              render_templates_data
+              script(src: '/assets/js/autospec_new.js', defer: true)
+            end
           end
         end
 
@@ -59,6 +63,7 @@ module Web
                  style: 'display: grid; gap: 16px;') do
               csrf_input_tag
               render_project_field
+              render_template_field
               render_title_field
               render_markdown_field
               render_submit_row
@@ -90,10 +95,40 @@ module Web
         def render_project_field
           label(style: 'display: grid; gap: 6px;') do
             span(style: label_style) { t_web(:web_autospec_field_project) }
-            select(name: 'project_id', required: true, style: input_style) do
+            select(name: 'project_id', required: true, style: input_style,
+                   data: { 'autospec-project-select' => 'true' }) do
               option(value: '') { t_web(:web_autospec_field_project_prompt) }
               @projects.each { |p| option(value: p.id.to_s) { p.gitlab_path } }
             end
+          end
+        end
+
+        # Per-project ticket-template picker (task #14). Hidden until JS
+        # populates it for the selected project (a project with no template
+        # keeps it hidden). Picking one fills the markdown textarea with the
+        # template body; the server applies the same fallback when JS is off
+        # (AutospecDraftsController#initial_markdown).
+        def render_template_field
+          div(data: { 'autospec-template-field' => 'true' }, style: 'display: none;') do
+            label(style: 'display: grid; gap: 6px;') do
+              span(style: label_style) { t_web(:web_autospec_field_template) }
+              select(name: 'template_slug', style: input_style,
+                     data: { 'autospec-template-select' => 'true' }) do
+                option(value: '') { t_web(:web_autospec_field_template_none) }
+              end
+            end
+          end
+        end
+
+        # Per-project templates as JSON for the picker's JS — keyed by
+        # project id. `</` is escaped so a template body containing
+        # `</script>` can't break out of the data block.
+        def render_templates_data
+          map = @projects.to_h do |p|
+            [p.id.to_s, p.ticket_templates.map { |t| { slug: t.slug, name: t.name, body: t.body } }]
+          end
+          script(type: 'application/json', id: 'autospec-templates-data') do
+            raw safe(JSON.generate(map).gsub('</', '<\/'))
           end
         end
 
@@ -111,7 +146,9 @@ module Web
             span(style: label_style) { t_web(:web_autospec_field_markdown) }
             textarea(name: 'markdown', rows: '8',
                      style: "#{input_style} font-family: var(--font-mono); font-size: 13px;",
-                     placeholder: t_web(:web_autospec_field_markdown_placeholder))
+                     placeholder: t_web(:web_autospec_field_markdown_placeholder),
+                     data: { 'autospec-markdown' => 'true',
+                             'confirm-overwrite' => t_web(:web_autospec_template_confirm_overwrite) })
           end
         end
 

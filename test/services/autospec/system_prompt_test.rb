@@ -37,12 +37,12 @@ module Autospec
       assert_match(/\(empty\)/,    state)
     end
 
-    def test_build_returns_two_blocks
+    # Without a briefing, build = persona + ticket-templates + draft state.
+    def test_build_returns_three_blocks_without_briefing
       blocks = Autospec::SystemPrompt.build(@draft)
 
-      assert_equal 2, blocks.size
-      assert_equal 'text', blocks[0][:type]
-      assert_equal 'text', blocks[1][:type]
+      assert_equal 3, blocks.size
+      assert(blocks.all? { |b| b[:type] == 'text' })
     end
 
     def test_first_block_is_cache_tagged
@@ -51,20 +51,20 @@ module Autospec
       assert_equal({ type: 'ephemeral' }, blocks[0][:cache_control])
     end
 
-    def test_second_block_is_not_cache_tagged
+    def test_draft_state_block_is_not_cache_tagged
       blocks = Autospec::SystemPrompt.build(@draft)
 
-      refute blocks[1].key?(:cache_control)
+      refute blocks.last.key?(:cache_control)
     end
 
-    # --- project briefing (3rd block, optional) -------------------
+    # --- project briefing (optional cached block) -----------------
 
     def test_build_inserts_briefing_block_when_project_has_one
       @project.update!(briefing_text: "# Project briefing\n\nDomain: invoices.",
                        briefing_generated_at: Time.current)
       blocks = Autospec::SystemPrompt.build(@draft)
 
-      assert_equal 3, blocks.size
+      assert_equal 4, blocks.size
       assert_match(/Project briefing/, blocks[1][:text])
       assert_equal({ type: 'ephemeral' }, blocks[1][:cache_control])
     end
@@ -73,7 +73,36 @@ module Autospec
       @project.update!(briefing_text: nil)
       blocks = Autospec::SystemPrompt.build(@draft)
 
-      assert_equal 2, blocks.size
+      assert_equal 3, blocks.size
+    end
+
+    # --- ticket templates (task #14) ------------------------------
+
+    def templates_block(draft)
+      Autospec::SystemPrompt.build(draft).find { |b| b[:text].match?(/Ticket templates|Default ticket structure/) }
+    end
+
+    def test_build_injects_default_structure_when_project_has_no_templates
+      block = templates_block(@draft)
+
+      assert_match(/Default ticket structure/, block[:text])
+      # fr is the project's default locale → fr default body
+      assert_match(/## Contexte/, block[:text])
+    end
+
+    def test_build_injects_project_templates_when_present
+      @project.ticket_templates.create!(name: 'Évolution', body: "## Localisation\n## Résultat attendu")
+      block = templates_block(@draft)
+
+      assert_match(/Ticket templates for this project/, block[:text])
+      assert_match(/## Évolution/, block[:text])
+      assert_match(/## Localisation/, block[:text])
+    end
+
+    def test_templates_block_is_not_cache_tagged
+      block = templates_block(@draft)
+
+      refute block.key?(:cache_control)
     end
 
     def test_briefing_block_carries_generated_at_marker

@@ -10,6 +10,7 @@ class Project < ApplicationRecord
   VALID_LOCALES = %w[fr en].freeze
 
   has_many :app_commands, class_name: 'ProjectAppCommand', dependent: :destroy
+  has_many :ticket_templates, class_name: 'ProjectTicketTemplate', dependent: :destroy
   has_many :project_memberships, dependent: :destroy
   has_many :users, through: :project_memberships
   has_many :owners, -> { where(project_memberships: { role: ProjectMembership::ROLE_OWNER }) },

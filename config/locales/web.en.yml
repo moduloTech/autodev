@@ -409,6 +409,42 @@ en:
   web_autospec_preview_empty: (nothing to show — the draft is empty)
   web_autospec_chat_unavailable_title: Chat unavailable
   web_autospec_chat_unavailable_hint: The Anthropic API key is not configured. Markdown and meta-chips remain editable — ask an admin to add `anthropic.api_key` to the config.
+  # AutoSpec ticket templates (task #14)
+  web_autospec_field_template: Ticket template
+  web_autospec_field_template_none: None (blank page)
+  web_autospec_template_confirm_overwrite: Replace the current content with this template?
+  web_autospec_default_template_body: |-
+    ## Context
+    _Why is this needed? What's the current situation?_
+
+    ## Expected behaviour
+    _What we should see once the ticket is delivered._
+
+    ## Acceptance criteria
+    - To be completed
+
+    ## Notes / References
+    _Mockups, links, screenshots (optional)._
+  web_ticket_templates_title: "Ticket templates — %{path}"
+  web_ticket_templates_title_short: Ticket templates
+  web_ticket_templates_subtitle: The structure AutoSpec enforces when drafting a ticket on this project.
+  web_ticket_templates_new: New template
+  web_ticket_templates_empty: No template for this project. AutoSpec uses a default structure; create one to enforce your conventions (e.g. Evolution, Bug).
+  web_ticket_templates_edit: Edit
+  web_ticket_templates_delete: Delete
+  web_ticket_templates_manage: Manage templates
+  web_ticket_templates_card_hint: "Define the ticket structure AutoSpec follows for this project (one per kind: evolution, bug…)."
+  web_ticket_template_new_title: New ticket template
+  web_ticket_template_edit_title: Edit ticket template
+  web_ticket_template_field_name: Name
+  web_ticket_template_field_name_hint: "Display name of the template (e.g. Evolution, Bug)."
+  web_ticket_template_field_slug: Identifier (optional)
+  web_ticket_template_field_slug_hint: Stable lowercase key. Derived from the name if left blank.
+  web_ticket_template_field_body: Structure (markdown)
+  web_ticket_template_field_body_hint: The sections (## headings, fields) AutoSpec must follow.
+  web_ticket_template_save: Save
+  web_ticket_template_cancel: Cancel
+  web_ticket_template_error_banner: "The template could not be saved:"
   web_dashboard_anthropic_missing_title: Anthropic API key missing
   web_dashboard_anthropic_missing_hint: AutoSpec chat is disabled. Set ANTHROPIC_API_KEY or add `anthropic.api_key` to ~/.autodev/config.yml then restart autodev.
   web_dashboard_drafts_to_vote: Drafts to vote on

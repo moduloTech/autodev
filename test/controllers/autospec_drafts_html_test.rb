@@ -79,6 +79,26 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
     assert_match(%r{/autospec_drafts/\d+}, response.location)
   end
 
+  def test_new_embeds_project_templates_for_the_picker
+    @project.ticket_templates.create!(name: 'Évolution', slug: 'evolution', body: '## Localisation')
+    sign_in @author
+    get '/autospec_drafts/new'
+
+    assert_response :success
+    assert_includes response.body, 'autospec-templates-data'
+    assert_includes response.body, 'Localisation'
+  end
+
+  def test_create_applies_chosen_template_body_when_markdown_blank
+    @project.ticket_templates.create!(name: 'Évolution', slug: 'evolution', body: "## Localisation\n## Contexte")
+    sign_in @author
+    post '/autospec_drafts', params: { project_id: @project.id, template_slug: 'evolution' }
+    draft = AutospecDraft.order(:id).last
+
+    assert_response :redirect
+    assert_equal "## Localisation\n## Contexte", draft.markdown
+  end
+
   def test_create_rejects_project_outside_visibility
     other_project = Project.create!(gitlab_path: 'other/proj', slug: 'other__proj')
     sign_in @author
