@@ -31,6 +31,10 @@ class AutospecDraft < ApplicationRecord
 
   belongs_to :user
   belongs_to :project
+  # The template the draft was started from (task #14 follow-up). Optional:
+  # blank-canvas and GitLab-imported drafts have none. Nullified at the DB
+  # level when the template is deleted.
+  belongs_to :ticket_template, class_name: 'ProjectTicketTemplate', optional: true
   has_many :autospec_messages, dependent: :destroy
   has_many :autospec_attachments, dependent: :destroy
   has_many :autospec_approvals, dependent: :destroy

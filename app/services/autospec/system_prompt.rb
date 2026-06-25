@@ -18,7 +18,7 @@ module Autospec
   #      an hour so cache hits are the common case across draft turns.
   #   3. draft state (title + markdown + meta_chips) — changes whenever
   #      the CSM edits, so we don't cache it.
-  module SystemPrompt
+  module SystemPrompt # rubocop:disable Metrics/ModuleLength
     module_function
 
     PERSONA = <<~PROMPT
@@ -101,25 +101,52 @@ module Autospec
       ].join("\n")
     end
 
-    # The project's ticket template(s) (task #14) — the structure the
-    # CSM's org expects for tickets on this project. When the project
-    # defines templates we list each (name + body) and tell AutoSpec to
-    # follow the matching one, so the CSM no longer copy-pastes a template
-    # into the chat. With none defined we fall back to a generic default
-    # structure rendered in the draft's locale. Always returns a block.
-    def ticket_templates(draft) # rubocop:disable Metrics/MethodLength
+    # The project's ticket template(s) (task #14 + follow-up) — the structure
+    # the CSM's org expects, so they no longer copy-paste a template into the
+    # chat. Three branches, each returning one block:
+    #   1. the draft has a chosen template → follow + verify against it;
+    #   2. no choice but the project defines templates → propose the best-fit;
+    #   3. the project defines none → a generic default structure (draft locale).
+    def ticket_templates(draft)
+      return chosen_template_block(draft) if draft.ticket_template
+
       templates = draft.project ? draft.project.ticket_templates.to_a : []
       return default_template_block(draft) if templates.empty?
 
+      propose_template_block(templates)
+    end
+
+    # Task #14 follow-up — the CSM explicitly picked a template: AutoSpec
+    # follows it AND, when assessing quality, verifies the ticket against it
+    # (lists missing / empty / extra sections vs the template).
+    def chosen_template_block(draft)
+      tpl = draft.ticket_template
+      <<~TXT.chomp
+        # Ticket template (chosen by the CSM)
+
+        The CSM chose the "#{tpl.name}" template for this ticket. Structure the
+        ticket to follow its sections (translate the headings into the draft's
+        language). Whenever you assess the ticket's quality, explicitly verify
+        it against this template: list any of the template's sections that are
+        missing or left empty, and any extra sections that don't belong. Do not
+        drop or rename the template's sections unless the CSM asks.
+
+        ## #{tpl.name}
+        #{tpl.body}
+      TXT
+    end
+
+    # Task #14 follow-up — no template chosen but the project defines some:
+    # AutoSpec proposes the best-fit one and offers to format the ticket.
+    def propose_template_block(templates)
       intro = <<~TXT.chomp
         # Ticket templates for this project
 
-        This project defines the following ticket template(s). Structure the
-        ticket to follow the relevant template's sections, translating the
-        headings into the draft's language. When several are listed, pick the
-        one matching the request (e.g. an evolution vs a bug) and tell the CSM
-        which you chose; if it's ambiguous, ask which kind it is. Don't invent
-        sections a template doesn't have unless the CSM asks.
+        The CSM has NOT chosen a template. Based on the request, proactively
+        propose the most appropriate template among those below, say which one
+        and why, and offer to restructure the ticket to match it. If it's
+        genuinely ambiguous, ask the CSM which kind it is. Don't invent sections
+        a template doesn't have.
       TXT
       ([intro] + templates.map { |t| "## #{t.name}\n#{t.body}" }).join("\n\n")
     end

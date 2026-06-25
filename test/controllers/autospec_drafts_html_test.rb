@@ -97,13 +97,15 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
   end
 
   def test_create_applies_chosen_template_body_when_markdown_blank
-    @project.ticket_templates.create!(name: 'Évolution', slug: 'evolution', body: "## Localisation\n## Contexte")
+    tpl = @project.ticket_templates.create!(name: 'Évolution', slug: 'evolution', body: "## Localisation\n## Contexte")
     sign_in @author
     post '/autospec_drafts', params: { project_id: @project.id, template_slug: 'evolution' }
     draft = AutospecDraft.order(:id).last
 
     assert_response :redirect
     assert_equal "## Localisation\n## Contexte", draft.markdown
+    # the chosen template is recorded so AutoSpec verifies against it (task #14 follow-up)
+    assert_equal tpl.id, draft.ticket_template_id
   end
 
   def test_create_rejects_project_outside_visibility

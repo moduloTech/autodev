@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **AutoSpec verifies a chosen ticket template, or proposes one when none is chosen (task #14 follow-up).** The new-draft template picker's choice is now persisted (new nullable `autospec_drafts.ticket_template_id`, FK to `project_ticket_templates`, nullified on template delete; `AutospecDraft belongs_to :ticket_template`). `Autospec::SystemPrompt#ticket_templates` now branches three ways: (1) **a template was explicitly chosen** → AutoSpec follows it and, on every quality assessment, explicitly verifies the ticket against it — listing the template's sections that are missing/empty and any extra ones (so the auto-eval from task #15 reports conformance, not just generic quality); (2) **no template chosen but the project defines some** → AutoSpec proactively proposes the best-fit template, says which and why, and offers to restructure the ticket (asking only when genuinely ambiguous); (3) **the project defines none** → the generic default structure (unchanged). The controller records the pick on create (`#chosen_template`, replacing `#initial_markdown` — markdown still falls back to the template body when JS is off). New tests: the chosen-template verify block and the propose block in `system_prompt_test.rb`, and create-records-the-template in `autospec_drafts_html_test.rb`.
+
 ### Fixed
 
 - **AutoSpec import now accepts GitLab `/-/work_items/<iid>` URLs (not just `/-/issues/<iid>`).** GitLab's newer work-items UI links to `…/-/work_items/<iid>`, and `Autospec::GitlabImporter` only matched the legacy `/-/issues/` form, so pasting a work-item URL into the import screen raised `InvalidUrl` and bounced back with an error. At project level the `work_items/<iid>` number is the same issue IID, so `ISSUE_URL_RE` now matches both forms and maps them to the same `client.issue(path, iid)` call. New test covering the work-items URL form.
