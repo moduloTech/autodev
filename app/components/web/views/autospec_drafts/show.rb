@@ -60,7 +60,12 @@ module Web
         private
 
         def render_page
-          div(class: 'app-shell') do
+          # `autospec-shell` pins the editor to the viewport height (vs the
+          # global `.app-shell` min-height:100vh which is indefinite). Without
+          # a definite height up the chain, the workspace columns size to
+          # content and the *page* scrolls instead of the conversation list
+          # (task #12).
+          div(class: 'app-shell autospec-shell') do
             render_sidebar
             main do
               render_topbar

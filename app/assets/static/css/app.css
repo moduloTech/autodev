@@ -689,6 +689,13 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
   color: var(--text-muted);
 }
 
+/* AutoSpec editor shell: pin to the viewport so the columns scroll
+   internally instead of the whole page (task #12). The global .app-shell
+   is min-height:100vh (indefinite) — without a definite height up the
+   chain, overflow:auto/hidden never engage and the body becomes the
+   scroller. height:100vh makes main → workspace → columns all bounded. */
+.autospec-shell { height: 100vh; overflow: hidden; }
+
 /* ── AutoSpec editor workspace (phase D, step 10b) ─────────────────
    Two-column grid: editor centre (flex), chat right (0 0 380px).
    Collapses to single column under 960px — the mobile tabs layout
@@ -697,6 +704,9 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
   flex: 1;
   display: grid;
   grid-template-columns: 1fr 380px;
+  /* Bound the single row to the workspace height (not content) so grid
+     items with overflow scroll internally. */
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   overflow: hidden;
   min-height: 0;

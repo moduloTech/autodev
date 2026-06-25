@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **AutoSpec chat scroll — real fix for the page scrolling instead of the conversation (task #12, follow-up to alpha.27).** The alpha.27 fix (`min-height: 0` on the chat scroll div) was necessary but insufficient: the whole height chain was unbounded, so the editor still scrolled the entire page (topbar and editor column included), not the message list. Root cause: the global `.app-shell` is `min-height: 100vh` (indefinite), so `overflow:auto/hidden` never engaged and the body became the scroller. The editor `show` page now carries an `autospec-shell` class pinning it to `height: 100vh; overflow: hidden`, and `.autospec-workspace` gets `grid-template-rows: minmax(0, 1fr)` to bound its single row — so `main → workspace → columns` all have definite heights and both the conversation list and the editor column scroll **inside their own containers**. The topbar and composer stay fixed. Verified in headless Chrome on a faithful reproduction of the height chain: before → page scrollable (755px overflow), chat div not a scroller (client = scroll height); after → page not scrollable (0 overflow), chat scrolls internally (client 573 < scroll 1032). Holds on desktop and on the mobile tabs layout (≤960px, same check at 600px width).
+
 ## [1.0.0-alpha.27] - 2026-06-24
 
 ### Changed
