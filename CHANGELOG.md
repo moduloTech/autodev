@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **"À surveiller" cards now tell the user what to do, not just what happened.** A user had to be told out-of-band that *Échec technique* means "ping the autodev team, it may be a bug" while *Question en attente* means "the CSM must answer Autodev on GitLab" — the on-screen wording didn't make the (different) expected response clear. Rewrote `web_errors_explain_failure` and `web_errors_explain_clarification` (fr + en) to spell out the next action: for a technical failure, retry then alert the autodev team (likely a bug) with the technical details; for a pending question, reply in a comment on the GitLab issue via "Voir la question". Synced the functional usage guide's "À surveiller" section (the two situations are now contrasted with their distinct expected responses, plus a per-action list) and added an FAQ entry for *Échec technique*. Re-shot `screenshots/03-errors.png` and `03b-errors-expanded.png` from the dev server (1440×900, light/FR) so the cards show the new wording.
+
 ## [1.0.0-alpha.30] - 2026-06-25
 
 ### Changed

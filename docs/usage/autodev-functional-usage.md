@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-06-25
+date: 2026-06-26
 lang: fr
 documentclass: article
 papersize: a4
@@ -162,15 +162,18 @@ La page qui regroupe **tout ce qui demande votre attention** : échecs, question
 
 ![Page À surveiller — chaque demande est une carte avec explication métier.](screenshots/03-errors.png)
 
-## Chaque carte explique d'abord ce qu'il s'est passé en langage clair
+## Chaque carte explique d'abord ce qu'il s'est passé — et ce que vous devez faire
 
-- Pour un échec : *« Une erreur a empêché autodev de continuer son travail. Consultez les détails techniques pour comprendre la cause. »*
-- Pour une question en attente : *« Autodev a posé une question pour préciser la demande et attend une réponse pour reprendre. »*
+Il y a deux situations bien distinctes, et la réponse attendue n'est pas la même :
 
-## Deux actions par carte
+- **Échec technique** — *« Une erreur a empêché autodev de continuer. »* C'est probablement un bug d'Autodev lui-même. Relancez la demande avec **Réessayer maintenant** ; si l'échec persiste, **prévenez l'équipe autodev** (les *détails techniques* sont utiles à transmettre). Vous n'avez rien à corriger côté ticket.
+- **Question en attente** — *« Autodev a posé une question pour préciser la demande. »* Là, c'est à **vous de répondre** : Autodev a posté une question dans le ticket GitLab et attend votre réponse pour reprendre. **Répondez-lui en commentaire sur le ticket GitLab** (le bouton **Voir la question** vous y emmène directement). Tant que personne ne répond, la demande reste en attente.
+
+## Les actions sur chaque carte
 
 - **Voir le détail** — ouvre la page détaillée du ticket.
-- **Réessayer maintenant** — relance Autodev sur ce ticket, à zéro.
+- **Réessayer maintenant** (échec technique) — relance Autodev sur ce ticket, à zéro.
+- **Voir la question** (question en attente) — ouvre le ticket GitLab où Autodev a posé sa question, pour que vous y répondiez.
 
 Si vous voulez voir ce qui s'est passé techniquement (pour faire suivre à un développeur, par exemple), le toggle **Afficher les détails techniques** déplie la trace :
 
@@ -367,6 +370,9 @@ Plusieurs, mais pas en illimité. Si vous lui en confiez beaucoup d'un coup, cer
 
 **Autodev a posé une question, comment je lui réponds ?**
 Répondez directement sur le ticket GitLab en commentaire, comme à n'importe quel collègue. Il verra votre réponse au prochain tour.
+
+**Une demande affiche *Échec technique*, qu'est-ce que je fais ?**
+Relancez-la d'abord avec **Réessayer maintenant** (l'erreur est peut-être passagère). Si elle échoue de nouveau, c'est probablement un bug d'Autodev : **prévenez l'équipe autodev** et transmettez les *détails techniques* dépliés sur la carte. Rien à corriger de votre côté sur le ticket.
 
 **Autodev s'est trompé ou a fait n'importe quoi, je peux annuler ?**
 Oui. Deux options : désassignez-le du ticket sur GitLab (il s'arrête, vous reprenez la main), ou ouvrez le détail de la demande et cliquez sur **Clôturer** pour la mettre de côté directement depuis le tableau de bord. Dans les deux cas vous pouvez ensuite l'assigner à un humain. La MR créée reste disponible — vous pouvez la fermer ou la modifier librement.
