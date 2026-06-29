@@ -195,11 +195,18 @@ module Web
         form(method: 'post', action: "/issues/#{row[:id]}/reset", style: 'display: inline',
              data: { confirm: t_web(:web_errors_confirm_reset, iid: row[:issue_iid]) }) do
           csrf_input_tag
-          button(type: 'submit', class: 'btn btn-primary-sm', style: retry_btn_style) do
-            render Components::Icon.new(name: 'refresh', size: 13)
-            plain ' '
-            plain t_web(:web_errors_action_retry)
-          end
+          # Come back to /errors after the reset so the user can retry the next
+          # failed issue without bouncing through each issue's detail page.
+          input(type: 'hidden', name: 'return_to', value: '/errors')
+          render_retry_button
+        end
+      end
+
+      def render_retry_button
+        button(type: 'submit', class: 'btn btn-primary-sm', style: retry_btn_style) do
+          render Components::Icon.new(name: 'refresh', size: 13)
+          plain ' '
+          plain t_web(:web_errors_action_retry)
         end
       end
 

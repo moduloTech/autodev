@@ -65,7 +65,7 @@ class IssuesController < ApplicationController
       resource: issue, action: 'issue.reset_manual', actor: current_user,
       payload: { project_path: issue.project_path, iid: issue.issue_iid, previous_state: previous_state }
     )
-    redirect_to "/issues/#{issue.id}"
+    redirect_to safe_return_to || "/issues/#{issue.id}"
   end
 
   # POST /issues/:id/transition?event=<aasm_event>
@@ -112,6 +112,14 @@ class IssuesController < ApplicationController
   end
 
   private
+
+  # Honor a `return_to` only when it's an in-app relative path (single leading
+  # slash, no scheme/host/protocol-relative form) so the errors page can bounce
+  # the reset back to /errors for mass retries without opening a redirect hole.
+  def safe_return_to
+    target = params[:return_to].to_s
+    target if target.match?(%r{\A/(?![/\\])})
+  end
 
   def close_issue!(issue)
     issue._audit_actor = current_user
