@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.32] - 2026-06-29
+
 ### Changed
 
 - **"Réessayer maintenant" on the errors page now comes back to the errors page (mass retry).** The retry button used to redirect to the reset issue's detail page, so retrying several failed issues meant bouncing through each one's page and navigating back. The errors-page retry form now ships a `return_to=/errors` hidden field, and `IssuesController#reset` honors it (via a `safe_return_to` guard that only accepts in-app relative paths — protocol-relative `//…` and off-site URLs are ignored, falling back to the issue page) so the user lands back on the list and can immediately retry the next one. The issue detail page's own reset button is unchanged (no `return_to` → still lands on the issue). New `issues_controller_reset_redirect_test.rb` covers the default redirect, the `/errors` bounce, and the open-redirect rejections.
