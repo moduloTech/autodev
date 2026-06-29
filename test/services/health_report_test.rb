@@ -85,6 +85,60 @@ class HealthReportTest < ActiveSupport::TestCase
     end
 
     assert_equal :down, result[:status]
-    assert_equal %i[poller workers queue claude_usage issues_error database], result[:checks].keys
+    assert_equal %i[poller workers queue claude_usage issues_error stuck_issues database], result[:checks].keys
+  end
+
+  # --- stuck_issues -------------------------------------------------------
+
+  test 'stuck_issues ok when there are no monitored issues' do
+    assert_equal :ok, report.check(:stuck_issues)[:status]
+  end
+
+  test 'stuck_issues warn for a pending issue older than the poll-stale window' do
+    # poll_stale_after = max(300*3, 900) = 900s; created 2000s ago, no activity.
+    Issue.create!(project_path: 'group/p', issue_iid: 700, status: 'pending',
+                  created_at: Time.now.utc - 2_000)
+
+    check = report.check(:stuck_issues)
+
+    assert_equal :warn, check[:status]
+    assert_equal 1, check[:checks][:stuck_issues][:meta][:count]
+  end
+
+  test 'stuck_issues ok for a freshly created pending issue' do
+    Issue.create!(project_path: 'group/p', issue_iid: 701, status: 'pending',
+                  created_at: Time.now.utc - 60)
+
+    assert_equal :ok, report.check(:stuck_issues)[:status]
+  end
+
+  test 'stuck_issues uses recent activity, not creation time, for an active issue' do
+    # Old creation but recent activity ⇒ a live long danger-claude run, not stuck.
+    issue = Issue.create!(project_path: 'group/p', issue_iid: 702, status: 'implementing',
+                          created_at: Time.now.utc - 100_000)
+    ActivityEvent.create!(issue_id: issue.id, kind: 'danger_claude', level: 'info',
+                          payload_json: '{}', created_at: Time.now.utc - 60)
+
+    assert_equal :ok, report.check(:stuck_issues)[:status]
+  end
+
+  test 'stuck_issues warn for an active issue with stale activity (dead worker)' do
+    issue = Issue.create!(project_path: 'group/p', issue_iid: 703, status: 'implementing',
+                          created_at: Time.now.utc - 100_000)
+    ActivityEvent.create!(issue_id: issue.id, kind: 'danger_claude', level: 'info',
+                          payload_json: '{}', created_at: Time.now.utc - 10_000) # > 7200s
+
+    assert_equal :warn, report.check(:stuck_issues)[:status]
+  end
+
+  test 'stuck_issues ignores terminal and human-wait states' do
+    Issue.create!(project_path: 'group/p', issue_iid: 704, status: 'done',
+                  created_at: Time.now.utc - 100_000)
+    Issue.create!(project_path: 'group/p', issue_iid: 705, status: 'needs_clarification',
+                  created_at: Time.now.utc - 100_000)
+    Issue.create!(project_path: 'group/p', issue_iid: 706, status: 'checking_pipeline',
+                  created_at: Time.now.utc - 100_000)
+
+    assert_equal :ok, report.check(:stuck_issues)[:status]
   end
 end

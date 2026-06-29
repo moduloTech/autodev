@@ -20,7 +20,7 @@ fr:
   web_admin_help_subtitle: Routes admin, configuration projet, CLI, machine à états
   web_nav_admin_health: Santé
   web_admin_health_title: Santé du système
-  web_admin_health_subtitle: État du poller, des workers, de la file et du quota — lecture passive
+  web_admin_health_subtitle: État du poller, des workers, de la file, du quota et des issues bloquées — lecture passive
   web_admin_health_breadcrumb: Administration
   web_admin_health_overall: État global
   web_admin_health_view_jobs: Inspecteur des jobs
@@ -33,6 +33,7 @@ fr:
   web_admin_health_check_queue: File de jobs
   web_admin_health_check_claude_usage: Quota Claude
   web_admin_health_check_issues_error: Issues en erreur
+  web_admin_health_check_stuck_issues: Issues bloquées
   web_admin_health_check_database: Base de données
   web_theme_toggle: Changer le thème
   web_sign_out: Se déconnecter

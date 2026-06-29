@@ -14,13 +14,32 @@ module Autodev
   #     checks: { <name> => { status:, detail:, meta: {} }, ... } }
   # where the top-level status is the worst severity across checks.
   class HealthReport # rubocop:disable Metrics/ClassLength
-    CHECKS = %i[poller workers queue claude_usage issues_error database].freeze
+    CHECKS = %i[poller workers queue claude_usage issues_error stuck_issues database].freeze
     SEVERITY = { ok: 0, warn: 1, down: 2 }.freeze
 
     DEFAULT_POLL_INTERVAL = 300
     DEFAULT_POLL_STALE_FACTOR = 3
     POLL_STALE_FLOOR = 900 # never flag stale before 15 min, even on a tight interval
     BACKLOG_WARN = 100
+
+    # "Stuck" detection — the invariant that a green dashboard must not hide:
+    # every issue in a non-terminal, non-human-wait state has *some* dispatcher
+    # pass that will advance it, so it must keep producing activity. A row that
+    # sits in such a state with no recent activity has, de facto, no path
+    # forward (e.g. a `pending` row reset on startup whose GitLab label drifted
+    # off `labels_todo`, so neither dispatch_new_issues nor dispatch_retries
+    # picks it up). `pending` should leave within a poll cycle, so it reuses the
+    # poller-staleness window; the active workflow states tolerate long
+    # danger-claude runs (which still emit activity), so they get a wider one.
+    # Excluded by design: done/closed (terminal), error (own panel + backoff),
+    # needs_clarification (waits on a human), checking_pipeline (waits on an
+    # external pipeline, re-polled every cycle — the documented "no blocked
+    # state").
+    PENDING_STUCK_STATES = %w[pending].freeze
+    ACTIVE_STUCK_STATES = %w[cloning checking_spec implementing committing pushing creating_mr
+                             reviewing fixing_discussions fixing_pipeline running_post_completion
+                             answering_question].freeze
+    STUCK_ACTIVE_AFTER = 7200 # 2h with zero activity ⇒ a dead worker, not a long run
 
     # poller_expected: whether the recurring poll is supposed to be running here.
     # Defaults to "not a local env" — config/recurring.yml disables recurring
@@ -121,7 +140,37 @@ module Autodev
       build(:ok, 'primary + queue reachable')
     end
 
+    def check_stuck_issues
+      stuck = stuck_issues
+      meta = { count: stuck.size }
+      return build(:ok, 'no stuck issues', meta) if stuck.empty?
+
+      meta[:sample] = stuck.first(5).map { |i| "##{i.issue_iid}(#{i.status})" }.join(' ')
+      build(:warn, "#{stuck.size} issue(s) stuck with no path forward", meta)
+    end
+
     # --- helpers -----------------------------------------------------------
+
+    def stuck_issues
+      monitored = Issue.where(status: PENDING_STUCK_STATES + ACTIVE_STUCK_STATES).to_a
+      return [] if monitored.empty?
+
+      # Scope the aggregation to the (typically few) monitored issues — never
+      # group the whole activity_events table, which /healthz may probe often.
+      last_activity = ActivityEvent.where(issue_id: monitored.map(&:id))
+                                   .group(:issue_id).maximum(:created_at)
+      monitored.select { |issue| stuck?(issue, last_activity) }
+    end
+
+    def stuck?(issue, last_activity)
+      seen = last_activity.fetch(issue.id, issue.created_at)
+      cutoff = PENDING_STUCK_STATES.include?(issue.status) ? @now - poll_stale_after : @now - stuck_active_after
+      seen < cutoff
+    end
+
+    def stuck_active_after
+      (@config.dig('monitoring', 'stuck_active_after_seconds') || STUCK_ACTIVE_AFTER).to_i
+    end
 
     def last_poller_event
       unless defined?(@last_poller_event)
