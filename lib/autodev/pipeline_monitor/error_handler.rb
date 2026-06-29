@@ -16,7 +16,21 @@ class PipelineMonitor
       log_activity(issue, :rate_limit, wait: wait)
     end
 
+    # Claude credentials are dead — see IssueProcessor::ErrorHandler#handle_auth_failure.
+    # No retry is scheduled and no per-ticket comment is posted.
+    def handle_auth_failure(issue, error)
+      log_error "Issue ##{issue.issue_iid}: Claude authentication failed, manual intervention required"
+      safe_mark_failed!(issue)
+      Issue.where(id: issue.id).update_all(
+        error_message: "#{error.class}: #{error.message}",
+        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
+      )
+      log_activity(issue, :auth_failure)
+    end
+
     def handle_failure_error(issue, error)
+      return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
+
       bt = error.backtrace&.first(10)&.join("\n  ")
       log_error "Pipeline evaluation/fix failed: #{error.class}: #{error.message}"
       log_error "  #{bt}" if bt

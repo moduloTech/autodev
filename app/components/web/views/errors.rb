@@ -124,8 +124,17 @@ module Web
         return :web_errors_explain_post_completion if row[:post_completion_error]
         return :web_errors_explain_clarification   if row[:status] == 'needs_clarification'
         return :"web_errors_explain_attention_#{row[:attention_reason]}" if row[:needs_attention]
+        return :web_errors_explain_auth if auth_failure?(row)
 
         :web_errors_explain_failure
+      end
+
+      # An AuthenticationError (Claude 401) is stored with its class name in
+      # error_message by the workers' handle_auth_failure. Retrying won't help
+      # until credentials are restored, so the card gets a dedicated message and
+      # the retry button is suppressed.
+      def auth_failure?(row)
+        row[:status] == 'error' && row[:error_message].to_s.include?('AuthenticationError')
       end
 
       def render_technical_details(row)
@@ -178,6 +187,11 @@ module Web
       end
 
       def render_retry_form(row)
+        # Auth failures can't be retried until Claude is reconnected — hide the
+        # button for regular users (the message says so), but keep it for admins
+        # so they can re-kick the issue once they've restored the credentials.
+        return if auth_failure?(row) && !@current_user_admin
+
         form(method: 'post', action: "/issues/#{row[:id]}/reset", style: 'display: inline',
              data: { confirm: t_web(:web_errors_confirm_reset, iid: row[:issue_iid]) }) do
           csrf_input_tag

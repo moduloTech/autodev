@@ -203,6 +203,7 @@ fr:
   web_errors_cause_post_completion: Erreur post-completion
   web_errors_cause_attention: Intervention manuelle requise
   web_errors_explain_failure: Une erreur a empêché autodev de continuer. Relancez la demande avec « Réessayer maintenant ». Si l'échec persiste, prévenez l'équipe autodev — il s'agit peut-être d'un bug à corriger. Les détails techniques ci-dessous aident au diagnostic.
+  web_errors_explain_auth: Autodev n'est plus connecté à Claude (échec d'authentification). Inutile de « Réessayer maintenant » — la connexion doit d'abord être rétablie. Prévenez l'équipe autodev.
   web_errors_explain_clarification: Autodev a posé une question dans le ticket GitLab pour préciser la demande et attend votre réponse pour reprendre. Répondez-lui en commentaire sur le ticket GitLab (bouton « Voir la question »).
   web_errors_explain_post_completion: Le hook de finalisation a échoué après la livraison. La demande est terminée mais la commande post-completion a renvoyé une erreur.
   web_errors_explain_attention_review_limit_reached: La limite de tours de review (3) est atteinte. La demande est marquée livrée mais des discussions non résolues subsistent et nécessitent une intervention manuelle.

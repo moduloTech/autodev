@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'auth_failure_detector'
 require_relative 'label_manager'
 require_relative 'issue_notifier'
 require_relative 'process_runner'
@@ -51,7 +52,7 @@ module DangerClaudeRunner
     log_dc_prompt(prompt, agent)
     out, err, ok = run_with_timeout('danger-claude', args, chdir: work_dir, label: label)
     text = capture_session_and_text(out)
-    RateLimitDetector.check!(text, err)
+    check_dc_failures!(text, err)
     raise ImplementationError, dc_error_msg('-p', text, err) unless ok
 
     text
@@ -69,7 +70,7 @@ module DangerClaudeRunner
     args += ['-c']
     out, err, ok = run_with_timeout('danger-claude', args, chdir: work_dir, label: label)
     text = capture_session_and_text(out)
-    RateLimitDetector.check!(text, err)
+    check_dc_failures!(text, err)
     raise ImplementationError, dc_error_msg('-c', text, err) unless ok
 
     text
@@ -77,6 +78,14 @@ module DangerClaudeRunner
 
   def dc_error_msg(mode, text, err)
     "danger-claude #{mode} failed:\nstdout: #{text[0, 500]}\nstderr: #{err[0, 500]}"
+  end
+
+  # Raises a typed error (RateLimitError / AuthenticationError) when danger-claude
+  # output carries a known fatal signature, so the workers can react specifically
+  # instead of treating it as a generic ImplementationError.
+  def check_dc_failures!(text, err)
+    RateLimitDetector.check!(text, err)
+    AuthFailureDetector.check!(text, err)
   end
 
   # claude --output-format json returns one JSON envelope: { "result": "...", "session_id": "...", ... }.

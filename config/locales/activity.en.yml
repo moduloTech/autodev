@@ -33,6 +33,7 @@ en:
   activity_discussions_none: ":white_check_mark: No discussions to fix"
   activity_error: ":x: Error: %{error}"
   activity_rate_limit: ":pause_button: Rate limit hit, pausing (%{wait}s)"
+  activity_auth_failure: ":no_entry: Claude authentication failed, manual intervention required"
   activity_done: ":checkered_flag: Done"
   activity_post_completion: ":gear: Running post-completion hook..."
   activity_clarification_received: ":incoming_envelope: Clarification received, resuming"

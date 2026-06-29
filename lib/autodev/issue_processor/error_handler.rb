@@ -17,7 +17,23 @@ class IssueProcessor
       log_activity(issue, :rate_limit, wait: wait)
     end
 
+    # Claude credentials are dead — retrying won't help until an operator fixes
+    # them, so no next_retry_at is set and no per-ticket error comment is posted
+    # (this is an ops problem, not the requester's). The dashboard renders a
+    # dedicated message keyed off the AuthenticationError class in error_message.
+    def handle_auth_failure(issue, error)
+      log_error "Issue ##{issue.issue_iid}: Claude authentication failed, manual intervention required"
+      safe_mark_failed!(issue)
+      Issue.where(id: issue.id).update_all(
+        error_message: "#{error.class}: #{error.message}",
+        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr, finished_at: Time.current
+      )
+      log_activity(issue, :auth_failure)
+    end
+
     def handle_process_error(issue, error)
+      return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
+
       bt = error.backtrace&.first(10)&.join("\n  ")
       safe_mark_failed!(issue)
       fields = build_error_fields(issue, error, bt)

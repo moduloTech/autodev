@@ -203,6 +203,7 @@ en:
   web_errors_cause_post_completion: Post-completion error
   web_errors_cause_attention: Manual intervention required
   web_errors_explain_failure: An error stopped autodev from continuing. Retry the request with "Retry now". If it keeps failing, let the autodev team know — it may be a bug to fix. The technical details below help with diagnosis.
+  web_errors_explain_auth: Autodev is no longer connected to Claude (authentication failure). There's no point clicking "Retry now" — the connection has to be restored first. Let the autodev team know.
   web_errors_explain_clarification: Autodev asked a question on the GitLab issue to refine the request and is waiting on your reply before resuming. Answer it in a comment on the GitLab issue ("See the question" button).
   web_errors_explain_post_completion: The post-completion hook failed after delivery. The request is done but the follow-up command exited with an error.
   web_errors_explain_attention_review_limit_reached: The review-round limit (3) was reached. The request is marked delivered but unresolved discussions remain and need manual intervention.

@@ -19,6 +19,10 @@ class ErrorsTest < Minitest::Test
     assert_kind_of AutodevError, RateLimitError.new('msg')
   end
 
+  def test_authentication_error_inherits_from_autodev_error
+    assert_kind_of AutodevError, AuthenticationError.new
+  end
+
   def test_rate_limit_wait_seconds_with_future_reset
     reset = Time.now.utc + 600
     err = RateLimitError.new('rate limited', reset_time: reset)

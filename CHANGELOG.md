@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Dedicated "À surveiller" message when Autodev loses its Claude connection.** A Claude API authentication failure (e.g. `danger-claude -p` exiting on `API Error: 401 Invalid authentication credentials`) used to surface on the errors dashboard as the generic *Échec technique* card telling the user to "Relancez la demande avec « Réessayer maintenant »" — but retrying is pointless until the credentials are restored, so users churned the retry button to no effect. New `AuthFailureDetector` (mirrors `RateLimitDetector`) recognises the 401/"invalid authentication credentials"/"failed to authenticate" signature in danger-claude output and raises a typed `AuthenticationError`; the three workers' error handlers (`IssueProcessor`, `MrFixer`, `PipelineMonitor`) dispatch it to a `handle_auth_failure` that marks the issue failed **without scheduling an automatic retry** and logs an `auth_failure` activity entry instead of posting a misleading per-ticket error comment (same philosophy as the rate-limit path). The errors card now shows a dedicated message (`web_errors_explain_auth`, fr + en — "Autodev n'est plus connecté à Claude … Inutile de « Réessayer maintenant » … Prévenez l'équipe autodev") under the existing *Échec technique* title, and the contradicting "Réessayer maintenant" button is hidden for regular users — but kept for admins, who can re-kick the issue once they've restored the credentials. New tests: `auth_failure_detector_test.rb` (signature matching + non-matching cases), the `AuthenticationError` inheritance assertion, and `errors_auth_failure_test.rb` (view shows the dedicated message and drops the retry button, while a generic error keeps both).
+
 ## [1.0.0-alpha.31] - 2026-06-26
 
 ### Changed

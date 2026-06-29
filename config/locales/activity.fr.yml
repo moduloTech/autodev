@@ -33,6 +33,7 @@ fr:
   activity_discussions_none: ":white_check_mark: Aucune discussion a corriger"
   activity_error: ":x: Erreur : %{error}"
   activity_rate_limit: ":pause_button: Limite de taux atteinte, en pause (%{wait}s)"
+  activity_auth_failure: ":no_entry: Authentification Claude expiree, intervention manuelle requise"
   activity_done: ":checkered_flag: Termine"
   activity_post_completion: ":gear: Execution du hook post-completion..."
   activity_clarification_received: ":incoming_envelope: Clarification recue, reprise du traitement"
