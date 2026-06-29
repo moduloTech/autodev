@@ -24,6 +24,7 @@ Le système est piloté par des jobs en arrière-plan (poller récurrent → dis
     "queue":        { "status": "ok",   "detail": "...", "meta": { "failed": 0, "pending": 1 } },
     "claude_usage": { "status": "ok",   "detail": "...", "meta": { "checked_at": "..." } },
     "issues_error": { "status": "warn", "detail": "...", "meta": { "count": 2 } },
+    "stuck_issues": { "status": "warn", "detail": "...", "meta": { "count": 1, "sample": "#15830(pending)" } },
     "database":     { "status": "ok",   "detail": "..." }
   }
 }
@@ -38,10 +39,12 @@ Sémantique de `status` (`ok` < `warn` < `down`, le global = le pire) :
 | **queue** | pas d'échec, file basse | jobs en échec, ou backlog > 100 | — |
 | **claude_usage** | dernier poll : quota dispo | dernier poll : quota épuisé | — |
 | **issues_error** | aucune issue en erreur | ≥ 1 issue `error` / `post_completion_error` | — |
+| **stuck_issues** | aucune issue bloquée | ≥ 1 issue dans un état actif sans avancement | — |
 | **database** | primaire + queue joignables | — | exception SQL |
 
 - **poller** se base sur le dernier `ActivityEvent` `kind: 'poller'`. Seuil de péremption = `poll_interval × monitoring.poll_stale_factor`, avec un plancher de 15 min. En environnement local (dev/test, où `config/recurring.yml` désactive les jobs récurrents), l'absence de heartbeat n'est **pas** une faute → `ok` (`poller disabled`).
 - **issues_error** est un `warn`, jamais un `down` : des tickets en erreur sont un état opérationnel normal, pas une panne système.
+- **stuck_issues** matérialise l'invariant qu'un dashboard tout vert masquait : toute issue dans un état non-terminal et non-attente-humaine a une passe du dispatcher qui la fait avancer, donc elle doit produire de l'activité. Lève un `warn` (jamais `down`) si une issue `pending` dépasse la fenêtre de péremption du poller (`max(poll_interval × poll_stale_factor, 900s)` — elle devrait quitter `pending` en un cycle) ou si une issue active (`cloning`…`creating_mr`, `reviewing`, `fixing_*`, `running_post_completion`, `answering_question`) n'a plus d'`ActivityEvent` depuis `monitoring.stuck_active_after_seconds` (défaut 2 h) — basé sur la dernière activité, donc un run danger-claude long mais vivant n'est pas flaggé. **Exclus volontairement** : `done`/`closed` (terminaux), `error` (panneau dédié + backoff), `needs_clarification` (attente humaine), `checking_pipeline` (attente d'un pipeline externe, re-pollé chaque cycle). Cas typique détecté : une issue remise à `pending` au redémarrage dont le label GitLab est resté `label_doing`, donc invisible à `dispatch_new_issues`.
 - Toute exception dans un check est rattrapée et dégradée en `down` (la page / l'endpoint ne plante jamais).
 
 ## Heartbeat du poller — `kind: 'poller'` / `kind: 'error'`

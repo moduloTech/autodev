@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-06-25
+date: 2026-06-29
 lang: fr
 documentclass: article
 papersize: a4
@@ -140,6 +140,7 @@ Une carte par composant, avec une pastille `OK` / `Attention` / `Hors service` :
 - **File de jobs** — jobs en échec / en attente (Solid Queue).
 - **Quota Claude** — dernier état connu du `UsageChecker` (lu sur le dernier heartbeat, pas re-sondé).
 - **Issues en erreur** — nombre d'issues `error` / `post_completion_error` (lien vers `/errors`).
+- **Issues bloquées** — issues dans un état actif qui n'avancent plus : une `pending` plus vieille que la fenêtre de péremption du poller, ou une issue active sans `ActivityEvent` depuis `monitoring.stuck_active_after_seconds` (défaut 2 h). Détecte les orphelines qu'un dashboard tout vert masquait (ex. une `pending` remise au redémarrage mais restée `label_doing` côté GitLab). Exclut `checking_pipeline` (attente pipeline) et `needs_clarification` (attente humaine).
 - **Base de données** — primaire + queue joignables.
 
 Les mêmes données sont servies en JSON sur `/healthz` (HTTP 503 uniquement si `down` — vraie panne ; `ok` et `warn` renvoient 200) pour brancher des sondes Datadog / BetterStack. Référence complète (endpoints, heartbeat, configuration, exemples de sondes, TODO) : **`docs/observability.md`**.

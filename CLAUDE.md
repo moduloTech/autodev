@@ -288,6 +288,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | MR already exists for branch | Reuse existing MR |
 | Issue closed between poll and processing | `clone_complete!` → done (guard: issue_closed?) |
 | Issues in error at startup | `Issue.recover_on_startup!` resets transient states |
+| Interrupted pre-MR processing (`cloning`…`creating_mr`, no MR yet) | Reset to `pending` **and `next_retry_at` stamped** → re-enqueued via `:retry_stuck` next poll (without the stamp the GitLab label stays `label_doing`, so `dispatch_new_issues` never re-discovers it → orphaned `pending`) |
 | Pipeline red (code by pre-triage) | Skip retrigger, go straight to fix phase |
 | Pipeline red (infra/uncertain, first time) | Retrigger once, recheck next poll |
 | Pipeline red (infra/uncertain, after retrigger) | Stay in checking_pipeline (manual intervention) |
