@@ -34,7 +34,10 @@ module Web
         # the users-rollout PR3. Pass `true` to include private methods.
         # The eventual call resolves on self (the controller) so the private
         # visibility doesn't block invocation.
-        csrf_token: respond_to?(:form_authenticity_token, true) ? form_authenticity_token : nil
+        csrf_token: respond_to?(:form_authenticity_token, true) ? form_authenticity_token : nil,
+        # Surfaced by Web::Views::Layout as a transient banner. `flash` is a
+        # controller method; absent in pure-view/test contexts, hence the guard.
+        flash: respond_to?(:flash) ? { notice: flash[:notice], alert: flash[:alert] } : {}
       }
     end
 

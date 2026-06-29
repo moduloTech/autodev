@@ -16,13 +16,14 @@ module Web
     class Base < Phlex::HTML
       include Web::Helpers
 
-      def initialize(locale: :fr, request_path: '/', # rubocop:disable Lint/MissingSuper
-                     current_user_email: nil, current_user_admin: false, csrf_token: nil)
+      def initialize(locale: :fr, request_path: '/', # rubocop:disable Lint/MissingSuper,Metrics/ParameterLists
+                     current_user_email: nil, current_user_admin: false, csrf_token: nil, flash: {})
         @locale = locale
         @request_path = request_path
         @current_user_email = current_user_email
         @current_user_admin = current_user_admin
         @csrf_token = csrf_token
+        @flash = flash || {}
       end
 
       # Override the I18nHelpers#web_locale that normally walks cookie/config:
@@ -38,7 +39,7 @@ module Web
       def with_layout(nav: true, shell: true, &)
         render(Layout.new(locale: @locale, request_path: @request_path,
                           nav: nav, shell: shell,
-                          csrf_token: @csrf_token), &)
+                          csrf_token: @csrf_token, flash: @flash), &)
       end
 
       # Hidden input every non-GET form must carry under

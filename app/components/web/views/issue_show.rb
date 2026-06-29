@@ -144,11 +144,26 @@ module Web
         render(Components::Card.new) do
           h3(class: 'sidecard-title') { t_web(:web_issue_actions) }
           div(style: 'display: flex; flex-direction: column; gap: 10px;') do
+            render_deploy_review
             render_close_form
             render_reset_form
             render_transition_section
           end
         end
+      end
+
+      # Lazy-loaded action to redeploy the review environment by (re)triggering
+      # the `deploy_review` job. The frame resolves its own availability via
+      # GET /issues/:id/deploy_review so the GitLab round-trip doesn't block
+      # this page. Skipped entirely on early-lifecycle issues that have neither
+      # an MR nor a branch yet — there's no pipeline to act on, so there's no
+      # point spending a server round-trip + GitLab client build per view.
+      def render_deploy_review
+        return unless @issue[:mr_iid] || @issue[:branch_name].to_s != ''
+
+        render Web::Views::DeployReviewFrame.new(
+          issue_id: @issue[:id], state: :loading, locale: @locale, csrf_token: @csrf_token
+        )
       end
 
       # Manual close — only for a project collaborator (the controller passes

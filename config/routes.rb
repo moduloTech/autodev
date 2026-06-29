@@ -46,6 +46,11 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   # /issues/:id/close → IssuesController#close (manual close by a project
   # collaborator; AASM `close` event, gated on project membership).
   post '/issues/:id/close',      to: 'issues#close',      constraints: { id: /\d+/ }
+  # /issues/:id/deploy_review → review-env redeploy. GET renders the lazy
+  # turbo-frame (availability probe of the branch pipeline's `deploy_review`
+  # job); POST (re)triggers it. Open to every signed-in user.
+  get  '/issues/:id/deploy_review', to: 'issues#deploy_review',         constraints: { id: /\d+/ }
+  post '/issues/:id/deploy_review', to: 'issues#trigger_deploy_review', constraints: { id: /\d+/ }
   get  '/errors',                to: 'errors#index'
   get  '/projects',              to: 'projects#index'
   # /projects/new + POST /projects → ProjectsController#new/#create (admin-only

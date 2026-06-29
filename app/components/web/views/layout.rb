@@ -99,13 +99,14 @@ module Web
         });
       JS
 
-      def initialize(locale: :fr, request_path: '/', nav: true, shell: true, # rubocop:disable Lint/MissingSuper
-                     csrf_token: nil)
+      def initialize(locale: :fr, request_path: '/', nav: true, shell: true, # rubocop:disable Lint/MissingSuper,Metrics/ParameterLists
+                     csrf_token: nil, flash: {})
         @locale = locale
         @request_path = request_path
         @nav = nav
         @shell = shell
         @csrf_token = csrf_token
+        @flash = flash || {}
       end
 
       def web_locale
@@ -117,6 +118,7 @@ module Web
         html(lang: @locale.to_s) do
           render_head
           body do
+            render_flash_banner
             if @shell
               div(class: 'page-shell') do
                 render_nav if @nav
@@ -128,6 +130,40 @@ module Web
             render_confirm_dialog
           end
         end
+      end
+
+      FLASH_BANNER_BASE = 'position: fixed; top: 16px; left: 50%; transform: translateX(-50%); ' \
+                          'z-index: 1000; max-width: min(560px, calc(100vw - 32px)); ' \
+                          'padding: 10px 16px; border-radius: var(--r-md); font-size: 13px; ' \
+                          'box-shadow: var(--shadow-md, 0 4px 16px rgba(0,0,0,0.12));'
+      FLASH_TONES = {
+        notice: 'background: var(--ok-500); color: white; border: 1px solid var(--ok-700);',
+        alert: 'background: var(--err-500); color: white; border: 1px solid var(--err-700);'
+      }.freeze
+
+      # Transient feedback banner for redirect-then-flash actions (e.g. the
+      # review-env redeploy). Auto-dismisses after a few seconds; rendered
+      # once at the top of <body> so it floats above any page chrome.
+      def render_flash_banner
+        tone, message = flash_tone_and_message
+        return unless message
+
+        div(class: 'flash-banner', role: 'status',
+            style: "#{FLASH_BANNER_BASE} #{FLASH_TONES.fetch(tone)}") { plain message }
+        script { raw(safe(FLASH_DISMISS_JS)) }
+      end
+
+      FLASH_DISMISS_JS = <<~JS
+        setTimeout(function () {
+          document.querySelectorAll('.flash-banner').forEach(function (n) { n.remove(); });
+        }, 5000);
+      JS
+
+      def flash_tone_and_message
+        return [:notice, @flash[:notice]] if @flash[:notice].present?
+        return [:alert, @flash[:alert]] if @flash[:alert].present?
+
+        [nil, nil]
       end
 
       def render_confirm_dialog # rubocop:disable Metrics/MethodLength

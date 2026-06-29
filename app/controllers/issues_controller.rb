@@ -10,6 +10,7 @@ class IssuesController < ApplicationController
   # identical semantics. Helpers that touch request.cookies / response
   # are Rack-compatible (they go through ActionDispatch's Rack layer).
   include ::Web::Helpers
+  include DeployReviewActions
 
   # CSRF protection is back on as of PR3 of the users-rollout chantier
   # (alpha.7+). The Phlex layout emits `<meta name='csrf-token'>` and the

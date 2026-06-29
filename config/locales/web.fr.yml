@@ -149,6 +149,19 @@ fr:
   web_issue_confirm_reset: Relancer cette demande depuis le début ?
   web_issue_close: Clôturer
   web_issue_confirm_close: Clôturer ce ticket ? Il passera dans l'onglet « Clôs ».
+  web_issue_deploy_review: Redéployer la review
+  web_issue_deploy_review_play: Déployer la review
+  web_issue_confirm_deploy_review: Redéployer l'environnement de review (job CI deploy_review) ?
+  web_issue_deploy_review_no_branch: L'issue n'a pas encore de branche.
+  web_issue_deploy_review_no_pipeline: Aucun pipeline pour l'instant.
+  web_issue_deploy_review_no_job: Le pipeline ne contient pas de job deploy_review.
+  web_issue_deploy_review_blocked: Une étape amont a échoué — pipeline non terminé.
+  web_issue_deploy_review_running: Déploiement déjà en cours.
+  web_issue_deploy_review_unknown: Le job n'est pas déclenchable pour l'instant.
+  web_issue_deploy_review_error: Disponibilité indéterminée (erreur GitLab).
+  web_flash_deploy_review_played: Job deploy_review déclenché.
+  web_flash_deploy_review_retried: Job deploy_review relancé.
+  web_flash_deploy_review_error: Échec du déclenchement de deploy_review (erreur GitLab — voir les logs).
   web_confirm_title: Confirmer l'action
   web_confirm_ok: Confirmer
   web_confirm_cancel: Annuler

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Redeploy the review environment from an issue page.** The issue actions card gained a "Redéployer la review" action that (re)triggers the branch pipeline's `deploy_review` job — *played* if the job is still manual (never run), *retried* if it already ran (new `Autodev::DeployReview` service, `app/services/autodev/deploy_review.rb`). Availability is resolved lazily: the button ships as a `<turbo-frame loading="lazy">` (`Web::Views::DeployReviewFrame`) whose `src` (`GET /issues/:id/deploy_review`) probes the relevant pipeline for a job named exactly `deploy_review`, so the GitLab round-trip never blocks the page render. The probed pipeline is the **MR head pipeline** when the issue has an MR (same pipeline `PipelineMonitor` watches — this catches detached/MR pipelines a `ref=branch` query would miss), falling back to the latest branch pipeline pre-MR. Availability is status-aware: a still-manual job offers **Déployer** (play), a finished job (`success`/`failed`/`canceled`) offers **Redéployer** (retry), and a job GitLab can't act on yet renders the button disabled with the reason — `created`/`skipped` (upstream stage failed / incomplete), `running`/`pending`/`preparing` (deploy already in flight), or an unrecognised status — so the click never 4xxes into an error flash. When no job/pipeline/branch is found the button is likewise disabled with a one-line reason (the same reason map drives both the disabled caption and the POST flash). Triggering posts to `POST /issues/:id/deploy_review` (targeting `_top`), confirmed via the existing dialog, and reports back through a new transient flash banner (threaded through `Web::Views::Base`/`Layout` + `view_kwargs`, reusable by other actions). Open to every signed-in user; each trigger writes an `issue.deploy_review` audit row. New strings in `web.{fr,en}.yml`; new `Autodev::DeployReview` unit test and `issues_controller_deploy_review_test.rb`.
+
 ## [1.0.0-alpha.32] - 2026-06-29
 
 ### Changed
