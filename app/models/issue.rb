@@ -247,8 +247,13 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
   def self.recover_stuck_processing!
     stuck = where(status: RECOVERABLE_ACTIVE_STATES)
+    # The pre-MR branch resets to `pending`, but the GitLab label is still
+    # `label_doing` (set when processing started) — so `dispatch_new_issues`,
+    # which only re-discovers `labels_todo` issues, will never re-enqueue it.
+    # Stamp `next_retry_at` so `dispatch_retries` picks it up via `:retry_stuck`
+    # on the next poll; otherwise the row is orphaned in `pending` forever.
     stuck.where.not(mr_iid: nil).update_all(status: 'checking_pipeline', started_at: nil) +
-      stuck.where(mr_iid: nil).update_all(status: 'pending', started_at: nil)
+      stuck.where(mr_iid: nil).update_all(status: 'pending', started_at: nil, next_retry_at: Time.current)
   end
 
   private_class_method :recover_errored!, :recover_fixing_pipeline!, :recover_reviewing!,
