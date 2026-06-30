@@ -171,7 +171,9 @@ module Web
       }
     end
 
-    # Counts used by the dashboard KPI cards.
+    # Counts used by the dashboard KPI cards (issue states) plus the AutoSpec
+    # nav badges (drafts). Merged here because both feed views via @kpis and
+    # the sidebar is rendered on nearly every page.
     def dashboard_kpis
       counts = issues_dataset.group(:status).count
       { active: Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 },
@@ -179,7 +181,20 @@ module Web
         errors: counts['error'] || 0,
         delivered_review: delivered_review_count,
         awaiting: counts['needs_clarification'] || 0,
-        delivered_week: delivered_this_week_count }
+        delivered_week: delivered_this_week_count }.merge(autospec_nav_counts)
+    end
+
+    # Draft counts behind the sidebar's AutoSpec section: the user's own
+    # drafting/pending drafts, and the owner-vote set (À valider). Zeroed when
+    # there's no signed-in user (e.g. admin_or_no_session contexts).
+    def autospec_nav_counts
+      user = respond_to?(:current_user) ? current_user : nil
+      return { autospec_drafting: 0, autospec_pending: 0, autospec_to_validate: 0 } if user.nil?
+
+      by_status = user.autospec_drafts.group(:status).count
+      { autospec_drafting: by_status['drafting'] || 0,
+        autospec_pending: by_status['pending_approval'] || 0,
+        autospec_to_validate: AutospecDraft.awaiting_vote_of(user).size }
     end
 
     def delivered_this_week_count

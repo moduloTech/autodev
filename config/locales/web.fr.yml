@@ -364,6 +364,13 @@ fr:
   web_autospec_index_title: AutoSpec
   web_autospec_index_subtitle: Rédigez de nouveaux tickets avec l'aide d'Autodev.
   web_autospec_index_empty: Vous n'avez pas encore de brouillon. Démarrez-en un pour cadrer un ticket avec Autodev.
+  web_autospec_tab_all: Toutes
+  web_autospec_tab_drafting: En rédaction
+  web_autospec_tab_pending: En attente de validation
+  web_autospec_tab_to_validate: À valider
+  web_autospec_tab_rejected: Rejetés
+  web_autospec_tab_approved: Approuvés
+  web_autospec_tab_empty: Aucun brouillon dans cet onglet.
   web_autospec_new_cta: Nouveau brouillon
   web_autospec_new_title: Nouveau brouillon
   web_autospec_new_subtitle: Choisissez un projet pour démarrer. Vous pourrez ensuite chater avec Autodev pour cadrer le ticket.

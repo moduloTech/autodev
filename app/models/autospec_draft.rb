@@ -87,6 +87,25 @@ class AutospecDraft < ApplicationRecord
     end
   end
 
+  # Drafts awaiting THIS user's vote: in `pending_approval`, on a project the
+  # user owns, where the user hasn't yet recorded an approval at the draft's
+  # current iteration. Single source for the dashboard widget, the
+  # /autospec_drafts "À valider" tab, and the sidebar badge — so the three
+  # never drift. Returns an Array (the already-voted filter is per-row against
+  # each draft's iteration); resolved in 2 queries to avoid an N+1.
+  def self.awaiting_vote_of(user) # rubocop:disable Metrics/AbcSize
+    return [] if user.nil?
+
+    owned_ids = user.project_memberships.where(role: ProjectMembership::ROLE_OWNER).select(:project_id)
+    candidates = where(status: STATUS_PENDING_APPROVAL, project_id: owned_ids)
+                 .includes(:project, :user).order(updated_at: :desc).to_a
+    return candidates if candidates.empty?
+
+    voted = AutospecApproval.where(user_id: user.id, autospec_draft_id: candidates.map(&:id))
+                            .pluck(:autospec_draft_id, :iteration).to_set
+    candidates.reject { |d| voted.include?([d.id, d.current_iteration]) }
+  end
+
   # The User who created the draft. Distinct from owners voting on it —
   # owners are tracked via `autospec_approvals.user_id`. An owner-author
   # IS expected to validate their own draft per autospec.md §A

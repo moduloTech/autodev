@@ -64,6 +64,41 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
     assert_includes response.body, 'AutoSpec'
   end
 
+  # --- index tabs ---------------------------------------------------
+
+  def test_status_tab_filters_my_drafts_by_status
+    AutospecDraft.create!(user: @author, project: @project, title: 'Still drafting')
+    submitted = AutospecDraft.create!(user: @author, project: @project,
+                                      title: 'Sent for approval', destination: 'human')
+    submitted.submit_for_approval!
+    sign_in @author
+    get '/autospec_drafts?tab=drafting'
+
+    assert_includes response.body, 'Still drafting'
+    refute_includes response.body, 'Sent for approval'
+  end
+
+  def test_to_validate_tab_lists_drafts_awaiting_my_vote
+    @author.project_memberships.find_by(project: @project).update!(role: 'owner')
+    other_draft = AutospecDraft.create!(user: @other, project: @project,
+                                        title: 'Please review me', destination: 'human')
+    other_draft.submit_for_approval!
+    sign_in @author
+    get '/autospec_drafts?tab=to_validate'
+
+    assert_response :success
+    assert_includes response.body, 'Please review me'
+  end
+
+  def test_to_validate_tab_excludes_my_own_drafting_work
+    @author.project_memberships.find_by(project: @project).update!(role: 'owner')
+    AutospecDraft.create!(user: @author, project: @project, title: 'My own WIP')
+    sign_in @author
+    get '/autospec_drafts?tab=to_validate'
+
+    refute_includes response.body, 'My own WIP'
+  end
+
   # --- new + create -------------------------------------------------
 
   def test_new_lists_visible_projects_only

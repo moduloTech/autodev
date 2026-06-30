@@ -52,6 +52,20 @@ class SidebarWatchItemsTest < ActiveSupport::TestCase
     assert_includes html, 'Configuration'
   end
 
+  def test_renders_autospec_section_links
+    html = render_sidebar
+
+    assert_includes html, '/autospec_drafts?tab=drafting'
+    assert_includes html, '/autospec_drafts?tab=pending'
+    assert_includes html, '/autospec_drafts?tab=to_validate'
+  end
+
+  def test_renders_autospec_to_validate_badge
+    html = render_sidebar(counts: { autospec_to_validate: 5 })
+
+    assert_includes html, '>5<'
+  end
+
   def test_admin_section_hidden_for_non_admin
     html = render_sidebar(admin: false)
 

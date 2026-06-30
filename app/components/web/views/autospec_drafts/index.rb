@@ -3,15 +3,37 @@
 module Web
   module Views
     module AutospecDrafts
-      # GET /autospec_drafts — listing of the signed-in user's drafts
-      # (step 10a — phase D AutoSpec). The full visual target (chat pane
-      # right, editor centre, sidebar 240px — cf. docs/design/spec_update/
-      # README.md) lands in step 10b/10c; this 10a slice is single-column
-      # and reuses the existing Card / Sidebar / Topbar primitives.
-      class Index < Web::Views::Base
-        def initialize(drafts:, **)
+      # GET /autospec_drafts — the signed-in user's drafts, filtered by a tab
+      # bar modelled on the /issues view. The status tabs (Toutes / En rédaction
+      # / En attente de validation / Rejetés / Approuvés) list the user's own
+      # drafts; "À valider" is the owner-vote set (drafts on projects they own
+      # that await their vote). Row rendering is unchanged from the 10a slice.
+      class Index < Web::Views::Base # rubocop:disable Metrics/ClassLength
+        include Concerns::FilterTabs
+
+        TABS = [
+          { id: 'all',          label_key: :web_autospec_tab_all,          count_key: :all },
+          { id: 'drafting',     label_key: :web_autospec_tab_drafting,     count_key: :drafting },
+          { id: 'pending',      label_key: :web_autospec_tab_pending,      count_key: :pending },
+          { id: 'to_validate',  label_key: :web_autospec_tab_to_validate,  count_key: :to_validate,
+            tone: :warn },
+          { id: 'rejected',     label_key: :web_autospec_tab_rejected,     count_key: :rejected },
+          { id: 'approved',     label_key: :web_autospec_tab_approved,     count_key: :approved }
+        ].freeze
+        private_constant :TABS
+
+        # Maps the active tab to the matching sidebar nav id so its entry
+        # highlights (only drafting / pending / to_validate have sidebar links).
+        SIDEBAR_ACTIVE = { 'drafting' => 'autospec_drafting', 'pending' => 'autospec_pending',
+                           'to_validate' => 'autospec_to_validate' }.freeze
+        private_constant :SIDEBAR_ACTIVE
+
+        def initialize(drafts:, tab: 'all', tab_counts: {}, kpis: {}, **)
           super(**)
           @drafts = drafts
+          @tab = tab
+          @tab_counts = tab_counts
+          @kpis = kpis
         end
 
         def view_template # rubocop:disable Metrics/MethodLength
@@ -20,6 +42,7 @@ module Web
               render_sidebar
               main do
                 render_topbar
+                render_filter_bar
                 div(style: 'flex: 1; overflow: auto; padding: 28px;') do
                   @drafts.any? ? render_list : render_empty
                 end
@@ -32,8 +55,8 @@ module Web
 
         def render_sidebar
           render Components::Sidebar.new(
-            active: 'chat', locale: web_locale, request_path: @request_path,
-            counts: { chat: @drafts.size }, admin: @current_user_admin,
+            active: SIDEBAR_ACTIVE.fetch(@tab, 'autospec'), locale: web_locale,
+            request_path: @request_path, counts: sidebar_counts, admin: @current_user_admin,
             translator: ->(key, **vars) { t_web(key, **vars) },
             current_user_email: @current_user_email, csrf_token: @csrf_token
           )
@@ -55,12 +78,28 @@ module Web
           end
         end
 
-        def render_empty
+        def render_filter_bar
+          div(class: 'filter-bar') do
+            div(class: 'filter-tabs') { TABS.each { |tab| render_tab(tab) } }
+          end
+        end
+
+        def render_tab(tab)
+          render_filter_tab(label: t_web(tab[:label_key]), count: @tab_counts[tab[:count_key]] || 0,
+                            active: @tab == tab[:id], href: "/autospec_drafts?tab=#{tab[:id]}",
+                            tone: tab[:tone])
+        end
+
+        def render_empty # rubocop:disable Metrics/MethodLength
           render Components::Card.new(padding: 32) do
-            p(class: 'muted', style: 'margin: 0 0 12px;') { t_web(:web_autospec_index_empty) }
-            a(href: '/autospec_drafts/new', class: 'button button-primary',
-              style: 'padding: 8px 14px; font-size: 13px;') do
-              t_web(:web_autospec_new_cta)
+            if @tab == 'all'
+              p(class: 'muted', style: 'margin: 0 0 12px;') { t_web(:web_autospec_index_empty) }
+              a(href: '/autospec_drafts/new', class: 'button button-primary',
+                style: 'padding: 8px 14px; font-size: 13px;') do
+                t_web(:web_autospec_new_cta)
+              end
+            else
+              p(class: 'muted', style: 'margin: 0;') { t_web(:web_autospec_tab_empty) }
             end
           end
         end

@@ -42,11 +42,21 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   rescue_from Autospec::ApprovalRecorder::NotAnOwner,
               with: -> { render_apply_error('not_an_owner', :forbidden) }
 
+  # Tabs for the drafts list. The status tabs filter the user's OWN drafts;
+  # `to_validate` is a different set entirely — drafts on projects they own
+  # that await their vote (AutospecDraft.awaiting_vote_of). Maps the URL slug
+  # to the AASM status where it differs (approved → submitted).
+  AUTOSPEC_TABS = %w[all drafting pending to_validate rejected approved].freeze
+  TAB_STATUSES = { 'drafting' => 'drafting', 'pending' => 'pending_approval',
+                   'rejected' => 'rejected', 'approved' => 'submitted' }.freeze
+
   # GET /autospec_drafts
   def index
-    drafts = current_user.autospec_drafts.includes(:project).order(updated_at: :desc)
-    render html: Web::Views::AutospecDrafts::Index.new(drafts: drafts, **view_kwargs).call.html_safe,
-           layout: false
+    tab = autospec_tab_param
+    render html: Web::Views::AutospecDrafts::Index.new(
+      drafts: drafts_for_tab(tab), tab: tab, tab_counts: autospec_tab_counts,
+      kpis: dashboard_kpis, **view_kwargs
+    ).call.html_safe, layout: false
   end
 
   # GET /autospec_drafts/new
@@ -200,6 +210,40 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   end
 
   private
+
+  def autospec_tab_param
+    raw = params[:tab].to_s
+    AUTOSPEC_TABS.include?(raw) ? raw : 'all'
+  end
+
+  # The 'to_validate' tab is the owner-vote set (others'/own drafts on my
+  # projects awaiting my vote); every other tab is my own authored drafts,
+  # optionally narrowed to one status.
+  def drafts_for_tab(tab)
+    return awaiting_my_vote if tab == 'to_validate'
+
+    scope = current_user.autospec_drafts.includes(:project, :user).order(updated_at: :desc)
+    status = TAB_STATUSES[tab]
+    status ? scope.where(status: status) : scope
+  end
+
+  def autospec_tab_counts
+    by_status = current_user.autospec_drafts.group(:status).count
+    {
+      all: by_status.values.sum,
+      drafting: by_status['drafting'] || 0,
+      pending: by_status['pending_approval'] || 0,
+      rejected: by_status['rejected'] || 0,
+      approved: by_status['submitted'] || 0,
+      to_validate: awaiting_my_vote.size
+    }
+  end
+
+  # Memoised so the index (list when tab=to_validate) and the count don't
+  # resolve the owner-vote set twice in one request.
+  def awaiting_my_vote
+    @awaiting_my_vote ||= AutospecDraft.awaiting_vote_of(current_user)
+  end
 
   def build_draft(project)
     template = chosen_template(project)

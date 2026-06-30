@@ -10,6 +10,7 @@ module Web
     # (cause panel + message + CTA) via the WatchCards mixin.
     class Issues < Base # rubocop:disable Metrics/ClassLength
       include Concerns::WatchCards
+      include Concerns::FilterTabs
 
       # Tabs rendered as watch cards rather than the dense table.
       CARD_TABS = %w[errors waiting delivered_review].freeze
@@ -104,52 +105,15 @@ module Web
         end
       end
 
-      def render_tab(tab) # rubocop:disable Metrics/AbcSize
-        is_active = @tab == tab[:id]
-        count = @tab_counts[tab[:count_key]] || 0
-        a(href: tab_href(tab[:id]), class: is_active ? 'tab tab-active' : 'tab',
-          style: tab_style(is_active)) do
-          plain t_web(tab[:label_key])
-          plain ' '
-          span(class: tab_count_classes(tab[:tone], is_active),
-               style: tab_count_style(tab[:tone], is_active)) { plain count.to_s }
-        end
+      def render_tab(tab)
+        render_filter_tab(label: t_web(tab[:label_key]), count: @tab_counts[tab[:count_key]] || 0,
+                          active: @tab == tab[:id], href: tab_href(tab[:id]), tone: tab[:tone])
       end
 
       def tab_href(tab_id)
         params = { tab: tab_id }
         params[:q] = @filters[:q] if @filters[:q] && !@filters[:q].empty?
         "/issues?#{URI.encode_www_form(params)}"
-      end
-
-      def tab_style(active)
-        bg = active ? 'var(--paper-2)' : 'transparent'
-        color = active ? 'var(--text-strong)' : 'var(--text-muted)'
-        border = active ? '1px solid var(--border)' : '1px solid transparent'
-        'display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; ' \
-          'border-radius: var(--r-pill); font-size: 13px; font-weight: 500; ' \
-          'white-space: nowrap; text-decoration: none; ' \
-          "background: #{bg}; color: #{color}; border: #{border};"
-      end
-
-      def tab_count_classes(_tone, _active)
-        'tab-count'
-      end
-
-      def tab_count_style(tone, active) # rubocop:disable Metrics/MethodLength
-        bg = case tone
-             when :err then 'var(--err-bg)'
-             when :warn then 'var(--warn-bg)'
-             else (active ? 'var(--paper)' : 'var(--paper-2)')
-             end
-        color = case tone
-                when :err then 'var(--err-fg)'
-                when :warn then 'var(--warn-fg)'
-                else 'var(--text-muted)'
-                end
-        border = %i[err warn].include?(tone) ? 'none' : '1px solid var(--border)'
-        'font-size: 11px; padding: 0 6px; border-radius: var(--r-pill); ' \
-          "background: #{bg}; color: #{color}; border: #{border};"
       end
 
       def render_search_form # rubocop:disable Metrics/MethodLength

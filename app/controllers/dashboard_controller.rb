@@ -34,27 +34,11 @@ class DashboardController < ApplicationController
     issues_dataset.where(status: 'error').order(id: :desc).to_a
   end
 
-  # AutoSpec drafts in pending_approval on projects the current user
-  # owns AND on which the user hasn't yet voted at the current
-  # iteration. Surfaces them on the dashboard as a CTA so owners
-  # don't have to remember to look. Returns [] for users who aren't
-  # owner of any project — the dashboard widget is hidden in that case.
-  def drafts_awaiting_my_vote # rubocop:disable Metrics/MethodLength
-    return [] if current_user.nil?
-
-    owned_project_ids = current_user
-                        .project_memberships
-                        .where(role: ProjectMembership::ROLE_OWNER)
-                        .select(:project_id)
-    drafts = AutospecDraft.where(status: AutospecDraft::STATUS_PENDING_APPROVAL,
-                                 project_id: owned_project_ids)
-                          .includes(:project, :user)
-                          .order(updated_at: :desc)
-    # Per-iteration filter (the `exists?` is per-row but the list is
-    # capped to the owner's project set so the N+1 stays small —
-    # typically 0-20 rows in production).
-    drafts.reject do |d|
-      d.autospec_approvals.exists?(user: current_user, iteration: d.current_iteration)
-    end
+  # AutoSpec drafts awaiting the current user's vote — surfaced on the
+  # dashboard as a CTA so owners don't have to remember to look. Same set as
+  # the /autospec_drafts "À valider" tab and the sidebar badge (shared
+  # `AutospecDraft.awaiting_vote_of`). Empty for users who own no project.
+  def drafts_awaiting_my_vote
+    AutospecDraft.awaiting_vote_of(current_user)
   end
 end

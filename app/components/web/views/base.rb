@@ -58,7 +58,9 @@ module Web
         {
           issues: @kpis[:active], errors: @kpis[:errors],
           waiting: @kpis[:awaiting], delivered_review: @kpis[:delivered_review],
-          chat: 0
+          autospec_drafting: @kpis[:autospec_drafting],
+          autospec_pending: @kpis[:autospec_pending],
+          autospec_to_validate: @kpis[:autospec_to_validate]
         }
       end
     end

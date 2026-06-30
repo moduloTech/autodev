@@ -139,8 +139,12 @@ module Web
               href: '/issues?tab=delivered_review', count_key: :delivered_review, tone: :warn }
           ] },
           { label_key: :web_nav_section_autospec, items: [
-            { id: 'chat', label_key: :web_nav_conversations, icon: 'messages',
-              href: '/autospec_drafts', count_key: :chat }
+            { id: 'autospec_drafting', label_key: :web_autospec_tab_drafting, icon: 'sparkles',
+              href: '/autospec_drafts?tab=drafting', count_key: :autospec_drafting },
+            { id: 'autospec_pending', label_key: :web_autospec_tab_pending, icon: 'clock',
+              href: '/autospec_drafts?tab=pending', count_key: :autospec_pending },
+            { id: 'autospec_to_validate', label_key: :web_autospec_tab_to_validate, icon: 'thumb-up',
+              href: '/autospec_drafts?tab=to_validate', count_key: :autospec_to_validate, tone: :warn }
           ] },
           { label_key: :web_nav_section_configuration, items: [
             { id: 'projects', label_key: :web_nav_projects, icon: 'folder', href: '/projects' }

@@ -364,6 +364,13 @@ en:
   web_autospec_index_title: AutoSpec
   web_autospec_index_subtitle: Draft new tickets with Autodev's help.
   web_autospec_index_empty: You don't have any draft yet. Start one to shape a ticket with Autodev.
+  web_autospec_tab_all: All
+  web_autospec_tab_drafting: Drafting
+  web_autospec_tab_pending: Awaiting validation
+  web_autospec_tab_to_validate: To validate
+  web_autospec_tab_rejected: Rejected
+  web_autospec_tab_approved: Approved
+  web_autospec_tab_empty: No drafts in this tab.
   web_autospec_new_cta: New draft
   web_autospec_new_title: New draft
   web_autospec_new_subtitle: Pick a project to get started. You'll then chat with Autodev to shape the ticket.
