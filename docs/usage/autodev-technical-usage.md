@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-06-29
+date: 2026-06-30
 lang: fr
 documentclass: article
 papersize: a4
@@ -33,13 +33,12 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | Route | Contrôleur | Description |
 |---|---|---|
 | `/` | `DashboardController#show` | KPIs, listes actives, sparkline, banderole erreurs |
-| `/issues` | `IssuesController#index` | Liste paginée + filtrable (`?tab=`, `?q=`, `?from=`, `?to=`) |
+| `/issues` | `IssuesController#index` | Liste paginée + filtrable (`?tab=`, `?q=`, `?from=`, `?to=`). Tabs : `active`, `pending`, `errors`, `waiting`, `delivered_review`, `done`, `closed`, `all`. Les tabs `errors` / `waiting` / `delivered_review` rendent des cartes « besoin d'un humain » (cause + message + CTA) au lieu du tableau dense — elles remplacent l'ancienne page `/errors` |
 | `/issues/:id` | `IssuesController#show` | Détail + activity events (200 derniers) |
 | `/issues/:id.json` | `IssuesController#show` | Mêmes données, format JSON |
 | `/issues/:id/reset` (POST) | `IssuesController#reset` | Reset brut (raw SQL, pas une transition AASM) |
 | `/issues/:id/transition` (POST) | `IssuesController#transition` | Déclenche un événement AASM (`?event=...`) |
 | `/issues/:id/close` (POST) | `IssuesController#close` | Clôture manuelle (événement AASM `close`, gatée sur le membership projet) — `closed` depuis n'importe quel état |
-| `/errors` | `ErrorsController#index` | Issues en `error` + `needs_clarification` + `post_completion_error IS NOT NULL` |
 | `/projects` | `ProjectsController#index` | Union des rows `projects` + entrées YAML pas encore importées |
 | `/projects/new` (+ POST `create`) | `ProjectsController#new`/`#create` | Création d'un projet en base (admin only) — enfile `SyncGitlabMembershipsJob` au succès |
 | `/projects/:slug/edit` (+ PATCH `update`) | `ProjectsController#edit`/`#update` | Édition de la config per-projet en base (gatée membership/admin) |
@@ -48,7 +47,7 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/projects/:slug` | `ProjectsController#show` | Slug = `group/sub/name` encodé en `group__sub__name` |
 | `/stream` | `StreamController#show` | Server-Sent Events, `ActionController::Live` |
 | `/locale/:lang` | `LocaleController#update` | Set le cookie `locale`, redirige sur `back` |
-| `/autospec_drafts` | `AutospecDraftsController#index` | Brouillons de l'utilisateur courant (AutoSpec) |
+| `/autospec_drafts` | `AutospecDraftsController#index` | Brouillons (AutoSpec), tabbé `?tab=` : `all` (défaut), `drafting`, `pending`, `to_validate`, `rejected`, `approved`. Les tabs de statut filtrent les brouillons de l'utilisateur ; `to_validate` est l'ensemble *vote owner* (`AutospecDraft.awaiting_vote_of` — pending sur un projet qu'il possède, pas encore voté) |
 | `/autospec_drafts/new` (+ POST `create`) | `AutospecDraftsController` | Formulaire de création + persistance |
 | `/autospec_drafts/import` (+ POST `create_from_import`) | `AutospecDraftsController` | Backfill depuis une URL d'issue GitLab |
 | `/autospec_drafts/:id` | `AutospecDraftsController#show` | Éditeur + chat + bandeau d'approbation |
@@ -139,7 +138,7 @@ Une carte par composant, avec une pastille `OK` / `Attention` / `Hors service` :
 - **Workers** — process Solid Queue vivants (heartbeat < 5 min).
 - **File de jobs** — jobs en échec / en attente (Solid Queue).
 - **Quota Claude** — dernier état connu du `UsageChecker` (lu sur le dernier heartbeat, pas re-sondé).
-- **Issues en erreur** — nombre d'issues `error` / `post_completion_error` (lien vers `/errors`).
+- **Issues en erreur** — nombre d'issues `error` / `post_completion_error` (lien vers `/issues?tab=errors`).
 - **Issues bloquées** — issues dans un état actif qui n'avancent plus : une `pending` plus vieille que la fenêtre de péremption du poller, ou une issue active sans `ActivityEvent` depuis `monitoring.stuck_active_after_seconds` (défaut 2 h). Détecte les orphelines qu'un dashboard tout vert masquait (ex. une `pending` remise au redémarrage mais restée `label_doing` côté GitLab). Exclut `checking_pipeline` (attente pipeline) et `needs_clarification` (attente humaine).
 - **Base de données** — primaire + queue joignables.
 
@@ -479,7 +478,7 @@ DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`
 | Désassigné en cours d'implémentation | Direct `done` au poll suivant |
 | Interruption en `fixing_pipeline` | Reset à `checking_pipeline` au boot |
 | Interruption en `reviewing` | Reset à `checking_pipeline` au boot |
-| Échec du hook `post_completion` | Non bloquant : `done` quand même, erreur stockée dans `post_completion_error`, visible via `--errors` et dans `/errors` |
+| Échec du hook `post_completion` | Non bloquant : `done` quand même, erreur stockée dans `post_completion_error`, visible via `--errors` et dans l'onglet *Livrée (à vérifier)* (`/issues?tab=delivered_review`) |
 | Interruption en `running_post_completion` | Reset à `done` au boot (non rejoué) |
 | Usage Claude exhausted | `AutodevPollJob` gate sur `UsageChecker#available?`, pause silencieuse au lieu de burn les retries |
 

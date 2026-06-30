@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-06-26
+date: 2026-06-30
 lang: fr
 documentclass: article
 papersize: a4
@@ -76,37 +76,45 @@ C'est la page d'accueil — votre vision d'ensemble de ce qui se passe sur tous 
 
 ![Le tableau de bord : KPIs en haut, demandes en cours à gauche, projets et activité à droite.](screenshots/01-dashboard.png)
 
-## Les 5 indicateurs en haut
+## Les indicateurs en haut
 
 | Indicateur | Ce qu'il signifie |
 |---|---|
 | **En traitement** | Autodev travaille dessus en ce moment. |
 | **En attente** | Dans la file, Autodev les prendra au prochain tour. |
-| **À surveiller** | Échec ou intervention nécessaire — quelqu'un doit regarder. |
+| **Erreurs** | Demandes en échec — quelqu'un doit regarder et relancer. |
 | **En attente d'une réponse** | Autodev a posé une question, il attend une réponse de votre part. |
+| **Livrée (à vérifier)** | Livrée, mais Autodev a atteint une limite (corrections ou relectures) : la MR mérite un coup d'œil. |
 | **Livrés cette semaine** | Tickets terminés sur les 7 derniers jours. |
 
-Chaque carte est un raccourci vers la liste filtrée correspondante.
+Chaque carte est un raccourci vers la liste filtrée correspondante (l'onglet de même nom dans la liste des demandes).
 
 ## Les blocs
 
 - **En traitement** — les 10 demandes sur lesquelles Autodev travaille actuellement. Chaque ligne montre le projet, le titre du ticket, et son état du moment.
-- **Activité de la semaine** — un mini-graphe du nombre d'opérations menées chaque jour sur les 7 derniers jours. Utile pour repérer une journée creuse ou un pic.
+- **Activité de la semaine** — un mini-graphe du nombre d'opérations menées chaque jour sur les 7 derniers jours, avec le chiffre affiché au-dessus de chaque barre. Utile pour repérer une journée creuse ou un pic.
 - **Vos projets** — un récap par projet avec le nombre de demandes actives et le nombre d'erreurs en cours.
 - **Brouillons à valider** — si vous êtes responsable d'un projet, ce bloc liste les brouillons de demande en attente de votre validation (que vous n'avez pas encore validés). Chaque ligne montre le titre, le projet, l'auteur, et un bouton **Voter** qui ouvre le brouillon.
 - **Banderole d'alerte** — si au moins une demande est en échec, un bandeau rouge en bas vous le rappelle avec un lien direct.
 
 ## Le menu de gauche
 
-Présent sur toutes les pages :
+Présent sur toutes les pages, organisé en sections :
 
-- **Tableau de bord** — cette page.
-- **Demandes** — la liste complète des tickets.
-- **À surveiller** — tout ce qui demande votre attention.
-- **Conversations** — vos brouillons de demandes rédigés avec l'aide d'Autodev (voir *Rédiger une demande avec Autodev*).
-- **Projets** — la liste des projets suivis.
+- En haut (sans titre) : **Tableau de bord** (cette page) et **Aide** (ce guide).
+- **Autodev** — le suivi des demandes confiées à Autodev :
+  - **Demandes** — la liste complète des tickets.
+  - **Erreurs** — les demandes en échec à relancer.
+  - **Question en attente** — les demandes où Autodev attend une réponse de votre part.
+  - **Livrée (à vérifier)** — les demandes livrées qui méritent un coup d'œil.
+- **AutoSpec** — vos brouillons de demandes rédigés avec l'aide d'Autodev (voir *Rédiger une demande avec Autodev*) :
+  - **En rédaction** — vos brouillons en cours d'écriture.
+  - **En attente de validation** — vos brouillons envoyés, en attente du vote des responsables.
+  - **À valider** — les brouillons qui attendent **votre** vote (si vous êtes responsable d'un projet).
+- **Configuration** — **Projets**, la liste des projets suivis.
+- **Admin** — réservé aux administrateurs (gestion des utilisateurs, santé, etc.).
 
-Tout en bas du menu : votre identité connectée et le lien **Se déconnecter**.
+La plupart des entrées affichent un compteur à jour. Tout en bas du menu : votre identité connectée et le lien **Se déconnecter**.
 
 ## Les options en haut à droite
 
@@ -131,13 +139,14 @@ Toutes les demandes suivies par Autodev, sur tous les projets confondus.
 |---|---|
 | **En traitement** | Tout ce qu'Autodev est en train de faire. |
 | **En attente** | Les tickets pris en compte mais pas encore démarrés. |
-| **Échecs** | Les tickets bloqués par une erreur. |
-| **Question en attente** | Les tickets où Autodev attend une précision. |
+| **Erreurs** | Les demandes en échec, à relancer. |
+| **Question en attente** | Les demandes où Autodev attend une précision de votre part. |
+| **Livrée (à vérifier)** | Les demandes livrées qui ont atteint une limite et méritent une vérification manuelle. |
 | **Livrés** | Les tickets terminés. |
 | **Clôs** | Les tickets clôturés à la main (mis de côté sans être livrés). |
 | **Tous** | Aucun filtre — l'historique complet. |
 
-Le compteur à côté de chaque onglet est mis à jour en direct.
+Le compteur à côté de chaque onglet est mis à jour en direct. Trois de ces onglets — **Erreurs**, **Question en attente** et **Livrée (à vérifier)** — n'affichent pas une simple liste mais des **cartes** qui expliquent ce qui s'est passé et ce que vous devez faire (voir *Les demandes qui ont besoin de vous* ci-dessous).
 
 ## Pour chaque ligne
 
@@ -156,24 +165,32 @@ Cliquez sur une ligne pour voir le **détail** de la demande (timeline complète
 
 \newpage
 
-# À surveiller
+# Les demandes qui ont besoin de vous
 
-La page qui regroupe **tout ce qui demande votre attention** : échecs, questions en attente, finalisations qui se sont mal passées.
+Tout ce qui demande votre attention vit dans **trois onglets de la liste des demandes** — chacun aussi accessible en un clic depuis le menu de gauche (section *Autodev*) et depuis les indicateurs du tableau de bord :
 
-![Page À surveiller — chaque demande est une carte avec explication métier.](screenshots/03-errors.png)
+- **Erreurs** — les demandes en échec.
+- **Question en attente** — les demandes où Autodev attend une réponse de votre part.
+- **Livrée (à vérifier)** — les demandes livrées qui méritent une vérification manuelle.
 
-## Chaque carte explique d'abord ce qu'il s'est passé — et ce que vous devez faire
+Dans ces trois onglets, chaque demande s'affiche sous forme de **carte** qui explique d'abord ce qu'il s'est passé — et ce que vous devez faire.
 
-Il y a deux situations bien distinctes, et la réponse attendue n'est pas la même :
+![L'onglet Erreurs — chaque demande est une carte avec explication métier.](screenshots/03-errors.png)
 
-- **Échec technique** — *« Une erreur a empêché autodev de continuer. »* C'est probablement un bug d'Autodev lui-même. Relancez la demande avec **Réessayer maintenant** ; si l'échec persiste, **prévenez l'équipe autodev** (les *détails techniques* sont utiles à transmettre). Vous n'avez rien à corriger côté ticket.
-- **Question en attente** — *« Autodev a posé une question pour préciser la demande. »* Là, c'est à **vous de répondre** : Autodev a posté une question dans le ticket GitLab et attend votre réponse pour reprendre. **Répondez-lui en commentaire sur le ticket GitLab** (le bouton **Voir la question** vous y emmène directement). Tant que personne ne répond, la demande reste en attente.
+## Ce que chaque carte vous dit de faire
+
+La réponse attendue dépend de la situation :
+
+- **Échec technique** (onglet *Erreurs*) — *« Une erreur a empêché autodev de continuer. »* C'est probablement un bug d'Autodev lui-même. Relancez la demande avec **Réessayer maintenant** ; si l'échec persiste, **prévenez l'équipe autodev** (les *détails techniques* sont utiles à transmettre). Vous n'avez rien à corriger côté ticket.
+- **Question en attente** (onglet *Question en attente*) — *« Autodev a posé une question pour préciser la demande. »* Là, c'est à **vous de répondre** : Autodev a posté une question dans le ticket GitLab et attend votre réponse pour reprendre. **Répondez-lui en commentaire sur le ticket GitLab** (le bouton **Voir la question** vous y emmène directement). Tant que personne ne répond, la demande reste en attente.
+- **Intervention manuelle requise** (onglet *Livrée (à vérifier)*) — la demande a été **livrée**, mais Autodev a atteint une limite (trop de corrections de pipeline ou de tours de relecture) et l'a livrée telle quelle. **Vérifiez la MR à la main** ; quand c'est bon, **Clôturer** la range.
 
 ## Les actions sur chaque carte
 
 - **Voir le détail** — ouvre la page détaillée du ticket.
-- **Réessayer maintenant** (échec technique) — relance Autodev sur ce ticket, à zéro.
-- **Voir la question** (question en attente) — ouvre le ticket GitLab où Autodev a posé sa question, pour que vous y répondiez.
+- **Réessayer maintenant** (onglet *Erreurs*) — relance Autodev sur ce ticket, à zéro.
+- **Voir la question** (onglet *Question en attente*) — ouvre le ticket GitLab où Autodev a posé sa question, pour que vous y répondiez.
+- **Clôturer** (onglet *Livrée (à vérifier)*) — range la demande une fois la MR vérifiée. Réservé aux personnes ayant accès au projet.
 
 Si vous voulez voir ce qui s'est passé techniquement (pour faire suivre à un développeur, par exemple), le toggle **Afficher les détails techniques** déplie la trace :
 
@@ -270,11 +287,20 @@ En haut à droite, **Voir sur GitLab** ouvre le projet GitLab.
 
 Pas besoin d'avoir déjà un ticket bien formulé : depuis le tableau de bord, vous pouvez **écrire une demande en discutant avec Autodev**, le laisser la mettre en forme, puis l'envoyer — à un développeur ou directement à Autodev — une fois qu'elle est validée.
 
-On y accède par **Conversations** dans le menu de gauche, ou par le bouton **Nouvelle demande** en haut du tableau de bord.
+On y accède par la section **AutoSpec** du menu de gauche, ou par le bouton **Nouvelle demande** en haut du tableau de bord.
 
-![La liste de vos brouillons de demandes.](screenshots/11-autospec-list.png)
+![La liste de vos brouillons de demandes, avec ses onglets.](screenshots/11-autospec-list.png)
 
-Chaque brouillon porte un titre, le projet concerné, et son état (en rédaction, en attente d'approbation, refusé, ou envoyé).
+Chaque brouillon porte un titre, le projet concerné, et son état (en rédaction, en attente de validation, rejeté, ou approuvé). La liste est organisée en onglets :
+
+| Onglet | Ce qu'il contient |
+|---|---|
+| **Toutes** | Tous vos brouillons, quel que soit leur état. |
+| **En rédaction** | Vos brouillons en cours d'écriture. |
+| **En attente de validation** | Vos brouillons envoyés, en attente du vote des responsables. |
+| **À valider** | Les brouillons qui attendent **votre** vote (si vous êtes responsable d'un projet) — y compris ceux écrits par d'autres. C'est ici, et non plus seulement sur le tableau de bord, que vous retrouvez ce que vous devez valider. |
+| **Rejetés** | Vos brouillons refusés (à corriger puis renvoyer). |
+| **Approuvés** | Vos brouillons validés et envoyés sur GitLab. |
 
 ## Démarrer un brouillon
 
@@ -387,4 +413,4 @@ C'est généralement une pipeline d'infra (pas un bug du code) qui a échoué et
 Oui, c'est un message d'attente : la synchronisation des équipes depuis GitLab sera mise en place dans une prochaine version. Cela n'empêche pas Autodev de travailler.
 
 **Et le hook *post-completion* qui apparaît parfois en erreur ?**
-C'est une action de finalisation après livraison (par exemple, mise à jour d'un changelog). Si elle échoue, la demande reste tout de même livrée — mais elle apparaîtra dans **À surveiller** pour signaler le problème de finalisation.
+C'est une action de finalisation après livraison (par exemple, mise à jour d'un changelog). Si elle échoue, la demande reste tout de même livrée — mais elle apparaîtra dans l'onglet **Livrée (à vérifier)** pour signaler le problème de finalisation.
