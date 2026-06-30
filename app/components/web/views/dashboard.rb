@@ -265,7 +265,7 @@ module Web
       # Hidden when empty — only owners of at least one project + a
       # pending draft + no vote yet at current_iteration land here.
       def render_drafts_awaiting_my_vote # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
-        div(style: 'margin-top: 20px;') do
+        div(style: 'margin: 20px 0;') do
           render(Components::Card.new(padding: 0)) do
             div(style: card_header_style) do
               h3(style: card_title_style) { t_web(:web_dashboard_drafts_to_vote) }

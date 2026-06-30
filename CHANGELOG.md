@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- **Dashboard: spacing between the "Brouillons à valider" card and the "En traitement" list.** The drafts-to-vote card only carried a top margin, so its bottom edge sat flush against the split grid below. Added a matching bottom margin so the two cards breathe.
 - **Pre-MR issues no longer get orphaned in `pending` after a supervisor restart.** When the supervisor restarted while an issue was mid-implementation but before its MR existed (`cloning`…`creating_mr`, `mr_iid` still null), `Issue.recover_on_startup!` (`recover_stuck_processing!`) reset it to `pending` — but the GitLab label was already `label_doing`, so `dispatch_new_issues` (which only re-discovers `labels_todo` issues) never re-enqueued it, and `dispatch_retries` skipped it too (`next_retry_at` was null). The row sat in "En attente" forever with no Solid Queue job behind it. `recover_stuck_processing!` now stamps `next_retry_at: Time.current` on the pre-MR reset branch so `dispatch_retries` re-enqueues it via `:retry_stuck` on the next poll, independent of the GitLab label state.
 
 ### Added
