@@ -34,7 +34,7 @@ module Web
       def render_sidebar
         render Components::Sidebar.new(
           active: 'projects', locale: web_locale, request_path: @request_path,
-          counts: { issues: @kpis[:active], errors: @kpis[:to_watch], chat: 0 },
+          counts: sidebar_counts,
           translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin,
           current_user_email: @current_user_email, csrf_token: @csrf_token
         )

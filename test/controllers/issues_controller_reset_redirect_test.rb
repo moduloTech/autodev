@@ -4,11 +4,11 @@ require_relative '../rails_helper'
 require 'action_dispatch/testing/integration'
 require 'devise'
 
-# The errors page "Réessayer maintenant" button ships a `return_to=/errors`
-# hidden field so a reset bounces back to the errors list (mass retry) instead
-# of each issue's detail page. The default (no return_to, e.g. the issue detail
-# page's own reset button) still lands on the issue. Open-redirect attempts are
-# ignored.
+# The errors-tab "Réessayer maintenant" button ships a
+# `return_to=/issues?tab=errors` hidden field so a reset bounces back to the
+# errors list (mass retry) instead of each issue's detail page. The default (no
+# return_to, e.g. the issue detail page's own reset button) still lands on the
+# issue. Open-redirect attempts are ignored.
 class IssuesControllerResetRedirectTest < ActionDispatch::IntegrationTest
   include Devise::Test::IntegrationHelpers
 
@@ -26,9 +26,9 @@ class IssuesControllerResetRedirectTest < ActionDispatch::IntegrationTest
   end
 
   def test_reset_redirects_back_to_errors_when_requested
-    post "/issues/#{@issue.id}/reset", params: { return_to: '/errors' }
+    post "/issues/#{@issue.id}/reset", params: { return_to: '/issues?tab=errors' }
 
-    assert_redirected_to '/errors'
+    assert_redirected_to '/issues?tab=errors'
   end
 
   def test_reset_ignores_offsite_return_to

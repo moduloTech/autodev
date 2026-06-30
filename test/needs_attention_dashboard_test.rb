@@ -4,7 +4,8 @@ require_relative 'autodev_test_helper'
 
 # Coverage for surfacing "gave-up done" issues (needs_attention) on the web
 # dashboard: the synthetic `done_attention` display status and the
-# "À surveiller" count that feeds the KPI card + sidebar badge.
+# "Livrée (à vérifier)" count that feeds the KPI card + the
+# /issues?tab=delivered_review list.
 class NeedsAttentionDashboardTest < Minitest::Test
   include DatabaseTestHelper
 
@@ -31,17 +32,18 @@ class NeedsAttentionDashboardTest < Minitest::Test
     assert_equal 'done', @helper.issue_status(issue)
   end
 
-  def test_to_watch_count_includes_needs_attention_done
+  def test_delivered_review_count_includes_needs_attention_and_post_completion
     create_issue(status: 'done', needs_attention: true)
-    create_issue(status: 'error')
-    create_issue(status: 'done') # clean delivery — excluded
+    create_issue(status: 'done', post_completion_error: 'deploy failed')
+    create_issue(status: 'error')  # an error, not a delivery — excluded
+    create_issue(status: 'done')   # clean delivery — excluded
 
-    assert_equal 2, @helper.to_watch_count
+    assert_equal 2, @helper.delivered_review_count
   end
 
-  def test_to_watch_count_excludes_clean_done
+  def test_delivered_review_count_excludes_clean_done
     create_issue(status: 'done')
 
-    assert_equal 0, @helper.to_watch_count
+    assert_equal 0, @helper.delivered_review_count
   end
 end

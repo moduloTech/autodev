@@ -4,7 +4,6 @@ en:
   web_nav_errors: Errors
   web_nav_all_issues: All issues
   web_nav_issues: Requests
-  web_nav_to_watch: To watch
   web_nav_conversations: Conversations
   web_nav_projects: Projects
   web_nav_admin_users: Users
@@ -64,10 +63,12 @@ en:
   web_kpi_in_progress_hint: Autodev is working on them
   web_kpi_pending: Pending
   web_kpi_pending_hint: In the queue, autodev will pick them up on the next tick
-  web_kpi_to_watch: To watch
-  web_kpi_to_watch_hint: Failed, action required
+  web_kpi_errors: Errors
+  web_kpi_errors_hint: Failed, action required
   web_kpi_awaiting_response: Awaiting response
   web_kpi_awaiting_response_hint: Autodev has a question
+  web_kpi_delivered_review: Delivered (to verify)
+  web_kpi_delivered_review_hint: Delivered but needs a manual check
   web_kpi_delivered_this_week: Delivered this week
   web_kpi_delivered_this_week_hint: Last 7 days
   web_dashboard_active_section: In progress
@@ -205,13 +206,8 @@ en:
   web_issue_screenshots: Screenshots (%{count})
   web_issue_screenshots_dir: Stored in
   web_issue_raw_data: Raw data
-  web_errors_title: To watch
-  web_errors_subtitle: Requests that failed or are waiting for a human.
-  web_errors_none: Nothing to watch right now.
   web_errors_confirm_reset: 'Restart request #%{iid} from the beginning?'
-  web_errors_banner_one: One request needs your attention.
-  web_errors_banner_many: "%{count} requests need your attention."
-  web_errors_banner_body: Autodev pauses and pings you whenever it hits a blocker it can't work around on its own.
+  web_errors_confirm_close: 'Close request #%{iid}?'
   web_errors_cause_failure: Technical failure
   web_errors_cause_clarification: Awaiting answer
   web_errors_cause_post_completion: Post-completion error
@@ -228,6 +224,7 @@ en:
   web_errors_view_detail: See details
   web_errors_action_retry: Retry now
   web_errors_action_view_question: See the question
+  web_errors_action_close: Close
   web_errors_requester: 'Requested by #%{iid}'
   web_project_title: Project — %{path}
   web_project_config: Configuration <code>app:</code>
@@ -323,8 +320,9 @@ en:
   web_issues_reset: Reset
   web_tab_active: In progress
   web_tab_pending: Pending
-  web_tab_errors: Failures
+  web_tab_errors: Errors
   web_tab_waiting: Awaiting answer
+  web_tab_delivered_review: Delivered (to verify)
   web_tab_done: Delivered
   web_tab_closed: Closed
   web_tab_all: All

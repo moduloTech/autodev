@@ -6,7 +6,7 @@ module Web
   module IssuesFilter
     PER_PAGE_OPTIONS = [20, 50, 100].freeze
     DEFAULT_PER_PAGE = 50
-    TABS = %w[active pending errors waiting done closed all].freeze
+    TABS = %w[active pending errors waiting delivered_review done closed all].freeze
 
     def filter_issues(params, base = issues_dataset)
       ds = apply_tab(base, tab_param(params))
@@ -21,27 +21,38 @@ module Web
       TABS.include?(raw) ? raw : 'all'
     end
 
-    def apply_tab(dataset, tab)
+    def apply_tab(dataset, tab) # rubocop:disable Metrics/CyclomaticComplexity
       case tab
       when 'active'  then dataset.where(status: Dashboard::ACTIVE_STATES)
       when 'pending' then dataset.where(status: 'pending')
       when 'errors'  then dataset.where(status: 'error')
       when 'waiting' then dataset.where(status: 'needs_clarification')
+      when 'delivered_review' then delivered_review_scope(dataset)
       when 'done'    then dataset.where(status: 'done')
       when 'closed'  then dataset.where(status: 'closed')
       else dataset
       end
     end
 
+    # "Delivered but flagged for a human": done issues that gave up
+    # (needs_attention) or whose post-completion hook failed. Shared by the
+    # `delivered_review` tab filter, its count, and the dashboard KPI so the
+    # three never drift apart.
+    def delivered_review_scope(dataset)
+      dataset.where(status: 'done')
+             .where('needs_attention = ? OR post_completion_error IS NOT NULL', true)
+    end
+
     # Counts per tab on the unfiltered dataset, used to populate the
-    # numeric pill on each tab. 6 cheap queries.
-    def tab_counts
+    # numeric pill on each tab. 7 cheap queries.
+    def tab_counts # rubocop:disable Metrics/MethodLength
       ds = issues_dataset
       {
         active: ds.where(status: Dashboard::ACTIVE_STATES).count,
         pending: ds.where(status: 'pending').count,
         errors: ds.where(status: 'error').count,
         waiting: ds.where(status: 'needs_clarification').count,
+        delivered_review: delivered_review_scope(ds).count,
         done: ds.where(status: 'done').count,
         closed: ds.where(status: 'closed').count,
         all: ds.count

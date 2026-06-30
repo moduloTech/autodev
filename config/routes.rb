@@ -30,7 +30,8 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   # /issues/:id (both HTML + .json) → IssuesController#show via respond_to.
   # /issues/:id/reset → IssuesController#reset (raw SQL reset, not AASM).
   # /issues/:id/transition → IssuesController#transition (AASM event!).
-  # /errors → ErrorsController#index (errored + needs_clarification + post_completion_error).
+  # The former /errors page is gone — its three concerns are now the
+  # /issues?tab={errors,waiting,delivered_review} card tabs.
   # /projects → ProjectsController#index (union of YAML config + DB-distinct paths).
   # /projects/:slug → ProjectsController#show (slug = group__project, decoded via project_unslug).
   # / → DashboardController#show (5 datasets aggregated into the Dashboard view).
@@ -51,7 +52,6 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   # job); POST (re)triggers it. Open to every signed-in user.
   get  '/issues/:id/deploy_review', to: 'issues#deploy_review',         constraints: { id: /\d+/ }
   post '/issues/:id/deploy_review', to: 'issues#trigger_deploy_review', constraints: { id: /\d+/ }
-  get  '/errors',                to: 'errors#index'
   get  '/projects',              to: 'projects#index'
   # /projects/new + POST /projects → ProjectsController#new/#create (admin-only
   # project creation, task #9 phase 4 — the DB-side replacement for adding a

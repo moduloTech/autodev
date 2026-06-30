@@ -4,7 +4,6 @@ fr:
   web_nav_errors: Erreurs
   web_nav_all_issues: Toutes les issues
   web_nav_issues: Demandes
-  web_nav_to_watch: À surveiller
   web_nav_conversations: Conversations
   web_nav_projects: Projets
   web_nav_admin_users: Utilisateurs
@@ -64,10 +63,12 @@ fr:
   web_kpi_in_progress_hint: Autodev travaille dessus
   web_kpi_pending: En attente
   web_kpi_pending_hint: Dans la file, autodev les prendra au prochain tour
-  web_kpi_to_watch: À surveiller
-  web_kpi_to_watch_hint: Échec, intervention requise
+  web_kpi_errors: Erreurs
+  web_kpi_errors_hint: Échec, intervention requise
   web_kpi_awaiting_response: En attente d'une réponse
   web_kpi_awaiting_response_hint: Autodev a une question
+  web_kpi_delivered_review: Livrée (à vérifier)
+  web_kpi_delivered_review_hint: Livrée mais à vérifier manuellement
   web_kpi_delivered_this_week: Livrés cette semaine
   web_kpi_delivered_this_week_hint: 7 derniers jours
   web_dashboard_active_section: En traitement
@@ -205,13 +206,8 @@ fr:
   web_issue_screenshots: Screenshots (%{count})
   web_issue_screenshots_dir: Stockés dans
   web_issue_raw_data: Données brutes
-  web_errors_title: À surveiller
-  web_errors_subtitle: Demandes qui ont échoué ou attendent une intervention humaine.
-  web_errors_none: Aucune demande à surveiller pour le moment.
   web_errors_confirm_reset: 'Relancer la demande #%{iid} depuis le début ?'
-  web_errors_banner_one: Une demande a besoin de vous.
-  web_errors_banner_many: "%{count} demandes ont besoin de vous."
-  web_errors_banner_body: Autodev s'arrête et vous appelle quand il rencontre un blocage qu'il ne peut pas résoudre seul.
+  web_errors_confirm_close: 'Clôturer la demande #%{iid} ?'
   web_errors_cause_failure: Échec technique
   web_errors_cause_clarification: Question en attente
   web_errors_cause_post_completion: Erreur post-completion
@@ -228,6 +224,7 @@ fr:
   web_errors_view_detail: Voir le détail
   web_errors_action_retry: Réessayer maintenant
   web_errors_action_view_question: Voir la question
+  web_errors_action_close: Clôturer
   web_errors_requester: 'Demandé par #%{iid}'
   web_project_title: Projet — %{path}
   web_project_config: Configuration <code>app:</code>
@@ -323,8 +320,9 @@ fr:
   web_issues_reset: Réinitialiser
   web_tab_active: En traitement
   web_tab_pending: En attente
-  web_tab_errors: Échecs
+  web_tab_errors: Erreurs
   web_tab_waiting: Question en attente
+  web_tab_delivered_review: Livrée (à vérifier)
   web_tab_done: Livrés
   web_tab_closed: Clôs
   web_tab_all: Tous

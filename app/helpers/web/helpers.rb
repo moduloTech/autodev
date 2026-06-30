@@ -177,7 +177,7 @@ module Web
       { active: Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 },
         pending: counts['pending'] || 0,
         errors: counts['error'] || 0,
-        to_watch: to_watch_count,
+        delivered_review: delivered_review_count,
         awaiting: counts['needs_clarification'] || 0,
         delivered_week: delivered_this_week_count }
     end
@@ -186,15 +186,12 @@ module Web
       issues_dataset.where(status: 'done').where('created_at >= ?', (Date.today - 7).to_s).count
     end
 
-    # Count of the "À surveiller" set — must match ErrorsController#errored_issues:
-    # error / needs_clarification states, a failed post-completion hook, or a
-    # "gave-up done" issue flagged needs_attention. Feeds the dashboard KPI card
-    # and the sidebar badge (both labelled "À surveiller").
-    def to_watch_count
-      issues_dataset.where(
-        "status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL " \
-        'OR needs_attention = ?', true
-      ).count
+    # Count behind the "Livrée (à vérifier)" KPI: done issues that gave up
+    # (needs_attention) or whose post-completion hook failed. Delegates to the
+    # shared IssuesFilter scope so it always matches the /issues?tab=delivered_review
+    # list and its tab pill.
+    def delivered_review_count
+      delivered_review_scope(issues_dataset).count
     end
 
     # Activity counts per day for the past 7 days, oldest first — the data

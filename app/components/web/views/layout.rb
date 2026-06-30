@@ -243,7 +243,7 @@ module Web
       def render_nav_links
         a(href: '/') { t_web(:web_nav_dashboard) }
         plain ' '
-        a(href: '/errors') { t_web(:web_nav_errors) }
+        a(href: '/issues?tab=errors') { t_web(:web_nav_errors) }
         plain ' '
         a(href: '/issues') { t_web(:web_nav_all_issues) }
       end

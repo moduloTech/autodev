@@ -25,14 +25,13 @@ class DashboardController < ApplicationController
     ).call
   end
 
-  # Same query as ErrorsController#index — status in
-  # (error, needs_clarification) OR post_completion_error IS NOT NULL,
-  # id desc. Scoped via issues_dataset for non-admin users.
+  # Failed requests behind the dashboard's red "X demandes ont échoué" banner,
+  # which links to /issues?tab=errors and offers a one-click retry — so it
+  # counts only `error` rows (the retryable ones), not the waiting /
+  # delivered-review concerns that now live in their own tabs. Scoped via
+  # issues_dataset for non-admin users.
   def errored_issues
-    issues_dataset
-      .where("status IN ('error', 'needs_clarification') OR post_completion_error IS NOT NULL")
-      .order(id: :desc)
-      .to_a
+    issues_dataset.where(status: 'error').order(id: :desc).to_a
   end
 
   # AutoSpec drafts in pending_approval on projects the current user

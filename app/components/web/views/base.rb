@@ -50,6 +50,17 @@ module Web
 
         input(type: 'hidden', name: 'authenticity_token', value: @csrf_token)
       end
+
+      # Counts for the sidebar nav badges. Shared by every view that renders the
+      # Sidebar (they all set @kpis from dashboard_kpis); keeps the four
+      # "needs-a-human" badges (errors / waiting / delivered_review) in sync.
+      def sidebar_counts
+        {
+          issues: @kpis[:active], errors: @kpis[:errors],
+          waiting: @kpis[:awaiting], delivered_review: @kpis[:delivered_review],
+          chat: 0
+        }
+      end
     end
   end
 end

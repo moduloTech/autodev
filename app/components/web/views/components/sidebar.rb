@@ -123,8 +123,12 @@ module Web
           { id: 'dashboard', label_key: :web_nav_dashboard,    icon: 'home',      href: '/' },
           { id: 'issues',    label_key: :web_nav_issues,       icon: 'list',      href: '/issues',
             count_key: :issues },
-          { id: 'errors',    label_key: :web_nav_to_watch,     icon: 'alert-tri', href: '/errors',
+          { id: 'errors',    label_key: :web_nav_errors,       icon: 'alert-tri', href: '/issues?tab=errors',
             count_key: :errors, tone: :err },
+          { id: 'waiting',   label_key: :web_tab_waiting,      icon: 'messages', href: '/issues?tab=waiting',
+            count_key: :waiting, tone: :warn },
+          { id: 'delivered_review', label_key: :web_tab_delivered_review, icon: 'alert-tri',
+            href: '/issues?tab=delivered_review', count_key: :delivered_review, tone: :warn },
           { id: 'chat',      label_key: :web_nav_conversations, icon: 'messages',
             href: '/autospec_drafts', count_key: :chat },
           { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '/projects' },
@@ -174,25 +178,32 @@ module Web
         def nav_icon_color(active, tone)
           return 'var(--accent-fg)' if active
           return 'var(--err-500)' if tone == :err
+          return 'var(--warn-500)' if tone == :warn
 
           'var(--text-muted)'
         end
 
-        def render_count_badge(count, active, tone) # rubocop:disable Metrics/MethodLength
-          bg = if tone == :err
-                 'var(--err-bg)'
-               else
-                 active ? 'var(--accent-bg-strong)' : 'var(--paper-2)'
-               end
-          color = if tone == :err
-                    'var(--err-fg)'
-                  else
-                    active ? 'var(--accent-fg)' : 'var(--text-muted)'
-                  end
+        def render_count_badge(count, active, tone)
+          bg = count_badge_bg(active, tone)
+          color = count_badge_color(active, tone)
           span(style: 'font-size: 11px; font-weight: 600; padding: 1px 7px; ' \
                       "border-radius: var(--r-pill); background: #{bg}; color: #{color};") do
             plain count.to_s
           end
+        end
+
+        def count_badge_bg(active, tone)
+          return 'var(--err-bg)' if tone == :err
+          return 'var(--warn-bg)' if tone == :warn
+
+          active ? 'var(--accent-bg-strong)' : 'var(--paper-2)'
+        end
+
+        def count_badge_color(active, tone)
+          return 'var(--err-fg)' if tone == :err
+          return 'var(--warn-fg)' if tone == :warn
+
+          active ? 'var(--accent-fg)' : 'var(--text-muted)'
         end
 
         def render_cta # rubocop:disable Metrics/MethodLength

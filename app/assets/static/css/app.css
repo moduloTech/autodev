@@ -228,6 +228,12 @@ pre { background: var(--code-bg); color: var(--code-fg); padding: 0.7rem; border
 .cause-title { font-size: 13px; font-weight: 600; color: var(--err-fg); margin-bottom: 4px; }
 .cause-body { font-size: 13px; color: var(--text); line-height: 1.55; }
 
+/* Warn-toned alert (pending questions + delivered-to-verify cards) — yellow
+   instead of the red technical-failure variant. */
+.cause-panel--warn { background: var(--warn-bg); }
+.cause-panel--warn .cause-icon-box { color: var(--warn-fg); }
+.cause-panel--warn .cause-title { color: var(--warn-fg); }
+
 .technical-details summary {
   font-size: 12px; color: var(--text-muted); cursor: pointer;
   display: inline-flex; align-items: center; gap: 6px;

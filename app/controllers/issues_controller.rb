@@ -3,7 +3,7 @@
 # Rails-native controller for routes ported off Sinatra. Sinatra still
 # answers any route not declared above the catch-all `mount Web::Server`
 # in config/routes.rb.
-class IssuesController < ApplicationController
+class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLength
   # Web::Helpers is the same module Sinatra mixes into Web::Server via
   # `helpers Web::Helpers`. Pulled in here so we can call find_issue,
   # activity_events_dataset, dashboard_kpis, web_locale, etc. with
@@ -101,22 +101,25 @@ class IssuesController < ApplicationController
   # just authentication, so only someone who works on the project can close
   # its tickets. Fires the AASM `close` event (terminal state; the poller
   # skips any status != 'pending'), then clears the needs_attention flag so a
-  # closed ticket no longer shows under "À surveiller". Reopen via #reset.
+  # closed ticket no longer shows under the delivered_review tab. Reopen via
+  # #reset. Honors a safe `return_to` so the delivered_review card can bounce
+  # back to its list for serial triage (defaults to the issue detail page).
   def close
     issue = find_issue(params[:id])
     return head :not_found unless issue
     return head :forbidden unless can_close?(issue)
-    return redirect_to "/issues/#{issue.id}" unless issue.may_close?
+    return redirect_to safe_return_to || "/issues/#{issue.id}" unless issue.may_close?
 
     close_issue!(issue)
-    redirect_to "/issues/#{issue.id}"
+    redirect_to safe_return_to || "/issues/#{issue.id}"
   end
 
   private
 
   # Honor a `return_to` only when it's an in-app relative path (single leading
-  # slash, no scheme/host/protocol-relative form) so the errors page can bounce
-  # the reset back to /errors for mass retries without opening a redirect hole.
+  # slash, no scheme/host/protocol-relative form) so the watch-card tabs can
+  # bounce a reset/close back to their list for serial triage without opening a
+  # redirect hole.
   def safe_return_to
     target = params[:return_to].to_s
     target if target.match?(%r{\A/(?![/\\])})
@@ -146,8 +149,19 @@ class IssuesController < ApplicationController
     issues, total, total_pages, page = paginate(filter_issues(params), page_for(params), per_page)
     ::Web::Views::Issues.new(
       **pagination_kwargs(issues, total, total_pages, page, per_page),
+      closable_ids: closable_ids_for(issues),
       **filters_kwargs, **view_kwargs
     ).call
+  end
+
+  # Issue ids on the current page the signed-in user may close — drives the
+  # "Clôturer" CTA on delivered_review cards. Only computed for that tab (the
+  # only place the button appears) to keep the per-row Project lookup off every
+  # other listing.
+  def closable_ids_for(issues)
+    return Set.new unless tab_param(params) == 'delivered_review'
+
+    issues.select { |issue| can_close?(issue) }.to_set(&:id)
   end
 
   def pagination_kwargs(issues, total, total_pages, page, per_page)

@@ -4,12 +4,24 @@ module Web
   module Views
     # GET /issues — sidebar + topbar + tab bar + dense table (desktop) /
     # stacked cards (mobile). Mirrors design/screen-issues.jsx.
+    #
+    # The errors / waiting / delivered_review tabs replace the old /errors
+    # page: instead of the dense table they render rich "needs-a-human" cards
+    # (cause panel + message + CTA) via the WatchCards mixin.
     class Issues < Base # rubocop:disable Metrics/ClassLength
+      include Concerns::WatchCards
+
+      # Tabs rendered as watch cards rather than the dense table.
+      CARD_TABS = %w[errors waiting delivered_review].freeze
+      private_constant :CARD_TABS
+
       TABS = [
         { id: 'active',  label_key: :web_tab_active,  count_key: :active },
         { id: 'pending', label_key: :web_tab_pending, count_key: :pending },
         { id: 'errors',  label_key: :web_tab_errors,  count_key: :errors,  tone: :err },
         { id: 'waiting', label_key: :web_tab_waiting, count_key: :waiting, tone: :warn },
+        { id: 'delivered_review', label_key: :web_tab_delivered_review,
+          count_key: :delivered_review, tone: :warn },
         { id: 'done',    label_key: :web_tab_done,    count_key: :done },
         { id: 'closed',  label_key: :web_tab_closed,  count_key: :closed },
         { id: 'all',     label_key: :web_tab_all,     count_key: :all }
@@ -17,8 +29,8 @@ module Web
       private_constant :TABS
 
       # rubocop:disable Metrics/ParameterLists
-      def initialize(issues:, total:, total_pages:, page:, per_page:, filters:, # rubocop:disable Metrics/ParameterLists
-                     tab:, tab_counts:, kpis:, **)
+      def initialize(issues:, total:, total_pages:, page:, per_page:, filters:, # rubocop:disable Metrics/ParameterLists,Metrics/MethodLength
+                     tab:, tab_counts:, kpis:, closable_ids: Set.new, **)
         super(**)
         @issues = issues
         @total = total
@@ -29,6 +41,7 @@ module Web
         @tab = tab
         @tab_counts = tab_counts
         @kpis = kpis
+        @closable_ids = closable_ids
       end
       # rubocop:enable Metrics/ParameterLists
 
@@ -42,6 +55,9 @@ module Web
               div(class: 'issues-content', style: 'flex: 1; overflow: auto;') do
                 if @issues.empty?
                   render_empty
+                elsif card_tab?
+                  render_watch_cards
+                  render_pager if @total_pages > 1
                 else
                   render_table
                   render_cards
@@ -55,10 +71,14 @@ module Web
 
       private
 
+      def card_tab?
+        CARD_TABS.include?(@tab)
+      end
+
       def render_sidebar
         render Components::Sidebar.new(
-          active: 'issues', locale: web_locale, request_path: @request_path,
-          counts: { issues: @kpis[:active], errors: @kpis[:to_watch], chat: 0 },
+          active: CARD_TABS.include?(@tab) ? @tab : 'issues', locale: web_locale, request_path: @request_path,
+          counts: sidebar_counts,
           translator: ->(key, **vars) { t_web(key, **vars) }, admin: @current_user_admin,
           current_user_email: @current_user_email, csrf_token: @csrf_token
         )
