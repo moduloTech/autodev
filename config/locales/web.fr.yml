@@ -2,13 +2,16 @@
 fr:
   web_nav_dashboard: Tableau de bord
   web_nav_errors: Erreurs
-  web_nav_all_issues: Toutes les issues
   web_nav_issues: Demandes
   web_nav_conversations: Conversations
   web_nav_projects: Projets
   web_nav_admin_users: Utilisateurs
   web_nav_admin_jobs: Jobs
   web_nav_help: Aide
+  web_nav_section_autodev: Autodev
+  web_nav_section_autospec: AutoSpec
+  web_nav_section_configuration: Configuration
+  web_nav_section_admin: Admin
   web_help_title: Guide utilisateur
   web_help_subtitle: Comment confier une demande à Autodev et suivre son travail
   web_help_project_selector: "Afficher les labels du projet :"

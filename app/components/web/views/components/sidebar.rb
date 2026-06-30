@@ -119,34 +119,59 @@ module Web
             'border: 1px solid var(--border); padding: 1px 5px; border-radius: 4px;'
         end
 
-        ITEMS = [
-          { id: 'dashboard', label_key: :web_nav_dashboard,    icon: 'home',      href: '/' },
-          { id: 'issues',    label_key: :web_nav_issues,       icon: 'list',      href: '/issues',
-            count_key: :issues },
-          { id: 'errors',    label_key: :web_nav_errors,       icon: 'alert-tri', href: '/issues?tab=errors',
-            count_key: :errors, tone: :err },
-          { id: 'waiting',   label_key: :web_tab_waiting,      icon: 'messages', href: '/issues?tab=waiting',
-            count_key: :waiting, tone: :warn },
-          { id: 'delivered_review', label_key: :web_tab_delivered_review, icon: 'alert-tri',
-            href: '/issues?tab=delivered_review', count_key: :delivered_review, tone: :warn },
-          { id: 'chat',      label_key: :web_nav_conversations, icon: 'messages',
-            href: '/autospec_drafts', count_key: :chat },
-          { id: 'projects',  label_key: :web_nav_projects, icon: 'folder', href: '/projects' },
-          { id: 'help',      label_key: :web_nav_help,    icon: 'info', href: '/help' }
+        # Nav grouped into labelled sections. The first section has no header
+        # (label_key: nil); `admin: true` hides the whole section (header +
+        # items) from non-admins. Item ids stay stable so `active` highlighting
+        # and the count badges are unaffected.
+        SECTIONS = [
+          { label_key: nil, items: [
+            { id: 'dashboard', label_key: :web_nav_dashboard, icon: 'home', href: '/' },
+            { id: 'help',      label_key: :web_nav_help,      icon: 'info', href: '/help' }
+          ] },
+          { label_key: :web_nav_section_autodev, items: [
+            { id: 'issues', label_key: :web_nav_issues, icon: 'list', href: '/issues',
+              count_key: :issues },
+            { id: 'errors', label_key: :web_nav_errors, icon: 'alert-tri', href: '/issues?tab=errors',
+              count_key: :errors, tone: :err },
+            { id: 'waiting', label_key: :web_tab_waiting, icon: 'messages', href: '/issues?tab=waiting',
+              count_key: :waiting, tone: :warn },
+            { id: 'delivered_review', label_key: :web_tab_delivered_review, icon: 'alert-tri',
+              href: '/issues?tab=delivered_review', count_key: :delivered_review, tone: :warn }
+          ] },
+          { label_key: :web_nav_section_autospec, items: [
+            { id: 'chat', label_key: :web_nav_conversations, icon: 'messages',
+              href: '/autospec_drafts', count_key: :chat }
+          ] },
+          { label_key: :web_nav_section_configuration, items: [
+            { id: 'projects', label_key: :web_nav_projects, icon: 'folder', href: '/projects' }
+          ] },
+          { label_key: :web_nav_section_admin, admin: true, items: [
+            { id: 'admin', label_key: :web_nav_admin_users, icon: 'users', href: '/admin/users' },
+            { id: 'admin_health', label_key: :web_nav_admin_health, icon: 'bell', href: '/admin/health' },
+            { id: 'jobs', label_key: :web_nav_admin_jobs, icon: 'settings', href: '/admin/jobs' },
+            { id: 'admin_help', label_key: :web_nav_admin_help, icon: 'info', href: '/admin/help' }
+          ] }
         ].freeze
-        # Appended after ITEMS when the caller passes `admin: true`. Lives in a
-        # separate constant so non-admin sidebars stay byte-identical to before.
-        ADMIN_ITEMS = [
-          { id: 'admin', label_key: :web_nav_admin_users, icon: 'users', href: '/admin/users' },
-          { id: 'admin_health', label_key: :web_nav_admin_health, icon: 'bell', href: '/admin/health' },
-          { id: 'jobs', label_key: :web_nav_admin_jobs, icon: 'settings', href: '/admin/jobs' },
-          { id: 'admin_help', label_key: :web_nav_admin_help, icon: 'info', href: '/admin/help' }
-        ].freeze
-        private_constant :ITEMS, :ADMIN_ITEMS
+        private_constant :SECTIONS
 
         def render_nav_items
-          items = @admin ? ITEMS + ADMIN_ITEMS : ITEMS
-          items.each { |item| render_nav_item(item) }
+          visible = SECTIONS.reject { |section| section[:admin] && !@admin }
+          visible.each_with_index do |section, idx|
+            render_section_separator unless idx.zero?
+            render_section_label(section[:label_key]) if section[:label_key]
+            section[:items].each { |item| render_nav_item(item) }
+          end
+        end
+
+        def render_section_separator
+          div(style: 'height: 1px; background: var(--border); margin: 10px 6px 2px;')
+        end
+
+        def render_section_label(label_key)
+          div(style: 'font-size: 10px; font-weight: 600; letter-spacing: 0.06em; ' \
+                     'text-transform: uppercase; color: var(--text-muted); padding: 2px 8px 2px;') do
+            @t.call(label_key)
+          end
         end
 
         def render_nav_item(item) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength

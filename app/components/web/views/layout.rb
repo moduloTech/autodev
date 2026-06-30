@@ -240,12 +240,24 @@ module Web
         end
       end
 
+      # Horizontal fallback nav for centered-layout pages (no sidebar). Mirrors
+      # the sidebar's section order — (Tableau de bord · Aide) | Demandes |
+      # Conversations | Projets — with a divider between groups. Admin links are
+      # omitted (this nav carries no admin context).
       def render_nav_links
         a(href: '/') { t_web(:web_nav_dashboard) }
         plain ' '
-        a(href: '/issues?tab=errors') { t_web(:web_nav_errors) }
-        plain ' '
-        a(href: '/issues') { t_web(:web_nav_all_issues) }
+        a(href: '/help') { t_web(:web_nav_help) }
+        render_nav_links_sep
+        a(href: '/issues') { t_web(:web_nav_issues) }
+        render_nav_links_sep
+        a(href: '/autospec_drafts') { t_web(:web_nav_conversations) }
+        render_nav_links_sep
+        a(href: '/projects') { t_web(:web_nav_projects) }
+      end
+
+      def render_nav_links_sep
+        span(style: 'color: var(--text-muted); margin: 0 0.5rem;') { '|' }
       end
 
       def render_lang_switcher
