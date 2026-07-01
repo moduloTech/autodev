@@ -34,17 +34,31 @@ class DashboardResetTest < Minitest::Test
 
     out = capture_io { Dashboard.reset({ 'database_url' => 'sqlite://:memory:' }, @pastel) }.first
 
-    assert_match(/2 issue\(s\) remise\(s\) en pending/, out)
+    assert_match(/2 issue\(s\) relancée\(s\)/, out)
   end
 
-  def test_resets_all_errors_db_state
-    create_issue(issue_iid: 800, status: 'error', error_message: 'fail1', retry_count: 2,
-                 next_retry_at: Time.now.to_s)
+  def test_resets_pre_mr_error_to_pending_with_next_retry_stamped
+    # A pre-MR error (no mr_iid) restarts as pending. next_retry_at MUST be
+    # stamped, otherwise dispatch_retries skips it and the row is orphaned in
+    # pending forever (task #26 — the GitLab label is still label_doing so
+    # dispatch_new_issues never re-discovers it either).
+    create_issue(issue_iid: 800, status: 'error', error_message: 'fail1', retry_count: 2)
     capture_io { Dashboard.reset({ 'database_url' => 'sqlite://:memory:' }, @pastel) }
 
-    assert_equal 'pending', Issue.find_by(issue_iid: 800).status
-    assert_equal 0, Issue.find_by(issue_iid: 800).retry_count
-    assert_nil Issue.find_by(issue_iid: 800).error_message
+    issue = Issue.find_by(issue_iid: 800)
+
+    assert_equal 'pending', issue.status
+    assert_nil issue.error_message
+    refute_nil issue.next_retry_at, 'next_retry_at must be stamped so dispatch_retries re-enqueues it'
+  end
+
+  def test_resets_error_with_mr_to_checking_pipeline
+    # An error that already produced an MR resumes at checking_pipeline, where
+    # dispatch_pipelines picks it up — no need to re-implement from scratch.
+    create_issue(issue_iid: 805, status: 'error', error_message: 'pipeline fail', mr_iid: 4321)
+    capture_io { Dashboard.reset({ 'database_url' => 'sqlite://:memory:' }, @pastel) }
+
+    assert_equal 'checking_pipeline', Issue.find_by(issue_iid: 805).status
   end
 
   def test_resets_specific_iid
