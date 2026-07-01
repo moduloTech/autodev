@@ -3,6 +3,13 @@
 # Clone-and-push helpers used by IssueProcessor, MrFixer, and PipelineMonitor.
 # Mixin: expects @gitlab_url, @token, @project_path, @project_config, plus `log` and `log_error` helpers.
 module RepoOperations
+  # GitLab rejects a push whose received pack exceeds this (its `receive.maxInputSize`,
+  # 50 MiB by default). We size the objects a push would send *before* sending them,
+  # so an oversized commit fails fast with an actionable message naming the culprit
+  # files, instead of an opaque "pack exceeds maximum allowed size" from the server
+  # after a wasted round-trip (and its --force-with-lease retry).
+  MAX_PUSH_PACK_BYTES = 50 * 1024 * 1024
+
   private
 
   def clone_and_checkout(work_dir, branch)
@@ -27,6 +34,7 @@ module RepoOperations
   end
 
   def push_with_lease_fallback(work_dir, branch, upstream: false)
+    check_push_size!(work_dir)
     log_push_diagnostics(work_dir)
     _out, _err, ok = run_cmd_status(push_cmd(branch, upstream: upstream), chdir: work_dir)
     return if ok
@@ -36,6 +44,40 @@ module RepoOperations
   rescue GitError => e
     log_large_blobs(work_dir) if e.message.include?('pack exceeds maximum allowed size')
     raise
+  end
+
+  # Objects reachable from HEAD but not from any remote-tracking ref are exactly
+  # what a push would upload — for the initial push (new branch) and for an MR
+  # re-push alike (already-pushed commits are excluded via origin/<branch>). If
+  # their on-disk (compressed) size clears GitLab's pack limit, abort now.
+  def check_push_size!(work_dir)
+    objs = push_object_sizes(work_dir)
+    total = objs.sum { |size, _| size }
+    return if total <= MAX_PUSH_PACK_BYTES
+
+    top = objs.sort_by { |size, _| -size }.first(10)
+    raise ImplementationError, oversized_push_message(total, top)
+  end
+
+  # Sizes of the objects a push would upload. Isolated so a probe failure returns
+  # [] (push proceeds) — the rescue must NOT wrap the ImplementationError raise in
+  # check_push_size!, or it would swallow the very abort it is meant to trigger.
+  def push_object_sizes(work_dir)
+    collect_objects(work_dir, %w[HEAD --not --remotes])
+  rescue StandardError => e
+    log_error "check_push_size! probe skipped: #{e.message}"
+    []
+  end
+
+  def oversized_push_message(total, top)
+    listing = top.map { |size, path| format('%<mib>8.1f MiB  %<path>s', mib: size / 1_048_576.0, path: path) }
+                 .join("\n")
+    format(
+      'Push aborted: this commit adds %<total>.1f MiB of new objects, over GitLab\'s %<limit>d MiB pack ' \
+      'limit. This is almost always a build artifact, dump or vendored dependency committed by mistake — ' \
+      "add it to .gitignore and drop it from the commit. Largest new files:\n%<listing>s",
+      total: total / 1_048_576.0, limit: MAX_PUSH_PACK_BYTES / 1_048_576, listing: listing
+    )
   end
 
   def push_cmd(branch, upstream:, force: false)
@@ -56,26 +98,29 @@ module RepoOperations
     log_error "log_push_diagnostics failed: #{e.message}"
   end
 
-  # Top N blobs by on-disk size — surfaces the culprit when a push is rejected
-  # for exceeding the server-side pack limit (e.g. a committed vendor/ directory).
+  # Top N blobs by on-disk size across the whole repo — the safety-net that still
+  # surfaces the culprit when a push slips past check_push_size! and the server
+  # rejects it (e.g. a committed vendor/ directory).
   def log_large_blobs(work_dir, limit: 10)
-    top = collect_top_blobs(work_dir, limit)
+    top = collect_objects(work_dir, %w[--all]).sort_by { |size, _| -size }.first(limit)
     formatted = top.map { |size, path| format('%<size>12d  %<path>s', size: size, path: path) }.join("\n")
     log "Top #{top.size} blobs by on-disk size:\n#{formatted}"
   rescue StandardError => e
     log_error "log_large_blobs failed: #{e.message}"
   end
 
-  def collect_top_blobs(work_dir, limit)
+  # [[on_disk_size, path], ...] for every blob reachable from the given rev-list
+  # revs (e.g. %w[--all] for the whole repo, %w[HEAD --not --remotes] for a push).
+  def collect_objects(work_dir, revs)
     raw, waiters = Open3.pipeline_r(
-      %w[git rev-list --objects --all],
+      %w[git rev-list --objects] + revs,
       ['git', 'cat-file', '--batch-check=%(objecttype) %(objectsize:disk) %(rest)'],
       chdir: work_dir
     )
     blobs = raw.each_line.filter_map { |line| parse_blob_line(line) }
     raw.close
     waiters.each(&:join)
-    blobs.sort_by { |size, _| -size }.first(limit)
+    blobs
   end
 
   def parse_blob_line(line)
