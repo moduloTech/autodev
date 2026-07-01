@@ -156,6 +156,7 @@ fr:
   web_issue_confirm_close: Clôturer ce ticket ? Il passera dans l'onglet « Clôs ».
   web_issue_deploy_review: Redéployer la review
   web_issue_deploy_review_play: Déployer la review
+  web_issue_deploy_review_submitting: Déclenchement…
   web_issue_confirm_deploy_review: Redéployer l'environnement de review (job CI deploy_review) ?
   web_issue_deploy_review_no_branch: L'issue n'a pas encore de branche.
   web_issue_deploy_review_no_pipeline: Aucun pipeline pour l'instant.

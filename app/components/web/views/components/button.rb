@@ -30,10 +30,10 @@ module Web
         }.freeze
 
         # rubocop:disable Metrics/ParameterLists
-        def initialize( # rubocop:disable Lint/MissingSuper
+        def initialize( # rubocop:disable Lint/MissingSuper,Metrics/MethodLength
           kind: :secondary, size: :md, type: 'button',
           icon: nil, icon_right: nil, full: false, disabled: false,
-          href: nil, extra_style: nil
+          href: nil, extra_style: nil, data: nil
         )
           @kind = kind
           @size = SIZES[size] || SIZES[:md]
@@ -45,18 +45,24 @@ module Web
           @disabled = disabled
           @href = href
           @extra_style = extra_style
+          @data = data
         end
         # rubocop:enable Metrics/ParameterLists
 
         def view_template(&)
           if @href
-            a(href: @href, class: 'btn', style: full_style) { render_inner(&) }
+            a(href: @href, class: 'btn', style: full_style, **data_attr) { render_inner(&) }
           else
-            button(type: @type, disabled: @disabled, class: 'btn', style: full_style) { render_inner(&) }
+            button(type: @type, disabled: @disabled, class: 'btn', style: full_style, **data_attr) { render_inner(&) }
           end
         end
 
         private
+
+        # data-* passthrough (e.g. turbo-submits-with); omitted entirely when nil.
+        def data_attr
+          @data ? { data: @data } : {}
+        end
 
         def render_inner(&block)
           render(@icon) if @icon

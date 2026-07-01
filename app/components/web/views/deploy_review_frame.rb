@@ -61,7 +61,14 @@ module Web
         form(method: 'post', action: src, 'data-turbo-frame' => '_top',
              data: { confirm: t_web(:web_issue_confirm_deploy_review) }) do
           csrf_input_tag
+          # data-turbo-submits-with disables the button and swaps its label for
+          # the duration of the (Turbo-driven) submission — a proportionate,
+          # confirm-safe guard against an accidental double-click re-triggering
+          # the job. It only fires once the confirm dialog is accepted, so a
+          # cancelled dialog never leaves the button stuck. (Decision: task #18 —
+          # no server-side lock, this is the sole defense-in-depth kept.)
           render Components::Button.new(kind: :secondary, size: :md, full: true, type: 'submit',
+                                        data: { turbo_submits_with: t_web(:web_issue_deploy_review_submitting) },
                                         icon: Components::Icon.new(name: 'rocket', size: 13)) do
             t_web(button_label_key)
           end

@@ -156,6 +156,7 @@ en:
   web_issue_confirm_close: Close this ticket? It will move to the "Closed" tab.
   web_issue_deploy_review: Redeploy review
   web_issue_deploy_review_play: Deploy review
+  web_issue_deploy_review_submitting: Triggering…
   web_issue_confirm_deploy_review: Redeploy the review environment (deploy_review CI job)?
   web_issue_deploy_review_no_branch: The issue has no branch yet.
   web_issue_deploy_review_no_pipeline: No pipeline yet.
