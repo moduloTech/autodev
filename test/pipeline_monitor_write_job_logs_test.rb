@@ -73,6 +73,38 @@ class PipelineMonitorWriteJobLogsTest < Minitest::Test
     end
   end
 
+  def test_writes_ascii_8bit_trace_with_accented_bytes
+    Dir.mktmpdir do |log_dir|
+      job = FakeJob.new(1, 'rspec', 'test')
+      # Mimics a GitLab trace: valid UTF-8 bytes (é, €) tagged as ASCII-8BIT,
+      # which makes a naive File.write raise Encoding::UndefinedConversionError.
+      @traces[job] = "déployé 5€\n".dup.force_encoding('ASCII-8BIT')
+
+      @monitor.send(:write_job_logs, [job], log_dir)
+
+      content = File.read(File.join(log_dir, 'rspec.log'))
+
+      assert_equal "déployé 5€\n", content
+      assert_equal Encoding::UTF_8, content.encoding
+    end
+  end
+
+  def test_writes_trace_with_invalid_bytes
+    Dir.mktmpdir do |log_dir|
+      job = FakeJob.new(1, 'rspec', 'test')
+      # A lone \xC3 byte is not valid UTF-8 — must be scrubbed, not crash.
+      @traces[job] = "bad\xC3byte".dup.force_encoding('ASCII-8BIT')
+
+      @monitor.send(:write_job_logs, [job], log_dir)
+
+      content = File.read(File.join(log_dir, 'rspec.log'))
+
+      assert_predicate content, :valid_encoding?
+      assert_includes content, 'bad'
+      assert_includes content, 'byte'
+    end
+  end
+
   def test_hash_style_jobs
     Dir.mktmpdir do |log_dir|
       job = { 'id' => 10, 'name' => 'jest', 'stage' => 'test' }

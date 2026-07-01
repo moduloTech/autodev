@@ -56,7 +56,11 @@ class PipelineMonitor
       stage = job.respond_to?(:stage) ? job.stage : job['stage']
       trace = fetch_job_trace(job)
       filename = "#{name.gsub(/[^a-zA-Z0-9_-]/, '_')}.log"
-      File.write(File.join(log_dir, filename), trace)
+      # GitLab returns the trace as ASCII-8BIT (raw bytes); accented chars / € make
+      # File.write raise Encoding::UndefinedConversionError. Force-decode as UTF-8
+      # and scrub any genuinely invalid bytes so the log is always written.
+      clean = trace.dup.force_encoding('UTF-8').scrub
+      File.write(File.join(log_dir, filename), clean)
       { name: name, stage: stage, log_path: "tmp/ci_logs/#{filename}" }
     end
 
