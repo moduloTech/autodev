@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Functional help doc (`/help`): corrected the "Envoyer la demande" section.** The guide described a single **Créer le ticket** button that "proposes a destination" — but no such button exists. The editor shows the submit button(s) directly labelled by destination: project owners see two (**Envoyer à un dev** + **Envoyer à AutoDev**), other members see one (**Envoyer à un dev**). Reworded to match the real UI (`web_autospec_submit_human` / `web_autospec_submit_autodev`) and removed the phantom button. Reported by an AutoSpec user (Autodev task #22).
 - **CI job logs with non-UTF-8 bytes no longer crash the pipeline fixer.** `PipelineMonitor::ApiHelpers#write_single_job_log` wrote the GitLab trace straight to disk with `File.write`, but the trace comes back tagged `ASCII-8BIT` (raw bytes); a job log containing accented characters or `€` raised `Encoding::UndefinedConversionError` ("\xC3" from ASCII-8BIT to UTF-8). Because the write failed on every pipeline-fix attempt, the issue was wrongly counted as `stagnation_pipeline` and delivered with an alert. The trace is now force-decoded as UTF-8 and scrubbed (`trace.dup.force_encoding('UTF-8').scrub`) before writing, so valid UTF-8 round-trips intact and genuinely invalid bytes become `�` instead of crashing. Trigger ticket: powerpanne/core#15819. New tests in `pipeline_monitor_write_job_logs_test.rb` cover an ASCII-8BIT trace with accented bytes and one with a lone invalid byte.
 
 ## [1.0.0-alpha.33] - 2026-06-30

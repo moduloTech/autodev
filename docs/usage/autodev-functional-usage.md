@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-06-30
+date: 2026-07-01
 lang: fr
 documentclass: article
 papersize: a4
@@ -330,10 +330,12 @@ L'éditeur a deux colonnes : à gauche votre demande en cours de rédaction, à 
 
 ## Envoyer la demande
 
-Quand la demande vous convient, le bouton **Créer le ticket** propose une destination :
+Quand la demande vous convient, envoyez-la avec le bouton d'envoi situé en haut de l'éditeur. Son libellé indique directement la destination :
 
 - **Envoyer à un dev** — le ticket est créé sur GitLab pour qu'un développeur s'en occupe.
-- **Envoyer à Autodev** — le ticket est créé *et* confié à Autodev, qui le prendra en charge automatiquement. Cette option est réservée aux responsables du projet.
+- **Envoyer à Autodev** — le ticket est créé *et* confié à Autodev, qui le prendra en charge automatiquement.
+
+Les responsables du projet voient les deux boutons et choisissent la destination ; les autres membres voient uniquement **Envoyer à un dev**.
 
 ## La validation
 
