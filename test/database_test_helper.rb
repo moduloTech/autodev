@@ -21,7 +21,7 @@ module DatabaseTestHelper
     attr_accessor :db_initialized, :iid_counter
   end
 
-  def setup_database # rubocop:disable Metrics/AbcSize
+  def setup_database
     # In-memory SQLite is per-connection, so any reconnect drops the
     # schema the test_helper.rb migration created. Re-run the migration
     # idempotently (every `create_table` is `if_not_exists: true`) and
@@ -31,14 +31,31 @@ module DatabaseTestHelper
     ActiveRecord::Base.establish_connection(primary)
     paths = Array(primary.migrations_paths || 'db/migrate').map { |p| Rails.root.join(p).to_s }
     ActiveRecord::MigrationContext.new(paths).migrate
-    ActiveRecord::Base.connection.execute('DELETE FROM activity_events')
-    ActiveRecord::Base.connection.execute('DELETE FROM issues')
-    # PR1+ of the users-rollout chantier wires every AASM transition on
-    # Issue to an `audit_logs` row. Legacy DB tests fire many transitions
-    # per test and inherit `Minitest::Test` (not `ActiveSupport::TestCase`),
-    # so they don't get the rails_helper teardown. Wipe here so a stray
-    # batch doesn't leak into AuditTest's `AuditLog.count` assertion.
-    ActiveRecord::Base.connection.execute('DELETE FROM audit_logs')
+    wipe_business_tables
+  end
+
+  # Wipe the tables these (non-transactional) tests write to. Called at setup
+  # AND at teardown: because Minitest::Test tests don't run inside a rolled-back
+  # transaction like ActiveSupport::TestCase, a test that leaves rows behind
+  # (e.g. an issue in `status: 'error'`) pollutes whatever runs next. Cleaning
+  # up at setup only protected each test from its predecessors; wiping at
+  # teardown too stops it leaking into successors — including transactional
+  # tests that read global issue state (e.g. HealthReport's issues_error check),
+  # which otherwise flaked depending on Minitest's run order. See task #25.
+  def wipe_business_tables
+    %w[audit_logs activity_events issues].each do |table|
+      ActiveRecord::Base.connection.execute("DELETE FROM #{table}")
+    end
+  rescue ActiveRecord::StatementInvalid, ActiveRecord::ConnectionNotEstablished
+    nil # table/connection not present in this test's context — nothing to clean
+  end
+
+  # Minitest lifecycle hook (chains via super); runs after every test that
+  # includes this module, so the wipe above happens whether or not the test
+  # defines its own teardown.
+  def after_teardown
+    super
+    wipe_business_tables
   end
 
   def create_issue(overrides = {})
