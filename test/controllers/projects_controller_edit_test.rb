@@ -41,7 +41,7 @@ class ProjectsControllerEditTest < ActionDispatch::IntegrationTest
     sign_in @member
     get '/projects/group__proj/edit'
 
-    assert_match 'Défaut : 600', response.body # dc_timeout baked default
+    assert_match 'Défaut : 1800', response.body # dc_timeout baked default
     assert_match 'Aide à la configuration', response.body # right-hand help panel
   end
 

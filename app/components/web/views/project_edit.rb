@@ -34,7 +34,7 @@ module Web
       # fixed value (target_branch, labels, prompts, agents) get a descriptive
       # hint via HINT_KEYS instead.
       DEFAULT_HINT_VALUES = {
-        dc_timeout: 600, max_retries: 1, retry_backoff: 10, stagnation_threshold: 5,
+        dc_timeout: 1800, max_retries: 1, retry_backoff: 10, stagnation_threshold: 5,
         clone_depth: 1, post_completion_timeout: 300,
         parallel_agents: 'false', split_implementation: 'false'
       }.freeze

@@ -45,7 +45,7 @@ module Config # rubocop:disable Metrics/ModuleLength
     'gitlab_token' => nil,
     'poll_interval' => 300,
     'max_workers' => 3,
-    'dc_timeout' => 600,
+    'dc_timeout' => 1800,
     'max_retries' => 1,
     'retry_backoff' => 10,
     'pickup_delay' => 600,

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Default `dc_timeout` raised from 600 s (10 min) to 1800 s (30 min).** A 10-minute cap was too tight for an agentic implementation loop on a full feature: `danger-claude -p` was killed mid-work (`ProcessRunner#handle_timeout` → `ImplementationError`), the issue dropped to `error`, and each retry re-ran the same oversized prompt and timed out again — the most frequent failure mode on the `core` project (trigger ticket: powerpanne/core#16207). The baked `Config::DEFAULTS['dc_timeout']` is the effective global fallback (the field is in `IGNORED_GLOBAL_FIELDS`, so a `config.yml` global is ignored), and `process_runner.rb` still lets a per-project value override it. The dashboard project-edit form's "Défaut : N" hint was updated to match. For projects that need more headroom, prefer a per-project `dc_timeout` and/or enabling `split_implementation` (code + tests in two passes, each with its own budget) over pushing the global default higher.
+
 ### Fixed
 
 - **Functional help doc (`/help`): corrected the "Envoyer la demande" section.** The guide described a single **Créer le ticket** button that "proposes a destination" — but no such button exists. The editor shows the submit button(s) directly labelled by destination: project owners see two (**Envoyer à un dev** + **Envoyer à AutoDev**), other members see one (**Envoyer à un dev**). Reworded to match the real UI (`web_autospec_submit_human` / `web_autospec_submit_autodev`) and removed the phantom button. Reported by an AutoSpec user (Autodev task #22).
