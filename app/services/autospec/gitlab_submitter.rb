@@ -137,10 +137,9 @@ module Autospec
     end
 
     # The gitlab gem returns BaseModel objects with attribute readers;
-    # tests pass plain Structs / OpenStructs. Same trick as
-    # Autospec::Chat#attr.
+    # tests pass plain Structs / OpenStructs. Delegates to the canonical accessor.
     def extract(obj, key)
-      obj.respond_to?(key) ? obj.public_send(key) : obj[key.to_s]
+      GitlabHelpers.field(obj, key)
     end
   end
 end

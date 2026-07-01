@@ -118,13 +118,14 @@ module Autospec
     end
 
     # The SDK returns BaseModel objects with attribute readers; tests pass
-    # plain OpenStructs / hashes. These two helpers normalise across both.
+    # plain OpenStructs / hashes. These two helpers normalise across both via
+    # the canonical GitlabHelpers.field accessor (generic reader-or-key lookup).
     def block_type(block)
-      block.respond_to?(:type) ? block.type.to_s : block['type'].to_s
+      GitlabHelpers.field(block, :type).to_s
     end
 
     def block_text(block)
-      block.respond_to?(:text) ? block.text : block['text']
+      GitlabHelpers.field(block, :text)
     end
 
     def serialise_tool_use(block)
@@ -137,7 +138,7 @@ module Autospec
     end
 
     def attr(block, key)
-      block.respond_to?(key) ? block.public_send(key) : block[key.to_s]
+      GitlabHelpers.field(block, key)
     end
 
     def stringify_keys(value)

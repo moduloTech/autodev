@@ -9,7 +9,7 @@ class PipelineMonitor
     private
 
     def compute_pipeline_signature(failed_jobs)
-      names = failed_jobs.map { |j| j.respond_to?(:name) ? j.name : j['name'] }.sort
+      names = failed_jobs.map { |j| GitlabHelpers.field(j, :name) }.sort
       Digest::SHA256.hexdigest(names.join(','))
     end
 

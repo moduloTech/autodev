@@ -81,7 +81,7 @@ module DiscussionSnapshot
     author = safe_call(note, :author)
     return nil unless author
 
-    author.respond_to?(:[]) ? author['username'] : safe_call(author, :username)
+    GitlabHelpers.field(author, :username)
   end
 
   def self.position_str(note)

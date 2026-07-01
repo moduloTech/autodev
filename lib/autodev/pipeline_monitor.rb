@@ -53,7 +53,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   end
 
   def dispatch_status(issue, pipeline)
-    status = pipeline.respond_to?(:status) ? pipeline.status : pipeline['status']
+    status = GitlabHelpers.field(pipeline, :status)
     log "Pipeline ##{pipeline_id(pipeline)} status: #{status}"
     case status
     when *RUNNING_STATUSES then log "Pipeline still running for MR !#{issue.mr_iid}, skipping"

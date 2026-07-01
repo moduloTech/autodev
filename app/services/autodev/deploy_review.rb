@@ -155,9 +155,9 @@ module Autodev
     end
 
     # GitLab gem objects answer to readers; plain Hashes (tests, cached rows)
-    # answer to string keys. Tolerate both.
+    # answer to string/symbol keys. Delegates to the canonical accessor.
     def field(obj, name)
-      obj.respond_to?(name) ? obj.public_send(name) : obj[name.to_s]
+      GitlabHelpers.field(obj, name)
     end
 
     def job_id(job)

@@ -92,12 +92,11 @@ module Autospec
     end
 
     def issue_title(issue)
-      issue.respond_to?(:title) ? issue.title : issue['title']
+      GitlabHelpers.field(issue, :title)
     end
 
     def issue_description(issue)
-      desc = issue.respond_to?(:description) ? issue.description : issue['description']
-      desc.to_s
+      GitlabHelpers.field(issue, :description).to_s
     end
 
     def client

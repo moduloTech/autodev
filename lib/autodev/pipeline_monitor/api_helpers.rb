@@ -15,13 +15,13 @@ class PipelineMonitor
     end
 
     def failed_not_allowed?(job)
-      status = job.respond_to?(:status) ? job.status : job['status']
-      allow = job.respond_to?(:allow_failure) ? job.allow_failure : job['allow_failure']
+      status = GitlabHelpers.field(job, :status)
+      allow = GitlabHelpers.field(job, :allow_failure)
       status == 'failed' && !allow
     end
 
     def fetch_job_trace(job)
-      jid = job.respond_to?(:id) ? job.id : job['id']
+      jid = GitlabHelpers.field(job, :id)
       @client.job_trace(@project_path, jid).to_s
     rescue Gitlab::Error::ResponseError => e
       log_error "Failed to fetch job trace: #{e.message}"
@@ -44,7 +44,7 @@ class PipelineMonitor
     end
 
     def pipeline_id(pipeline)
-      pipeline.respond_to?(:id) ? pipeline.id : pipeline['id']
+      GitlabHelpers.field(pipeline, :id)
     end
 
     def write_job_logs(failed_jobs, log_dir)
@@ -52,8 +52,8 @@ class PipelineMonitor
     end
 
     def write_single_job_log(job, log_dir)
-      name  = job.respond_to?(:name) ? job.name : job['name']
-      stage = job.respond_to?(:stage) ? job.stage : job['stage']
+      name  = GitlabHelpers.field(job, :name)
+      stage = GitlabHelpers.field(job, :stage)
       trace = fetch_job_trace(job)
       filename = "#{name.gsub(/[^a-zA-Z0-9_-]/, '_')}.log"
       # GitLab returns the trace as ASCII-8BIT (raw bytes); accented chars / € make

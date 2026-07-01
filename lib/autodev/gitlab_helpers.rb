@@ -6,6 +6,20 @@ require 'time'
 module GitlabHelpers
   module_function
 
+  # Read a field from a GitLab API value whatever its shape: the gitlab gem
+  # returns objects with attribute readers, while tests and some paths pass raw
+  # Hashes (string- or symbol-keyed). Reader wins, then a string key, then a
+  # symbol key. Canonical replacement for the ~half-dozen
+  # `x.respond_to?(:f) ? x.f : x['f']` copies that had drifted apart (some tried
+  # symbol keys, some only string). Falsey values are preserved (no `||`).
+  def field(obj, name)
+    return obj.public_send(name) if obj.respond_to?(name)
+    return unless obj.respond_to?(:[])
+    return obj[name.to_s] if !obj.respond_to?(:key?) || obj.key?(name.to_s)
+
+    obj[name.to_sym]
+  end
+
   def build_gitlab_client(gitlab_url, token)
     unless token
       raise ConfigError,
@@ -288,11 +302,7 @@ module GitlabHelpers
 
     # Extract a field from a position object (supports both method calls and hash access).
     def pos_field(pos, field)
-      if pos.respond_to?(field)
-        pos.public_send(field)
-      elsif pos.is_a?(Hash)
-        pos[field.to_s] || pos[field]
-      end
+      GitlabHelpers.field(pos, field)
     end
   end
 end

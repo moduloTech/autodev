@@ -97,11 +97,7 @@ class MrFixer
     end
 
     def pos_field(pos, field)
-      if pos.respond_to?(field)
-        pos.send(field)
-      elsif pos.is_a?(Hash)
-        pos[field.to_s] || pos[field]
-      end
+      GitlabHelpers.field(pos, field)
     end
   end
 end
