@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.34] - 2026-07-01
+
 ### Added
 
 - **Deploy-review button: guard against an accidental double-click.** The "(Re)deploy review" submit button now carries `data-turbo-submits-with`, so once the confirm dialog is accepted Turbo disables it and shows a "Triggering…" label for the duration of the (full-page) submission — a proportionate, confirm-safe guard against re-triggering the `deploy_review` job by double-clicking. Outcome of the task #18 analysis of `POST /issues/:id/deploy_review` concurrency: the action is **not** hardened server-side (no per-issue lock, no idempotency key) because the real risk is low (GitLab itself rejects a redundant play/retry, so there is no double deploy; `Audit.record!` fires only on the `:triggered` outcome) and its exposure is identical to the un-serialized `reset`/`transition`/`close` actions — singling it out would be inconsistent. The GET-probe + POST double-fetch is likewise kept: the POST's re-fetch re-validates the job state at click time and is the very thing that narrows the race. New `web_issue_deploy_review_submitting` string (fr + en); `Components::Button` gained an additive `data:` passthrough.
