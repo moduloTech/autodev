@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.35] - 2026-07-01
+
 ### Fixed
 
 - **`autodev --reset` no longer orphans the issues it resets.** `perform_reset` set `next_retry_at: nil` while flipping errored issues to `pending`, but `PollDispatcher#fetch_retryable` only re-enqueues rows with `next_retry_at IS NOT NULL`, and `dispatch_new_issues` only re-discovers issues carrying a `labels_todo` GitLab label (a failed issue still carries `label_doing`, which neither the error path nor `--reset` reverts). So a reset row sat in `pending` forever, never reprocessed — the same orphan pattern `Issue.recover_stuck_processing!` was fixed for in alpha.33. `perform_reset` now mirrors that recovery: a pre-MR error becomes `pending` **with `next_retry_at` stamped** (re-enqueued via `:retry_stuck`), and an error that already has an MR resumes at `checking_pipeline` (picked up by `dispatch_pipelines`) instead of re-implementing from scratch. Message reworded to "relancée(s)". New tests in `dashboard_reset_test.rb` cover the stamp and the with-MR path. Found while re-running the prod error backlog (task #26).
