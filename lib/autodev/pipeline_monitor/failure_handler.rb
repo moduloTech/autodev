@@ -35,7 +35,7 @@ class PipelineMonitor
       log_activity(issue, :pipeline_red, count: failed_jobs.size, replace_pattern: PIPELINE_RED_PATTERN)
       triage = pre_triage(failed_jobs)
       return if retrigger_if_needed(issue, pipeline, triage)
-      return if infra_skip?(issue, triage)
+      return if infra_skip?(issue, triage, failed_jobs)
 
       check_stagnation_and_fix(issue, failed_jobs, triage)
     end
@@ -58,9 +58,18 @@ class PipelineMonitor
       false
     end
 
-    def infra_skip?(issue, triage)
+    # An :infra/deploy verdict can't be fixed by the branch's code, so we stay in
+    # checking_pipeline waiting for recovery — but a failure that never clears (a
+    # broken shared CI/deploy job) would poll forever. Track the signature like
+    # the code-fix path and, once the same infra job set recurs the stagnation
+    # threshold, bail via handle_stagnation → done + needs_attention (see CHANGELOG).
+    def infra_skip?(issue, triage, failed_jobs)
       return false unless triage[:verdict] == :infra
 
+      signature = compute_pipeline_signature(failed_jobs)
+      return true if bail_on_stagnation?(issue, :pipeline, signature)
+
+      update_stagnation_signature(issue, :pipeline, signature)
       log "Issue ##{issue.issue_iid}: infra failure, staying in checking_pipeline"
       log_activity(issue, :pipeline_infra, replace_pattern: PIPELINE_INFRA_PATTERN)
       true
@@ -70,10 +79,7 @@ class PipelineMonitor
 
     def check_stagnation_and_fix(issue, failed_jobs, triage)
       signature = compute_pipeline_signature(failed_jobs)
-      if stagnated?(issue, :pipeline, signature)
-        handle_stagnation(issue, :pipeline)
-        return
-      end
+      return if bail_on_stagnation?(issue, :pipeline, signature)
 
       update_stagnation_signature(issue, :pipeline, signature)
       clone_and_fix(issue, failed_jobs, triage)

@@ -204,7 +204,7 @@ Handles `checking_pipeline`: fetches MR head pipeline via GitLab API.
 - **Green + review_count >= MAX_REVIEW_ROUNDS (3)** → `done` with alert
 - **Red (code)** → `pipeline_failed_code!` → `fixing_pipeline` → `pipeline_fix_done!` (with stagnation detection)
 - **Red (infra/uncertain, first time)** → retrigger once, recheck next poll
-- **Red (infra, after retrigger)** → stay in `checking_pipeline` (manual intervention needed)
+- **Red (infra, after retrigger)** → stay in `checking_pipeline`, but track the failure signature; once the same infra job set recurs `stagnation_threshold` times, bail via `handle_stagnation` → `done` + `needs_attention` (`stagnation_pipeline`), so a never-recovering infra/deploy job can't poll forever
 - **Canceled/skipped** → stay in `checking_pipeline` (manual intervention needed)
 
 Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log` files in the work directory (no truncation). Prompts reference these files by path so danger-claude reads the complete log. Each failed job is fixed in a separate danger-claude call + commit (same pattern as MrFixer's per-discussion approach).
@@ -291,7 +291,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | Interrupted pre-MR processing (`cloning`…`creating_mr`, no MR yet) | Reset to `pending` **and `next_retry_at` stamped** → re-enqueued via `:retry_stuck` next poll (without the stamp the GitLab label stays `label_doing`, so `dispatch_new_issues` never re-discovers it → orphaned `pending`) |
 | Pipeline red (code by pre-triage) | Skip retrigger, go straight to fix phase |
 | Pipeline red (infra/uncertain, first time) | Retrigger once, recheck next poll |
-| Pipeline red (infra/uncertain, after retrigger) | Stay in checking_pipeline (manual intervention) |
+| Pipeline red (infra/uncertain, after retrigger) | Stay in checking_pipeline; if the same infra job set recurs `stagnation_threshold` times, bail via stagnation → done + needs_attention (`stagnation_pipeline`) |
 | Pipeline canceled/skipped | Stay in checking_pipeline (manual intervention) |
 | Stagnation detected (pipeline or discussions) | Transition to done with alert comment |
 | Review limit reached (3 rounds) | Transition to done with alert comment |
@@ -312,7 +312,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 - **Polling by assignee**: Issues are discovered by querying GitLab for issues assigned to the autodev user with `labels_todo`, replacing the old `trigger_label`-based approach.
 - **3 labels only**: `labels_todo`, `label_doing`, `label_done`. Label stays `label_doing` during the entire implementation + pipeline + fix + review cycle, and switches to `label_done` only when reaching `done`.
 - **Post-completion at unassignment**: The `post_completion` hook triggers when autodev is unassigned from a `done` issue (not immediately after pipeline green).
-- **No blocked state**: Infrastructure failures and canceled pipelines keep the issue in `checking_pipeline` indefinitely until manual intervention or natural resolution.
+- **No blocked state**: Canceled pipelines keep the issue in `checking_pipeline` indefinitely until manual intervention or natural resolution. Infrastructure failures do the same *only until stagnation* — a recurring infra/deploy failure that never recovers is bailed out via `handle_stagnation` (→ `done` + `needs_attention`) after `stagnation_threshold` identical polls, so it can't loop forever.
 - **danger-claude as implementation engine**: Leverages the existing Docker-based Claude CLI wrapper for sandboxed code generation.
 - **Solid Queue concurrency control**: `IssueProcessJob`'s `limits_concurrency to: 1, key: "issue-#{path}-#{iid}"` ensures no two jobs touch the same issue at once. Global concurrency cap comes from `queue.yml`'s `threads` setting (`AUTODEV_MAX_WORKERS`, default 3) — mirrors the legacy `max_workers`.
 

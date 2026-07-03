@@ -42,6 +42,16 @@ class PipelineMonitor
       {}
     end
 
+    # Bail out to "delivered, needs a check" when the same failure signature has
+    # recurred past the threshold. Shared by the code-fix and infra-wait paths so
+    # both reach the identical end state (done + needs_attention).
+    def bail_on_stagnation?(issue, type, signature)
+      return false unless stagnated?(issue, type, signature)
+
+      handle_stagnation(issue, type)
+      true
+    end
+
     def handle_stagnation(issue, type)
       log "Issue ##{issue.issue_iid}: #{type} stagnation detected → done"
       issue.update(status: 'done', finished_at: Time.current,

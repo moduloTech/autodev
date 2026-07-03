@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.36] - 2026-07-03
+
+### Fixed
+
+- **A pipeline whose only blocking failure is classified `:infra`/deploy no longer polls `checking_pipeline` forever.** `PipelineMonitor::FailureHandler#infra_skip?` short-circuited *before* the stagnation tracker ran: once the single auto-retrigger was spent, an `:infra` verdict just re-logged `pipeline_infra` and stayed in `checking_pipeline` on every poll, with no counter, cap, or timeout. A failure that never clears — e.g. a broken shared CI deploy job — looped indefinitely: powerpanne/core#16081 accumulated ~7,646 activity events over 4 days (and 19 issues on that project were stuck the same way, ~563k of ~581k total activity events being this loop's noise). Its sibling #16079 only escaped because an extra `runner_system_failure` job pushed the verdict to `:uncertain`, which flows into the stagnation path and ends as "Livrée (à vérifier)" (`done` + `needs_attention`). `infra_skip?` now tracks the failure signature the same way the code-fix path does (`compute_pipeline_signature` + `update_stagnation_signature`) and, once the same infra job set has recurred `stagnation_threshold` times (default 5), bails out via `handle_stagnation(issue, :pipeline)` → `done` + `needs_attention` + `attention_reason: 'stagnation_pipeline'` — the exact end state a stagnated code failure reaches. Bounds the unbounded activity-event growth as a side effect. New `test/pipeline_monitor_infra_stagnation_test.rb`. Trigger ticket: powerpanne/core#16081.
+
 ## [1.0.0-alpha.35] - 2026-07-01
 
 ### Fixed
