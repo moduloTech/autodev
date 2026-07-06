@@ -121,10 +121,10 @@ module Web
         end
 
         def render_avatar_strip(row)
-          author = row[:issue_author_id] ? "##{row[:issue_author_id]}" : '—'
+          author = author_display(row)
           div(class: 'avatar-strip') do
-            span(class: 'avatar') { plain author[0..1] }
-            span(class: 'requester-text') { t_web(:web_errors_requester, iid: row[:issue_iid]) }
+            span(class: 'avatar') { plain author_initials(author) }
+            span(class: 'requester-text') { t_web(:web_errors_requester, name: author) }
           end
         end
 

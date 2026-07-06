@@ -229,7 +229,7 @@ en:
   web_errors_action_retry: Retry now
   web_errors_action_view_question: See the question
   web_errors_action_close: Close
-  web_errors_requester: 'Requested by #%{iid}'
+  web_errors_requester: 'Requested by %{name}'
   web_project_title: Project — %{path}
   web_project_config: Configuration <code>app:</code>
   web_project_no_config: Project not listed in the current config.
@@ -333,6 +333,7 @@ en:
   web_issues_col_title: Title
   web_issues_col_status: Status
   web_issues_col_activity: Activity
+  web_issues_author: 'Requested by %{name}'
   web_issues_no_results: No request matches these filters.
   web_time_just_now: just now
   web_time_minutes_ago: "%{n} min ago"

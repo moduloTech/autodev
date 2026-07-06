@@ -74,6 +74,28 @@ module Web
       timestamp.to_s
     end
 
+    # Human label for a ticket's author (task #27). Prefers the GitLab display
+    # name captured at ingest; falls back to the numeric author id for rows
+    # created before the name column existed, then an em-dash when neither is
+    # known. Reads defensively so it works for AR rows and plain hashes alike.
+    def author_display(row)
+      name = row[:issue_author_name].to_s.strip
+      return name unless name.empty?
+      return "##{row[:issue_author_id]}" if row[:issue_author_id]
+
+      '—'
+    end
+
+    # Two-letter monogram for the avatar bubble: initials of the first two
+    # words of a display name ("Jean Dupont" → "JD"), or the first two
+    # characters of anything else (an id fallback like "#42" → "#4").
+    def author_initials(display)
+      words = display.to_s.split(/\s+/).reject(&:empty?)
+      return (words[0][0].to_s + words[1][0].to_s).upcase if words.size >= 2
+
+      display.to_s[0, 2].upcase
+    end
+
     # Set or clear the locale cookie based on `lang`. Used by /locale/:lang.
     def apply_locale_cookie!(lang)
       if AVAILABLE_LOCALES.include?(lang)

@@ -156,12 +156,19 @@ module Web
       def render_table_row(row, last)
         a(class: 'issues-row', style: row_style(last), href: "/issues/#{row[:id]}") do
           span(class: 'iid') { plain "##{row[:issue_iid]}" }
-          div(class: 'title-cell') do
-            div(class: 'title') { row[:issue_title] }
-            div(class: 'meta') { row[:project_path] }
-          end
+          render_title_cell(row)
           render status_pill(issue_status(row), size: :sm)
           span(class: 'activity-cell') { relative_time(row[:created_at]) }
+        end
+      end
+
+      def render_title_cell(row)
+        div(class: 'title-cell') do
+          div(class: 'title') { row[:issue_title] }
+          div(class: 'meta') do
+            plain "#{row[:project_path]} · "
+            render_author_meta(row)
+          end
         end
       end
 
@@ -184,10 +191,22 @@ module Web
             render status_pill(issue_status(row), size: :sm)
           end
           div(class: 'issue-card-title') { row[:issue_title] }
-          div(class: 'issue-card-footer') do
-            span(class: 'muted') { relative_time(row[:created_at]) }
-          end
+          render_issue_card_footer(row)
         end
+      end
+
+      def render_issue_card_footer(row)
+        div(class: 'issue-card-footer') do
+          span(class: 'muted') { relative_time(row[:created_at]) }
+          span(class: 'muted') { plain '·' }
+          render_author_meta(row)
+        end
+      end
+
+      # Task #27: the ticket author, shown under every request in both the
+      # dense table and the mobile cards so a user can spot their own.
+      def render_author_meta(row)
+        span(class: 'author-meta') { t_web(:web_issues_author, name: author_display(row)) }
       end
 
       def render_pager

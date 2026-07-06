@@ -141,9 +141,11 @@ module Autodev
 
     def find_or_create_issue(gl_issue)
       locale = ::LanguageDetector.detect(gl_issue.description.to_s)
+      author = gl_issue.author
       ::Issue.create(project_path: @path, issue_iid: gl_issue.iid,
                      issue_title: gl_issue.title, status: 'pending',
-                     issue_author_id: gl_issue.author&.id, locale: locale.to_s)
+                     issue_author_id: author&.id,
+                     issue_author_name: author&.name, locale: locale.to_s)
       ::Issue.where(project_path: @path, issue_iid: gl_issue.iid).first
     rescue ActiveRecord::RecordNotUnique
       ::Issue.where(project_path: @path, issue_iid: gl_issue.iid).first
