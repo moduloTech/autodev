@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`test/services/autodev/deploy_review_test.rb` no longer fails when run on its own.** The 13 availability/trigger cases only passed when some earlier-loaded test file happened to have defined the top-level `GitlabHelpers` constant; run in isolation (`bin/rails test test/services/autodev/deploy_review_test.rb`) every probe hit `NameError: uninitialized constant Autodev::DeployReview::GitlabHelpers` — swallowed by the service's `rescue StandardError` and degraded to an `:error` outcome, so the expected `:available`/`:blocked`/`:running`/`:triggered` assertions failed. The latent dependency was introduced by the alpha.34 refactor that routed `DeployReview#field` through `GitlabHelpers.field`: `GitlabHelpers` lives in `lib/autodev` (required at boot via `lib/autodev.rb`, which the test env skips with `AUTODEV_SKIP_LEGACY=1`). `test/rails_helper.rb` now `require`s `autodev/gitlab_helpers` alongside the `autodev/locales` / `autodev/config` requires it already declares for the same reason — a light dependency (only `require 'time'`). Full suite unchanged (985 runs, 0 failures); the file now also passes standalone.
+
 ## [1.0.0-alpha.36] - 2026-07-03
 
 ### Fixed

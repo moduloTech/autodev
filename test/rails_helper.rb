@@ -28,6 +28,13 @@ require_relative '../config/environment'
 # lib/autodev tree (which would drag in Sequel-era modules).
 require 'autodev/locales'
 require 'autodev/config'
+# `Autodev::DeployReview` (app/services) calls `GitlabHelpers.field` /
+# `.build_gitlab_client`, but GitlabHelpers lives in lib/autodev (required at
+# boot via lib/autodev.rb, which AUTODEV_SKIP_LEGACY=1 skips). Without this
+# require its unit test only passed by accident when another file had already
+# loaded the constant — run in isolation every probe degraded to :error
+# (NameError: uninitialized constant …::GitlabHelpers). Light dep (just 'time').
+require 'autodev/gitlab_helpers'
 
 require 'minitest/autorun'
 require 'active_support/test_case'
