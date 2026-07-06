@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.38] - 2026-07-06
+
+### Changed
+
+- **Usage-doc screenshots regenerated** to match the alpha.37 UI: the ticket author's name on the requests list, the failing-job detail (`deploy_review (script_failure)`) on the *Livrée (à vérifier)* card, and the deploy-review button on the issue-detail page (enabled on a branched issue, disabled-with-reason on a branch-less one). Also fixed the functional-guide caption that still referred to the removed `/errors` page (its concerns are now the `/issues` card tabs).
+
 ## [1.0.0-alpha.37] - 2026-07-06
 
 ### Added

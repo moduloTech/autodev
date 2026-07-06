@@ -176,7 +176,7 @@ Tout ce qui demande votre attention vit dans **trois onglets de la liste des dem
 
 Dans ces trois onglets, chaque demande s'affiche sous forme de **carte** qui explique d'abord ce qu'il s'est passé — et ce que vous devez faire.
 
-![L'onglet Erreurs — chaque demande est une carte avec explication métier.](screenshots/03-errors.png)
+![Un onglet « besoin d'un humain » (ici *Livrée (à vérifier)*) — chaque demande est une carte qui explique la cause (le ou les jobs en échec) et qui l'a demandée.](screenshots/03-errors.png)
 
 ## Ce que chaque carte vous dit de faire
 
