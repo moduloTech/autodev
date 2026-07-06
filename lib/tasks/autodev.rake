@@ -26,6 +26,32 @@ def autodev_link_user
   puts Autodev::OpsCommands.link_user(email: email, gitlab_username: username)
 end
 
+# One-off backfill for issue #27: existing issues predate the
+# `issue_author_name` column, so they keep it NULL and fall back to the raw
+# author id in the UI. New tickets get the name at ingest (PollDispatcher);
+# this task resolves the name for the old ones via one GitLab API call each.
+# Idempotent (only touches NULL/empty rows) and safe to re-run.
+def autodev_backfill_issue_author_names
+  cfg = Web.config
+  client = GitlabHelpers.build_gitlab_client(cfg['gitlab_url'], cfg['gitlab_token'])
+  scope = Issue.where(issue_author_name: [nil, ''])
+  puts "[autodev:backfill_issue_author_names] #{scope.count} issue(s) missing an author name"
+  tally = { updated: 0, failed: 0 }
+  scope.find_each { |issue| autodev_backfill_one_author_name(issue, client, tally) }
+  puts "[autodev:backfill_issue_author_names] done: #{tally[:updated]} updated, #{tally[:failed]} failed"
+end
+
+def autodev_backfill_one_author_name(issue, client, tally)
+  name = client.issue(issue.project_path, issue.issue_iid).author&.name
+  return if name.blank?
+
+  issue.update_column(:issue_author_name, name)
+  tally[:updated] += 1
+rescue StandardError => e
+  tally[:failed] += 1
+  warn "  ##{issue.issue_iid} (#{issue.project_path}): #{e.message}"
+end
+
 namespace :autodev do
   desc 'Import ~/.autodev/config.yml `projects:` block into projects + project_app_commands. ' \
        'DRY_RUN=1 logs the summary without writing. AUTODEV_CONFIG=path overrides the file path.'
@@ -54,4 +80,8 @@ namespace :autodev do
   desc 'Manually link a User to a GitLab username (override for non-standard naming). ' \
        'Usage: bin/rails autodev:link_user EMAIL=marc@modulotech.fr GITLAB_USERNAME=mleclercq'
   task(link_user: :environment) { autodev_link_user }
+
+  desc 'Backfill issue_author_name for pre-existing issues (one GitLab call per issue). ' \
+       'Idempotent — only fills NULL/empty rows. Usage: bin/rails autodev:backfill_issue_author_names'
+  task(backfill_issue_author_names: :environment) { autodev_backfill_issue_author_names }
 end
