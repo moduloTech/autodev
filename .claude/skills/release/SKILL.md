@@ -1,19 +1,18 @@
 ---
 name: release
-description: Release a new version of a tool in this meta-project. Handles changelog, commit, tag, GitHub release, and Homebrew formula update. Trigger when the user asks to release, publish, or ship a new version.
+description: Release a new version of autodev. Handles changelog, commit, tag, GitHub release, and Homebrew formula update. Trigger when the user asks to release, publish, or ship a new version.
 ---
 
-# Release a tool
+# Release Autodev
 
-Run the full release pipeline for a given tool and version. The user provides the version number (e.g. `0.0.3`). If working inside a tool's subdirectory, use that as the tool. Otherwise, ask which tool to release.
+Run the full release pipeline for autodev. The user provides the version number (e.g. `0.0.3`). If no version is provided, suggest a coherent number by reading the CHANGELOG.
 
 ## Conventions
 
-- `<tool>`: the tool directory name (e.g. `danger-claude`)
 - `<version>`: the version number without `v` prefix
-- All git operations for the tool run from its subdirectory (e.g. `danger-claude/`)
-- The GitHub repo name matches the tool directory name under the `moduloTech` org
-- The Homebrew formula is at `/opt/homebrew/Library/Taps/modulotech/homebrew-tap/Formula/<tool>.rb`
+- `<Claude model name and version>`: the name and version of the current Claude model (e.g. `Opus 4.8`)
+- The GitHub repo name is `modulotech/autodev`.
+- The Homebrew formula is at `/opt/homebrew/Library/Taps/modulotech/homebrew-tap/Formula/autodev.rb`
 
 ## Steps
 
@@ -34,9 +33,8 @@ Run the full release pipeline for a given tool and version. The user provides th
 - Categorize changes under `### Added`, `### Changed`, `### Fixed`, or `### Removed` as appropriate.
 - Write concise, user-facing descriptions of what changed.
 
-### 4. Refresh usage docs (autodev only)
+### 4. Refresh usage docs
 
-- Only for the `autodev` tool. Skip for any other tool (they have no in-dashboard usage guides).
 - Follow the `refresh-usage-docs` skill to sync `docs/usage/autodev-functional-usage.md` + `autodev-technical-usage.md` (and screenshots when the UI changed) with the changes being released. Read that skill for the full procedure — don't reimplement it here.
 - The skill normally stops before committing; in the release flow, let its doc/screenshot edits flow into this release's commit (next step) instead.
 
@@ -49,14 +47,14 @@ Run the full release pipeline for a given tool and version. The user provides th
 
   <short description of changes>
 
-  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+  Co-Authored-By: Claude <Claude model name and version> <noreply@anthropic.com>
   ```
 - Tag as `v<version>`.
 
 ### 6. Push
 
 - `git push && git push origin v<version>`
-- If the push fails with `Host key verification failed`, seed the known_hosts file and retry:
+- If the push fails with `Host key verification failed`, seed the `known_hosts` file and retry:
   ```bash
   mkdir -p ~/.ssh && ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts
   ```
@@ -77,11 +75,11 @@ Run the full release pipeline for a given tool and version. The user provides th
   ```
   Update <tool> to v<version>
 
-  Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+  Co-Authored-By: Claude <Claude model name and version> <noreply@anthropic.com>
   ```
 - Push the tap: `cd /opt/homebrew/Library/Taps/modulotech/homebrew-tap && git push`
 
 ### 9. Confirm
 
 - Print the GitHub release URL.
-- Remind the user to run `brew reinstall <tool>` to get the new version.
+
