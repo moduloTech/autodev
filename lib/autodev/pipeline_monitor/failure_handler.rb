@@ -58,20 +58,20 @@ class PipelineMonitor
       false
     end
 
-    # An :infra/deploy verdict can't be fixed by the branch's code, so we stay in
-    # checking_pipeline waiting for recovery — but a failure that never clears (a
-    # broken shared CI/deploy job) would poll forever. Track the signature like
-    # the code-fix path and, once the same infra job set recurs the stagnation
-    # threshold, bail via handle_stagnation → done + needs_attention (see CHANGELOG).
+    # An :infra/deploy verdict can't be fixed by the branch's code, so we wait in
+    # checking_pipeline for recovery. To avoid polling a never-clearing failure
+    # forever, track the signature like the code-fix path and bail via
+    # handle_stagnation (surfacing `detail` — the failing job + reason) at threshold.
     def infra_skip?(issue, triage, failed_jobs)
       return false unless triage[:verdict] == :infra
 
+      detail = format_failure_detail(failed_jobs)
       signature = compute_pipeline_signature(failed_jobs)
-      return true if bail_on_stagnation?(issue, :pipeline, signature)
+      return true if bail_on_stagnation?(issue, :pipeline, signature, detail: detail)
 
       update_stagnation_signature(issue, :pipeline, signature)
-      log "Issue ##{issue.issue_iid}: infra failure, staying in checking_pipeline"
-      log_activity(issue, :pipeline_infra, replace_pattern: PIPELINE_INFRA_PATTERN)
+      log "Issue ##{issue.issue_iid}: infra failure (#{detail}), staying in checking_pipeline"
+      log_activity(issue, :pipeline_infra, detail: detail, replace_pattern: PIPELINE_INFRA_PATTERN)
       true
     end
 
@@ -79,7 +79,7 @@ class PipelineMonitor
 
     def check_stagnation_and_fix(issue, failed_jobs, triage)
       signature = compute_pipeline_signature(failed_jobs)
-      return if bail_on_stagnation?(issue, :pipeline, signature)
+      return if bail_on_stagnation?(issue, :pipeline, signature, detail: format_failure_detail(failed_jobs))
 
       update_stagnation_signature(issue, :pipeline, signature)
       clone_and_fix(issue, failed_jobs, triage)
@@ -108,9 +108,8 @@ class PipelineMonitor
     def write_and_categorize_jobs(work_dir, failed_jobs)
       log_dir = File.join(work_dir, 'tmp', 'ci_logs')
       FileUtils.mkdir_p(log_dir)
-      entries = write_job_logs(failed_jobs, log_dir)
-      categorize_jobs!(entries, log_dir)
-      entries
+      # categorize_jobs! mutates + returns the entries (Array#each), so it is the value.
+      categorize_jobs!(write_job_logs(failed_jobs, log_dir), log_dir)
     end
 
     def resolve_explanation(issue, work_dir, triage, job_entries)

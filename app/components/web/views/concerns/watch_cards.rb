@@ -57,8 +57,21 @@ module Web
             div do
               div(class: 'cause-title') { t_web(cause_key(row)) }
               div(class: 'cause-body') { t_web(explain_key(row)) }
+              render_attention_detail(row)
             end
           end
+        end
+
+        # The concrete infra blocker (failing job + reason, e.g. "deploy_review
+        # (script_failure)") captured on the stagnation bail-out. Only present on
+        # needs_attention rows whose give-up path recorded it (currently the infra
+        # pipeline path); rendered as a compact line under the plain-language cause
+        # so the operator sees what to fix without opening the MR.
+        def render_attention_detail(row)
+          detail = row[:attention_detail]
+          return if detail.nil? || detail.to_s.strip.empty?
+
+          div(class: 'cause-detail') { t_web(:web_errors_attention_detail, detail: detail.to_s) }
         end
 
         # Technical failures (the errors tab) keep the red alert; a pending

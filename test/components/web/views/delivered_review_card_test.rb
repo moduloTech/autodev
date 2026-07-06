@@ -45,6 +45,21 @@ class DeliveredReviewCardTest < ActiveSupport::TestCase
     assert_includes html, 'deploy script failed'
   end
 
+  def test_shows_the_captured_infra_detail_when_present
+    issue = create_issue(status: 'done', needs_attention: true, attention_reason: 'stagnation_pipeline',
+                         attention_detail: 'deploy_review (script_failure)')
+    html = render_for(issue, closable: [issue.id])
+
+    assert_includes html, 'deploy_review (script_failure)'
+  end
+
+  def test_omits_detail_line_when_absent
+    issue = create_issue(status: 'done', needs_attention: true, attention_reason: 'stagnation_pipeline')
+    html = render_for(issue, closable: [issue.id])
+
+    refute_includes html, 'cause-detail'
+  end
+
   def test_alert_uses_warn_tone_not_red
     issue = create_issue(status: 'done', needs_attention: true, attention_reason: 'stagnation_pipeline')
     html = render_for(issue, closable: [issue.id])

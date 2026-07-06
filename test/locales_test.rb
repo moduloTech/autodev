@@ -51,6 +51,25 @@ class LocalesTest < Minitest::Test
     assert_empty missing, "FR locale is missing keys: #{missing.join(', ')}"
   end
 
+  def test_stagnation_pipeline_renders_the_infra_detail_in_both_locales
+    detail = 'deploy_review (script_failure)'
+    fr = Locales.t(:stagnation_pipeline, locale: :fr, tag: 't', mr_url: 'url', detail: detail)
+    en = Locales.t(:stagnation_pipeline, locale: :en, tag: 't', mr_url: 'url', detail: detail)
+
+    assert_includes fr, detail
+    assert_includes en, detail
+  end
+
+  def test_activity_stagnation_and_infra_lines_render_the_detail_in_both_locales
+    detail = 'deploy_review (script_failure)'
+    %i[fr en].each do |loc|
+      %i[activity_stagnation_pipeline activity_pipeline_infra].each do |key|
+        assert_includes Locales.t(key, locale: loc, tag: 't', detail: detail), detail,
+                        "#{key} (#{loc}) must interpolate the detail"
+      end
+    end
+  end
+
   def test_pipeline_fix_success_with_all_vars
     msg = Locales.t(:pipeline_fix_success, locale: :en,
                                            tag: 'v1', mr_url: 'url', count: 3, round: 2)

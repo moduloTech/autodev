@@ -13,7 +13,7 @@ en:
   pipeline_fix_success: ":wrench: %{tag}: pipeline fix applied on %{mr_url} — %{count} job(s) fixed (round %{round})"
   review_limit_reached: ":warning: %{tag}: review limit (3 rounds) reached for %{mr_url}. Remaining unresolved discussions require manual intervention."
   review_failures_exhausted: ":warning: %{tag}: mr-review failed %{count} times in a row on %{mr_url}. Manual intervention required (binary, token, or MR issue)."
-  stagnation_pipeline: ":warning: %{tag}: stagnation detected — the same jobs keep failing on %{mr_url}. Manual intervention required."
+  stagnation_pipeline: ":warning: %{tag}: stagnation detected — the same jobs keep failing on %{mr_url}. Failing job(s): %{detail}. Manual intervention required."
   stagnation_discussions: ":warning: %{tag}: stagnation detected — the same discussions remain unresolved on %{mr_url}. Manual intervention required."
   unassigned_stop: ":stop_sign: %{tag}: unassigned, stopping work in progress."
   done_nominal: |-

@@ -60,7 +60,7 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
     Issue.where(id: issue.id).update_all(
       status: 'pending', retry_count: 0, error_message: nil,
       next_retry_at: nil, started_at: nil,
-      needs_attention: false, attention_reason: nil
+      needs_attention: false, attention_reason: nil, attention_detail: nil
     )
     Audit.record!(
       resource: issue, action: 'issue.reset_manual', actor: current_user,
@@ -130,7 +130,8 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
     issue._audit_origin = :manual
     issue.close!
     Issue.where(id: issue.id).update_all(finished_at: Time.current,
-                                         needs_attention: false, attention_reason: nil)
+                                         needs_attention: false, attention_reason: nil,
+                                         attention_detail: nil)
   end
 
   # A ticket can be closed by an admin or by a collaborator (contributor or

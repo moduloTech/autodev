@@ -13,6 +13,27 @@ class PipelineMonitor
       Digest::SHA256.hexdigest(names.join(','))
     end
 
+    # Concise, human-readable "what actually failed" string for the failing jobs,
+    # e.g. "deploy_review (script_failure)" (comma-joined when several). The job
+    # name + GitLab failure_reason are already in `failed_jobs`, so surfacing them
+    # costs nothing and turns a generic "infra failure" into an actionable pointer.
+    # Appends the job's GitLab URL when the API exposed it so the failing job is
+    # one click away instead of buried in the pipeline view. Returns "" when no
+    # usable job info is present (never nil, so templates interpolate cleanly).
+    def format_failure_detail(failed_jobs)
+      Array(failed_jobs).filter_map { |job| format_single_job_detail(job) }.join(', ')
+    end
+
+    def format_single_job_detail(job)
+      name = GitlabHelpers.field(job, :name).to_s
+      return nil if name.empty?
+
+      reason = GitlabHelpers.field(job, :failure_reason).to_s
+      url = GitlabHelpers.field(job, :web_url).to_s
+      label = reason.empty? ? name : "#{name} (#{reason})"
+      url.empty? ? label : "#{label} — #{url}"
+    end
+
     def stagnated?(issue, type, signature)
       data = parse_stagnation(issue)
       entry = data[type.to_s] || {}
@@ -45,20 +66,26 @@ class PipelineMonitor
     # Bail out to "delivered, needs a check" when the same failure signature has
     # recurred past the threshold. Shared by the code-fix and infra-wait paths so
     # both reach the identical end state (done + needs_attention).
-    def bail_on_stagnation?(issue, type, signature)
+    def bail_on_stagnation?(issue, type, signature, detail: nil)
       return false unless stagnated?(issue, type, signature)
 
-      handle_stagnation(issue, type)
+      handle_stagnation(issue, type, detail: detail)
       true
     end
 
-    def handle_stagnation(issue, type)
+    # `detail` carries the concrete failing job(s) + reason (see
+    # format_failure_detail). It is persisted on the row and threaded into the
+    # `stagnation_pipeline` notification/activity so the operator sees *what* to
+    # fix without opening the pipeline. It stays empty on the discussions path
+    # (whose templates don't reference %{detail}, so the extra var is ignored).
+    def handle_stagnation(issue, type, detail: nil)
       log "Issue ##{issue.issue_iid}: #{type} stagnation detected → done"
       issue.update(status: 'done', finished_at: Time.current,
-                   needs_attention: true, attention_reason: "stagnation_#{type}")
+                   needs_attention: true, attention_reason: "stagnation_#{type}",
+                   attention_detail: detail)
       apply_label_done(issue.issue_iid)
-      notify_localized(issue.issue_iid, :"stagnation_#{type}", mr_url: issue.mr_url)
-      log_activity(issue, :"stagnation_#{type}")
+      notify_localized(issue.issue_iid, :"stagnation_#{type}", mr_url: issue.mr_url, detail: detail.to_s)
+      log_activity(issue, :"stagnation_#{type}", detail: detail.to_s)
     end
   end
 end
