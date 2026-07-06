@@ -22,7 +22,8 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # so without the override AR would store `Time#to_s` ("… UTC") on the next
   # AR-written Issue, breaking any `date(created_at)`/`datetime(created_at)`
   # SQL the way it broke the activity_events sparkline.
-  %i[started_at finished_at next_retry_at clarification_requested_at pipeline_poll_since created_at].each do |col|
+  %i[started_at finished_at next_retry_at clarification_requested_at pipeline_poll_since
+     infra_recheck_at created_at].each do |col|
     attribute col, :datetime
   end
 

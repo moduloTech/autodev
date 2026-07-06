@@ -67,6 +67,7 @@ module Autodev
       dispatch_unassignment
       dispatch_done_unassigned
       dispatch_retries
+      dispatch_infra_recheck
     end
 
     # === poll_issues equivalent ===
@@ -245,6 +246,38 @@ module Autodev
       IssueProcessJob.perform_later(@path, issue.issue_iid, action)
       @logger.info("Enqueued retry (#{action}) for issue ##{issue.issue_iid} " \
                    "(attempt #{issue.retry_count + 1})", project: @path)
+    end
+
+    # === infra-recovery recheck ===
+    #
+    # Tickets that stagnated on an INFRA/deploy failure sit in `done` +
+    # `needs_attention` + `attention_reason: 'stagnation_pipeline'` and were
+    # never re-attempted once CI recovered. Re-enqueue the still-open,
+    # under-cap, backoff-elapsed ones so `:recheck_infra` re-classifies their
+    # current pipeline (infra-vs-code at recheck time) and re-enters on
+    # recovery. Only `stagnation_pipeline` is targeted — never
+    # `stagnation_discussions`, never a code-origin give-up.
+
+    def dispatch_infra_recheck
+      fetch_infra_recheck_candidates.each do |issue|
+        IssueProcessJob.perform_later(@path, issue.issue_iid, :recheck_infra)
+        @logger.info("Enqueued infra recheck for issue ##{issue.issue_iid} " \
+                     "(attempt #{(issue.infra_recheck_count || 0) + 1})", project: @path)
+      end
+    end
+
+    def fetch_infra_recheck_candidates
+      ::Issue.where(project_path: @path, status: 'done',
+                    needs_attention: true, attention_reason: 'stagnation_pipeline')
+             .where.not(mr_iid: nil)
+             .where('infra_recheck_count < ?', infra_recheck_max)
+             .where("infra_recheck_at IS NULL OR infra_recheck_at <= datetime('now')")
+             .to_a
+    end
+
+    def infra_recheck_max
+      (@project_config['infra_recheck_max'] || @config['infra_recheck_max'] ||
+        ::PipelineMonitor::DEFAULT_INFRA_RECHECK_MAX).to_i
     end
   end
 end

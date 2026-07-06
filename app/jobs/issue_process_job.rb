@@ -11,6 +11,8 @@
 #   :post_completion   → post-completion sequence  (done + unassigned + pc cmd)
 #   :retry_errored     → retry path for error rows (clears backoff + re-enters)
 #   :retry_stuck       → re-enqueue a stuck pending row
+#   :recheck_infra     → re-classify an infra-stagnated done row's pipeline;
+#                        re-enter checking_pipeline if CI has recovered
 #
 # Concurrency: at most one execution per (project_path, issue_iid) at a
 # time. The N=3 global cap comes from queue.yml's worker `threads` setting,
@@ -22,7 +24,8 @@ class IssueProcessJob < ApplicationJob
                      key: ->(project_path, issue_iid, *_) { "issue-#{project_path}-#{issue_iid}" },
                      duration: 1.hour
 
-  ACTIONS = %i[process check_pipeline fix_discussions post_completion retry_errored retry_stuck].freeze
+  ACTIONS = %i[process check_pipeline fix_discussions post_completion
+               retry_errored retry_stuck recheck_infra].freeze
 
   def perform(project_path, issue_iid, action)
     action = action.to_sym
@@ -83,6 +86,20 @@ class IssueProcessJob < ApplicationJob
 
   def perform_fix_discussions(issue, config, project_config)
     ::MrFixer.new(**worker_kwargs(config, project_config)).fix(issue)
+  end
+
+  # Re-classify the infra-stagnated ticket's CURRENT head pipeline. Only when
+  # CI has recovered does PipelineMonitor return true; we then re-enter the
+  # pipeline-check flow via the exact same reset ResumeHandler uses when a human
+  # re-adds labels_todo (needs_attention cleared, back to checking_pipeline).
+  def perform_recheck_infra(issue, config, project_config)
+    monitor = ::PipelineMonitor.new(**worker_kwargs(config, project_config))
+    return unless monitor.recheck_infra_recovery(issue)
+
+    ::PollRouter.new(config: config, project_config: project_config,
+                     logger: ::Autodev::JobLogger.new(logger),
+                     token: config['gitlab_token'], pool: nil)
+                .resume_recovered_infra(issue, build_client(config))
   end
 
   def perform_post_completion(issue, config, project_config)

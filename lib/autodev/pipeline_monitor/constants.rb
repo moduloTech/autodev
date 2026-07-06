@@ -12,6 +12,15 @@ class PipelineMonitor
 
   RUNNING_STATUSES = %w[running pending created waiting_for_resource preparing scheduled].freeze
 
+  # Automatic infra-recovery recheck (see PipelineMonitor::InfraRecheck).
+  # Cap: how many times the dispatch pass will re-classify a stagnated
+  # infra/deploy ticket's current pipeline before giving up for good.
+  # Backoff: minimum spacing (seconds) between two automatic rechecks.
+  # Both are overridable per-project (`infra_recheck_max` /
+  # `infra_recheck_backoff`) or globally in config.
+  DEFAULT_INFRA_RECHECK_MAX = 5
+  DEFAULT_INFRA_RECHECK_BACKOFF = 3600
+
   DEPLOY_JOB_PATTERN = /
     \b(deploy|release|publish|rollout|provision|terraform|ansible|
     helm|k8s|kubernetes|staging|production|review.?app)\b

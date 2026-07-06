@@ -26,6 +26,16 @@ class PollRouter
     route_by_state(gl_issue, existing)
   end
 
+  # Public entry for PollDispatcher's infra-recheck pass. An infra-origin
+  # stagnation whose CI has recovered re-enters the pipeline-check flow using
+  # the exact same reset a human re-adding labels_todo triggers
+  # (ResumeHandler#reenter_via_pipeline_check): back to `checking_pipeline`,
+  # `needs_attention` cleared, review/fix counters reset, label doing re-applied.
+  def resume_recovered_infra(issue, client)
+    @client = @route_client = client
+    reenter_via_pipeline_check(issue)
+  end
+
   private
 
   def init_project_settings(project_config)

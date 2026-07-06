@@ -8,6 +8,7 @@ require_relative 'pipeline_monitor/poll_tracker'
 require_relative 'pipeline_monitor/post_completion'
 require_relative 'pipeline_monitor/fix_prompts'
 require_relative 'pipeline_monitor/failure_handler'
+require_relative 'pipeline_monitor/infra_recheck'
 require_relative 'pipeline_monitor/pipeline_fixer'
 require_relative 'pipeline_monitor/reviewer'
 require_relative 'pipeline_monitor/mr_state_checker'
@@ -21,6 +22,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include PollTracker
   include PostCompletion
   include FailureHandler
+  include InfraRecheck
   include PipelineFixer
   include Reviewer
   include MrStateChecker
