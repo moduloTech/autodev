@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-07-01
+date: 2026-07-06
 lang: fr
 documentclass: article
 papersize: a4
@@ -153,6 +153,7 @@ Le compteur à côté de chaque onglet est mis à jour en direct. Trois de ces o
 - L'identifiant interne (par exemple `#15124`).
 - Le titre du ticket GitLab.
 - Le chemin du projet.
+- **Le nom de la personne qui a fait la demande** (repris de GitLab), affiché sous le titre. On le retrouve aussi sur les cartes mobiles et sur les cartes des onglets *Erreurs*, *Question en attente* et *Livrée (à vérifier)*.
 - L'état actuel sous forme de pastille colorée.
 - La date de la dernière activité.
 
@@ -183,7 +184,7 @@ La réponse attendue dépend de la situation :
 
 - **Échec technique** (onglet *Erreurs*) — *« Une erreur a empêché autodev de continuer. »* C'est probablement un bug d'Autodev lui-même. Relancez la demande avec **Réessayer maintenant** ; si l'échec persiste, **prévenez l'équipe autodev** (les *détails techniques* sont utiles à transmettre). Vous n'avez rien à corriger côté ticket.
 - **Question en attente** (onglet *Question en attente*) — *« Autodev a posé une question pour préciser la demande. »* Là, c'est à **vous de répondre** : Autodev a posté une question dans le ticket GitLab et attend votre réponse pour reprendre. **Répondez-lui en commentaire sur le ticket GitLab** (le bouton **Voir la question** vous y emmène directement). Tant que personne ne répond, la demande reste en attente.
-- **Intervention manuelle requise** (onglet *Livrée (à vérifier)*) — la demande a été **livrée**, mais Autodev a atteint une limite (trop de corrections de pipeline ou de tours de relecture) et l'a livrée telle quelle. **Vérifiez la MR à la main** ; quand c'est bon, **Clôturer** la range.
+- **Intervention manuelle requise** (onglet *Livrée (à vérifier)*) — la demande a été **livrée**, mais Autodev a atteint une limite (trop de corrections de pipeline ou de tours de relecture) et l'a livrée telle quelle. **Vérifiez la MR à la main** ; quand c'est bon, **Clôturer** la range. Quand le blocage vient d'un souci d'infrastructure (un job qui échoue en boucle), la carte indique désormais **le ou les jobs en cause** (par exemple *deploy_review*) pour vous aiguiller. Bonne nouvelle : dès que l'infrastructure est réparée et que les tests repassent au vert, Autodev **relance tout seul** ce genre de demande — vous n'avez en général rien à faire.
 
 ## Les actions sur chaque carte
 
@@ -239,6 +240,7 @@ L'historique remonte les 200 dernières entrées par défaut.
 - **Réinitialiser** — repart à zéro sur cette demande.
 - **Forcer la transition** — fait passer manuellement la demande à l'étape suivante. Utile si vous voulez court-circuiter une attente.
 - **Clôturer** — met la demande de côté sans la livrer. Elle bascule dans l'onglet *Clôs* et Autodev ne la reprend plus. Réservé aux personnes ayant accès au projet. Pour la relancer plus tard, utilisez *Réinitialiser*.
+- **Déployer / Redéployer la review** — déclenche le déploiement de l'environnement de review de la MR. Ce bouton est **toujours présent** sur la page d'une demande : tant qu'il n'y a pas encore de branche déployable, il apparaît **désactivé** avec la raison (par exemple *« L'issue n'a pas encore de branche »*), plutôt que d'être caché. Dès qu'une branche et un déploiement sont disponibles, il devient cliquable.
 
 ## Quand Autodev pose une question
 
@@ -409,7 +411,7 @@ Oui. Deux options : désassignez-le du ticket sur GitLab (il s'arrête, vous rep
 Oui. Autodev livre une MR prête à merger, mais le merge final reste à un humain (validation finale, déploiement, etc.).
 
 **Une demande est bloquée en *Test de la fonctionnalité* depuis longtemps. Pourquoi ?**
-C'est généralement une pipeline d'infra (pas un bug du code) qui a échoué et n'a pas pu être relancée automatiquement. La demande attend une intervention manuelle. Ouvrez le détail, regardez les **détails techniques**, et faites suivre à l'équipe technique si besoin.
+C'est généralement une pipeline d'infra (pas un bug du code) qui a échoué de façon répétée. La demande bascule alors en *Livrée (à vérifier)*, et la carte vous indique le job en cause. Autodev **retente automatiquement** une fois l'infrastructure réparée (les tests repassés au vert) : la plupart du temps il n'y a donc rien à faire. Si le souci persiste, ouvrez le détail, regardez les **détails techniques**, et faites suivre à l'équipe technique.
 
 **Je vois *« Synchronisation avec les membres GitLab à venir »* sur un projet. Normal ?**
 Oui, c'est un message d'attente : la synchronisation des équipes depuis GitLab sera mise en place dans une prochaine version. Cela n'empêche pas Autodev de travailler.

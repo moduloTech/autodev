@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-06-30
+date: 2026-07-06
 lang: fr
 documentclass: article
 papersize: a4
@@ -33,12 +33,14 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | Route | Contrôleur | Description |
 |---|---|---|
 | `/` | `DashboardController#show` | KPIs, listes actives, sparkline, banderole erreurs |
-| `/issues` | `IssuesController#index` | Liste paginée + filtrable (`?tab=`, `?q=`, `?from=`, `?to=`). Tabs : `active`, `pending`, `errors`, `waiting`, `delivered_review`, `done`, `closed`, `all`. Les tabs `errors` / `waiting` / `delivered_review` rendent des cartes « besoin d'un humain » (cause + message + CTA) au lieu du tableau dense — elles remplacent l'ancienne page `/errors` |
+| `/issues` | `IssuesController#index` | Liste paginée + filtrable (`?tab=`, `?q=`, `?from=`, `?to=`). Tabs : `active`, `pending`, `errors`, `waiting`, `delivered_review`, `done`, `closed`, `all`. Chaque ligne / carte affiche le demandeur par son **nom** (colonne `issue_author_name`, remplie depuis `gl_issue.author.name` au ingest), via `Web::I18nHelpers#author_display` (fallback `#<author_id>` pour les rows d'avant la colonne, em-dash sinon). Les tabs `errors` / `waiting` / `delivered_review` rendent des cartes « besoin d'un humain » (cause + message + CTA) au lieu du tableau dense — elles remplacent l'ancienne page `/errors` |
 | `/issues/:id` | `IssuesController#show` | Détail + activity events (200 derniers) |
 | `/issues/:id.json` | `IssuesController#show` | Mêmes données, format JSON |
 | `/issues/:id/reset` (POST) | `IssuesController#reset` | Reset brut (raw SQL, pas une transition AASM) |
 | `/issues/:id/transition` (POST) | `IssuesController#transition` | Déclenche un événement AASM (`?event=...`) |
 | `/issues/:id/close` (POST) | `IssuesController#close` | Clôture manuelle (événement AASM `close`, gatée sur le membership projet) — `closed` depuis n'importe quel état |
+| `/issues/:id/deploy_review` (GET) | `IssuesController#deploy_review` | Turbo-frame paresseux : sonde la disponibilité du job `deploy_review` (`Autodev::DeployReview#availability`). Rendu **inconditionnellement** sur chaque page d'issue (task #28) — sur une issue sans branche/MR il renvoie `:no_branch` sans appel GitLab et affiche un bouton désactivé + un motif au lieu de rien |
+| `/issues/:id/deploy_review` (POST) | `IssuesController#trigger_deploy_review` | Déclenche le job CI `deploy_review` (redéploiement de l'env de review) |
 | `/projects` | `ProjectsController#index` | Union des rows `projects` + entrées YAML pas encore importées |
 | `/projects/new` (+ POST `create`) | `ProjectsController#new`/`#create` | Création d'un projet en base (admin only) — enfile `SyncGitlabMembershipsJob` au succès |
 | `/projects/:slug/edit` (+ PATCH `update`) | `ProjectsController#edit`/`#update` | Édition de la config per-projet en base (gatée membership/admin) |
@@ -170,6 +172,8 @@ Depuis le task #9 (phases 3-4, `v1.0.0-alpha.25`/`.26`), la config par projet vi
 | Exécution | `max_retries` | Nb max de tentatives sur échec. |
 | Exécution | `retry_backoff` | Délai de base entre deux tentatives (s). |
 | Exécution | `stagnation_threshold` | Échecs identiques consécutifs avant abandon. |
+| Exécution | `infra_recheck_max` | Nb max de rechecks automatiques d'une stagnation infra (défaut 5, `DEFAULT_INFRA_RECHECK_MAX`). |
+| Exécution | `infra_recheck_backoff` | Délai (s) entre deux rechecks infra (défaut 3600, `DEFAULT_INFRA_RECHECK_BACKOFF`). |
 | Exécution | `clone_depth` | Profondeur du `git clone` (0 = historique complet). |
 | Exécution | `sparse_checkout` | Chemins du sparse checkout (liste, pour monorepos). |
 | Exécution | `post_completion` | Commande(s) lancée(s) après livraison (sur désassignation). |
@@ -311,6 +315,7 @@ pending → cloning → checking_spec → implementing → committing → pushin
 - `error` (depuis n'importe quel état actif) → `pending` (retry avec backoff).
 - `needs_clarification` (depuis `checking_spec`) → `pending` quand un commentaire de clarification est posté.
 - `close` (événement manuel, depuis n'importe quel état) → `closed`. État terminal : le poller ignore toute issue dont le `status != 'pending'`. Pour rouvrir, utiliser `#reset` qui force la row à `pending`.
+- `done` + `needs_attention` + `attention_reason: 'stagnation_pipeline'` + MR ouverte → recheck auto (`:recheck_infra`) ; si la pipeline courante a récupéré, réentrée en `checking_pipeline` (voir §*Recheck automatique d'une stagnation infra*). Borné par `infra_recheck_max` / `infra_recheck_backoff`.
 
 ## Reset vs Transition (UI)
 
@@ -331,7 +336,7 @@ Pas de webhook GitLab — Autodev poll régulièrement (`AutodevPollJob` toutes 
 
 ## Polling
 
-`Autodev::PollDispatcher#run_once` exécute 6 passes par projet, dans cet ordre :
+`Autodev::PollDispatcher#run_once` exécute 7 passes par projet, dans cet ordre :
 
 1. `dispatch_new_issues` — nouveaux tickets `label_todo` → action `:process`
 2. `dispatch_pipelines` — issues en `checking_pipeline` → action `:check_pipeline`
@@ -339,6 +344,7 @@ Pas de webhook GitLab — Autodev poll régulièrement (`AutodevPollJob` toutes 
 4. `dispatch_unassignment` — issues actives plus assignées → `done` inline (pas de job)
 5. `dispatch_done_unassigned` — issues `done` désassignées avec `post_completion` configuré → action `:post_completion`
 6. `dispatch_retries` — issues `error` + `pending` avec backoff écoulé → `:retry_errored` / `:retry_stuck`
+7. `dispatch_infra_recheck` — issues `done` + `needs_attention` + `attention_reason: 'stagnation_pipeline'`, MR ouverte, sous le cap et backoff écoulé → action `:recheck_infra` (re-tentative auto d'une stagnation infra, voir plus bas)
 
 Chaque dispatch enfile un `IssueProcessJob(project_path, issue_iid, action)` sur Solid Queue. `limits_concurrency to: 1, key: "issue-#{path}-#{iid}"` garantit qu'un même ticket n'est jamais traité en parallèle. Le cap global de concurrence est `AUTODEV_MAX_WORKERS` (défaut 3).
 
@@ -374,9 +380,23 @@ Tire la pipeline head de la MR via l'API GitLab et applique une matrice de déci
 
 Récupère les logs complets de chaque job en échec, les écrit dans `tmp/ci_logs/<job_name>.log` du workdir (sans troncature), et appelle `danger-claude` une fois par job en échec (chaque appel produit un commit). Stagnation détectée si la signature SHA256 des noms de jobs en échec se répète 5 fois (configurable via `stagnation_threshold`) — la demande passe alors `done` avec un commentaire d'alerte.
 
+Quand la pipeline bloque sur un échec `:infra`/deploy (`FailureHandler#infra_skip?`), le job en cause et sa `failure_reason` GitLab ne sont plus perdus : `format_failure_detail` construit une chaîne concise (ex. `deploy_review (script_failure)`, séparés par virgule pour plusieurs jobs, URL du job GitLab ajoutée si l'API l'expose). Ce détail est (1) **persisté** sur la colonne `attention_detail` de l'issue (vidée à la réentrée / reset / close, comme les autres colonnes d'attention), (2) **injecté** dans la notification `stagnation_pipeline` et les lignes d'activité `activity_stagnation_pipeline` / `activity_pipeline_infra` via le placeholder `%{detail}`, et (3) **affiché** sur la carte de surveillance needs_attention / delivered_review (`web_errors_attention_detail`). `attention_reason` reste `stagnation_pipeline`.
+
 ## Correction des discussions (MrFixer)
 
 Clone la branche de la MR, récupère les discussions non résolues, en fixe une par appel `danger-claude -p` + `-c`, résout chaque discussion, pousse. Stagnation détectée par signature des IDs de discussions non résolues. Tire `discussions_fixed!` → `checking_pipeline`.
+
+## Recheck automatique d'une stagnation infra (task #31)
+
+Un ticket abandonné sur une stagnation infra/deploy (`done` + `needs_attention` + `attention_reason: 'stagnation_pipeline'` + `label_done`) n'est plus terminal : la pass `dispatch_infra_recheck` le ré-enfile en `IssueProcessJob(:recheck_infra)` tant qu'il reste ouvert, sous le cap `infra_recheck_max` et le backoff `infra_recheck_backoff` écoulé.
+
+`PipelineMonitor#recheck_infra_recovery` (`pipeline_monitor/infra_recheck.rb`) re-classe la pipeline head **courante** de la MR avec les mêmes `pre_triage`/`job_classifier` (infra-vs-code décidé au moment du recheck sur les jobs qui échouent *actuellement*, jamais un verdict stocké) :
+
+- **Pipeline recovered** (verte / plus rien qui échoue) → réentrée via `ResumeHandler#reenter_via_pipeline_check` (retour à `checking_pipeline`, `needs_attention` vidé, compteurs review/fix remis à zéro, `label_doing` ré-appliqué, `infra_recheck_count`/`infra_recheck_at` réinitialisés).
+- **Toujours infra** → on attend, une tentative bornée est enregistrée (`infra_recheck_count += 1`, `infra_recheck_at` re-stampé).
+- **Maintenant code** → laissé intact (vraie erreur à corriger à la main).
+
+Chaque non-recovery consomme une tentative, donc le recheck s'auto-limite au cap : une infra qui ne récupère jamais reste en `needs_attention` définitivement, sans boucler. `stagnation_discussions` n'est jamais visé. Colonnes ajoutées (migration `20260706000002_add_infra_recheck_to_issues`) : `infra_recheck_count`, `infra_recheck_at`.
 
 \newpage
 
@@ -472,7 +492,8 @@ DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`
 | Pipeline rouge (infra / incertaine, 1re fois) | Retrigger unique, recheck au poll suivant |
 | Pipeline rouge (infra / incertaine, après retrigger) | Reste en `checking_pipeline` (manuel) |
 | Pipeline canceled / skipped | Reste en `checking_pipeline` (manuel) |
-| Stagnation pipeline (5 corrections identiques) | `done` avec commentaire d'alerte |
+| Stagnation pipeline (5 corrections identiques) | `done` + `needs_attention` (`stagnation_pipeline`), commentaire d'alerte incluant le job en cause (`attention_detail`, ex. `deploy_review (script_failure)`). Re-tentative auto une fois CI rétablie (voir ligne suivante) |
+| Stagnation pipeline infra — CI rétabli | `dispatch_infra_recheck` ré-enfile `:recheck_infra` ; pipeline courante verte → réentrée `checking_pipeline`. Borné par `infra_recheck_max` (5) / `infra_recheck_backoff` (3600 s) ; jamais de boucle |
 | Stagnation discussions | `done` avec commentaire d'alerte |
 | Limite de review atteinte (3 passes) | `done` avec commentaire d'alerte |
 | Désassigné en cours d'implémentation | Direct `done` au poll suivant |

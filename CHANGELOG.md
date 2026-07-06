@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.37] - 2026-07-06
+
 ### Added
 
 - **The ticket author's name is now shown next to every request on `/issues`, across all tabs (task #27).** Each request already carried an opaque `issue_author_id`, but nothing on the page told a user *who* filed it — the errors/waiting/delivered_review watch cards even rendered the raw id (`#7`) in the "requested by" line. The GitLab author display name is available on the issue payload at ingest time, so a new `issue_author_name` column is populated from `gl_issue.author.name` in `PollDispatcher#find_or_create_issue` and surfaced everywhere requests are listed: the dense desktop table (under the title, next to the project path), the mobile stacked cards (in the footer), and the three watch-card tabs (in the avatar strip, with initials derived from the name). A shared `Web::I18nHelpers#author_display` falls back to `#<author_id>` for rows created before the column existed and to an em-dash when neither is known — no blocking GitLab calls from the view. New `web_issues_author` string (fr + en); `web_errors_requester` reworded to show the author name instead of the issue iid. Migration `20260706000001_add_issue_author_name_to_issues` (idempotent, `if_not_exists`). New tests: `test/components/web/views/issues_author_test.rb`, `test/services/autodev/poll_dispatcher_author_test.rb`.
