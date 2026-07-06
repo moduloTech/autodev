@@ -152,15 +152,20 @@ module Web
         end
       end
 
-      # Lazy-loaded action to redeploy the review environment by (re)triggering
+      # Lazy-loaded action to (re)deploy the review environment by (re)triggering
       # the `deploy_review` job. The frame resolves its own availability via
-      # GET /issues/:id/deploy_review so the GitLab round-trip doesn't block
-      # this page. Skipped entirely on early-lifecycle issues that have neither
-      # an MR nor a branch yet — there's no pipeline to act on, so there's no
-      # point spending a server round-trip + GitLab client build per view.
+      # GET /issues/:id/deploy_review so the GitLab round-trip doesn't block this
+      # page.
+      #
+      # Rendered on *every* issue, regardless of lifecycle state (Autodev #28: a
+      # user "couldn't find the deploy button" because on branch-less issues the
+      # whole frame was omitted, leaving neither a button nor an explanation).
+      # The availability probe short-circuits to `:no_branch` *before* building a
+      # GitLab client when the issue has neither an MR nor a branch, so an
+      # early-lifecycle issue costs one cheap local round-trip and shows a
+      # disabled button + "no branch yet" reason instead of a silent gap the user
+      # has to hunt through.
       def render_deploy_review
-        return unless @issue[:mr_iid] || @issue[:branch_name].to_s != ''
-
         render Web::Views::DeployReviewFrame.new(
           issue_id: @issue[:id], state: :loading, locale: @locale, csrf_token: @csrf_token
         )
