@@ -53,7 +53,8 @@ class PollRouter
       existing.update(review_count: 1, review_failure_count: 0, stagnation_signatures: nil,
                       fix_round: 0, pipeline_retrigger_count: 0, error_message: nil,
                       finished_at: nil, activity_note_id: nil,
-                      needs_attention: false, attention_reason: nil, attention_detail: nil)
+                      needs_attention: false, attention_reason: nil, attention_detail: nil,
+                      infra_recheck_count: 0, infra_recheck_at: nil)
       apply_label_doing(existing.issue_iid)
       log_activity(existing, :reenter_to_fix)
       log "Issue ##{existing.issue_iid}: MR open → checking_pipeline (will route to fixing_discussions)"
