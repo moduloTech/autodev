@@ -40,10 +40,20 @@ module RepoOperations
     return if ok
 
     log 'Push failed, retrying with --force-with-lease...'
-    run_cmd(push_cmd(branch, upstream: upstream, force: true), chdir: work_dir)
+    run_cmd(push_cmd(branch, upstream: upstream, force: true, lease: remote_lease(work_dir, branch)),
+            chdir: work_dir)
   rescue GitError => e
     log_large_blobs(work_dir) if e.message.include?('pack exceeds maximum allowed size')
     raise
+  end
+
+  # The remote value we fetched for the branch (refs/remotes/origin/<branch>),
+  # used as the explicit force-with-lease expectation. nil when no remote-tracking
+  # ref exists (a brand-new branch) — the bare lease is then fine.
+  def remote_lease(work_dir, branch)
+    out, _err, ok = run_cmd_status(['git', 'rev-parse', '--verify', '--quiet', "refs/remotes/origin/#{branch}"],
+                                   chdir: work_dir)
+    ok && !out.strip.empty? ? out.strip : nil
   end
 
   # Objects reachable from HEAD but not from any remote-tracking ref are exactly
@@ -80,12 +90,26 @@ module RepoOperations
     )
   end
 
-  def push_cmd(branch, upstream:, force: false)
+  def push_cmd(branch, upstream:, force: false, lease: nil)
     cmd = %w[git push]
-    cmd << '--force-with-lease' if force
+    cmd << force_lease_flag(branch, lease) if force
     cmd << '-u' if upstream
     cmd += ['origin', branch]
     cmd
+  end
+
+  # An explicit-value lease (--force-with-lease=<branch>:<sha>) keeps the
+  # anti-clobber guarantee (the push is refused if the remote moved past <sha>
+  # since we fetched) WITHOUT triggering the implicit --force-if-includes that a
+  # bare --force-with-lease carries since git 2.30. After re-implementing an
+  # existing branch we rebase it on the advanced target, rewriting history so the
+  # previously-delivered remote commit is no longer an ancestor; the includes
+  # check then rejects the push with "stale info" (task #33). This is aggravated
+  # by the `clone_depth: 1` clone (--single-branch), where origin/<branch> exists
+  # only via the one-off fetch. Falls back to the bare form when we have no
+  # leased sha.
+  def force_lease_flag(branch, lease)
+    lease ? "--force-with-lease=#{branch}:#{lease}" : '--force-with-lease'
   end
 
   # Logs a snapshot of HEAD + pack stats so we can diagnose oversized pushes
