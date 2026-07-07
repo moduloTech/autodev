@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Re-implementing an existing branch no longer dies at `git push` with `! [rejected] (stale info)` (task #33).** Surfaced while relaunching the task #32 tickets in prod: once a recette-KO reentry routes to a full re-implementation, `IssueProcessor` reuses the existing branch, rebases it on the (meanwhile-advanced) target (`rebase_branch_on_target`), then pushes — and `RepoOperations#push_with_lease_fallback` failed on the `--force-with-lease` retry. Root cause (reproduced deterministically, git 2.50.1 = prod): the **bare** `git push --force-with-lease` implies `--force-if-includes` since git 2.30, which requires the remote-tracking tip to be integrated into the pushed history; the rebase rewrites history so the previously-delivered remote commit is no longer an ancestor, and the check rejects the push as `stale info`. It bit specifically because the `clone_depth: 1` clone is `--single-branch`, so `refs/remotes/origin/<branch>` exists only via autodev's one-off fetch (a full clone tracks the branch and passes). The force retry now uses an **explicit-value lease** `--force-with-lease=<branch>:<sha>`, where `<sha>` is the fetched `refs/remotes/origin/<branch>` (`RepoOperations#remote_lease`): it keeps the anti-clobber guarantee (still refused if the remote moved past `<sha>` since our fetch) but does not trigger `--force-if-includes`, so a deliberate post-rebase overwrite of our own prior delivery goes through. Falls back to the bare lease when there is no remote-tracking ref (brand-new branch — no force needed anyway). This also covers `MrFixer`'s rebase-then-push path. New `test/repo_operations_force_push_test.rb` reproduces the rebased-branch push (asserts it succeeds) and asserts the lease still refuses a push when the remote genuinely moved since the fetch. Follow-up still open on #33: the error path leaves `next_retry_at` NULL, so a push that ultimately errors is not auto-retried (same orphan pattern as #26).
+
 ## [1.0.0-alpha.40] - 2026-07-07
 
 ### Fixed
