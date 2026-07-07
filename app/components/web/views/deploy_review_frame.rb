@@ -25,8 +25,17 @@ module Web
         super(**)
       end
 
+      # `src` + `loading="lazy"` belong ONLY on the frame the issue page
+      # embeds (state :loading): they tell Turbo to lazily fetch the resolved
+      # frame. The lazy-fetch *response* (every other state) must NOT re-emit
+      # them — Turbo 8 treats a response `<turbo-frame>` that still carries
+      # `src`/`loading="lazy"` as a fresh lazy frame, blanks it and re-navigates,
+      # so the button flashed in and then vanished (Autodev #28). The resolved
+      # frame therefore ships as a bare `<turbo-frame id>` + content.
       def view_template
-        turbo_frame(id: frame_id, src: src, loading: 'lazy') do
+        attrs = { id: frame_id }
+        attrs.merge!(src: src, loading: 'lazy') if @state == :loading
+        turbo_frame(**attrs) do
           case @state
           when :loading   then render_placeholder
           when :available then render_button
