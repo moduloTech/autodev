@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.39] - 2026-07-07
+
 ### Fixed
 
 - **The deploy-review button no longer flashes in and vanishes on the issue page.** A follow-up to the Autodev #28 fix: with the frame now always rendered, the button appeared for a fraction of a second on page load and then disappeared. Root cause was in `Web::Views::DeployReviewFrame`: the component emitted the outer `<turbo-frame>` with `src` + `loading="lazy"` for *every* state — including the lazy-fetch **response**. Turbo 8 treats a response `<turbo-frame>` that still carries `src`/`loading="lazy"` as a fresh lazy frame: it blanks the just-injected content and re-navigates, leaving the frame empty (reproduced with a controlled A/B against the bundled `turbo.js` — a single `200` response with the button HTML, yet the frame ends up empty; omitting `src`/`loading` keeps the button stable). The lazy `src` + `loading="lazy"` now ship **only** on the frame the issue page embeds (state `:loading`); the resolved response (`:available` / `:no_job` / `:blocked` / …) renders a bare `<turbo-frame id>` + content, the canonical Turbo lazy-frame pattern. `GET /issues/:id/deploy_review` itself was always `200`/correct — this was purely the client-side frame swap. New `test/components/web/views/deploy_review_frame_test.rb` asserts the `:loading` frame carries `src`/`loading` and the resolved frames omit them.
