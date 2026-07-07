@@ -35,13 +35,28 @@ class PollRouter
 
       mr = @route_client.merge_request(@project_path, existing.mr_iid)
       case mr.state
-      when 'opened' then :pipeline_check
+      when 'opened' then open_mr_destination(existing)
       when 'merged' then :skip_merged
       else               :reimplementation
       end
     rescue Gitlab::Error::ResponseError => e
       log_error "Failed to check MR !#{existing.mr_iid} state for reentry: #{e.message}"
       :reimplementation
+    end
+
+    # An open MR normally means "the human wants the review threads addressed" →
+    # `:pipeline_check` (routes to MrFixer). But if the human left recette-KO
+    # feedback as a NEW comment on the ISSUE after the last delivery (bug #32),
+    # that feedback lives on the issue, not on the MR — the MR-discussion path
+    # never reads it and re-delivers the identical MR. Route those to a full
+    # `:reimplementation`, the only path that injects issue comments (via
+    # GitlabHelpers.fetch_full_context) and that reuses the existing branch/MR.
+    def open_mr_destination(existing)
+      if GitlabHelpers.human_comment_since?(@route_client, @project_path, existing.issue_iid, existing.finished_at)
+        :reimplementation
+      else
+        :pipeline_check
+      end
     end
 
     # Preserve mr_iid; reset only what would block the pipeline-fix flow.

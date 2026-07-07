@@ -15,11 +15,17 @@ require 'autodev/poll_router'
 # re-implementation cycle. Observed on Powerpanne issue #11859 (2026-05-28):
 # autodev re-implemented from scratch and never addressed the existing 12
 # unresolved threads.
-class PollRouterReenterTest < Minitest::Test
+class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
   FakeMr = Struct.new(:state)
   FakeGlIssue = Struct.new(:iid, :title)
+  FakeNote = Struct.new(:system, :created_at, :body)
+
+  # Mimics the gitlab gem's paginated response (responds to auto_paginate).
+  Paginated = Struct.new(:items) do
+    def auto_paginate = items
+  end
 
   # Pool stub: just record enqueue calls without running them.
   class StubPool
@@ -38,8 +44,9 @@ class PollRouterReenterTest < Minitest::Test
   class StubClient
     attr_reader :merge_request_calls, :label_calls
 
-    def initialize(mr_state:)
+    def initialize(mr_state:, issue_notes: [])
       @mr_state = mr_state
+      @issue_notes = issue_notes
       @merge_request_calls = []
       @label_calls = []
     end
@@ -47,6 +54,10 @@ class PollRouterReenterTest < Minitest::Test
     def merge_request(project_path, mr_iid)
       @merge_request_calls << [project_path, mr_iid]
       FakeMr.new(@mr_state)
+    end
+
+    def issue_notes(_project_path, _iid, **_opts)
+      Paginated.new(@issue_notes)
     end
 
     # Label workflow noops — we don't assert label state in this test, just
@@ -135,6 +146,54 @@ class PollRouterReenterTest < Minitest::Test
 
     assert_equal 'pending', issue.status
     assert_empty client.merge_request_calls
+  end
+
+  # Bug #32 (recette KO): a human re-adds the todo label AND posts a new comment
+  # on the ISSUE explaining what's wrong. The MR is still open. Feedback lives on
+  # the issue, not on the MR — so route to a full reimplementation (the only path
+  # that reads issue comments via fetch_full_context) instead of looping through
+  # fixing_discussions and re-delivering the identical MR.
+  def test_reenter_reimplements_when_new_issue_comment_posted_after_delivery
+    issue = done_issue_with_mr(mr_iid: 42)
+    issue.update(finished_at: Time.parse('2026-07-01T10:00:00Z'))
+    client = StubClient.new(mr_state: 'opened',
+                            issue_notes: [FakeNote.new(system: false, body: 'La recette est KO, il manque X',
+                                                       created_at: '2026-07-02T09:00:00Z')])
+
+    verdict = build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+    issue.reload
+
+    assert_equal :next, verdict
+    assert_equal 'pending', issue.status
+  end
+
+  # A comment predating the last delivery is stale (already accounted for) — keep
+  # the existing open-MR behavior (checking_pipeline → fixing_discussions).
+  def test_reenter_stays_on_pipeline_when_issue_comment_predates_delivery
+    issue = done_issue_with_mr(mr_iid: 42)
+    issue.update(finished_at: Time.parse('2026-07-02T10:00:00Z'))
+    client = StubClient.new(mr_state: 'opened',
+                            issue_notes: [FakeNote.new(system: false, body: 'vieux commentaire',
+                                                       created_at: '2026-07-01T09:00:00Z')])
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+    issue.reload
+
+    assert_equal 'checking_pipeline', issue.status
+  end
+
+  # autodev's own post-delivery comment must not be mistaken for human feedback.
+  def test_reenter_ignores_autodev_own_comment_after_delivery
+    issue = done_issue_with_mr(mr_iid: 42)
+    issue.update(finished_at: Time.parse('2026-07-01T10:00:00Z'))
+    client = StubClient.new(mr_state: 'opened',
+                            issue_notes: [FakeNote.new(system: false, created_at: '2026-07-02T09:00:00Z',
+                                                       body: '**autodev** : MR livrée')])
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+    issue.reload
+
+    assert_equal 'checking_pipeline', issue.status
   end
 
   def test_reenter_skipped_when_mr_merged

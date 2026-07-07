@@ -112,7 +112,16 @@ module GitlabHelpers
   def clarification_answered?(client, project_path, issue_iid, requested_at)
     return true unless requested_at
 
-    threshold = Time.parse(requested_at.to_s)
+    human_comment_since?(client, project_path, issue_iid, requested_at)
+  end
+
+  # True when a human (not autodev, not a system note) posted a comment on the
+  # issue strictly after `since`. Used both to detect a clarification answer and
+  # to detect recette-KO feedback left on a delivered ticket (bug #32).
+  def human_comment_since?(client, project_path, issue_iid, since)
+    return false unless since
+
+    threshold = since.is_a?(Time) ? since : Time.parse(since.to_s)
     notes = client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
     notes.any? do |note|
       !note.system &&
