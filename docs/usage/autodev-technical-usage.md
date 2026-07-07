@@ -310,7 +310,7 @@ pending → cloning → checking_spec → implementing → committing → pushin
 
 ## Réentrées et hooks
 
-- `done` + label *à traiter* détecté au poll → `pending` (réentrée).
+- `done` + label *à traiter* détecté au poll → réentrée (`PollRouter::ResumeHandler`), routée selon l'état de la MR : MR **mergée** → on ne fait rien (travail déjà livré, label *livré* ré-appliqué) ; MR **ouverte** → `checking_pipeline` (→ `fixing_discussions`) pour traiter les retours de relecture *sauf* si un **nouveau commentaire humain a été posté sur le ticket après la dernière livraison** (`finished_at`), auquel cas → `pending` pour une **ré-implémentation** complète qui réutilise la branche/MR existantes et intègre le commentaire (retour de recette KO) ; MR **fermée / absente** → `pending` (ré-implémentation).
 - `done` + désassigné au poll + `post_completion` configuré → `running_post_completion` → `done`.
 - `error` (depuis n'importe quel état actif) → `pending` (retry avec backoff).
 - `needs_clarification` (depuis `checking_spec`) → `pending` quand un commentaire de clarification est posté.

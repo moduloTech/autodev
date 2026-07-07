@@ -410,6 +410,9 @@ Oui. Deux options : désassignez-le du ticket sur GitLab (il s'arrête, vous rep
 **La MR n'est pas mergée, est-ce qu'il faut que je le fasse moi ?**
 Oui. Autodev livre une MR prête à merger, mais le merge final reste à un humain (validation finale, déploiement, etc.).
 
+**J'ai recetté la livraison et ce n'est pas bon, comment je lui demande de corriger ?**
+Remettez le label *{{label_todo|à traiter}}* sur le ticket **et laissez un commentaire sur le ticket GitLab** expliquant ce qui ne va pas. Tant que la MR est encore ouverte, Autodev reprend le travail en tenant compte de votre commentaire et pousse la correction **sur la même MR** — inutile d'en rouvrir une. Le commentaire est indispensable : sans nouveau retour, il considère qu'il n'y a rien à changer.
+
 **Une demande est bloquée en *Test de la fonctionnalité* depuis longtemps. Pourquoi ?**
 C'est généralement une pipeline d'infra (pas un bug du code) qui a échoué de façon répétée. La demande bascule alors en *Livrée (à vérifier)*, et la carte vous indique le job en cause. Autodev **retente automatiquement** une fois l'infrastructure réparée (les tests repassés au vert) : la plupart du temps il n'y a donc rien à faire. Si le souci persiste, ouvrez le détail, regardez les **détails techniques**, et faites suivre à l'équipe technique.
 
