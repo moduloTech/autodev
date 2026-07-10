@@ -66,4 +66,50 @@ class DeliveredReviewCardTest < ActiveSupport::TestCase
 
     assert_includes html, 'cause-panel--warn'
   end
+
+  def test_needs_attention_card_shows_contact_line
+    issue = create_issue(status: 'done', needs_attention: true, attention_reason: 'stagnation_pipeline')
+    html = render_for(issue, closable: [issue.id])
+
+    assert_includes html, 'Contactez un développeur du projet pour finaliser cette livraison.'
+  end
+
+  def test_all_attention_reasons_show_contact_line
+    %w[stagnation_pipeline stagnation_discussions review_limit_reached review_failures_exhausted].each do |reason|
+      issue = create_issue(status: 'done', needs_attention: true, attention_reason: reason)
+      html = render_for(issue, closable: [issue.id])
+
+      assert_includes html, 'Contactez un développeur du projet pour finaliser cette livraison.',
+                      "expected contact line for attention_reason=#{reason}"
+    end
+  end
+
+  def test_post_completion_error_does_not_show_contact_line
+    issue = create_issue(status: 'done', post_completion_error: 'deploy script failed')
+    html = render_for(issue, closable: [issue.id])
+
+    refute_includes html, 'Contactez un développeur du projet pour finaliser cette livraison.'
+  end
+
+  def test_error_card_does_not_show_contact_line
+    issue = create_issue(status: 'error', error_message: "NoMethodError: undefined method 'foo'")
+    html = Web::Views::Issues.new(
+      issues: [issue], total: 1, total_pages: 1, page: 1, per_page: 50,
+      filters: {}, tab: 'errors', tab_counts: Hash.new(0), kpis: Hash.new(0),
+      closable_ids: Set.new
+    ).call
+
+    refute_includes html, 'Contactez un développeur du projet pour finaliser cette livraison.'
+  end
+
+  def test_needs_clarification_card_does_not_show_contact_line
+    issue = create_issue(status: 'needs_clarification')
+    html = Web::Views::Issues.new(
+      issues: [issue], total: 1, total_pages: 1, page: 1, per_page: 50,
+      filters: {}, tab: 'waiting', tab_counts: Hash.new(0), kpis: Hash.new(0),
+      closable_ids: Set.new
+    ).call
+
+    refute_includes html, 'Contactez un développeur du projet pour finaliser cette livraison.'
+  end
 end

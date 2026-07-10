@@ -231,6 +231,7 @@ en:
   web_errors_action_view_question: See the question
   web_errors_action_close: Close
   web_errors_requester: 'Requested by %{name}'
+  web_errors_contact: Contact a developer on the project to finalise this delivery.
   web_project_title: Project — %{path}
   web_project_config: Configuration <code>app:</code>
   web_project_no_config: Project not listed in the current config.

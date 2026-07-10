@@ -54,12 +54,15 @@ module Web
             span(class: 'cause-icon-box') do
               render Components::Icon.new(name: 'alert-tri', size: 14)
             end
-            div do
-              div(class: 'cause-title') { t_web(cause_key(row)) }
-              div(class: 'cause-body') { t_web(explain_key(row)) }
-              render_attention_detail(row)
-            end
+            div { render_cause_panel_body(row) }
           end
+        end
+
+        def render_cause_panel_body(row)
+          div(class: 'cause-title') { t_web(cause_key(row)) }
+          div(class: 'cause-body') { t_web(explain_key(row)) }
+          render_attention_detail(row)
+          render_attention_contact(row)
         end
 
         # The concrete infra blocker (failing job + reason, e.g. "deploy_review
@@ -72,6 +75,16 @@ module Web
           return if detail.nil? || detail.to_s.strip.empty?
 
           div(class: 'cause-detail') { t_web(:web_errors_attention_detail, detail: detail.to_s) }
+        end
+
+        # A delivered-but-flagged card (needs_attention) has no dedicated owner
+        # by design — decision was a single common message rather than naming
+        # a person or branching on attention_reason. Not shown on plain errors
+        # or pending clarifications, only on the 4 needs_attention reasons.
+        def render_attention_contact(row)
+          return unless row[:needs_attention]
+
+          div(class: 'cause-contact') { t_web(:web_errors_contact) }
         end
 
         # Technical failures (the errors tab) keep the red alert; a pending
