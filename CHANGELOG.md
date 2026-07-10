@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.42] - 2026-07-10
+
 ### Added
 
 - **"Livrée (à vérifier)" cards now tell the CSM who to contact (task #35).** The yellow "Intervention manuelle requise" panel shown for `needs_attention` rows (`stagnation_pipeline`, `stagnation_discussions`, `review_limit_reached`, `review_failures_exhausted`) explained the problem but never said who could act on it. `WatchCards#render_cause_panel` now renders a common contact line (new `web_errors_contact` i18n key) under the cause body, gated on `row[:needs_attention]` — it does not appear on the plain `/errors` failures or on pending `needs_clarification` questions.
