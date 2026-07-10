@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-07-06
+date: 2026-07-10
 lang: fr
 documentclass: article
 papersize: a4
@@ -107,6 +107,7 @@ Présent sur toutes les pages, organisé en sections :
   - **Erreurs** — les demandes en échec à relancer.
   - **Question en attente** — les demandes où Autodev attend une réponse de votre part.
   - **Livrée (à vérifier)** — les demandes livrées qui méritent un coup d'œil.
+  - **Déploiement review** — déployer un environnement de review pour n'importe quelle *Merge Request* ouverte, même une que vous n'avez pas confiée à Autodev (voir *Déployer un environnement de review*).
 - **AutoSpec** — vos brouillons de demandes rédigés avec l'aide d'Autodev (voir *Rédiger une demande avec Autodev*) :
   - **En rédaction** — vos brouillons en cours d'écriture.
   - **En attente de validation** — vos brouillons envoyés, en attente du vote des responsables.
@@ -184,7 +185,7 @@ La réponse attendue dépend de la situation :
 
 - **Échec technique** (onglet *Erreurs*) — *« Une erreur a empêché autodev de continuer. »* C'est probablement un bug d'Autodev lui-même. Relancez la demande avec **Réessayer maintenant** ; si l'échec persiste, **prévenez l'équipe autodev** (les *détails techniques* sont utiles à transmettre). Vous n'avez rien à corriger côté ticket.
 - **Question en attente** (onglet *Question en attente*) — *« Autodev a posé une question pour préciser la demande. »* Là, c'est à **vous de répondre** : Autodev a posté une question dans le ticket GitLab et attend votre réponse pour reprendre. **Répondez-lui en commentaire sur le ticket GitLab** (le bouton **Voir la question** vous y emmène directement). Tant que personne ne répond, la demande reste en attente.
-- **Intervention manuelle requise** (onglet *Livrée (à vérifier)*) — la demande a été **livrée**, mais Autodev a atteint une limite (trop de corrections de pipeline ou de tours de relecture) et l'a livrée telle quelle. **Vérifiez la MR à la main** ; quand c'est bon, **Clôturer** la range. Quand le blocage vient d'un souci d'infrastructure (un job qui échoue en boucle), la carte indique désormais **le ou les jobs en cause** (par exemple *deploy_review*) pour vous aiguiller. Bonne nouvelle : dès que l'infrastructure est réparée et que les tests repassent au vert, Autodev **relance tout seul** ce genre de demande — vous n'avez en général rien à faire.
+- **Intervention manuelle requise** (onglet *Livrée (à vérifier)*) — la demande a été **livrée**, mais Autodev a atteint une limite (trop de corrections de pipeline ou de tours de relecture) et l'a livrée telle quelle. **Vérifiez la MR à la main** ; quand c'est bon, **Clôturer** la range. Quand le blocage vient d'un souci d'infrastructure (un job qui échoue en boucle), la carte indique désormais **le ou les jobs en cause** (par exemple *deploy_review*) pour vous aiguiller. Bonne nouvelle : dès que l'infrastructure est réparée et que les tests repassent au vert, Autodev **relance tout seul** ce genre de demande — vous n'avez en général rien à faire. Sous l'explication, la carte rappelle aussi **qui contacter** — un développeur du projet — pour finaliser la livraison.
 
 ## Les actions sur chaque carte
 
@@ -252,6 +253,22 @@ Répondez directement sur le ticket GitLab (commentaire). Autodev verra votre r�
 
 \newpage
 
+# Déployer un environnement de review
+
+Autodev peut déployer un **environnement de review** pour une *Merge Request*, même une MR qu'il ne suit pas (créée à la main par un développeur, en dehors du circuit Autodev). C'est utile pour prévisualiser une MR sans attendre qu'elle passe par Autodev.
+
+On y accède par **Déploiement review** dans la section *Autodev* du menu de gauche.
+
+![La page Déploiement review : le sélecteur de projet en haut, puis la liste des MR ouvertes avec un bouton Déployer / Redéployer par ligne.](screenshots/19-deploy-review.png)
+
+1. **Choisissez un projet** dans le sélecteur (seuls apparaissent les projets auxquels vous avez accès).
+2. La page liste alors **toutes les MR ouvertes** du projet : titre, numéro, branche source et auteur.
+3. Pour chacune, un bouton **Déployer / Redéployer** déclenche le déploiement de son environnement de review.
+
+Les MR déjà suivies par Autodev sont signalées par un badge **Suivie par autodev** qui renvoie vers la demande correspondante ; elles restent listées (redéployer ne pose aucun problème).
+
+\newpage
+
 # Projets
 
 La liste des projets que suit Autodev.
@@ -277,7 +294,9 @@ Quatre onglets en haut :
 1. **Vue d'ensemble** — KPIs et les 5 demandes les plus récentes.
 2. **Demandes** — la liste complète, préfiltrée sur ce projet.
 3. **Configuration Autodev** — les réglages techniques du projet (à voir avec l'équipe technique).
-4. **Équipe** — qui peut intervenir sur ce projet.
+4. **Équipe** — la gestion des **responsables (owners)** du projet : la liste des responsables actuels, avec la possibilité d'en **ajouter** (parmi les membres du projet) ou d'en **retirer**. Les responsables sont ceux qui valident les demandes rédigées dans AutoSpec (voir *Rédiger une demande avec Autodev*). Ajout et retrait réservés aux administrateurs et aux responsables déjà en place ; les autres membres voient la liste en lecture seule.
+
+![L'onglet Équipe d'un projet : les responsables actuels avec un bouton Retirer, et le formulaire d'ajout d'un responsable parmi les membres du projet.](screenshots/20-project-team.png)
 
 Le panneau de droite récapitule les **détails techniques** et l'**équipe**.
 
@@ -293,7 +312,7 @@ On y accède par la section **AutoSpec** du menu de gauche, ou par le bouton **N
 
 ![La liste de vos brouillons de demandes, avec ses onglets.](screenshots/11-autospec-list.png)
 
-Chaque brouillon porte un titre, le projet concerné, et son état (en rédaction, en attente de validation, rejeté, ou approuvé). La liste est organisée en onglets :
+Chaque brouillon porte un titre, le projet concerné, son état (en rédaction, en attente de validation, rejeté, ou approuvé), et **le nom de son auteur** — utile surtout dans l'onglet *À valider*, où vous voyez des brouillons rédigés par d'autres. La liste est organisée en onglets :
 
 | Onglet | Ce qu'il contient |
 |---|---|
@@ -349,6 +368,8 @@ Une demande envoyée passe d'abord par une **validation des responsables du proj
 - Quand **tous** ont approuvé, le ticket est créé sur GitLab (et confié à Autodev si c'était la destination choisie).
 
 Vous pouvez aussi **rétracter** un brouillon en attente pour le modifier avant qu'il soit validé.
+
+Enfin, vous pouvez **supprimer** un brouillon tant qu'il n'a pas été envoyé sur GitLab — qu'il soit en rédaction, en attente de validation, ou rejeté. La suppression se fait depuis la page du brouillon, avec une confirmation, et est définitive. Une fois la demande envoyée (le ticket GitLab créé), elle ne peut plus être supprimée. L'action est réservée à l'auteur, à un responsable du projet, ou à un administrateur.
 
 ## Les modèles de ticket
 
@@ -416,8 +437,8 @@ Remettez le label *{{label_todo|à traiter}}* sur le ticket **et laissez un comm
 **Une demande est bloquée en *Test de la fonctionnalité* depuis longtemps. Pourquoi ?**
 C'est généralement une pipeline d'infra (pas un bug du code) qui a échoué de façon répétée. La demande bascule alors en *Livrée (à vérifier)*, et la carte vous indique le job en cause. Autodev **retente automatiquement** une fois l'infrastructure réparée (les tests repassés au vert) : la plupart du temps il n'y a donc rien à faire. Si le souci persiste, ouvrez le détail, regardez les **détails techniques**, et faites suivre à l'équipe technique.
 
-**Je vois *« Synchronisation avec les membres GitLab à venir »* sur un projet. Normal ?**
-Oui, c'est un message d'attente : la synchronisation des équipes depuis GitLab sera mise en place dans une prochaine version. Cela n'empêche pas Autodev de travailler.
+**Qui peut valider les demandes AutoSpec d'un projet, et comment sont désignés les responsables ?**
+Les **membres** d'un projet sont synchronisés automatiquement depuis GitLab : toute personne ayant accès au dépôt devient contributeur. Les **responsables (owners)** — ceux qui valident les demandes rédigées dans AutoSpec — sont désignés **à la main**, dans l'onglet *Équipe* de la page du projet, par un administrateur ou un responsable déjà en place. La synchronisation GitLab ne touche jamais à cette liste. Tant qu'aucun responsable n'a été désigné sur un projet, un administrateur doit poser le premier.
 
 **Et le hook *post-completion* qui apparaît parfois en erreur ?**
 C'est une action de finalisation après livraison (par exemple, mise à jour d'un changelog). Si elle échoue, la demande reste tout de même livrée — mais elle apparaîtra dans l'onglet **Livrée (à vérifier)** pour signaler le problème de finalisation.

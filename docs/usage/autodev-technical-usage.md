@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-07-06
+date: 2026-07-10
 lang: fr
 documentclass: article
 papersize: a4
@@ -41,11 +41,16 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/issues/:id/close` (POST) | `IssuesController#close` | Clôture manuelle (événement AASM `close`, gatée sur le membership projet) — `closed` depuis n'importe quel état |
 | `/issues/:id/deploy_review` (GET) | `IssuesController#deploy_review` | Turbo-frame paresseux : sonde la disponibilité du job `deploy_review` (`Autodev::DeployReview#availability`). Rendu **inconditionnellement** sur chaque page d'issue (task #28) — sur une issue sans branche/MR il renvoie `:no_branch` sans appel GitLab et affiche un bouton désactivé + un motif au lieu de rien |
 | `/issues/:id/deploy_review` (POST) | `IssuesController#trigger_deploy_review` | Déclenche le job CI `deploy_review` (redéploiement de l'env de review) |
+| `/deploy_review` (GET) | `DeployReviewsController#index` | Sélecteur de projet (parmi les projets visibles) + liste des MR ouvertes du projet (API GitLab, `per_page: 100`), chacune avec un `DeployReviewFrame` paresseux ; MR déjà suivie annotée d'un badge vers la fiche issue (task #43) |
+| `/deploy_review/mr` (GET) | `DeployReviewsController#availability` | Sonde paresseuse (`project`, `mr_iid`) — `Autodev::DeployReview#availability` sur une `Target` légère (`project_path`, `branch_name`, `mr_iid`) au lieu d'une row Issue |
+| `/deploy_review/mr` (POST) | `DeployReviewsController#trigger` | Déclenche le déploiement (`project`, `mr_iid`), audit `deploy_review.manual`. `authorize_project!` (403 hors projets visibles) gate `availability` **et** `trigger` — la sécurité ne repose pas sur l'UI |
 | `/projects` | `ProjectsController#index` | Union des rows `projects` + entrées YAML pas encore importées |
 | `/projects/new` (+ POST `create`) | `ProjectsController#new`/`#create` | Création d'un projet en base (admin only) — enfile `SyncGitlabMembershipsJob` au succès |
 | `/projects/:slug/edit` (+ PATCH `update`) | `ProjectsController#edit`/`#update` | Édition de la config per-projet en base (gatée membership/admin) |
 | `/projects/:slug/ticket_templates` (index/new/create) | `TicketTemplatesController` | Modèles de ticket AutoSpec du projet (gaté membership/admin, 404 si pas de row projet) |
 | `/projects/:slug/ticket_templates/:id` (edit/update/destroy) | `TicketTemplatesController` | Édition / suppression d'un modèle (`:id` numérique) |
+| `/projects/:slug/owners` (POST) | `ProjectOwnersController#create` | Promeut un membre du projet (`user_id`) au rôle `owner` — audit `project.owner_granted`. Gaté `can_manage_owners?` (admin ou owner du projet), 403 sinon ; refus si le candidat n'est pas membre (task #38) |
+| `/projects/:slug/owners/:user_id` (DELETE) | `ProjectOwnersController#destroy` | Rétrograde un owner en `contributor` — audit `project.owner_revoked`. Même gate |
 | `/projects/:slug` | `ProjectsController#show` | Slug = `group/sub/name` encodé en `group__sub__name` |
 | `/stream` | `StreamController#show` | Server-Sent Events, `ActionController::Live` |
 | `/locale/:lang` | `LocaleController#update` | Set le cookie `locale`, redirige sur `back` |
@@ -57,6 +62,7 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/autospec_drafts/:id/chat` (POST) | `AutospecDraftsController#chat` | Tour de chat (`Autospec::Chat`), 503 si clé Anthropic absente |
 | `/autospec_drafts/:id/apply_suggestion` (POST) | `AutospecDraftsController#apply_suggestion` | Applique un `tool_use` proposé par le modèle |
 | `/autospec_drafts/:id/{submit_for_approval,retract,approve,reject}` (POST) | `AutospecDraftsController` | Workflow d'approbation (§J) |
+| `/autospec_drafts/:id/destroy` (POST) | `AutospecDraftsController#destroy` | Hard-delete d'un brouillon non `submitted` (route brute, pas une action `resources` — Rails replierait un membre `destroy` sur `/:id`). Gaté `authorize_deletable!` (auteur / owner / admin), 409 `draft_not_deletable` si `submitted` (task #39) |
 | `/autospec_drafts/:id/autospec_attachments` (POST + DELETE `:id`) | `AutospecAttachmentsController` | Pièces jointes image (ActiveStorage, ≤ 10 Mo) |
 | `/help` | `HelpController#show` | Guide utilisateur rendu (`HelpDoc.render(:functional)`) |
 | `/help/images/:filename` | `HelpController#image` | Captures d'écran des deux guides (partagé) |
@@ -98,7 +104,7 @@ Colonnes :
 - **Status** — `active` ou `inactive` (rebasculé selon les memberships GitLab) ;
 - **Memberships** — entrées de `project_memberships`, rôle `owner` ou `contributor`.
 
-Les memberships sont dérivés d'une synchro GitLab (commande CLI `--sync-memberships`). Pas d'édition manuelle depuis l'UI : la sync GitLab fait foi. Pour bootstrapper le premier admin, utiliser `autodev --seed-admin EMAIL`.
+Depuis la task #38, seuls les **contributeurs** sont dérivés de la synchro GitLab (`--sync-memberships`, access-level ≥ 20). Le rôle **owner** est une désignation **manuelle** (onglet *Équipe* d'un projet, `ProjectOwnersController`) : la synchro ne crée, ne rétrograde ni ne révoque jamais un owner. Il n'y a donc pas d'édition des contributeurs depuis l'UI (la sync GitLab fait foi), mais les owners, eux, se gèrent à la main. Pour bootstrapper le premier admin, utiliser `autodev --seed-admin EMAIL`.
 
 \newpage
 
@@ -199,6 +205,8 @@ Les commandes d'environnement (`setup`/`test`/`lint`/`run`) vivent à part dans 
 ## Synchronisation GitLab
 
 Les memberships sont alimentés par `autodev --sync-memberships` (manuel ou via la tâche planifiée `0 3 * * *`).
+
+`Autodev::GitlabMembershipSync` mappe l'access-level GitLab ≥ 20 (reporter) vers `contributor`, et rien en dessous — le seuil `owner` a disparu du mapping (task #38). À la réconciliation, les rows `owner` sont **exclues** : jamais rétrogradées, jamais révoquées. Le rôle `owner` est donc désormais posé **exclusivement à la main** via l'onglet *Équipe* de la page projet, et sert de marqueur fiable de « désignation manuelle » (aucune colonne dédiée). Une data-migration (`20260710000001_convert_project_owners_to_contributors`) a rétrogradé tous les owners hérités de l'ancienne synchro : après déploiement, un projet n'a plus aucun owner tant qu'un admin n'en désigne (amorçage manuel assumé).
 
 Attention : un `--sync-memberships` lancé sur une base `projects` vide désactive silencieusement tous les users. Toujours vérifier `Project.count > 0` avant de lancer la sync.
 
@@ -428,8 +436,9 @@ Prédicats portés par le modèle (appelés par le contrôleur ET les vues pour 
 - `destination_choosable_by?` — contributeur-auteur → `human` seulement ; owner-auteur → `human` ou `autodev` (le « envoyer à AutoDev » est un verrou produit owner-only).
 - `retractable_by?` — auteur + `pending_approval`.
 - `votable_by?` — owner du projet + `pending_approval` (l'idempotence « déjà voté à cette itération » est vérifiée par `ApprovalRecorder`, pas ici).
+- `deletable_by?` — non `submitted` ET (auteur OU owner du projet OU admin) : autorise le hard-delete tant que le brouillon n'est pas validé (`drafting` / `pending_approval` / `rejected`) — task #39.
 
-`AutospecDraftsController` applique trois before-actions : `authorize_view!` (show), `authorize_voter!` (approve/reject), `authorize_author!` (le reste).
+`AutospecDraftsController` applique quatre before-actions : `authorize_view!` (show), `authorize_voter!` (approve/reject), `authorize_deletable!` (destroy), `authorize_author!` (le reste). `authorize_deletable!` vérifie le **rôle** (403 si ni auteur, ni owner, ni admin) indépendamment de l'état ; la garde d'**état** (409 `draft_not_deletable` sur un brouillon `submitted`, déjà exporté vers GitLab) est appliquée dans `#destroy`. Les dépendances (`autospec_messages` / `autospec_attachments` / `autospec_approvals`) sont nettoyées par les `dependent: destroy` existants.
 
 ## Services
 
