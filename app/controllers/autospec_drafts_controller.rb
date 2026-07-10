@@ -27,7 +27,11 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   before_action :authorize_view!, only: :show
   before_action :authorize_voter!, only: %i[approve reject]
   before_action :authorize_author!,
-                except: %i[index new create show approve reject import create_from_import]
+                except: %i[index new create show approve reject import create_from_import destroy]
+  # `destroy` has its own gate (author OR project owner OR admin, cf.
+  # `deletable_by?`) — looser than the author-only `authorize_author!`
+  # used by every other write action, so it's excluded above.
+  before_action :authorize_deletable!, only: :destroy
 
   rescue_from Autospec::SuggestionApplier::AlreadyApplied,
               with: -> { render_apply_error('already_applied', :conflict) }
@@ -209,6 +213,19 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
     render_draft_response
   end
 
+  # POST /autospec_drafts/:id/destroy — hard delete (Autodev #39).
+  # Allowed on any state that isn't `submitted` (drafting, pending_approval,
+  # rejected — all "not yet validated"); `deletable_by?` already gated the
+  # actor via `authorize_deletable!`, this only re-checks the state (same
+  # 409 pattern as update/retract's guards). Messages/attachments/approvals
+  # cascade via `dependent: destroy` on the model — no orphan to clean up.
+  def destroy
+    return render_apply_error('draft_not_deletable', :conflict) if @draft.submitted?
+
+    @draft.destroy
+    redirect_to '/autospec_drafts', notice: t_web(:web_autospec_deleted)
+  end
+
   private
 
   def autospec_tab_param
@@ -305,6 +322,26 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
     end
   end
 
+  # Hard-delete gate (Autodev #39) — author, project owner, or admin.
+  # Deliberately role-only (state-independent), mirroring
+  # `authorize_author!`'s split with update/retract: the *role* check
+  # lives in this before_action (wrong role → 403 regardless of status),
+  # while the *state* check (submitted? → conflict) lives in `destroy`
+  # itself. Reusing the model's `deletable_by?` here instead — which
+  # bundles "not submitted" into the same predicate (by design, so the
+  # Show view can hide the button once submitted) — would turn a
+  # legitimate author's attempt to delete an already-submitted draft into
+  # a 403 "forbidden" before `destroy` ever gets to return the intended
+  # 409 "draft_not_deletable".
+  def authorize_deletable!
+    return if @draft.user_id == current_user.id || current_user.owner_of?(@draft.project) || current_user.admin?
+
+    respond_to do |format|
+      format.html { head :forbidden }
+      format.json { render json: { error: 'forbidden' }, status: :forbidden }
+    end
+  end
+
   # Looser than `authorize_author!` — owners of the project can also
   # see the draft once it reaches pending_approval / submitted /
   # rejected (autospec.md §J matrix). Plain contributors who aren't
@@ -327,7 +364,8 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
       can_submit_autodev: @draft.destination_choosable_by?(current_user, AutospecDraft::DESTINATION_AUTODEV),
       can_retract: @draft.retractable_by?(current_user),
       can_vote: @draft.votable_by?(current_user),
-      can_edit: @draft.editable_by?(current_user)
+      can_edit: @draft.editable_by?(current_user),
+      can_delete: @draft.deletable_by?(current_user)
     }
   end
 

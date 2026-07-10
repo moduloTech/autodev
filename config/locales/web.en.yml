@@ -512,3 +512,9 @@ en:
   web_autospec_import_submit: Import
   web_autospec_import_cta: Import from GitLab
   web_autospec_author: 'By %{name}'
+
+  # AutoSpec draft deletion (Autodev #39)
+  web_autospec_delete: Delete
+  web_autospec_delete_confirm: Permanently delete this draft? This action cannot be undone.
+  web_autospec_deleted: Draft deleted.
+  draft_not_deletable: This draft has already been submitted and can no longer be deleted.

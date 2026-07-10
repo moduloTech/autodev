@@ -341,4 +341,57 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
     assert_equal 'draft_locked', flash[:alert]
     assert_equal 'Old', draft.reload.title
   end
+
+  # --- destroy button in Show (Autodev #39) --------------------------
+
+  def test_show_renders_delete_button_for_author_while_drafting
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'X')
+    sign_in @author
+    get "/autospec_drafts/#{draft.id}"
+
+    assert_includes response.body, 'Supprimer'
+  end
+
+  def test_show_hides_delete_button_once_submitted
+    owner = User.create!(email: 'owner@modulotech.fr', name: 'Owner')
+    ProjectMembership.create!(user: owner, project: @project, role: 'owner')
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'X',
+                                  destination: 'human')
+    draft.submit_for_approval!
+    draft.finalize! # owner would otherwise be allowed to delete — state gate wins
+    sign_in owner
+    get "/autospec_drafts/#{draft.id}"
+
+    assert_response :success
+    refute_includes response.body, 'Supprimer'
+  end
+
+  def test_index_never_renders_delete_button_on_cards
+    AutospecDraft.create!(user: @author, project: @project, title: 'Mine')
+    sign_in @author
+    get '/autospec_drafts'
+
+    refute_includes response.body, 'Supprimer'
+  end
+
+  # --- destroy redirect flow ------------------------------------------
+
+  def test_destroy_html_redirects_to_index_with_notice
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'To delete')
+    sign_in @author
+    post "/autospec_drafts/#{draft.id}/destroy"
+
+    assert_redirected_to '/autospec_drafts'
+    assert_equal 'Brouillon supprimé.', flash[:notice]
+    refute AutospecDraft.exists?(draft.id)
+  end
+
+  def test_destroy_html_forbidden_for_unrelated_user
+    draft = AutospecDraft.create!(user: @author, project: @project, title: 'Mine')
+    sign_in @other
+    post "/autospec_drafts/#{draft.id}/destroy"
+
+    assert_response :forbidden
+    assert AutospecDraft.exists?(draft.id)
+  end
 end

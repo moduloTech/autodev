@@ -457,4 +457,71 @@ class AutospecDraftsControllerTest < ActionDispatch::IntegrationTest # rubocop:d
 
     assert_equal 'Updated', JSON.parse(response.body).dig('draft', 'title')
   end
+
+  # --- destroy (JSON) -------------------------------------------------
+
+  def test_destroy_requires_signed_in_user
+    post "/autospec_drafts/#{@draft.id}/destroy", as: :json
+
+    assert_response :unauthorized
+  end
+
+  def test_destroy_forbids_unrelated_user
+    sign_in @other
+    post "/autospec_drafts/#{@draft.id}/destroy", as: :json
+
+    assert_response :forbidden
+    assert AutospecDraft.exists?(@draft.id)
+  end
+
+  def test_destroy_allowed_for_author_while_drafting
+    sign_in @author
+
+    assert_difference 'AutospecDraft.count', -1 do
+      post "/autospec_drafts/#{@draft.id}/destroy", as: :json
+    end
+  end
+
+  def test_destroy_allowed_for_project_owner
+    ProjectMembership.create!(user: @other, project: @project, role: 'owner')
+    sign_in @other
+
+    assert_difference 'AutospecDraft.count', -1 do
+      post "/autospec_drafts/#{@draft.id}/destroy", as: :json
+    end
+  end
+
+  def test_destroy_allowed_for_admin
+    admin = User.create!(email: 'admin@modulotech.fr', name: 'Admin', admin: true)
+    sign_in admin
+
+    assert_difference 'AutospecDraft.count', -1 do
+      post "/autospec_drafts/#{@draft.id}/destroy", as: :json
+    end
+  end
+
+  def test_destroy_allowed_when_rejected
+    ProjectMembership.create!(user: @author, project: @project, role: 'owner')
+    @draft.update!(destination: 'human')
+    @draft.submit_for_approval!
+    @draft.mark_rejected!
+    sign_in @author
+
+    assert_difference 'AutospecDraft.count', -1 do
+      post "/autospec_drafts/#{@draft.id}/destroy", as: :json
+    end
+  end
+
+  def test_destroy_returns_conflict_when_submitted
+    ProjectMembership.create!(user: @author, project: @project, role: 'owner')
+    @draft.update!(destination: 'human')
+    @draft.submit_for_approval!
+    @draft.finalize!
+    sign_in @author
+    post "/autospec_drafts/#{@draft.id}/destroy", as: :json
+
+    assert_response :conflict
+    assert_equal 'draft_not_deletable', JSON.parse(response.body)['error']
+    assert AutospecDraft.exists?(@draft.id)
+  end
 end

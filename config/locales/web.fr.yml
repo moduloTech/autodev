@@ -512,3 +512,9 @@ fr:
   web_autospec_import_submit: Importer
   web_autospec_import_cta: Importer depuis GitLab
   web_autospec_author: 'Par %{name}'
+
+  # AutoSpec draft deletion (Autodev #39)
+  web_autospec_delete: Supprimer
+  web_autospec_delete_confirm: Supprimer définitivement ce brouillon ? Cette action est irréversible.
+  web_autospec_deleted: Brouillon supprimé.
+  draft_not_deletable: Ce brouillon a déjà été soumis et ne peut plus être supprimé.

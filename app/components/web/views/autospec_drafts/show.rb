@@ -138,6 +138,7 @@ module Web
             render_submit_form('human', :web_autospec_submit_human, kind: :primary)
           end
           render_retract_form if @capabilities[:can_retract]
+          render_delete_form if @capabilities[:can_delete]
         end
 
         def render_submit_form(destination, label_key, kind:)
@@ -161,6 +162,24 @@ module Web
                    class: 'button button-secondary',
                    style: 'padding: 7px 14px; font-size: 13px;') do
               t_web(:web_autospec_retract)
+            end
+          end
+        end
+
+        # Irreversible hard-delete — allowed for any not-yet-`submitted`
+        # state (author, project owner, or admin; cf.
+        # AutospecDraft#deletable_by?). `data-confirm` wires into the
+        # shared delegated-submit listener (layout.rb) which pops the
+        # styled <dialog> instead of a native confirm().
+        def render_delete_form
+          form(action: "/autospec_drafts/#{@draft.id}/destroy",
+               method: 'post', style: 'display: inline;',
+               data: { confirm: t_web(:web_autospec_delete_confirm) }) do
+            csrf_input_tag
+            button(type: 'submit',
+                   class: 'button button-danger',
+                   style: 'padding: 7px 14px; font-size: 13px;') do
+              t_web(:web_autospec_delete)
             end
           end
         end

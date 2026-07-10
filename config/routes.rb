@@ -97,6 +97,17 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
     post :reject,              on: :member
     resources :autospec_attachments, only: %i[create destroy], constraints: { id: /\d+/ }
   end
+  # /autospec_drafts/:id/destroy — hard-delete a not-yet-submitted draft
+  # (Autodev #39). A member POST rather than the REST DELETE verb: this
+  # repo's write actions are all POST members (retract, approve, …), no
+  # `_method=delete` shim is wired anywhere. Declared as a raw route
+  # (not `post :destroy, on: :member` inside the `resources` block above)
+  # because Rails treats `destroy` as one of the 7 canonical resource
+  # actions and folds member routes named after it back onto the bare
+  # `/autospec_drafts/:id` path (just swapping the verb) instead of
+  # appending `/destroy` — the opposite of what we want here.
+  post '/autospec_drafts/:id/destroy', to: 'autospec_drafts#destroy',
+                                       as: :destroy_autospec_draft, constraints: { id: /\d+/ }
 
   # In-app help — renders `docs/usage/autodev-functional-usage.md` as HTML
   # (same source the operator builds the PDF from via `md2pdf`). The

@@ -2,7 +2,7 @@
 
 require_relative '../rails_helper'
 
-class AutospecDraftTest < ActiveSupport::TestCase
+class AutospecDraftTest < ActiveSupport::TestCase # rubocop:disable Metrics/ClassLength
   setup do
     @author  = User.create!(email: 'csm@modulotech.fr', name: 'CSM')
     @project = Project.create!(gitlab_path: 'g/p', slug: 'g__p')
@@ -96,5 +96,64 @@ class AutospecDraftTest < ActiveSupport::TestCase
     assert_difference 'AutospecApproval.count', -1 do
       draft.destroy
     end
+  end
+
+  # --- deletable_by? (Autodev #39) -----------------------------------
+
+  def test_deletable_by_author_while_drafting
+    draft = AutospecDraft.create!(user: @author, project: @project)
+
+    assert draft.deletable_by?(@author)
+  end
+
+  def test_deletable_by_project_owner
+    owner = User.create!(email: 'owner@modulotech.fr', name: 'Owner')
+    ProjectMembership.create!(user: owner, project: @project, role: 'owner')
+    draft = AutospecDraft.create!(user: @author, project: @project)
+
+    assert draft.deletable_by?(owner)
+  end
+
+  def test_deletable_by_admin
+    admin = User.create!(email: 'admin@modulotech.fr', name: 'Admin', admin: true)
+    draft = AutospecDraft.create!(user: @author, project: @project)
+
+    assert draft.deletable_by?(admin)
+  end
+
+  def test_not_deletable_by_unrelated_user
+    stranger = User.create!(email: 'stranger@modulotech.fr', name: 'Stranger')
+    draft = AutospecDraft.create!(user: @author, project: @project)
+
+    refute draft.deletable_by?(stranger)
+  end
+
+  def test_not_deletable_by_nil_user
+    draft = AutospecDraft.create!(user: @author, project: @project)
+
+    refute draft.deletable_by?(nil)
+  end
+
+  def test_deletable_when_pending_approval
+    draft = AutospecDraft.create!(user: @author, project: @project, destination: 'human')
+    draft.submit_for_approval!
+
+    assert draft.deletable_by?(@author)
+  end
+
+  def test_deletable_when_rejected
+    draft = AutospecDraft.create!(user: @author, project: @project, destination: 'human')
+    draft.submit_for_approval!
+    draft.mark_rejected!
+
+    assert draft.deletable_by?(@author)
+  end
+
+  def test_not_deletable_when_submitted
+    draft = AutospecDraft.create!(user: @author, project: @project, destination: 'human')
+    draft.submit_for_approval!
+    draft.finalize!
+
+    refute draft.deletable_by?(@author)
   end
 end

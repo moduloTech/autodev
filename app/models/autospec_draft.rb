@@ -166,6 +166,22 @@ class AutospecDraft < ApplicationRecord
     user && user_id == user.id && pending_approval?
   end
 
+  # Can this user permanently delete this draft (Autodev #39)? Allowed on
+  # any state that isn't `submitted` — drafting, pending_approval AND
+  # rejected are all "not yet validated" per the ticket's product call.
+  # Once `submitted` the draft is already exported to GitLab and deletion
+  # is refused (controller returns 409). Author, project owner, or
+  # platform admin — same trio as the wider §J matrix, just without the
+  # author-only restriction of editable_by?/retractable_by?. Messages,
+  # attachments and approvals cascade via `dependent: destroy` — hard
+  # delete leaves no orphan.
+  def deletable_by?(user)
+    return false unless user
+    return false if submitted?
+
+    user_id == user.id || user.owner_of?(project) || user.admin?
+  end
+
   # Can this user record an approval/rejection on this draft right now?
   # Owner of the project + draft in `pending_approval`. Idempotency
   # (already voted at current_iteration) is checked at the recorder
