@@ -136,7 +136,8 @@ module Web
             { id: 'waiting', label_key: :web_tab_waiting, icon: 'messages', href: '/issues?tab=waiting',
               count_key: :waiting, tone: :warn },
             { id: 'delivered_review', label_key: :web_tab_delivered_review, icon: 'alert-tri',
-              href: '/issues?tab=delivered_review', count_key: :delivered_review, tone: :warn }
+              href: '/issues?tab=delivered_review', count_key: :delivered_review, tone: :warn },
+            { id: 'deploy_review', label_key: :web_nav_deploy_review, icon: 'rocket', href: '/deploy_review' }
           ] },
           { label_key: :web_nav_section_autospec, items: [
             { id: 'autospec_drafting', label_key: :web_autospec_tab_drafting, icon: 'sparkles',

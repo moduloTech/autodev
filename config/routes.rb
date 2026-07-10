@@ -52,6 +52,17 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   # job); POST (re)triggers it. Open to every signed-in user.
   get  '/issues/:id/deploy_review', to: 'issues#deploy_review',         constraints: { id: /\d+/ }
   post '/issues/:id/deploy_review', to: 'issues#trigger_deploy_review', constraints: { id: /\d+/ }
+  # /deploy_review → deploy a review env for an MR autodev never tracked
+  # (task #43). #index is the project-selector + open-MR-list page;
+  # #availability is the per-row lazy turbo-frame probe (?project=&mr_iid=,
+  # mirrors /issues/:id/deploy_review but for an arbitrary MR instead of a
+  # tracked issue); #trigger (re)plays the job. #availability/#trigger are
+  # access-gated (DeployReviewsController#authorize_project!) — unlike the
+  # issue surface, an arbitrary project_path has no equivalent filtering via
+  # issues_dataset, so the controller must enforce it itself.
+  get  '/deploy_review',         to: 'deploy_reviews#index'
+  get  '/deploy_review/mr',      to: 'deploy_reviews#availability'
+  post '/deploy_review/mr',      to: 'deploy_reviews#trigger'
   get  '/projects',              to: 'projects#index'
   # /projects/new + POST /projects → ProjectsController#new/#create (admin-only
   # project creation, task #9 phase 4 — the DB-side replacement for adding a

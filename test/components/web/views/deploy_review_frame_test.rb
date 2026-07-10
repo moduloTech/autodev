@@ -42,4 +42,46 @@ class DeployReviewFrameTest < ActiveSupport::TestCase
     refute_includes html, 'src="/issues/42/deploy_review"'
     refute_includes html, 'loading="lazy"'
   end
+
+  # Parameterized variant (task #43): DeployReviewsController drives the same
+  # component for an arbitrary (project, mr_iid) pair — no issue_id at all —
+  # by passing an explicit frame_id/src/submit_action plus hidden fields the
+  # ticket surface doesn't need (project/mr_iid aren't URL path segments on
+  # `/deploy_review/mr`, so they travel as hidden inputs instead).
+  def render_custom(state:, action: nil)
+    Web::Views::DeployReviewFrame.new(
+      state: state, action: action,
+      frame_id: 'deploy-review-mr-group-proj-7', src: '/deploy_review/mr?project=group%2Fproj&mr_iid=7',
+      submit_action: '/deploy_review/mr', hidden_fields: { project: 'group/proj', mr_iid: 7 },
+      locale: :fr, csrf_token: 'tok'
+    ).call
+  end
+
+  def test_custom_loading_frame_uses_the_given_frame_id_and_src
+    html = render_custom(state: :loading)
+
+    assert_includes html, 'id="deploy-review-mr-group-proj-7"'
+    assert_includes html, 'src="/deploy_review/mr?project=group%2Fproj&mr_iid=7"'
+    assert_includes html, 'loading="lazy"'
+  end
+
+  def test_custom_resolved_available_frame_posts_to_submit_action_with_hidden_fields # rubocop:disable Minitest/MultipleAssertions
+    html = render_custom(state: :available, action: :play)
+
+    assert_includes html, 'id="deploy-review-mr-group-proj-7"'
+    assert_includes html, 'action="/deploy_review/mr"'
+    refute_includes html, 'src="/deploy_review/mr?project=group%2Fproj&mr_iid=7"',
+                    'the lazy-fetch response must NOT re-emit src'
+    assert_includes html, 'name="project"'
+    assert_includes html, 'value="group/proj"'
+    assert_includes html, 'name="mr_iid"'
+    assert_includes html, 'value="7"'
+  end
+
+  def test_ticket_default_still_works_without_explicit_frame_id_or_src
+    html = render(state: :available, action: :retry)
+
+    assert_includes html, 'id="deploy-review-42"'
+    assert_includes html, 'action="/issues/42/deploy_review"'
+  end
 end

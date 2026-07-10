@@ -528,3 +528,15 @@ en:
   web_project_owners_remove: Remove
   web_project_owners_confirm_remove: Remove this owner from the project?
   web_project_owners_not_member_error: This candidate is not a member of the project.
+
+  # Deploy-review for an off-autodev MR (task #43)
+  web_nav_deploy_review: Review deployment
+  web_deploy_review_title: Review deployment
+  web_deploy_review_subtitle: Deploy a review environment for any open MR, even ones autodev never tracked.
+  web_deploy_review_project_label: Project
+  web_deploy_review_apply: Show
+  web_deploy_review_no_projects: No accessible projects.
+  web_deploy_review_no_mrs: No open MR on this project.
+  web_deploy_review_tracked_badge: Tracked by autodev
+  web_deploy_review_open_in_gitlab: Open in GitLab
+  web_deploy_review_api_error: Could not fetch open MRs (GitLab error — see logs).

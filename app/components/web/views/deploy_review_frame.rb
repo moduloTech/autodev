@@ -15,13 +15,36 @@ module Web
     # The trigger form targets `_top`: a successful POST redirects the whole
     # page to the issue, surfacing the global flash banner (the frame alone
     # can't repaint the banner that lives outside it).
+    #
+    # Generalized (task #43) so the same component also renders the "deploy a
+    # review env for an off-autodev MR" surface (`/deploy_review`), where
+    # there's no issue row/id — just an arbitrary (project, mr_iid) pair.
+    # `issue_id:` remains the convenient default: passing it alone reproduces
+    # the original ticket-page behavior (frame_id/src/submit_action derived
+    # from it). The MR surface instead passes `frame_id:` + `src:` (its GET
+    # probe is a query-string endpoint, not a `/:id` path segment) + optional
+    # `hidden_fields:` — extra hidden inputs the trigger form needs to carry
+    # (project/mr_iid) since they aren't part of the POST URL.
     class DeployReviewFrame < Base
       register_element :turbo_frame
 
-      def initialize(issue_id:, state:, action: nil, **)
-        @issue_id = issue_id
+      # Deterministic frame id for the MR surface — shared by the index page's
+      # embedded `:loading` frame and the availability probe's resolved
+      # response, so Turbo can match them up.
+      def self.mr_frame_id(project_path, mr_iid)
+        "deploy-review-mr-#{project_path.to_s.tr('/', '-')}-#{mr_iid}"
+      end
+
+      def initialize( # rubocop:disable Metrics/ParameterLists
+        state:, action: nil, issue_id: nil,
+        frame_id: nil, src: nil, submit_action: nil, hidden_fields: {}, **
+      )
         @state = state
         @action = action
+        @frame_id = frame_id || "deploy-review-#{issue_id}"
+        @src = src || "/issues/#{issue_id}/deploy_review"
+        @submit_action = submit_action || @src
+        @hidden_fields = hidden_fields
         super(**)
       end
 
@@ -46,13 +69,7 @@ module Web
 
       private
 
-      def frame_id
-        "deploy-review-#{@issue_id}"
-      end
-
-      def src
-        "/issues/#{@issue_id}/deploy_review"
-      end
+      attr_reader :frame_id, :src
 
       def render_placeholder
         render Components::Button.new(kind: :secondary, size: :md, full: true, disabled: true,
@@ -67,9 +84,10 @@ module Web
       end
 
       def render_button
-        form(method: 'post', action: src, 'data-turbo-frame' => '_top',
+        form(method: 'post', action: @submit_action, 'data-turbo-frame' => '_top',
              data: { confirm: t_web(:web_issue_confirm_deploy_review) }) do
           csrf_input_tag
+          render_hidden_fields
           # data-turbo-submits-with disables the button and swaps its label for
           # the duration of the (Turbo-driven) submission — a proportionate,
           # confirm-safe guard against an accidental double-click re-triggering
@@ -82,6 +100,18 @@ module Web
             t_web(button_label_key)
           end
         end
+      end
+
+      # Extra hidden inputs the trigger form needs alongside the CSRF token —
+      # empty for the ticket surface (issue id is already in the POST URL),
+      # `{ project:, mr_iid: }` for the MR surface (query-string params, not
+      # path segments, so they must ride along as form fields).
+      def render_hidden_fields
+        # `name.to_s` matters: Phlex dasherizes bare Symbol attribute VALUES
+        # (same rule that turns `stroke_width: '1.6'` into `stroke-width`
+        # elsewhere) — passing the Symbol straight through would rewrite
+        # `:mr_iid` into the literal string "mr-iid" and break the param name.
+        @hidden_fields.each { |name, value| input(type: 'hidden', name: name.to_s, value: value) }
       end
 
       def render_unavailable

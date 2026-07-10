@@ -15,6 +15,14 @@ module Autodev
   class DeployReview
     JOB_NAME = 'deploy_review'
 
+    # Lightweight stand-in for an `Issue` row: the service only ever reads
+    # these 3 accessors (`project_path` / `branch_name` / `mr_iid`), so any
+    # object answering to them works as `target` — no Issue row required.
+    # Used by `DeployReviewsController` (task #43) to deploy a review env for
+    # an arbitrary open MR that autodev never tracked. `branch_name: nil` is
+    # fine: the `mr_iid` path to the head pipeline (below) doesn't need it.
+    Target = Struct.new(:project_path, :branch_name, :mr_iid)
+
     # GitLab job statuses bucketed by what we can actually do with them. A
     # still-manual job is *played*; a finished one is *retried*. Anything in
     # between can't be acted on — the GitLab API would reject play/retry — so we

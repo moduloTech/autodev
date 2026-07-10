@@ -13,6 +13,7 @@ class AuditLog < ApplicationRecord
     issue.transition_manual
     issue.transition_auto
     issue.deploy_review
+    deploy_review.manual
     membership.granted
     membership.revoked
     membership.role_changed

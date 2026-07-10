@@ -528,3 +528,15 @@ fr:
   web_project_owners_remove: Retirer
   web_project_owners_confirm_remove: Retirer cet owner du projet ?
   web_project_owners_not_member_error: Ce candidat n'est pas membre du projet.
+
+  # Deploy-review for an off-autodev MR (task #43)
+  web_nav_deploy_review: Déploiement review
+  web_deploy_review_title: Déploiement review
+  web_deploy_review_subtitle: Déployez un environnement de review pour n'importe quelle MR ouverte, même hors autodev.
+  web_deploy_review_project_label: Projet
+  web_deploy_review_apply: Afficher
+  web_deploy_review_no_projects: Aucun projet accessible.
+  web_deploy_review_no_mrs: Aucune MR ouverte sur ce projet.
+  web_deploy_review_tracked_badge: Suivie par autodev
+  web_deploy_review_open_in_gitlab: Ouvrir dans GitLab
+  web_deploy_review_api_error: Impossible de récupérer les MR ouvertes (erreur GitLab — voir les logs).

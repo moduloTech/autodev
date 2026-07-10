@@ -6,7 +6,7 @@ require_relative '../../rails_helper'
 # pipeline's `deploy_review` job. A fake GitLab client is injected so the
 # tests never touch the network.
 module Autodev
-  class DeployReviewTest < ActiveSupport::TestCase
+  class DeployReviewTest < ActiveSupport::TestCase # rubocop:disable Metrics/ClassLength
     Job = Struct.new(:id, :name, :status, :web_url)
     Pipeline = Struct.new(:id, :status, :web_url)
 
@@ -189,6 +189,37 @@ module Autodev
         assert_equal state, outcome.state, status
         assert_empty client.calls, status
       end
+    end
+
+    # Target (task #43): the service is agnostic to what `project_path` /
+    # `branch_name` / `mr_iid` come from — a Target struct (no Issue row)
+    # works exactly like an Issue for both availability and trigger.
+    def test_availability_works_with_a_target_instead_of_an_issue
+      client = FakeClient.new(head_pipeline: Pipeline.new(id: 77), jobs: [deploy_job(status: 'manual')])
+      target = Autodev::DeployReview::Target.new(project_path: 'group/proj', branch_name: nil, mr_iid: 12)
+
+      outcome = Autodev::DeployReview.new(target, client: client).availability
+
+      assert_equal :available, outcome.state
+      assert_equal :play, outcome.action
+      assert_includes client.calls, [:merge_request]
+    end
+
+    def test_trigger_works_with_a_target_instead_of_an_issue
+      client = FakeClient.new(pipelines: [Pipeline.new(id: 9)], jobs: [deploy_job(status: 'success')])
+      target = Autodev::DeployReview::Target.new(project_path: 'group/proj', branch_name: 'some-branch', mr_iid: nil)
+
+      outcome = Autodev::DeployReview.new(target, client: client).trigger!
+
+      assert_equal :triggered, outcome.state
+      assert_equal :retry, outcome.action
+      assert_equal [[:retry, 'group/proj', 42]], client.calls
+    end
+
+    def test_target_with_no_branch_and_no_mr_is_no_branch
+      target = Autodev::DeployReview::Target.new(project_path: 'group/proj', branch_name: nil, mr_iid: nil)
+
+      assert_equal :no_branch, Autodev::DeployReview.new(target, client: FakeClient.new).availability.state
     end
   end
 end
