@@ -518,3 +518,13 @@ fr:
   web_autospec_delete_confirm: Supprimer définitivement ce brouillon ? Cette action est irréversible.
   web_autospec_deleted: Brouillon supprimé.
   draft_not_deletable: Ce brouillon a déjà été soumis et ne peut plus être supprimé.
+
+  # Project Team tab — manual owner management (Autodev #38)
+  web_project_owners_title: Gestion des owners
+  web_project_owners_current: Owners actuels
+  web_project_owners_none: Aucun owner désigné
+  web_project_owners_select_label: Ajouter un owner
+  web_project_owners_add: Ajouter
+  web_project_owners_remove: Retirer
+  web_project_owners_confirm_remove: Retirer cet owner du projet ?
+  web_project_owners_not_member_error: Ce candidat n'est pas membre du projet.

@@ -6,13 +6,20 @@ module Autodev
   # local table, fetch the effective access_level from GitLab's
   # `/projects/:id/members/all` (group inheritance included) and:
   #
-  # - level ≥ 40 (Maintainer / Owner) → local role `owner`
-  # - level 20..30 (Reporter / Developer) → local role `contributor`
+  # - level ≥ 20 (Reporter / Developer / Maintainer / Owner) → local role `contributor`
   # - level 10 (Guest) or none → no local membership
   #
-  # ADD + REMOVE: a sync run reconciles the full set, so revocations
-  # on GitLab propagate at the next sync. Role downgrades / upgrades
-  # also flow through.
+  # ADD + REMOVE: a sync run reconciles the full set of `contributor` rows,
+  # so revocations on GitLab propagate at the next sync.
+  #
+  # Owner (Autodev #38): NOT derived from GitLab anymore. It's a 100%
+  # manual designation made from the project's Team tab
+  # (ProjectOwnersController) — see `reconcile_memberships!` below, which
+  # excludes `owner` rows entirely from this reconciliation (never
+  # downgraded, never revoked). Rationale: mapping GitLab Maintainer (40)
+  # straight to `owner` meant every maintainer on a project like PowerPanne
+  # became an AutoSpec approver, which doesn't hold — approval rights are a
+  # project-local decision, not a GitLab permission.
   #
   # Identity resolution: the GitLab user is looked up by username
   # derived from the email (`login@modulotech.fr` → `login`); the
@@ -27,8 +34,7 @@ module Autodev
   class GitlabMembershipSync # rubocop:disable Metrics/ClassLength
     # GitLab access levels — see
     # https://docs.gitlab.com/api/access_requests/ for the canonical list.
-    OWNER_ACCESS_THRESHOLD = 40       # Maintainer (40) + Owner (50)
-    REPORTER_ACCESS_THRESHOLD = 20    # Reporter (20) + Developer (30)
+    REPORTER_ACCESS_THRESHOLD = 20 # Reporter (20) + Developer (30) + Maintainer/Owner (40/50)
 
     class UnresolvedGitlabIdentity < StandardError; end
     class SyncFailed < StandardError; end
@@ -140,7 +146,6 @@ module Autodev
 
     def role_for_access_level(level)
       return nil if level.nil?
-      return ::ProjectMembership::ROLE_OWNER if level >= OWNER_ACCESS_THRESHOLD
       return ::ProjectMembership::ROLE_CONTRIBUTOR if level >= REPORTER_ACCESS_THRESHOLD
 
       nil
@@ -148,19 +153,27 @@ module Autodev
 
     # ---- reconciliation --------------------------------------------
 
+    # `owner` rows are immune (Autodev #38): manually granted, so they're
+    # excluded from `managed` up front and never appear on either side of
+    # the create/change/revoke logic below — not downgraded when GitLab
+    # reports lower (or no) access, not deleted when GitLab drops the user
+    # entirely. Only `contributor` rows are GitLab-authoritative.
     def reconcile_memberships!(user, desired)
       existing = user.project_memberships.index_by(&:project_id)
+      managed = existing.reject { |_project_id, membership| membership.role == ::ProjectMembership::ROLE_OWNER }
 
-      desired.each do |project_id, role|
-        membership = existing[project_id]
-        if membership.nil?
-          create_membership!(user, project_id, role)
-        elsif membership.role != role
-          change_role!(membership, role)
-        end
+      desired.each { |project_id, role| reconcile_one!(user, project_id, role, existing, managed) }
+
+      (managed.keys - desired.keys).each { |pid| revoke_membership!(managed[pid]) }
+    end
+
+    def reconcile_one!(user, project_id, role, existing, managed)
+      membership = managed[project_id]
+      if membership.nil?
+        create_membership!(user, project_id, role) unless existing.key?(project_id)
+      elsif membership.role != role
+        change_role!(membership, role)
       end
-
-      (existing.keys - desired.keys).each { |pid| revoke_membership!(existing[pid]) }
     end
 
     def create_membership!(user, project_id, role)

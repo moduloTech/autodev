@@ -45,6 +45,18 @@ class ProjectTest < ActiveSupport::TestCase
     assert_equal 2, project.users.count
   end
 
+  # Autodev #38: owner-candidates for the Team tab's "add an owner" select —
+  # current members who aren't owners yet.
+  def test_contributors_scope_excludes_owners
+    project = Project.create!(gitlab_path: 'g/y2', slug: 'g__y2')
+    contrib = User.create!(email: 'c2@m.fr', name: 'C2')
+    owner = User.create!(email: 'o2@m.fr', name: 'O2')
+    ProjectMembership.create!(user: contrib, project: project, role: ProjectMembership::ROLE_CONTRIBUTOR)
+    ProjectMembership.create!(user: owner, project: project, role: ProjectMembership::ROLE_OWNER)
+
+    assert_equal [contrib], project.contributors.to_a
+  end
+
   def test_destroying_project_cascades_app_commands_and_memberships
     project = Project.create!(gitlab_path: 'g/z', slug: 'g__z')
     user    = User.create!(email: 'd@m.fr', name: 'D')

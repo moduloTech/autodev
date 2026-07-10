@@ -15,6 +15,12 @@ class Project < ApplicationRecord
   has_many :users, through: :project_memberships
   has_many :owners, -> { where(project_memberships: { role: ProjectMembership::ROLE_OWNER }) },
            through: :project_memberships, source: :user
+  # Owner-candidates for the Team tab (Autodev #38): current, already-synced
+  # members who aren't owners yet. Deliberately excludes owners (one role per
+  # row), so no live GitLab call is needed to populate the "add an owner"
+  # select — the candidates are already in `project_memberships`.
+  has_many :contributors, -> { where(project_memberships: { role: ProjectMembership::ROLE_CONTRIBUTOR }) },
+           through: :project_memberships, source: :user
   has_many :autospec_drafts, dependent: :destroy
 
   validates :gitlab_path, presence: true, uniqueness: true

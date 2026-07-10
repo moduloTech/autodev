@@ -3,8 +3,8 @@
 # Platform-wide audit row. See `docs/users-rollout.md` §2 for the action
 # catalog and `app/services/audit.rb` for the canonical write path.
 #
-# `resource` is polymorphic — Issue / ProjectMembership / User in the
-# current set, anything else is fair game for future actions.
+# `resource` is polymorphic — Issue / ProjectMembership / User / Project in
+# the current set, anything else is fair game for future actions.
 # `actor` is nullable: NULL means the action was performed by the
 # system (poller, recurring job, AASM transition fired by a job).
 class AuditLog < ApplicationRecord
@@ -19,6 +19,8 @@ class AuditLog < ApplicationRecord
     user.created
     user.disabled
     user.reactivated
+    project.owner_granted
+    project.owner_revoked
   ].freeze
 
   # SQLite has no native JSON type; `t.json` in the migration maps to TEXT

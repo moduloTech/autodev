@@ -75,6 +75,15 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   get    '/projects/:slug/ticket_templates/:id/edit', to: 'ticket_templates#edit',    constraints: { id: /\d+/ }
   patch  '/projects/:slug/ticket_templates/:id',      to: 'ticket_templates#update',  constraints: { id: /\d+/ }
   delete '/projects/:slug/ticket_templates/:id',      to: 'ticket_templates#destroy', constraints: { id: /\d+/ }
+  # /projects/:slug/owners → ProjectOwnersController (Autodev #38). Manual
+  # owner designation from the project's Team tab — owner is no longer
+  # derived from GitLab access level (cf. Autodev::GitlabMembershipSync).
+  # POST promotes an existing project member (contributor) to owner;
+  # DELETE demotes an owner back to contributor. Gated on
+  # can_manage_owners? (admin or existing project owner), same shape as
+  # the ticket_templates sub-resource above.
+  post   '/projects/:slug/owners',          to: 'project_owners#create'
+  delete '/projects/:slug/owners/:user_id', to: 'project_owners#destroy', constraints: { user_id: /\d+/ }
   get  '/projects/:slug',        to: 'projects#show'
   get  '/stream',                to: 'stream#show'
   get  '/locale/:lang',          to: 'locale#update'

@@ -8,9 +8,10 @@ module Web
       TABS = %w[overview issues config team].freeze
       private_constant :TABS
 
-      # rubocop:disable Metrics/ParameterLists
+      # rubocop:disable Metrics/ParameterLists, Metrics/MethodLength
       def initialize(project_path:, project_config:, project_issues:,
-                     stats:, kpis:, tab:, can_edit: false, **)
+                     stats:, kpis:, tab:, can_edit: false,
+                     team_owners: [], team_candidates: [], can_manage_owners: false, **)
         super(**)
         @project_path = project_path
         @project_config = project_config
@@ -18,9 +19,12 @@ module Web
         @stats = stats
         @kpis = kpis
         @can_edit = can_edit
+        @team_owners = team_owners
+        @team_candidates = team_candidates
+        @can_manage_owners = can_manage_owners
         @tab = TABS.include?(tab) ? tab : 'overview'
       end
-      # rubocop:enable Metrics/ParameterLists
+      # rubocop:enable Metrics/ParameterLists, Metrics/MethodLength
 
       def view_template # rubocop:disable Metrics/MethodLength
         with_layout(nav: false, shell: false) do
@@ -345,13 +349,82 @@ module Web
       end
 
       # === Team tab ========================================================
+      #
+      # Manual owner management (Autodev #38). Owner is no longer derived
+      # from GitLab access level (cf. Autodev::GitlabMembershipSync); this
+      # tab is the only UI to grant/revoke it. Controls (remove buttons +
+      # the add-owner form) are rendered only when the controller determined
+      # `can_manage_owners` (admin or an existing owner of this project) —
+      # everyone else gets a read-only owners list.
 
       def render_team_tab
+        div(style: 'display: flex; flex-direction: column; gap: 22px;') do
+          render_owners_card
+          render_add_owner_card if @can_manage_owners
+        end
+      end
+
+      def render_owners_card
         render(Components::Card.new) do
-          div(class: 'coming-soon', title: t_web(:web_coming_soon_tooltip)) do
-            p(class: 'muted', style: 'margin: 0;') { t_web(:web_project_team_coming_soon) }
+          h3(class: 'sidecard-title') { t_web(:web_project_owners_current) }
+          if @team_owners.empty?
+            div(class: 'empty-state') { p(class: 'muted') { t_web(:web_project_owners_none) } }
+          else
+            @team_owners.each { |user| render_owner_row(user) }
           end
         end
+      end
+
+      def render_owner_row(user)
+        div(style: 'display: flex; justify-content: space-between; align-items: center; ' \
+                   'padding: 8px 0; border-bottom: 1px solid var(--divider);') do
+          span { plain user_display_name(user) }
+          render_remove_owner_form(user) if @can_manage_owners
+        end
+      end
+
+      def render_remove_owner_form(user)
+        form(method: 'post', action: "#{owners_path}/#{user.id}",
+             data: { confirm: t_web(:web_project_owners_confirm_remove) }) do
+          csrf_input_tag
+          input(type: 'hidden', name: '_method', value: 'delete')
+          render Components::Button.new(kind: :danger, size: :sm, type: 'submit') do
+            t_web(:web_project_owners_remove)
+          end
+        end
+      end
+
+      # The select is left empty (no options) when there are no candidate
+      # contributors left to promote — submitting it then falls through to
+      # ProjectOwnersController's "not a member" error, which is an
+      # acceptable v1 edge case (cf. spec: candidates = current contributors,
+      # no separate empty-candidates copy requested).
+      def render_add_owner_card
+        render(Components::Card.new) do
+          h3(class: 'sidecard-title') { t_web(:web_project_owners_title) }
+          render_add_owner_form
+        end
+      end
+
+      def render_add_owner_form
+        form(method: 'post', action: owners_path, style: 'display: flex; gap: 8px; align-items: center;') do
+          csrf_input_tag
+          label(for: 'owner_user_id', style: 'font-size: 12px;') { t_web(:web_project_owners_select_label) }
+          select(name: 'user_id', id: 'owner_user_id') do
+            @team_candidates.each { |user| option(value: user.id) { user_display_name(user) } }
+          end
+          render Components::Button.new(kind: :primary, size: :sm, type: 'submit') do
+            t_web(:web_project_owners_add)
+          end
+        end
+      end
+
+      def user_display_name(user)
+        user.name.presence || user.email
+      end
+
+      def owners_path
+        "/projects/#{project_slug(@project_path)}/owners"
       end
 
       def render_empty(message_key)

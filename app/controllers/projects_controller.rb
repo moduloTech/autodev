@@ -102,6 +102,18 @@ class ProjectsController < ApplicationController # rubocop:disable Metrics/Class
     current_user.contributor_of?(project)
   end
 
+  # Team tab gating (Autodev #38): who may grant/revoke the manual `owner`
+  # role. Narrower than #can_edit_project? — an ordinary contributor can
+  # edit the config but must NOT be able to hand out owner. Mirrored (not
+  # shared) in ProjectOwnersController, same convention as #can_edit_project?
+  # above.
+  def can_manage_owners?(project)
+    return false unless current_user
+    return true if current_user.admin?
+
+    current_user.owner_of?(project)
+  end
+
   # Creating a project is admin-only: a non-admin's access is derived from
   # memberships on existing projects, so there's no project to be a member of
   # before it exists. (Editing an existing one stays open to collaborators.)
@@ -173,8 +185,21 @@ class ProjectsController < ApplicationController # rubocop:disable Metrics/Class
       kpis: dashboard_kpis,
       tab: params[:tab].to_s,
       can_edit: record.present? && can_edit_project?(record),
+      **team_view_kwargs(record),
       **view_kwargs
     ).call
+  end
+
+  # Team tab inputs (Autodev #38): the owners list + candidate contributors
+  # for the "add an owner" select, plus the gate for whether to render the
+  # management controls at all. Split out of #render_project_show to keep
+  # its ABC size down.
+  def team_view_kwargs(record)
+    {
+      team_owners: record ? record.owners.to_a : [],
+      team_candidates: record ? record.contributors.to_a : [],
+      can_manage_owners: record.present? && can_manage_owners?(record)
+    }
   end
 
   def render_project_edit(project)

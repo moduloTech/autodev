@@ -78,7 +78,11 @@ class GitlabMembershipSyncTest < ActiveSupport::TestCase # rubocop:disable Metri
 
   # ---- role mapping -----------------------------------------------
 
-  def test_maintainer_becomes_owner
+  # Autodev #38: the owner role is now 100% manual (cf. reconcile_memberships!
+  # immunity tests below) — GitLab access_level no longer derives it. A
+  # maintainer (or GitLab Owner, 50) lands as a plain contributor, same as
+  # a developer/reporter.
+  def test_maintainer_becomes_contributor
     setup_resolved_user(gitlab_user_id: 42)
     @client.members_by_project_path = {
       'group/p1' => [gl_member(id: 42, access_level: 40)],
@@ -87,7 +91,7 @@ class GitlabMembershipSyncTest < ActiveSupport::TestCase # rubocop:disable Metri
 
     ::Autodev::GitlabMembershipSync.for_user!(@user, client: @client)
 
-    assert_equal 'owner', @user.project_memberships.find_by(project: @p1).role
+    assert_equal 'contributor', @user.project_memberships.find_by(project: @p1).role
   end
 
   def test_developer_becomes_contributor
@@ -128,9 +132,12 @@ class GitlabMembershipSyncTest < ActiveSupport::TestCase # rubocop:disable Metri
 
   # ---- reconciliation ---------------------------------------------
 
-  def test_role_upgrade_records_audit_log
+  # Autodev #38: `contributor` is the only role the sync can still assign, so
+  # a maintainer-level access bump on an existing contributor row is a no-op
+  # (no `membership.role_changed` audit) — it stays `contributor` either way.
+  def test_contributor_stays_contributor_on_access_level_bump
     setup_resolved_user(gitlab_user_id: 42)
-    ProjectMembership.create!(user: @user, project: @p1, role: 'contributor')
+    membership = ProjectMembership.create!(user: @user, project: @p1, role: 'contributor')
     @client.members_by_project_path = {
       'group/p1' => [gl_member(id: 42, access_level: 40)],
       'group/p2' => []
@@ -138,8 +145,8 @@ class GitlabMembershipSyncTest < ActiveSupport::TestCase # rubocop:disable Metri
 
     ::Autodev::GitlabMembershipSync.for_user!(@user, client: @client)
 
-    assert_equal 'owner', @user.project_memberships.find_by(project: @p1).role
-    assert_equal 1, AuditLog.where(action: 'membership.role_changed').count
+    assert_equal 'contributor', membership.reload.role
+    assert_equal 0, AuditLog.where(action: 'membership.role_changed').count
   end
 
   def test_membership_revoke_deletes_row_and_records_audit
@@ -151,6 +158,37 @@ class GitlabMembershipSyncTest < ActiveSupport::TestCase # rubocop:disable Metri
 
     assert_empty ProjectMembership.where(user_id: @user.id)
     assert_equal 1, AuditLog.where(action: 'membership.revoked').count
+  end
+
+  # ---- owner immunity (Autodev #38) --------------------------------
+  #
+  # Owner is now a manual-only designation (cf. project_owners_controller_test.rb).
+  # The sync must never touch an existing owner row, whatever GitLab reports.
+
+  def test_owner_row_survives_when_gitlab_reports_contributor_level_access
+    setup_resolved_user(gitlab_user_id: 42)
+    membership = ProjectMembership.create!(user: @user, project: @p1, role: 'owner')
+    @client.members_by_project_path = {
+      'group/p1' => [gl_member(id: 42, access_level: 30)],
+      'group/p2' => []
+    }
+
+    ::Autodev::GitlabMembershipSync.for_user!(@user, client: @client)
+
+    assert_equal 'owner', membership.reload.role
+    assert_equal 0, AuditLog.where(action: 'membership.role_changed').count
+  end
+
+  def test_owner_row_survives_when_gitlab_no_longer_lists_the_user
+    setup_resolved_user(gitlab_user_id: 42)
+    membership = ProjectMembership.create!(user: @user, project: @p1, role: 'owner')
+    @client.members_by_project_path = { 'group/p1' => [], 'group/p2' => [] }
+
+    ::Autodev::GitlabMembershipSync.for_user!(@user, client: @client)
+
+    assert_predicate membership.reload, :persisted?
+    assert_equal 'owner', membership.role
+    assert_equal 0, AuditLog.where(action: 'membership.revoked').count
   end
 
   # ---- user lifecycle ---------------------------------------------
