@@ -99,6 +99,27 @@ class AutospecDraftsHtmlTest < ActionDispatch::IntegrationTest # rubocop:disable
     refute_includes response.body, 'My own WIP'
   end
 
+  def test_to_validate_tab_shows_the_other_authors_name
+    @author.project_memberships.find_by(project: @project).update!(role: 'owner')
+    other_draft = AutospecDraft.create!(user: @other, project: @project,
+                                        title: 'Please review me', destination: 'human')
+    other_draft.submit_for_approval!
+    sign_in @author
+    get '/autospec_drafts?tab=to_validate'
+
+    assert_response :success
+    assert_includes response.body, 'Other'
+  end
+
+  def test_index_shows_the_authors_name_on_rows
+    AutospecDraft.create!(user: @author, project: @project, title: 'Mine')
+    sign_in @author
+    get '/autospec_drafts'
+
+    assert_response :success
+    assert_includes response.body, 'CSM'
+  end
+
   # --- new + create -------------------------------------------------
 
   def test_new_lists_visible_projects_only

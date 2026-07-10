@@ -511,3 +511,4 @@ fr:
   web_autospec_import_field_url_hint: Le projet doit être listé dans vos accès — sinon demandez à un owner de vous ajouter avant.
   web_autospec_import_submit: Importer
   web_autospec_import_cta: Importer depuis GitLab
+  web_autospec_author: 'Par %{name}'

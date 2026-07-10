@@ -126,7 +126,8 @@ module Web
                 plain(draft.title.presence || t_web(:web_autospec_untitled))
               end
               div(class: 'muted', style: 'font-size: 12px; margin-top: 2px;') do
-                plain "#{draft.project.gitlab_path} · #{t_web(status_label_key(draft.status))}"
+                meta = "#{draft.project.gitlab_path} · #{t_web(status_label_key(draft.status))}"
+                plain "#{meta} · #{t_web(:web_autospec_author, name: author_display(draft))}"
               end
             end
             div(class: 'muted', style: 'font-size: 11px;') do
@@ -135,6 +136,13 @@ module Web
               plain draft.updated_at.to_s
             end
           end
+        end
+
+        # Display name for the draft's author: falls back to the email when
+        # no display name is set (User#name is optional).
+        def author_display(draft)
+          author = draft.author
+          author.name.presence || author.email
         end
 
         def status_label_key(status)

@@ -5,6 +5,7 @@
 ### Added
 
 - **"Livrée (à vérifier)" cards now tell the CSM who to contact (task #35).** The yellow "Intervention manuelle requise" panel shown for `needs_attention` rows (`stagnation_pipeline`, `stagnation_discussions`, `review_limit_reached`, `review_failures_exhausted`) explained the problem but never said who could act on it. `WatchCards#render_cause_panel` now renders a common contact line (new `web_errors_contact` i18n key) under the cause body, gated on `row[:needs_attention]` — it does not appear on the plain `/errors` failures or on pending `needs_clarification` questions.
+- **The AutoSpec drafts list now shows each draft's author on every tab (task #40).** The row meta line only showed "project · status", so on the "À valider" tab a validator saw drafts written by other users with no indication of who wrote them. `Web::Views::AutospecDrafts::Index#render_row_body` now appends "· Par <auteur>" (new `web_autospec_author` key) to the meta line on every tab, using a new private `author_display` helper (`draft.author.name`, falling back to `email`). Both data sources already eager-load the author (`includes(:project, :user)` in the controller and in `AutospecDraft.awaiting_vote_of`), so no additional query is introduced.
 
 ## [1.0.0-alpha.41] - 2026-07-07
 
