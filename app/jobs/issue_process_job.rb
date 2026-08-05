@@ -138,7 +138,7 @@ class IssueProcessJob < ApplicationJob
   end
 
   def log_retry_activity(issue, config, project_config)
-    max = (project_config['max_retries'] || config['max_retries']).to_i
+    max = ::Config.max_retries(project_config, config)
     ctx = ::ActivityLogger::Ctx.new(build_client(config), project_config['path'],
                                     ::Autodev::JobLogger.new(logger))
     ::ActivityLogger.post(ctx, issue, :retry, attempt: issue.retry_count + 1, max: max)

@@ -227,7 +227,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
   def self.recover_errored!(max_retries)
     retryable = where(status: 'error')
-                .where('retry_count < ?', max_retries)
+                .where('retry_count <= ?', max_retries)
                 .where("next_retry_at IS NULL OR next_retry_at <= datetime('now')")
     cleared = { error_message: nil, started_at: nil }
     retryable.where.not(mr_iid: nil).update_all(cleared.merge(status: 'checking_pipeline')) +

@@ -92,6 +92,28 @@ module Config # rubocop:disable Metrics/ModuleLength
                                 test_writer_agent mr_fixer_agent app].freeze
   VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
 
+  # Single source of truth for the effective retry budget (Autodev #34).
+  #
+  # `max_retries` counts RETRIES, not total attempts: a budget of N allows a
+  # row whose `retry_count` has reached N to be retried once more, and only
+  # N+1 to be terminal. Every comparison against it therefore uses `<=`
+  # (`retry_count <= max_retries`), not `<`.
+  #
+  # Resolution order is per-project override → global → baked DEFAULT. Note
+  # that a *global* `max_retries` in config.yml is ignored with a deprecation
+  # warning (IGNORED_GLOBAL_FIELDS), so in practice it's the per-project
+  # override or the DEFAULT — the `config` argument stays because callers hold
+  # merged hashes that legitimately carry it.
+  #
+  # This exists because the former call sites each carried their own fallback
+  # and silently disagreed: `|| 3` in IssueProcessor::ErrorHandler, none at
+  # all in PollDispatcher (so `nil.to_i` → 0, which would disable retries
+  # outright rather than fall back to anything).
+  def self.max_retries(project_config, config = nil)
+    value = project_config&.[]('max_retries') || config&.[]('max_retries') || DEFAULTS['max_retries']
+    value.to_i
+  end
+
   def self.load(cli_overrides = {})
     config_path = cli_overrides.delete('config_path') || CONFIG_PATH
     config = DEFAULTS.dup

@@ -119,8 +119,9 @@ module Autodev
     def exceeded_retries?(existing)
       return false unless existing
 
-      max_retries = (@project_config['max_retries'] || @config['max_retries']).to_i
-      existing.retry_count >= max_retries
+      # `>`, not `>=`: the budget counts retries, so a row sitting exactly at
+      # it still has one owed (see Config.max_retries — Autodev #34).
+      existing.retry_count > ::Config.max_retries(@project_config, @config)
     end
 
     def log_dry_run(gl_issue)
@@ -233,10 +234,10 @@ module Autodev
     end
 
     def fetch_retryable
-      max_retries = (@project_config['max_retries'] || @config['max_retries']).to_i
+      max_retries = ::Config.max_retries(@project_config, @config)
       ::Issue.where(project_path: @path)
              .where(status: %w[error pending])
-             .where('retry_count < ?', max_retries)
+             .where('retry_count <= ?', max_retries)
              .where("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')")
              .to_a
     end

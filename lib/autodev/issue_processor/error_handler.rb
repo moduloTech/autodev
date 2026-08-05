@@ -57,7 +57,11 @@ class IssueProcessor
       fields = { error_message: "#{error.class}: #{error.message}\n  #{backtrace}",
                  dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
                  retry_count: retry_count, finished_at: Time.current }
-      fields[:next_retry_at] = backoff_s.seconds.from_now if retry_count < max
+      # `<=`, not `<`: max_retries counts retries, so a budget of N still owes
+      # a retry to the Nth failure (see Config.max_retries). With the strict
+      # comparison and the default budget of 1, the very first failure left
+      # this NULL and nothing ever re-enqueued the row (Autodev #34).
+      fields[:next_retry_at] = backoff_s.seconds.from_now if retry_count <= max
       fields
     end
 
@@ -68,7 +72,7 @@ class IssueProcessor
                 "#{error.class}: #{error.message}"
     end
 
-    def max_retries_config = (@project_config['max_retries'] || @config['max_retries'] || 3).to_i
+    def max_retries_config = ::Config.max_retries(@project_config, @config)
     def retry_backoff_config = (@project_config['retry_backoff'] || @config['retry_backoff'] || 30).to_i
   end
 end
