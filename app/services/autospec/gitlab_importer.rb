@@ -43,11 +43,18 @@ module Autospec
     # between the hostname and `/-/(issues|work_items)/`.
     ISSUE_URL_RE = %r{\Ahttps?://[^/]+/(?<path>.+?)/-/(?:issues|work_items)/(?<iid>\d+)/?(?:[?#].*)?\z}
 
-    def initialize(url, user, client: nil, config: nil)
+    # Per-image failures collected while rapatriating the issue's inline
+    # images (Autodev #37). Empty on a clean import; the controller surfaces a
+    # flash when it isn't. Populated by `#call`, so read it afterwards.
+    attr_reader :warnings
+
+    def initialize(url, user, client: nil, config: nil, image_fetcher: nil)
       @url    = url
       @user   = user
       @client = client || self.class.default_client
       @config = config
+      @image_fetcher = image_fetcher
+      @warnings = []
     end
 
     def call
@@ -55,14 +62,30 @@ module Autospec
       project = find_visible_project!(project_path)
       issue = fetch_issue!(project_path, iid)
 
-      AutospecDraft.create!(
+      draft = AutospecDraft.create!(
         user: @user, project: project,
         title: issue_title(issue),
         markdown: issue_description(issue)
       )
+      import_images!(draft)
+      draft
     end
 
     private
+
+    # The issue body references its images as project-relative `/uploads/…`
+    # paths, which only resolve for someone authenticated against GitLab — so
+    # they're downloaded into local attachments and the body is rewritten to
+    # point at them. Runs after the create because an attachment needs the
+    # draft row to hang off.
+    def import_images!(draft)
+      cfg = config_hash
+      result = IssueImageImporter.new(
+        draft, gitlab_url: cfg['gitlab_url'], token: cfg['gitlab_token'], fetcher: @image_fetcher
+      ).call(draft.markdown)
+      @warnings = result.warnings
+      draft.update!(markdown: result.markdown) unless result.markdown == draft.markdown
+    end
 
     def parse!
       match = ISSUE_URL_RE.match(@url.to_s.strip)

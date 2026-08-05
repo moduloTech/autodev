@@ -91,9 +91,10 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
 
   # POST /autospec_drafts/import
   def create_from_import # rubocop:disable Metrics/MethodLength
-    draft = Autospec::GitlabImporter.new(params[:url].to_s, current_user).call
+    importer = Autospec::GitlabImporter.new(params[:url].to_s, current_user)
+    draft = importer.call
     auto_evaluate_quality(draft)
-    redirect_to "/autospec_drafts/#{draft.id}"
+    redirect_to "/autospec_drafts/#{draft.id}", **import_images_flash(importer.warnings)
   rescue Autospec::GitlabImporter::InvalidUrl
     redirect_to('/autospec_drafts/import', alert: 'import_invalid_url')
   rescue Autospec::GitlabImporter::ProjectNotFound
@@ -293,6 +294,16 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
     Autospec::Chat.new(draft).reply(user_content: Locales.t(:web_autospec_auto_eval_prompt, locale: locale))
   rescue StandardError => e
     Rails.logger.warn("[autospec] auto quality eval failed for draft #{draft.id}: #{e.class}: #{e.message}")
+  end
+
+  # A partially-imported image set (Autodev #37) is not an error: the draft
+  # exists and is usable, and the unreachable images kept their original
+  # GitLab links. So it rides along as an alert on the draft page rather than
+  # bouncing the CSM back to the import form empty-handed.
+  def import_images_flash(warnings)
+    return {} if warnings.blank?
+
+    { alert: t_web(:web_autospec_import_images_failed, count: warnings.size, files: warnings.join(', ')) }
   end
 
   def load_draft

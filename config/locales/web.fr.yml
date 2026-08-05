@@ -488,6 +488,9 @@ fr:
   web_autospec_attachment_drop_here: Déposez une capture ici
   web_autospec_attachment_drop_hint: PNG, JPG, GIF, WEBP — jusqu'à 10 Mo
   web_autospec_attachment_upload_error: Échec de l'envoi de la capture
+  web_autospec_import_images_failed: >-
+    Ticket importé, mais %{count} capture(s) du ticket source n'ont pas pu être
+    récupérées : %{files}. Leurs liens d'origine ont été conservés dans le texte.
   web_autospec_tab_mobile_edit: Édition
   web_autospec_tab_mobile_chat: Discussion
 
