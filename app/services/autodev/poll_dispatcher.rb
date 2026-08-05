@@ -20,6 +20,13 @@ module Autodev
     ACTIVE_STATUSES = %w[cloning checking_spec implementing committing pushing creating_mr
                          checking_pipeline reviewing fixing_discussions fixing_pipeline].freeze
 
+    # Bounds of the second-chance recovery for a spent retry budget
+    # (`dispatch_error_recheck`, Autodev #34): at most 3 extra rounds per
+    # ticket, spaced an hour apart, so a transient failure gets another shot
+    # once its cause clears while a real code failure just burns the cap.
+    DEFAULT_ERROR_RECHECK_MAX = 3
+    DEFAULT_ERROR_RECHECK_BACKOFF = 3600
+
     # PollRouter's contract expects a `pool` arg with an `enqueue?` method. In
     # the Solid Queue world the router still routes (returns :next vs
     # :continue) but the actual enqueue happens through `process_issue`
@@ -66,6 +73,9 @@ module Autodev
       dispatch_discussions
       dispatch_unassignment
       dispatch_done_unassigned
+      # Before dispatch_retries, so a budget re-armed this cycle is picked up
+      # by it immediately rather than waiting a full poll interval.
+      dispatch_error_recheck
       dispatch_retries
       dispatch_infra_recheck
     end
@@ -240,6 +250,73 @@ module Autodev
              .where('retry_count <= ?', max_retries)
              .where("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')")
              .to_a
+    end
+
+    # === bounded second chance for a spent retry budget ===
+    #
+    # Exhausting `max_retries` is right for a genuine code failure but wrong for
+    # a transient one (network blip, GitLab/registry outage, the #33 `git push`
+    # stale-info case): the row sat in `error` forever, needing a manual UPDATE.
+    #
+    # This pass does NOT reimplement the retry mechanics. It re-arms the spent
+    # budget — `retry_count` back to 0 plus a due `next_retry_at` — and lets
+    # `dispatch_retries` (which runs right after) take it through the usual
+    # `:retry_errored` / `:retry_stuck` path, labels and activity log included.
+    #
+    # It deliberately does not classify the error. `JobClassifier` reads GitLab
+    # CI `failure_reason` values, not Ruby exceptions, so classifying here would
+    # mean a new brittle heuristic over `error_message`. A real code failure
+    # instead burns the cap — a few extra rounds spread over hours — and then
+    # rests terminal, which is the bound we actually need.
+    def dispatch_error_recheck
+      fetch_error_recheck_candidates.each { |issue| recheck_errored(issue) }
+    end
+
+    def fetch_error_recheck_candidates
+      ::Issue.where(project_path: @path, status: 'error')
+             .where('retry_count > ?', ::Config.max_retries(@project_config, @config))
+             .where('error_recheck_count < ?', error_recheck_max)
+             .where("error_recheck_at IS NULL OR error_recheck_at <= datetime('now')")
+             .to_a
+    end
+
+    # Every candidate costs one bounded attempt whether or not it gets re-armed,
+    # so a closed-and-forgotten ticket can't make us call GitLab on every poll
+    # forever.
+    def recheck_errored(issue)
+      attempt = (issue.error_recheck_count || 0) + 1
+      stamps = { error_recheck_count: attempt,
+                 error_recheck_at: error_recheck_backoff.seconds.from_now }
+      stamps.merge!(retry_count: 0, next_retry_at: Time.current) if worth_rearming?(issue)
+      issue.update(**stamps)
+      log_error_recheck(issue, attempt, stamps.key?(:retry_count))
+    rescue ::Gitlab::Error::ResponseError => e
+      @logger.error("Failed to recheck errored ##{issue.issue_iid}: #{e.message}", project: @path)
+    end
+
+    # One GitLab read answers both questions — a ticket that was closed or
+    # handed to a human is not ours to retry.
+    def worth_rearming?(issue)
+      gl_issue = @client.issue(@path, issue.issue_iid)
+      return false unless gl_issue.state == 'opened'
+
+      (gl_issue.assignees || []).any? { |a| a.id == ::GitlabHelpers.current_user_id(@client) }
+    end
+
+    def log_error_recheck(issue, attempt, rearmed)
+      verb = rearmed ? 'rearmed retry budget' : 'declined (closed or unassigned)'
+      @logger.info("Error recheck #{attempt}/#{error_recheck_max} for issue " \
+                   "##{issue.issue_iid}: #{verb}", project: @path)
+    end
+
+    def error_recheck_max
+      (@project_config['error_recheck_max'] || @config['error_recheck_max'] ||
+        DEFAULT_ERROR_RECHECK_MAX).to_i
+    end
+
+    def error_recheck_backoff
+      (@project_config['error_recheck_backoff'] || @config['error_recheck_backoff'] ||
+        DEFAULT_ERROR_RECHECK_BACKOFF).to_i
     end
 
     def enqueue_retry(issue)
