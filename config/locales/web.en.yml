@@ -488,6 +488,11 @@ en:
   web_autospec_attachment_drop_here: Drop a capture here
   web_autospec_attachment_drop_hint: PNG, JPG, GIF, WEBP — up to 10 MB
   web_autospec_attachment_upload_error: Capture upload failed
+  web_autospec_import_error_invalid_url: This URL is not a GitLab ticket URL.
+  web_autospec_import_error_project_not_found: This project is not tracked by autodev.
+  web_autospec_import_error_project_not_visible: You do not have access to this project.
+  web_autospec_import_error_issue_not_found: This ticket could not be found on GitLab.
+  web_autospec_new_project_unavailable: This project is not available.
   web_autospec_import_images_failed: >-
     Ticket imported, but %{count} capture(s) from the source ticket could not be
     retrieved: %{files}. Their original links were kept in the body.

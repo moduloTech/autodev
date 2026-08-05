@@ -70,7 +70,7 @@ class AutospecDraftsImportTest < ActionDispatch::IntegrationTest
 
     assert_response :redirect
     assert_equal '/autospec_drafts/import', URI.parse(response.location).path
-    assert_equal 'import_invalid_url', flash[:alert]
+    assert_equal Locales.t(:web_autospec_import_error_invalid_url, locale: :fr), flash[:alert]
   end
 
   def test_create_from_import_redirects_back_on_unknown_project
@@ -79,7 +79,7 @@ class AutospecDraftsImportTest < ActionDispatch::IntegrationTest
          params: { url: 'https://gitlab.example.com/unknown/proj/-/issues/1' }
 
     assert_response :redirect
-    assert_equal 'import_project_not_found', flash[:alert]
+    assert_equal Locales.t(:web_autospec_import_error_project_not_found, locale: :fr), flash[:alert]
   end
 
   def test_create_from_import_redirects_back_on_invisible_project
@@ -89,6 +89,6 @@ class AutospecDraftsImportTest < ActionDispatch::IntegrationTest
          params: { url: "https://gitlab.example.com/#{invisible.gitlab_path}/-/issues/1" }
 
     assert_response :redirect
-    assert_equal 'import_project_not_visible', flash[:alert]
+    assert_equal Locales.t(:web_autospec_import_error_project_not_visible, locale: :fr), flash[:alert]
   end
 end

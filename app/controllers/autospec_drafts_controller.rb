@@ -73,7 +73,7 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   # POST /autospec_drafts
   def create
     project = current_user.visible_projects.find_by(id: params[:project_id])
-    return redirect_to('/autospec_drafts/new', alert: 'project_unavailable') unless project
+    return redirect_to('/autospec_drafts/new', alert: t_web(:web_autospec_new_project_unavailable)) unless project
 
     draft = build_draft(project)
     auto_evaluate_quality(draft)
@@ -96,13 +96,13 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
     auto_evaluate_quality(draft)
     redirect_to "/autospec_drafts/#{draft.id}", **import_images_flash(importer.warnings)
   rescue Autospec::GitlabImporter::InvalidUrl
-    redirect_to('/autospec_drafts/import', alert: 'import_invalid_url')
+    redirect_to_import(:web_autospec_import_error_invalid_url)
   rescue Autospec::GitlabImporter::ProjectNotFound
-    redirect_to('/autospec_drafts/import', alert: 'import_project_not_found')
+    redirect_to_import(:web_autospec_import_error_project_not_found)
   rescue Autospec::GitlabImporter::ProjectNotVisible
-    redirect_to('/autospec_drafts/import', alert: 'import_project_not_visible')
+    redirect_to_import(:web_autospec_import_error_project_not_visible)
   rescue Autospec::GitlabImporter::IssueNotFound
-    redirect_to('/autospec_drafts/import', alert: 'import_issue_not_found')
+    redirect_to_import(:web_autospec_import_error_issue_not_found)
   end
 
   # GET /autospec_drafts/:id
@@ -300,6 +300,13 @@ class AutospecDraftsController < ApplicationController # rubocop:disable Metrics
   # exists and is usable, and the unreachable images kept their original
   # GitLab links. So it rides along as an alert on the draft page rather than
   # bouncing the CSM back to the import form empty-handed.
+  # The flash banner renders `flash[:alert]` verbatim, so every value handed to
+  # it must already be translated — passing a bare key put the literal string
+  # "import_invalid_url" on screen.
+  def redirect_to_import(key)
+    redirect_to('/autospec_drafts/import', alert: t_web(key))
+  end
+
   def import_images_flash(warnings)
     return {} if warnings.blank?
 
