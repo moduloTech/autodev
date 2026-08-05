@@ -14,7 +14,25 @@
   const AUTOSAVE_DEBOUNCE_MS = 2000;
   const LS_PREFIX = 'autodev:draft:';
 
-  document.addEventListener('DOMContentLoaded', init);
+  // Bootstrapped on BOTH events, because neither covers the other's case.
+  // `DOMContentLoaded` handles a cold load (F5, pasted URL) but never fires
+  // for a Turbo Drive visit: this script tag lives in the body Turbo
+  // replaces, so it re-executes with that event long since dispatched.
+  // `turbo:load` covers the in-app navigation. Binding only the former left
+  // the entire editor unwired whenever a draft was reached by clicking
+  // through /autospec_drafts — dead preview tab (Autodev #42), dead dropzone
+  // (#41), and dead autosave + localStorage backup, which silently dropped
+  // edits. A hard reload of the same URL worked, which is what made it look
+  // intermittent.
+  //
+  // `turbo:load` also fires on the first load, so `init` must tolerate being
+  // called more than once — see its workspace guard.
+  document.addEventListener('turbo:load', init);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();  // `defer` already guarantees a parsed DOM here
+  }
   wireChatComposer();
 
   // ── Chat composer: optimistic send feedback ───────────────────
@@ -93,6 +111,12 @@
   function init() {
     const workspace = document.querySelector('[data-autospec-draft-id]');
     if (!workspace) return;
+    // Idempotence guard, held on the element rather than on `window`: the
+    // workspace is a brand-new node after every Turbo body swap, so the flag
+    // clears itself exactly when the handlers do need re-binding. A window
+    // flag would survive the swap and leave the new DOM unwired.
+    if (workspace.dataset.autospecWired === 'true') return;
+    workspace.dataset.autospecWired = 'true';
 
     const draftId = workspace.getAttribute('data-autospec-draft-id');
     const locked = workspace.getAttribute('data-autospec-locked') === 'true';

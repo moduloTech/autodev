@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The AutoSpec editor no longer stays dead when a draft is opened by clicking through the app (Autodev #41 + #42 — one root cause).** `autospec.js` bound its `init` to `DOMContentLoaded` alone. The script tag lives in the page body (`Web::Views::AutospecDrafts::Show`), which Turbo Drive replaces on every in-app navigation and re-executes — but by then `DOMContentLoaded` has long since fired, so `init` never ran and nothing it wires existed: the Édition/Aperçu tab toggle (reported as "l'aperçu du ticket est cassé", #42), the capture dropzone and its click-to-pick fallback ("le drag&drop de capture est cassé", #41), and — unreported but more damaging — the debounced autosave together with its `localStorage` backup, so edits typed after such a navigation were dropped entirely. A hard reload of the same URL bootstrapped normally, which is what made the failures look intermittent and surface as two separate UI bugs. `init` is now wired on `turbo:load` **and** the cold-load path (`DOMContentLoaded`, or an immediate call when the DOM is already parsed), and made idempotent by a `data-autospec-wired` flag held on the workspace element rather than on `window` — the element is a fresh node after each Turbo body swap, so the flag clears exactly when the handlers do need re-binding, while `turbo:load` firing on the first load no longer double-binds every handler (which would have uploaded each dropped file twice). `wireChatComposer` was already called at script-execution time behind a `window.__autospecChatWired` guard, which is why the chat composer kept working and masked the scope of the breakage. New `test/autospec_js_turbo_bootstrap_test.rb` locks the three invariants (turbo:load wiring, cold-load wiring, idempotence guard) at source level — the suite has no JS runtime, same tactic as `DeployReviewFrameTest` for the sibling Turbo-semantics bug (#28).
+
 ## [1.0.0-alpha.42] - 2026-07-10
 
 ### Added
