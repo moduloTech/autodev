@@ -229,9 +229,43 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     retryable = where(status: 'error')
                 .where('retry_count <= ?', max_retries)
                 .where("next_retry_at IS NULL OR next_retry_at <= datetime('now')")
-    cleared = { error_message: nil, started_at: nil }
-    retryable.where.not(mr_iid: nil).update_all(cleared.merge(status: 'checking_pipeline')) +
-      retryable.where(mr_iid: nil).update_all(cleared.merge(status: 'pending'))
+    # `reset_budget: false` on purpose: this is automatic crash recovery, not an
+    # operator decision. Handing out a fresh budget here would restart a
+    # genuinely broken ticket on every single boot.
+    reset_for_retry!(retryable)
+  end
+
+  # Single source of truth for putting a row back into a state the poller will
+  # actually pick up again (Autodev #34, item 3). Returns the number of rows
+  # touched. Bypasses AASM deliberately — like every other recovery/reset path,
+  # this is an out-of-band correction, not a workflow transition.
+  #
+  # Two halves, and both matter:
+  #
+  # - A row that already has an MR resumes at `checking_pipeline`, which
+  #   `dispatch_pipelines` polls unconditionally. Sending it back to `pending`
+  #   instead would re-implement from scratch over an existing MR.
+  # - A pre-MR row restarts as `pending` and **must** carry a due
+  #   `next_retry_at`: `fetch_retryable` requires a non-NULL stamp, and
+  #   `dispatch_new_issues` only rediscovers `labels_todo` while an errored
+  #   ticket still carries `label_doing`. Without the stamp the row is orphaned
+  #   in `pending` — task #26's exact pattern.
+  #
+  # Three call sites used to re-derive this rule and disagreed: the CLI
+  # `--reset` had it right, `recover_errored!` dropped the stamp, and
+  # `IssuesController#reset` dropped both the stamp and the split. Hence one
+  # method rather than a fourth chance to get it wrong.
+  #
+  # `reset_budget:` zeroes `retry_count` — for an operator-driven reset, which
+  # means "clean slate". `clear_attention:` also clears the needs_attention
+  # trio, for the same reason.
+  def self.reset_for_retry!(scope, reset_budget: false, clear_attention: false)
+    fields = { error_message: nil, started_at: nil }
+    fields[:retry_count] = 0 if reset_budget
+    fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention
+
+    scope.where.not(mr_iid: nil).update_all(**fields, status: 'checking_pipeline', next_retry_at: nil) +
+      scope.where(mr_iid: nil).update_all(**fields, status: 'pending', next_retry_at: Time.current)
   end
 
   def self.recover_fixing_pipeline!

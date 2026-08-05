@@ -52,16 +52,17 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
   # we match it byte-for-byte. After-transition hooks intentionally do NOT
   # fire (this is a recovery action, not a normal flow event). The audit row
   # is written directly from here for that reason.
-  def reset # rubocop:disable Metrics/MethodLength
+  def reset
     issue = find_issue(params[:id])
     return head :not_found unless issue
 
     previous_state = issue.status
-    Issue.where(id: issue.id).update_all(
-      status: 'pending', retry_count: 0, error_message: nil,
-      next_retry_at: nil, started_at: nil,
-      needs_attention: false, attention_reason: nil, attention_detail: nil
-    )
+    # Delegated to the model so this button can't drift from the CLI `--reset`
+    # again: it used to force `pending` with a NULL `next_retry_at` for every
+    # row, which left the ticket orphaned (no stamp → `fetch_retryable` skips
+    # it; `label_doing` → `dispatch_new_issues` never rediscovers it) and sent
+    # MR-bearing rows to a full re-implementation. See Issue.reset_for_retry!.
+    Issue.reset_for_retry!(Issue.where(id: issue.id), reset_budget: true, clear_attention: true)
     Audit.record!(
       resource: issue, action: 'issue.reset_manual', actor: current_user,
       payload: { project_path: issue.project_path, iid: issue.issue_iid, previous_state: previous_state }

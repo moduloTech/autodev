@@ -109,16 +109,11 @@ module Dashboard
 
   def perform_reset(scope, config, pastel)
     count = scope.count
-    # Mirror Issue.recover_stuck_processing!: an error that already has an MR
-    # resumes at `checking_pipeline` (picked up by `dispatch_pipelines`); a
-    # pre-MR error restarts from scratch as `pending` WITH `next_retry_at`
-    # stamped, so `dispatch_retries` re-enqueues it via `:retry_stuck`. The
-    # stamp is essential — the GitLab label is still `label_doing`, so
-    # `dispatch_new_issues` never re-discovers it; without it the reset row was
-    # orphaned in `pending` forever (task #26).
-    common = { retry_count: 0, error_message: nil, started_at: nil }
-    scope.where.not(mr_iid: nil).update_all(status: 'checking_pipeline', next_retry_at: nil, **common)
-    scope.where(mr_iid: nil).update_all(status: 'pending', next_retry_at: Time.current, **common)
+    # The MR split and the `next_retry_at` stamp (task #26) now live in
+    # Issue.reset_for_retry! — this used to be their only correct copy, while
+    # the dashboard button and recover_errored! each got a piece wrong (#34).
+    # `reset_budget:` because an operator asking for a reset wants a clean slate.
+    Issue.reset_for_retry!(scope, reset_budget: true)
     label = config['reset_iid'] ? "Issue ##{config['reset_iid']}" : "#{count} issue(s)"
     puts pastel.green("✓ #{label} relancée(s).")
   end
