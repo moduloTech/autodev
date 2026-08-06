@@ -45,5 +45,6 @@ fr:
   activity_stagnation_pipeline: ":warning: Stagnation pipeline detectee : %{detail} → termine"
   activity_stagnation_discussions: ":warning: Stagnation discussions detectee → termine"
   activity_unassigned_stop: ":stop_sign: Desassigne, travail en cours arrete"
+  activity_closed_externally: ":lock: Ticket cloture sur GitLab, travail en cours arrete"
   activity_dc_parse_failed: ":warning: Sortie danger-claude non parsable, session reuse desactive pour cet appel"
   activity_truncation_marker: "*[anciennes entrees tronquees pour rester sous la limite GitLab]*"

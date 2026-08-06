@@ -187,21 +187,48 @@ module Autodev
 
     def dispatch_unassignment
       ::Issue.where(project_path: @path, status: ACTIVE_STATUSES).find_each do |issue|
-        check_still_assigned(issue)
+        check_external_state(issue)
       end
     end
 
-    def check_still_assigned(issue)
-      return if still_assigned?(issue)
+    # One GitLab read answers both questions, so detecting a closure costs
+    # nothing on top of the assignment sweep that already ran here (Autodev
+    # #44 — the `state` field used to be fetched and thrown away).
+    #
+    # Closure wins over unassignment: a ticket closed on GitLab is closed
+    # whether or not it is still assigned, and `closed` says more than `done`.
+    # Only active rows are swept, so a ticket closed while parked in `pending`
+    # or `error` is noticed whenever it next moves, not proactively.
+    def check_external_state(issue)
+      gl_issue = @client.issue(@path, issue.issue_iid)
+      return close_externally(issue) if ::GitlabHelpers.field(gl_issue, :state) == 'closed'
+      return if assigned_to_autodev?(gl_issue)
 
+      stop_unassigned(issue)
+    rescue ::Gitlab::Error::ResponseError => e
+      @logger.error("Failed to check external state for ##{issue.issue_iid}: #{e.message}",
+                    project: @path)
+    end
+
+    # Mirrors IssuesController#close_issue!, minus the audit actor: nobody
+    # clicked anything, the ticket just went away on GitLab.
+    def close_externally(issue)
+      return unless issue.may_close?
+
+      @logger.info("Issue ##{issue.issue_iid}: closed on GitLab, closing locally", project: @path)
+      issue.close!
+      ::Issue.where(id: issue.id).update_all(finished_at: Time.current, needs_attention: false,
+                                             attention_reason: nil, attention_detail: nil)
+      ::ActivityLogger.post(::ActivityLogger::Ctx.new(@client, @path, @logger),
+                            issue, :closed_externally)
+    end
+
+    def stop_unassigned(issue)
       @logger.info("Issue ##{issue.issue_iid}: no longer assigned, transitioning to done",
                    project: @path)
       issue.update(status: 'done', finished_at: Time.current)
       ::ActivityLogger.post(::ActivityLogger::Ctx.new(@client, @path, @logger),
                             issue, :unassigned_stop)
-    rescue ::Gitlab::Error::ResponseError => e
-      @logger.error("Failed to check assignment for ##{issue.issue_iid}: #{e.message}",
-                    project: @path)
     end
 
     def dispatch_done_unassigned
@@ -225,8 +252,12 @@ module Autodev
     end
 
     def still_assigned?(issue)
-      gl_issue = @client.issue(@path, issue.issue_iid)
-      (gl_issue.assignees || []).any? { |a| a.id == ::GitlabHelpers.current_user_id(@client) }
+      assigned_to_autodev?(@client.issue(@path, issue.issue_iid))
+    end
+
+    def assigned_to_autodev?(gl_issue)
+      (::GitlabHelpers.field(gl_issue, :assignees) || [])
+        .any? { |a| ::GitlabHelpers.field(a, :id) == ::GitlabHelpers.current_user_id(@client) }
     end
 
     def mr_closed_or_merged?(issue)
