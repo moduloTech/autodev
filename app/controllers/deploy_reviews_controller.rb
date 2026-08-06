@@ -18,7 +18,7 @@ class DeployReviewsController < ApplicationController
 
   before_action :authorize_project!, only: %i[availability trigger]
 
-  # GET /deploy_review
+  # GET /deploy_review[?project=&q=&untracked=1]
   #
   # Always renders the project selector (scoped to current_user.visible_projects).
   # When `?project=` names a project the user can see, also lists its open MRs
@@ -26,14 +26,20 @@ class DeployReviewsController < ApplicationController
   # redeploy probe and a "tracked by autodev" badge when a matching Issue row
   # exists. An unknown/forbidden project silently falls back to the bare
   # selector — this is read-only UI, not the security boundary (see above).
+  #
+  # `q` searches by ticket number, MR number or free text (Autodev::DeployReviewSearch);
+  # `untracked=1` hides the MRs autodev already follows. Both exist because the
+  # unfiltered list runs past 100 rows on a real project, which is what made the
+  # surface unusable for a CSM arriving with a ticket number (Autodev #45).
   def index
     project_path = params[:project].presence
     merge_requests, error = index_merge_requests(project_path)
+    tracked = tracked_issue_ids(project_path, merge_requests)
 
     render html: Web::Views::DeployReviews::Index.new(
       projects: current_user_visible_projects, selected_project: project_path,
-      merge_requests: merge_requests, tracked_issue_ids: tracked_issue_ids(project_path, merge_requests),
-      error: error, kpis: dashboard_kpis,
+      merge_requests: apply_untracked_filter(merge_requests, tracked), tracked_issue_ids: tracked,
+      query: search_query, untracked_only: untracked_only?, error: error, kpis: dashboard_kpis,
       **view_kwargs
     ).call.html_safe, layout: false
   end
@@ -54,10 +60,31 @@ class DeployReviewsController < ApplicationController
   # project's MR list.
   def trigger
     apply_deploy_review_flash(Autodev::DeployReview.new(build_target).trigger!)
-    redirect_to "/deploy_review?project=#{CGI.escape(params[:project].to_s)}"
+    redirect_to index_path_with_filters
   end
 
   private
+
+  # Carries the search + filter back through the redirect, so a deploy doesn't
+  # dump the user back into the unfiltered 100-row list.
+  def index_path_with_filters
+    query = { project: params[:project].to_s }
+    query[:q] = search_query if search_query
+    query[:untracked] = '1' if untracked_only?
+    "/deploy_review?#{query.to_query}"
+  end
+
+  def search_query = params[:q].presence&.strip.presence
+
+  def untracked_only? = params[:untracked].to_s == '1'
+
+  # Applied here rather than in the search service: the tracked map is built
+  # from the `issues` table, which is the controller's business, not GitLab's.
+  def apply_untracked_filter(merge_requests, tracked)
+    return merge_requests unless untracked_only? && merge_requests
+
+    merge_requests.reject { |mr| tracked.key?(GitlabHelpers.field(mr, :iid)) }
+  end
 
   def build_target
     Autodev::DeployReview::Target.new(
@@ -81,7 +108,11 @@ class DeployReviewsController < ApplicationController
   def index_merge_requests(project_path)
     return [nil, false] unless project_path && visible_project_path?(project_path)
 
-    fetch_open_merge_requests(project_path)
+    result = Autodev::DeployReviewSearch.new(
+      client: gitlab_client, project_path: project_path,
+      query: search_query, logger: Rails.logger
+    ).call
+    [result.merge_requests, result.error]
   end
 
   def current_user_visible_projects
@@ -98,17 +129,6 @@ class DeployReviewsController < ApplicationController
 
   def mr_frame_src
     "/deploy_review/mr?project=#{CGI.escape(params[:project].to_s)}&mr_iid=#{params[:mr_iid]}"
-  end
-
-  # per_page: 100, no auto-pagination beyond that (v1 — see ticket's "points
-  # d'attention": listing + probing every row is already several GitLab calls
-  # per page load, the lazy per-row probe is what keeps that bounded).
-  def fetch_open_merge_requests(project_path)
-    mrs = gitlab_client.merge_requests(project_path, state: 'opened', per_page: 100)
-    [mrs.to_a, false]
-  rescue StandardError => e
-    Rails.logger.warn("[deploy_reviews] failed to list MRs for #{project_path}: #{e.class}: #{e.message}")
-    [[], true]
   end
 
   # Maps each listed MR's iid to the tracking Issue's id (for the "tracked by

@@ -550,3 +550,9 @@ fr:
   web_deploy_review_tracked_badge: Suivie par autodev
   web_deploy_review_open_in_gitlab: Ouvrir dans GitLab
   web_deploy_review_api_error: Impossible de récupérer les MR ouvertes (erreur GitLab — voir les logs).
+  web_deploy_review_search_placeholder: Numéro de ticket, de MR ou texte
+  web_deploy_review_search_hint: Cherchez par numéro de ticket (ex. 16432), par numéro de MR, ou par un mot du titre ou de la branche.
+  web_deploy_review_untracked_label: Masquer les MR suivies par autodev
+  web_deploy_review_no_matches: Aucune MR ouverte ne correspond à cette recherche.
+  web_deploy_review_no_untracked_mrs: Toutes les MR ouvertes de ce projet sont déjà suivies par autodev.
+  web_deploy_review_count: "%{count} MR ouverte(s)"

@@ -11,11 +11,14 @@ module Web
       # not hidden, since (re)deploying is idempotent either way.
       class Index < Base # rubocop:disable Metrics/ClassLength
         # rubocop:disable Metrics/ParameterLists
-        def initialize(projects:, selected_project:, merge_requests:, tracked_issue_ids:, error:, kpis:, **)
+        def initialize(projects:, selected_project:, merge_requests:, tracked_issue_ids:, error:, kpis:,
+                       query: nil, untracked_only: false, **)
           @projects = projects
           @selected_project = selected_project
           @merge_requests = merge_requests
           @tracked_issue_ids = tracked_issue_ids
+          @query = query
+          @untracked_only = untracked_only
           @error = error
           @kpis = kpis
           super(**)
@@ -55,12 +58,40 @@ module Web
           )
         end
 
+        # One form carries project + search + filter, so a submit never drops
+        # part of the state (Autodev #45).
         def render_selector
           form(method: 'get', action: '/deploy_review', style: 'display: flex; align-items: center; ' \
-                                                               'gap: 8px; margin-bottom: 20px;') do
+                                                               'gap: 8px; margin-bottom: 8px; flex-wrap: wrap;') do
             label { t_web(:web_deploy_review_project_label) }
             select(name: 'project') { @projects.each { |p| render_project_option(p) } }
+            render_search_input
+            render_untracked_checkbox
             button(type: 'submit', class: 'btn btn-primary-sm') { t_web(:web_deploy_review_apply) }
+          end
+          render_search_hint
+        end
+
+        def render_search_input
+          input(type: 'search', name: 'q', value: @query, style: 'min-width: 260px;',
+                placeholder: t_web(:web_deploy_review_search_placeholder),
+                'aria-label' => t_web(:web_deploy_review_search_placeholder))
+        end
+
+        def render_untracked_checkbox
+          label(style: 'display: inline-flex; align-items: center; gap: 6px; font-weight: 400;') do
+            attrs = { type: 'checkbox', name: 'untracked', value: '1' }
+            attrs[:checked] = true if @untracked_only
+            input(**attrs)
+            plain t_web(:web_deploy_review_untracked_label)
+          end
+        end
+
+        # Says out loud that a ticket number works — the whole point of the
+        # search is that the person arrives with one and nothing told them so.
+        def render_search_hint
+          p(class: 'muted', style: 'font-size: 12px; margin: 0 0 20px;') do
+            t_web(:web_deploy_review_search_hint)
           end
         end
 
@@ -75,9 +106,25 @@ module Web
           return unless @selected_project
 
           return render_empty(:web_deploy_review_api_error) if @error
-          return render_empty(:web_deploy_review_no_mrs) if @merge_requests.blank?
+          return render_empty(empty_key) if @merge_requests.blank?
 
+          render_count
           render_mr_list
+        end
+
+        # An empty result under a search means "no match", not "nothing to
+        # deploy" — collapsing the two is how a working feature reads as broken.
+        def empty_key
+          return :web_deploy_review_no_matches if @query.present?
+          return :web_deploy_review_no_untracked_mrs if @untracked_only
+
+          :web_deploy_review_no_mrs
+        end
+
+        def render_count
+          p(class: 'muted', style: 'font-size: 12px; margin: 0 0 12px;') do
+            t_web(:web_deploy_review_count, count: @merge_requests.size)
+          end
         end
 
         def render_empty(key)
