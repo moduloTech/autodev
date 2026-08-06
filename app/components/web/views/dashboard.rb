@@ -7,7 +7,8 @@ module Web
     class Dashboard < Base # rubocop:disable Metrics/ClassLength
       # rubocop:disable Metrics/ParameterLists
       def initialize(active:, errored:, kpis:, weekly_activity:, by_project:,
-                     anthropic_configured: true, drafts_awaiting_my_vote: [], **)
+                     anthropic_configured: true, drafts_awaiting_my_vote: [],
+                     usage_state: { available: true, checked_at: nil }, **)
         super(**)
         @active = active
         @errored = errored
@@ -16,6 +17,7 @@ module Web
         @by_project = by_project
         @anthropic_configured = anthropic_configured
         @drafts_awaiting_my_vote = drafts_awaiting_my_vote
+        @usage_state = usage_state
       end
       # rubocop:enable Metrics/ParameterLists
 
@@ -26,6 +28,7 @@ module Web
             main do
               render_topbar
               div(style: 'flex: 1; overflow: auto; padding: 32px;') do
+                render_usage_paused_banner if usage_paused?
                 render_anthropic_missing_banner if show_anthropic_banner?
                 render_kpis
                 render_drafts_awaiting_my_vote if @drafts_awaiting_my_vote.any?
@@ -307,7 +310,24 @@ module Web
         @current_user_admin && !@anthropic_configured
       end
 
-      def render_anthropic_missing_banner # rubocop:disable Metrics/MethodLength
+      def render_anthropic_missing_banner
+        render_warn_banner(t_web(:web_dashboard_anthropic_missing_title),
+                           t_web(:web_dashboard_anthropic_missing_hint))
+      end
+
+      # Claude quota outage (Autodev #46). Shown to every signed-in user, not
+      # just admins: the pause holds up everyone's tickets, and the copy has to
+      # say what still runs or the banner reads as "autodev is down".
+      def usage_paused? = @usage_state[:available] == false
+
+      def render_usage_paused_banner
+        render_warn_banner(
+          t_web(:web_dashboard_usage_paused_title),
+          t_web(:web_dashboard_usage_paused_hint, checked_at: relative_time(@usage_state[:checked_at]))
+        )
+      end
+
+      def render_warn_banner(title, hint) # rubocop:disable Metrics/MethodLength
         banner_style = 'border-color: var(--warn-200); ' \
                        'background: linear-gradient(180deg, var(--warn-bg), var(--paper) 60%);'
         div(style: 'margin-bottom: 20px;') do
@@ -317,12 +337,8 @@ module Web
                 render Components::Icon.new(name: 'alert-tri', size: 18)
               end
               div(style: 'flex: 1;') do
-                div(style: 'font-size: 14px; font-weight: 600; color: var(--text-strong);') do
-                  t_web(:web_dashboard_anthropic_missing_title)
-                end
-                div(style: 'font-size: 12px; color: var(--text-muted); margin-top: 2px;') do
-                  t_web(:web_dashboard_anthropic_missing_hint)
-                end
+                div(style: 'font-size: 14px; font-weight: 600; color: var(--text-strong);') { title }
+                div(style: 'font-size: 12px; color: var(--text-muted); margin-top: 2px;') { hint }
               end
             end
           end

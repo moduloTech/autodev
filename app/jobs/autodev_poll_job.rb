@@ -14,13 +14,11 @@ class AutodevPollJob < ApplicationJob
   def perform
     config = ::Config.load
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    usage_ok = probe_usage
 
-    if usage_paused?(config)
-      logger.info('[autodev_poll] usage limit hit, skipping cycle')
-      return record_heartbeat(usage_ok: false, projects: 0, started: started, level: 'warn')
-    end
-
-    record_heartbeat(usage_ok: true, projects: run_cycle(config), started: started)
+    projects = run_cycle(config, usage_ok: usage_ok)
+    record_heartbeat(usage_ok: usage_ok, projects: projects, started: started,
+                     level: usage_ok ? 'info' : 'warn')
   rescue StandardError => e
     record_cycle_error(e)
     raise
@@ -28,15 +26,31 @@ class AutodevPollJob < ApplicationJob
 
   private
 
+  # One probe per cycle, persisted by the gate so every worker and the dashboard
+  # read the same verdict without shelling out to danger-claude themselves.
+  def probe_usage
+    usage_ok = ::Autodev::UsageGate.probe!(logger: logger)
+    unless usage_ok
+      logger.info('[autodev_poll] usage limit hit: implementation paused, ' \
+                  'observation passes still running')
+    end
+    usage_ok
+  end
+
   # Runs one dispatch pass over every project; returns the count. Projects are
   # discovered from the DB (`Project.runtime_configs`, task #9 phase 4), with
   # any not-yet-imported YAML `projects:` entry still picked up as a fallback.
-  def run_cycle(config)
+  #
+  # `usage_ok` is the cycle's single Claude-quota probe. It used to abort the
+  # whole cycle here; since Autodev #46 it travels down to the dispatcher, which
+  # skips only the passes that reach danger-claude (see
+  # Autodev::PollDispatcher#claude_available?).
+  def run_cycle(config, usage_ok:)
     projects = ::Project.runtime_configs(config['projects'])
     wrapped_logger = ::Autodev::JobLogger.new(logger)
     projects.each do |project_config|
       ::Autodev::PollDispatcher.new(config: config, project_config: project_config,
-                                    logger: wrapped_logger).dispatch
+                                    logger: wrapped_logger, usage_ok: usage_ok).dispatch
     end
     projects.size
   end
@@ -68,15 +82,5 @@ class AutodevPollJob < ApplicationJob
     )
   rescue StandardError => e
     logger.warn("[autodev_poll] error record failed: #{e.class}: #{e.message}")
-  end
-
-  # Mirrors `UsageChecker#available?` from the legacy poller. The job
-  # backend can't pause a recurring task at the queue layer, so we no-op
-  # the cycle if claude's usage budget is exhausted.
-  def usage_paused?(_config)
-    !::UsageChecker.new(logger: logger).available?
-  rescue StandardError => e
-    logger.warn("[autodev_poll] usage check failed, assuming available: #{e.class}: #{e.message}")
-    false
   end
 end

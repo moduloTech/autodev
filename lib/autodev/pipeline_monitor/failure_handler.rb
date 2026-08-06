@@ -77,7 +77,16 @@ class PipelineMonitor
 
     # -- Stagnation detection --
 
+    # The fix path always ends in danger-claude (either the Claude evaluation of
+    # an uncertain verdict, or the per-job fix itself), so it is gated on the
+    # Claude quota (Autodev #46). Returning *before* `update_stagnation_signature`
+    # matters: a cycle that never looked at the failure must not count towards
+    # stagnation, or an outage would burn the whole budget and give the ticket up.
+    # `retrigger_if_needed` and `infra_skip?` ran earlier and are unaffected —
+    # neither calls Claude.
     def check_stagnation_and_fix(issue, failed_jobs, triage)
+      return defer_fix_for_usage(issue) unless claude_available?
+
       signature = compute_pipeline_signature(failed_jobs)
       return if bail_on_stagnation?(issue, :pipeline, signature, detail: format_failure_detail(failed_jobs))
 

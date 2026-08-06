@@ -7,7 +7,7 @@ require_relative '../rails_helper'
 # skips test env), so the workers/queue/database checks degrade to :down via
 # the safe_check rescue; we stub those when asserting the rollup and exercise
 # the DB-backed checks (poller/claude_usage/issues_error) with real rows.
-class HealthReportTest < ActiveSupport::TestCase
+class HealthReportTest < ActiveSupport::TestCase # rubocop:disable Metrics/ClassLength
   CONFIG = { 'poll_interval' => 300, 'monitoring' => { 'poll_stale_factor' => 3 } }.freeze
 
   def poller_event(age_seconds, usage_ok: true)
@@ -42,14 +42,37 @@ class HealthReportTest < ActiveSupport::TestCase
     assert_equal :down, report(poller_expected: true).check(:poller)[:status]
   end
 
-  test 'claude_usage warn when the last poll had usage exhausted' do
-    poller_event(60, usage_ok: false)
+  # Since Autodev #46 the check reads Autodev::UsageGate's state (written at
+  # probe time, before the passes run) rather than the heartbeat (written at
+  # cycle end) — same envelope, fresher source.
+  def usage_event(available:, age_seconds: 0)
+    ActivityEvent.create!(
+      issue_id: nil, kind: 'usage', level: available ? 'info' : 'warn',
+      payload_json: JSON.generate(available: available),
+      created_at: Time.now.utc - age_seconds
+    )
+  end
+
+  test 'claude_usage warn when the last probe found the quota exhausted' do
+    usage_event(available: false)
 
     assert_equal :warn, report.check(:claude_usage)[:status]
   end
 
-  test 'claude_usage ok when the last poll had usage available' do
-    poller_event(60, usage_ok: true)
+  test 'claude_usage ok when the last probe found the quota available' do
+    usage_event(available: true)
+
+    assert_equal :ok, report.check(:claude_usage)[:status]
+  end
+
+  test 'claude_usage ok when nothing was ever probed' do
+    assert_equal :ok, report.check(:claude_usage)[:status]
+  end
+
+  # A stale verdict must not keep the page red forever after the poller stops —
+  # the poller check is what reports that.
+  test 'claude_usage ok when the verdict is stale' do
+    usage_event(available: false, age_seconds: 5_000)
 
     assert_equal :ok, report.check(:claude_usage)[:status]
   end

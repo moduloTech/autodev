@@ -46,10 +46,14 @@ module Autodev
       end
     end
 
-    def initialize(config:, project_config:, logger:)
+    # `usage_ok:` is the Claude-quota verdict AutodevPollJob probed once for the
+    # whole cycle (Autodev::UsageGate). It gates only the passes that end in a
+    # danger-claude / mr-review call — see #claude_available? (Autodev #46).
+    def initialize(config:, project_config:, logger:, usage_ok: true)
       @config = config
       @project_config = project_config
       @logger = logger
+      @usage_ok = usage_ok
       @path = project_config['path']
       @token = config['gitlab_token']
       @client = ::GitlabHelpers.build_gitlab_client(config['gitlab_url'], @token)
@@ -57,7 +61,7 @@ module Autodev
 
     def dispatch
       @logger.debug("[poll_dispatcher] #{@path}", project: @path)
-      dispatch_new_issues
+      claude_available? ? dispatch_new_issues : log_usage_pause
       return if @config['dry_run']
 
       dispatch_existing
@@ -68,9 +72,26 @@ module Autodev
 
     private
 
+    # An exhausted Claude quota pauses implementation, not observation: only
+    # `dispatch_new_issues`, `dispatch_discussions` and the `:retry_stuck`
+    # branch of `dispatch_retries` reach danger-claude. Everything else here is
+    # GitLab reads, DB transitions and shell hooks, and freezing those was the
+    # bug — a ticket closed on GitLab or an MR turning green went unnoticed for
+    # the whole outage. `:check_pipeline` keeps running too; PipelineMonitor
+    # holds its own gate at the two points where it would call Claude.
+    #
+    # Nil (a dispatcher built by an older call site or by a unit test) reads as
+    # available — the gate must never activate by omission.
+    def claude_available? = @usage_ok != false
+
+    def log_usage_pause
+      @logger.info('[poll_dispatcher] Claude usage exhausted: implementation paused, ' \
+                   'observation passes still running', project: @path)
+    end
+
     def dispatch_existing
       dispatch_pipelines
-      dispatch_discussions
+      dispatch_discussions if claude_available?
       dispatch_unassignment
       dispatch_done_unassigned
       # Before dispatch_retries, so a budget re-armed this cycle is picked up
@@ -350,11 +371,22 @@ module Autodev
         DEFAULT_ERROR_RECHECK_BACKOFF).to_i
     end
 
+    # Gated by action, not by pass: `:retry_stuck` re-runs IssueProcessor inline
+    # (a danger-claude call), while `:retry_errored` only fires transitions and
+    # restores GitLab labels. A deferred row keeps its `next_retry_at` stamp, so
+    # the next cycle rediscovers it untouched.
     def enqueue_retry(issue)
       action = issue.status == 'pending' ? :retry_stuck : :retry_errored
+      return defer_retry(issue) if action == :retry_stuck && !claude_available?
+
       IssueProcessJob.perform_later(@path, issue.issue_iid, action)
       @logger.info("Enqueued retry (#{action}) for issue ##{issue.issue_iid} " \
                    "(attempt #{issue.retry_count + 1})", project: @path)
+    end
+
+    def defer_retry(issue)
+      @logger.info("Deferred retry for issue ##{issue.issue_iid}: Claude usage exhausted",
+                   project: @path)
     end
 
     # === infra-recovery recheck ===

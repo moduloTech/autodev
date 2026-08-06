@@ -475,6 +475,8 @@ fr:
   web_ticket_template_error_banner: "Le modèle n'a pas pu être enregistré :"
   web_dashboard_anthropic_missing_title: Clé Anthropic manquante
   web_dashboard_anthropic_missing_hint: AutoSpec chat est désactivé. Définissez ANTHROPIC_API_KEY ou ajoutez `anthropic.api_key` à ~/.autodev/config.yml puis redémarrez autodev.
+  web_dashboard_usage_paused_title: Quota Claude épuisé
+  web_dashboard_usage_paused_hint: L'implémentation des nouvelles demandes est en pause. Le suivi des pipelines, les clôtures et les livraisons continuent normalement. Dernière vérification %{checked_at}.
   web_dashboard_drafts_to_vote: Brouillons à valider
   web_dashboard_drafts_to_vote_author: "auteur : %{email}"
   web_dashboard_drafts_to_vote_cta: Voter

@@ -13,7 +13,11 @@ class DashboardController < ApplicationController
   private
 
   def render_dashboard
-    ::Web::Views::Dashboard.new(
+    ::Web::Views::Dashboard.new(**dashboard_datasets, **view_kwargs).call
+  end
+
+  def dashboard_datasets
+    {
       active: active_issues,
       errored: errored_issues,
       kpis: dashboard_kpis,
@@ -21,8 +25,10 @@ class DashboardController < ApplicationController
       by_project: project_breakdown,
       anthropic_configured: Autospec::Chat.api_key_configured?,
       drafts_awaiting_my_vote: drafts_awaiting_my_vote,
-      **view_kwargs
-    ).call
+      # Passive read of the last quota probe (Autodev #46) — no live
+      # danger-claude call on a page render.
+      usage_state: Autodev::UsageGate.state(config: app_config)
+    }
   end
 
   # Failed requests behind the dashboard's red "X demandes ont échoué" banner,

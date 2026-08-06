@@ -13,9 +13,13 @@ Object.const_set(:Config, Module.new { def self.load(*) = {} }) unless defined?(
 Object.const_set(:UsageChecker, Class.new { def self.new(**); end }) unless defined?(UsageChecker)
 
 # Wiring test for AutodevPollJob. The job's contract is intentionally thin
-# (load config → bail on usage gate → instantiate one PollDispatcher per
+# (load config → probe the Claude quota → instantiate one PollDispatcher per
 # project), so we stub both helpers and just assert the orchestration.
-class AutodevPollJobTest < ActiveSupport::TestCase
+#
+# Since Autodev #46 an exhausted quota no longer short-circuits the cycle: the
+# verdict is forwarded to each dispatcher, which gates only the passes that
+# reach danger-claude.
+class AutodevPollJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/ClassLength
   setup do
     @stub_config = {
       'projects' => [
@@ -45,10 +49,32 @@ class AutodevPollJobTest < ActiveSupport::TestCase
     assert_equal ['db/only'], dispatched
   end
 
-  test 'short-circuits the cycle when usage is paused' do
+  # Autodev #46: the cycle used to return here, freezing pipeline tracking and
+  # GitLab-closure detection for the whole outage.
+  test 'still runs the cycle when usage is paused' do
     dispatched = run_with_stubs(usage_available: false)
 
-    assert_empty dispatched, 'expected no dispatcher call when usage is paused'
+    assert_equal %w[group/foo group/bar], dispatched
+  end
+
+  test 'forwards the quota verdict to every dispatcher' do
+    verdicts = []
+    run_with_stubs(usage_available: false, usage_captures: verdicts)
+
+    assert_equal [false, false], verdicts
+  end
+
+  test 'forwards an available quota as true' do
+    verdicts = []
+    run_with_stubs(usage_available: true, usage_captures: verdicts)
+
+    assert_equal [true, true], verdicts
+  end
+
+  test 'persists the quota verdict so the workers and the dashboard can read it' do
+    run_with_stubs(usage_available: false)
+
+    refute Autodev::UsageGate.available?(config: {})
   end
 
   test 'treats a usage-checker crash as available (fail-open)' do
@@ -77,6 +103,15 @@ class AutodevPollJobTest < ActiveSupport::TestCase
     assert_equal 'warn', event.level
   end
 
+  # The old paused heartbeat reported `projects: 0` because nothing ran. It now
+  # reports the projects it actually swept, so the health page can tell a paused
+  # cycle from a dead one.
+  test 'a usage-paused heartbeat still reports the projects it swept' do
+    run_with_stubs(usage_available: false)
+
+    assert_equal 2, ActivityEvent.where(kind: 'poller').order(:id).last.payload['projects']
+  end
+
   test 'records a cycle error and re-raises when the cycle blows up' do
     fake_checker = build_fake_checker(true)
     assert_raises(StandardError) do
@@ -95,10 +130,10 @@ class AutodevPollJobTest < ActiveSupport::TestCase
 
   private
 
-  def run_with_stubs(usage_available:) # rubocop:disable Metrics/MethodLength
+  def run_with_stubs(usage_available:, usage_captures: []) # rubocop:disable Metrics/MethodLength
     dispatched = []
     fake_checker = build_fake_checker(usage_available)
-    fake_dispatcher = build_fake_dispatcher(dispatched)
+    fake_dispatcher = build_fake_dispatcher(dispatched, usage_captures)
 
     Config.stub(:load, @stub_config) do
       UsageChecker.stub(:new, fake_checker) do
@@ -117,10 +152,11 @@ class AutodevPollJobTest < ActiveSupport::TestCase
     end
   end
 
-  def build_fake_dispatcher(captures)
-    lambda do |config:, project_config:, logger:|
+  def build_fake_dispatcher(captures, usage_captures = [])
+    lambda do |config:, project_config:, logger:, usage_ok: true|
       _ = config
       _ = logger
+      usage_captures << usage_ok
       Object.new.tap do |obj|
         obj.define_singleton_method(:dispatch) { captures << project_config['path'] }
       end

@@ -153,7 +153,68 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
     assert_includes transitions, :retry_pipeline!
   end
 
+  # -- Claude-quota gate (Autodev #46) --
+  #
+  # PollDispatcher already skips the consuming passes during an outage, but a
+  # job enqueued just before the quota ran out is still in the queue. Each of
+  # these actions leaves the row in a state the next cycle rediscovers, so
+  # returning early loses nothing.
+
+  CONSUMING_ACTIONS = { process: [IssueProcessor, :process],
+                        fix_discussions: [MrFixer, :fix] }.freeze
+
+  CONSUMING_ACTIONS.each do |action, (klass, method)|
+    test "#{action} is skipped when the Claude quota is exhausted" do
+      stub_usage(available: false) do
+        refute assert_action_called(action, klass: klass, method: method),
+               "expected #{klass}##{method} to be skipped for #{action}"
+      end
+    end
+
+    test "#{action} still runs when the Claude quota is available" do
+      stub_usage(available: true) do
+        assert assert_action_called(action, klass: klass, method: method)
+      end
+    end
+  end
+
+  test ':retry_stuck is skipped when the Claude quota is exhausted' do
+    stub_usage(available: false) do
+      refute assert_action_called(:retry_stuck, klass: IssueProcessor, method: :process)
+    end
+  end
+
+  # Observation-only actions must never be gated — that is the whole point of
+  # the ticket.
+  test ':check_pipeline still runs when the Claude quota is exhausted' do
+    stub_usage(available: false) do
+      assert assert_action_called(:check_pipeline, klass: PipelineMonitor, method: :check)
+    end
+  end
+
   private
+
+  def stub_usage(available:, &)
+    Autodev::UsageGate.stub(:available?, available, &)
+  end
+
+  # Same wiring as assert_action_routes, but returns the flag instead of
+  # asserting it, so the gate tests can assert either way.
+  def assert_action_called(action, klass:, method:) # rubocop:disable Metrics/MethodLength
+    called = false
+    fake_worker = Object.new
+    fake_worker.define_singleton_method(method) { |issue| called = !issue.nil? }
+    Config.stub(:load, @config) do
+      Issue.stub(:where, ->(**_) { fake_dataset(@issue) }) do
+        GitlabHelpers.stub(:build_gitlab_client, @client) do
+          ActivityLogger.stub(:post, true) do
+            klass.stub(:new, fake_worker) { run_perform(action) }
+          end
+        end
+      end
+    end
+    called
+  end
 
   def run_perform(action)
     IssueProcessJob.new.perform(PROJECT_PATH, ISSUE_IID, action)

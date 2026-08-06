@@ -475,6 +475,8 @@ en:
   web_ticket_template_error_banner: "The template could not be saved:"
   web_dashboard_anthropic_missing_title: Anthropic API key missing
   web_dashboard_anthropic_missing_hint: AutoSpec chat is disabled. Set ANTHROPIC_API_KEY or add `anthropic.api_key` to ~/.autodev/config.yml then restart autodev.
+  web_dashboard_usage_paused_title: Claude quota exhausted
+  web_dashboard_usage_paused_hint: Implementing new requests is paused. Pipeline tracking, closures and deliveries keep running as usual. Last checked %{checked_at}.
   web_dashboard_drafts_to_vote: Drafts to vote on
   web_dashboard_drafts_to_vote_author: "author: %{email}"
   web_dashboard_drafts_to_vote_cta: Vote

@@ -114,16 +114,20 @@ module Autodev
       build(:ok, "#{pending} pending, no failures", meta)
     end
 
-    # Passive read of the last poll's usage flag — no live probe.
+    # Passive read of Autodev::UsageGate's persisted verdict — no live probe.
+    # The gate is written when the cycle probes (before any pass runs), so it is
+    # fresher than the end-of-cycle heartbeat this used to read, and it is the
+    # very state the dispatcher and PipelineMonitor act on (Autodev #46). It
+    # fails open on a missing or stale verdict; a poller that stopped ticking is
+    # the `poller` check's job to report, not this one's.
     def check_claude_usage
-      last = last_poller_event
-      return build(:ok, 'no poll data yet') if last.nil?
+      state = UsageGate.state(config: @config, now: @now)
+      return build(:ok, 'no usage probe on file') if state[:checked_at].nil?
 
-      if last.payload['usage_ok'] == false
-        build(:warn, 'Claude usage exhausted at last poll', checked_at: iso(last.created_at))
-      else
-        build(:ok, 'Claude usage available at last poll', checked_at: iso(last.created_at))
-      end
+      meta = { checked_at: iso(state[:checked_at]) }
+      return build(:warn, 'Claude usage exhausted at last probe', meta) unless state[:available]
+
+      build(:ok, 'Claude usage available at last probe', meta)
     end
 
     def check_issues_error

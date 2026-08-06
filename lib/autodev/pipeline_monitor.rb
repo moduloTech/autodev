@@ -65,11 +65,32 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     end
   end
 
+  # Claude-quota gate (Autodev #46). `:check_pipeline` keeps being dispatched
+  # during an outage — tracking a pipeline costs no credit — but two branches
+  # here do call Claude, so each checks the state the poll cycle probed.
+  # Undefined outside Rails (CLI / unit tests): read as available, never gate by
+  # omission.
+  def claude_available?
+    return true unless defined?(::Autodev::UsageGate)
+
+    ::Autodev::UsageGate.available?
+  end
+
+  # Deliberately placed before `clear_pipeline_poll_since` and `log_activity`:
+  # the ticket is still waiting, so the "checking pipeline" line stays as it is
+  # rather than being replaced by a green line we can't act on — and a note
+  # appended on every poll would blow past GitLab's 1M-char cap over a long
+  # outage.
   def handle_green(issue)
+    review_count = issue.review_count || 0
+    return defer_review_for_usage(issue) if review_count.zero? && !claude_available?
+
     clear_pipeline_poll_since(issue)
     log_activity(issue, :pipeline_green)
-    review_count = issue.review_count || 0
+    dispatch_green(issue, review_count)
+  end
 
+  def dispatch_green(issue, review_count)
     if review_count >= Reviewer::MAX_REVIEW_ROUNDS
       green_done_max_reviews(issue)
     elsif review_count.zero?
@@ -77,6 +98,19 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     else
       green_post_review(issue)
     end
+  end
+
+  # Both quota deferrals live here rather than in their own modules: they say
+  # the same thing (the ticket stays in checking_pipeline, untouched, for the
+  # next cycle) and belong next to the gate that triggers them.
+  def defer_review_for_usage(issue)
+    log "Issue ##{issue.issue_iid}: pipeline green but Claude usage exhausted, " \
+        'deferring mr-review, staying in checking_pipeline'
+  end
+
+  def defer_fix_for_usage(issue)
+    log "Issue ##{issue.issue_iid}: pipeline red but Claude usage exhausted, " \
+        'deferring the fix, staying in checking_pipeline'
   end
 
   def green_first_review(issue)

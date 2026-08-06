@@ -8,7 +8,10 @@
 # `after_create_commit` so subscribers only see events the DB actually
 # accepted (rolled-back transactions no longer leak partial state).
 class ActivityEvent < ApplicationRecord
-  KINDS = %w[transition danger_claude poller error].freeze
+  # `poller`, `error` and `usage` are system events (issue_id nil): heartbeats,
+  # cycle-failure markers, and the Claude-quota verdict Autodev::UsageGate
+  # persists once per cycle (Autodev #46).
+  KINDS = %w[transition danger_claude poller error usage].freeze
   LEVELS = %w[info warn error].freeze
 
   belongs_to :issue, optional: true

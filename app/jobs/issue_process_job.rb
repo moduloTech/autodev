@@ -27,9 +27,18 @@ class IssueProcessJob < ApplicationJob
   ACTIONS = %i[process check_pipeline fix_discussions post_completion
                retry_errored retry_stuck recheck_infra].freeze
 
+  # Actions that end in a danger-claude call. `Autodev::PollDispatcher` already
+  # skips the passes that produce them while the Claude quota is out, but a job
+  # enqueued just before the outage can still be sitting in the queue — hence
+  # this second, defensive gate (Autodev #46). Each of the three leaves its row
+  # in a state the next cycle rediscovers (`pending` / `fixing_discussions` /
+  # `pending` + `next_retry_at`), so returning early loses no work.
+  CLAUDE_CONSUMING_ACTIONS = %i[process fix_discussions retry_stuck].freeze
+
   def perform(project_path, issue_iid, action)
     action = action.to_sym
     raise ArgumentError, "unknown action #{action.inspect}" unless ACTIONS.include?(action)
+    return log_usage_skip(project_path, issue_iid, action) if usage_blocked?(action)
 
     config = ::Config.load
     project_config = lookup_project_config(config, project_path)
@@ -42,6 +51,15 @@ class IssueProcessJob < ApplicationJob
   end
 
   private
+
+  def usage_blocked?(action)
+    CLAUDE_CONSUMING_ACTIONS.include?(action) && !::Autodev::UsageGate.available?
+  end
+
+  def log_usage_skip(project_path, issue_iid, action)
+    logger.info("[issue_process] skipping #{action} for #{project_path}##{issue_iid}: " \
+                'Claude usage exhausted')
+  end
 
   # Phase 2 of task #9: the per-project config comes from the DB. Every
   # per-project key is now columnized, so a `projects` row is the complete,
