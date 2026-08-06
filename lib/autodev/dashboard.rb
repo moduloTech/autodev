@@ -24,17 +24,17 @@ module Dashboard
     'error' => :red
   }.freeze
 
-  ACTIVE_STATES = %w[
-    cloning checking_spec implementing committing pushing
-    creating_mr reviewing checking_pipeline
-    fixing_discussions fixing_pipeline running_post_completion
-  ].freeze
+  # Single source of truth is `Issue::ACTIVE_STATES` — the state machine owns
+  # its vocabulary. Resolved at call time, not load time: this file is required
+  # from a Rails initializer, and touching an autoloaded constant there would
+  # pin a stale class across Zeitwerk reloads.
+  def self.active_states = Issue::ACTIVE_STATES
 
   module_function
 
   def status_label(status)
     case status
-    when *ACTIVE_STATES then 'En cours'
+    when *Dashboard.active_states then 'En cours'
     when 'pending'              then 'En attente'
     when 'needs_clarification'  then 'En attente de clarification'
     when 'done'                 then 'Terminée'

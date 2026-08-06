@@ -44,6 +44,22 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `issue.transition_auto` with NULL actor.
   attr_accessor :_audit_actor, :_audit_origin
 
+  # The states that mean "autodev is working on it right now" — everything
+  # between pickup and a terminal outcome, excluding the two waiting states
+  # (`pending`, `needs_clarification`) and `answering_question`, which is a
+  # read-only investigation rather than a delivery.
+  #
+  # Canonical here because the state machine below owns the vocabulary. The web
+  # helpers used to read this list off the CLI display module (`Dashboard`),
+  # which made every Rails request depend on lib/autodev being loaded — invisible
+  # in production (the initializer requires it) but a 500 in any test booted
+  # with AUTODEV_SKIP_LEGACY=1.
+  ACTIVE_STATES = %w[
+    cloning checking_spec implementing committing pushing
+    creating_mr reviewing checking_pipeline
+    fixing_discussions fixing_pipeline running_post_completion
+  ].freeze
+
   aasm column: :status, whiny_transitions: false do # rubocop:disable Metrics/BlockLength
     state :pending, initial: true
     state :cloning, :checking_spec, :implementing, :committing, :pushing

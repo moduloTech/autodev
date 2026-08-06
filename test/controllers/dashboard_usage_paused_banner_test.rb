@@ -3,11 +3,6 @@
 require_relative '../rails_helper'
 require 'action_dispatch/testing/integration'
 require 'devise'
-# `Web::Helpers#active_issues` reads `Dashboard::ACTIVE_STATES` from the CLI
-# module, which AUTODEV_SKIP_LEGACY=1 leaves unloaded. Required here so the
-# file also passes on its own, not just when the full suite happens to have
-# loaded it first.
-require 'autodev/dashboard'
 
 # Autodev #46 point 3 — a Claude quota outage used to live in the log only, so
 # nobody could tell a paused autodev from a broken one. It now shows on `/` for

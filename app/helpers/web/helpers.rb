@@ -78,7 +78,7 @@ module Web
     end
 
     def active_issues
-      issues_dataset.where(status: Dashboard::ACTIVE_STATES).order(id: :desc).to_a
+      issues_dataset.where(status: Issue::ACTIVE_STATES).order(id: :desc).to_a
     end
 
     def issues_grouped_by_status(rows)
@@ -108,7 +108,7 @@ module Web
       total = counts.values.sum
       {
         path: path, total: total,
-        active: Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 },
+        active: Issue::ACTIVE_STATES.sum { |s| counts[s] || 0 },
         done: counts['done'] || 0,
         error: counts['error'] || 0
       }
@@ -176,7 +176,7 @@ module Web
     # the sidebar is rendered on nearly every page.
     def dashboard_kpis
       counts = issues_dataset.group(:status).count
-      { active: Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 },
+      { active: Issue::ACTIVE_STATES.sum { |s| counts[s] || 0 },
         pending: counts['pending'] || 0,
         errors: counts['error'] || 0,
         delivered_review: delivered_review_count,
@@ -295,7 +295,7 @@ module Web
       counts = scope.group(:status).count
       since = (Date.today - 30).to_s
       {
-        active: Dashboard::ACTIVE_STATES.sum { |s| counts[s] || 0 },
+        active: Issue::ACTIVE_STATES.sum { |s| counts[s] || 0 },
         errors: (counts['error'] || 0) + (counts['needs_clarification'] || 0),
         done_month: scope.where(status: 'done').where('created_at >= ?', since).count,
         total: counts.values.sum

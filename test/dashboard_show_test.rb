@@ -122,11 +122,18 @@ class DashboardShowTest < Minitest::Test
   end
 
   def test_status_colors_covers_all_states
-    all_states = Dashboard::ACTIVE_STATES + %w[pending answering_question needs_clarification done error]
+    all_states = Dashboard.active_states + %w[pending answering_question needs_clarification done error]
 
     all_states.each do |state|
       assert Dashboard::STATUS_COLORS.key?(state), "STATUS_COLORS missing key '#{state}'"
     end
+  end
+
+  # The CLI display module must not keep its own copy of the state vocabulary —
+  # the two lists drifting apart is how the dashboard and `--status` end up
+  # disagreeing about what "en cours" means.
+  def test_active_states_come_from_the_model
+    assert_same Issue::ACTIVE_STATES, Dashboard.active_states
   end
 
   def test_status_colors_frozen

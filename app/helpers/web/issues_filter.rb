@@ -23,7 +23,7 @@ module Web
 
     def apply_tab(dataset, tab) # rubocop:disable Metrics/CyclomaticComplexity
       case tab
-      when 'active'  then dataset.where(status: Dashboard::ACTIVE_STATES)
+      when 'active'  then dataset.where(status: Issue::ACTIVE_STATES)
       when 'pending' then dataset.where(status: 'pending')
       when 'errors'  then dataset.where(status: 'error')
       when 'waiting' then dataset.where(status: 'needs_clarification')
@@ -48,7 +48,7 @@ module Web
     def tab_counts # rubocop:disable Metrics/MethodLength
       ds = issues_dataset
       {
-        active: ds.where(status: Dashboard::ACTIVE_STATES).count,
+        active: ds.where(status: Issue::ACTIVE_STATES).count,
         pending: ds.where(status: 'pending').count,
         errors: ds.where(status: 'error').count,
         waiting: ds.where(status: 'needs_clarification').count,

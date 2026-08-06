@@ -36,7 +36,7 @@ module Dashboard
 
     def build_comment(row, status, worker_map)
       comment = Dashboard.status_label(status).dup
-      comment << " (#{status})" if ACTIVE_STATES.include?(status)
+      comment << " (#{status})" if Dashboard.active_states.include?(status)
       worker = worker_map[row[:issue_iid]]
       comment << " [worker-#{worker}]" if worker
       comment << " — MR !#{row[:mr_iid]}" if row[:mr_url]
@@ -81,7 +81,7 @@ module Dashboard
 
     def count_by_status(rows)
       {
-        active: rows.count { |r| ACTIVE_STATES.include?(r[:status]) || r[:status] == 'pending' },
+        active: rows.count { |r| Dashboard.active_states.include?(r[:status]) || r[:status] == 'pending' },
         done: rows.count { |r| r[:status] == 'done' },
         blocked: rows.count { |r| %w[error needs_clarification].include?(r[:status]) }
       }
