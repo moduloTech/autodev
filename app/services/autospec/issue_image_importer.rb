@@ -68,9 +68,11 @@ module Autospec
 
       fetched = @fetcher.call(download_url(upload_path), @token)
       return warn_and_keep(filename, original, :unreachable) unless fetched.ok
-      return warn_and_keep(filename, original, :not_an_image) unless image?(fetched)
 
-      "![#{alt}](#{attach!(fetched, filename)})"
+      content_type = image_type(fetched)
+      return warn_and_keep(filename, original, :not_an_image) unless content_type
+
+      "![#{alt}](#{attach!(fetched, filename, content_type)})"
     rescue StandardError => e
       # Anything unexpected (network reset, ActiveStorage failure, a malformed
       # blob) costs one image, not the import.
@@ -81,21 +83,26 @@ module Autospec
       @gitlab_url.present? && @token.present?
     end
 
-    # GitLab serves an issue's uploads under the project's own path, and the
-    # reference in the body is relative to it.
+    # The API endpoint, not the project-relative `/uploads/…` path the body
+    # references: that one is session-cookie only and answers a PRIVATE-TOKEN
+    # request with 200 + the sign-in page. See
+    # GitlabHelpers::ImageDownloader.upload_api_url.
     def download_url(upload_path)
-      "#{@gitlab_url}/#{@draft.project.gitlab_path}#{upload_path}"
+      GitlabHelpers::ImageDownloader.upload_api_url(@gitlab_url, @draft.project.gitlab_path, upload_path)
     end
 
-    def image?(fetched)
-      fetched.body.present? && fetched.content_type.to_s.start_with?('image/')
+    # Sniffed from the bytes rather than read off the header — the API answers
+    # `application/octet-stream` for a valid PNG, while the sign-in page
+    # answers a well-formed `text/html`. Returns the real MIME type or nil.
+    def image_type(fetched)
+      GitlabHelpers::ImageDownloader.sniff_image_type(fetched.body)
     end
 
     # Returns the local blob path the rewritten markdown points at.
-    def attach!(fetched, filename)
+    def attach!(fetched, filename, content_type)
       attachment = @draft.autospec_attachments.create!
       attachment.file.attach(
-        io: StringIO.new(fetched.body.b), filename: filename, content_type: fetched.content_type
+        io: StringIO.new(fetched.body.b), filename: filename, content_type: content_type
       )
       Rails.application.routes.url_helpers.rails_blob_path(attachment.file, only_path: true)
     end

@@ -136,6 +136,47 @@ module GitlabHelpers
   module ImageDownloader
     module_function
 
+    # GitLab serves a project's `/uploads/<secret>/<file>` path **to a browser
+    # session only**: a PRIVATE-TOKEN request gets 200 + the sign-in HTML page,
+    # not the image (measured against source.modulotech.fr, 2026-08-06). The
+    # token-authenticated equivalent is the API endpoint below, which answered
+    # 200 + the real bytes for the same upload.
+    #
+    # `upload_path` arrives as `/uploads/<secret>/<filename>` — already the
+    # API's own suffix — so it is appended verbatim. The project path must be
+    # fully escaped: nested namespaces (modulosource/powerpanne/powerpanne/core)
+    # would otherwise read as path segments and 404.
+    def upload_api_url(gitlab_url, project_path, upload_path)
+      "#{gitlab_url.to_s.chomp('/')}/api/v4/projects/#{CGI.escape(project_path.to_s)}#{upload_path}"
+    end
+
+    # Leading bytes → MIME type, for the formats AutospecAttachment accepts.
+    # WebP needs two probes (RIFF container + WEBP fourcc) so it is handled
+    # separately in `sniff_image_type`.
+    IMAGE_SIGNATURES = {
+      "\x89PNG\r\n\x1A\n".b => 'image/png',
+      "\xFF\xD8\xFF".b => 'image/jpeg',
+      'GIF87a'.b => 'image/gif',
+      'GIF89a'.b => 'image/gif'
+    }.freeze
+
+    # Returns the MIME type when the body really is an image, else nil.
+    #
+    # Sniffing rather than trusting `Content-Type`, for two reasons that bit us
+    # at once: the API endpoint answers `application/octet-stream`, so a
+    # `start_with?('image/')` check rejected valid bytes; and the sign-in page
+    # answers a perfectly well-formed `text/html` 200, so a permissive check
+    # would have attached an HTML page to a draft as a "screenshot".
+    def sniff_image_type(body)
+      return nil if body.nil? || body.empty?
+
+      bytes = body.b
+      IMAGE_SIGNATURES.each { |signature, type| return type if bytes.start_with?(signature) }
+      return 'image/webp' if bytes[0, 4] == 'RIFF'.b && bytes[8, 4] == 'WEBP'.b
+
+      nil
+    end
+
     # Returns an options hash for image downloading, or nil if not available.
     def download_opts(opts, project_path)
       return nil unless opts[:gitlab_url] && opts[:token] && opts[:work_dir]
@@ -152,7 +193,7 @@ module GitlabHelpers
 
     # Replace a single image markdown reference with a local path or error placeholder.
     def replace_reference(alt, upload_path, opts, state)
-      url = "#{opts[:gitlab_url]}/#{opts[:project_path]}#{upload_path}"
+      url = upload_api_url(opts[:gitlab_url], opts[:project_path], upload_path)
       filename = File.basename(upload_path)
       local_path = File.join(state[:image_dir], filename)
 
@@ -204,9 +245,11 @@ module GitlabHelpers
     # Validate image content type and write to disk.
     def validate_and_write(response, local_path, alt, filename)
       body = response.body
-      content_type = response['content-type'].to_s
-      if body.nil? || body.empty? || !content_type.start_with?('image/')
-        return "[Image: #{filename} -- format non support\u00E9 (#{content_type})]"
+      # Sniffed, not read off the header: the API endpoint answers
+      # `application/octet-stream` for a perfectly valid PNG. See
+      # `sniff_image_type`.
+      unless sniff_image_type(body)
+        return "[Image: #{filename} -- format non support\u00E9 (#{response['content-type']})]"
       end
 
       File.binwrite(local_path, body)

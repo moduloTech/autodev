@@ -1,48 +1,37 @@
 # frozen_string_literal: true
 
 require_relative '../../rails_helper'
+require_relative 'image_importer_support'
 
 module Autospec
   # Rapatriating an imported GitLab issue's inline images into local
   # AutospecAttachment rows (Autodev #37) — the inverse of GitlabSubmitter.
+  # Degraded-import behaviour lives in issue_image_importer_degraded_test.rb.
   class IssueImageImporterTest < ActiveSupport::TestCase
-    PNG = "\x89PNG\r\n\x1A\n".b
+    include ImageImporterSupport
 
-    setup do
-      @user    = User.create!(email: 'csm@modulotech.fr', name: 'CSM')
-      @project = Project.create!(gitlab_path: 'group/proj', slug: 'group__proj')
-      @draft   = AutospecDraft.create!(user: @user, project: @project, title: 'T', markdown: '')
-      @calls   = []
+    # --- download mechanics -------------------------------------------
+
+    # The API endpoint, not the project-relative web path: the latter is
+    # session-cookie only and answers a PRIVATE-TOKEN request with 200 + the
+    # sign-in page, which is how #37 shipped broken.
+    def test_downloads_through_the_token_authenticated_api_endpoint
+      import('![c](/uploads/abc123/shot.png)')
+
+      assert_equal 'https://gitlab.example.com/api/v4/projects/group%2Fproj/uploads/abc123/shot.png',
+                   @calls.first[:url]
+      assert_equal 'tok', @calls.first[:token]
     end
 
-    def ok(body: PNG, content_type: 'image/png')
-      IssueImageImporter::Fetched.new(ok: true, body: body, content_type: content_type)
-    end
+    # The exact prod condition: that endpoint labels a valid PNG
+    # `application/octet-stream`. Trusting the header rejected the very bytes
+    # the fix went to fetch, so the type is sniffed and the attachment stores
+    # the real one.
+    def test_accepts_an_octet_stream_body_and_stores_the_sniffed_type
+      import('![c](/uploads/abc/shot.png)', fetcher(ok(content_type: 'application/octet-stream')))
 
-    def failed
-      IssueImageImporter::Fetched.new(ok: false, body: '', content_type: '')
-    end
-
-    # Answers each queued response in turn, the last one repeating, so a
-    # multi-image body can mix success and failure.
-    def fetcher(*queued)
-      lambda do |url, token|
-        @calls << { url: url, token: token }
-        queued.size > 1 ? queued.shift : queued.first
-      end
-    end
-
-    def import(markdown, fetch = nil, token: 'tok')
-      IssueImageImporter.new(@draft, gitlab_url: 'https://gitlab.example.com',
-                                     token: token, fetcher: fetch || fetcher(ok)).call(markdown)
-    end
-
-    def attachments
-      @draft.autospec_attachments
-    end
-
-    def blob_path(attachment)
-      Rails.application.routes.url_helpers.rails_blob_path(attachment.file, only_path: true)
+      assert_equal 1, attachments.count
+      assert_equal 'image/png', attachments.first.file.content_type
     end
 
     # --- happy path -------------------------------------------------
@@ -61,13 +50,6 @@ module Autospec
       assert_equal "![capture](#{blob_path(attachments.first)})", result.markdown
     end
 
-    def test_builds_the_download_url_from_the_project_path
-      import('![c](/uploads/abc123/shot.png)')
-
-      assert_equal 'https://gitlab.example.com/group/proj/uploads/abc123/shot.png', @calls.first[:url]
-      assert_equal 'tok', @calls.first[:token]
-    end
-
     def test_imports_every_image_in_the_body
       import("![a](/uploads/h1/a.png)\n\n![b](/uploads/h2/b.png)")
 
@@ -80,53 +62,6 @@ module Autospec
       result = import('![c](/uploads/abc/shot.png){width=300 height=200}')
 
       assert_not_includes result.markdown, 'width=300'
-    end
-
-    # --- degraded import: never aborts ------------------------------
-
-    def test_an_unreachable_image_keeps_its_original_reference
-      result = import('![c](/uploads/abc/shot.png)', fetcher(failed))
-
-      assert_equal '![c](/uploads/abc/shot.png)', result.markdown
-      assert_equal 0, attachments.count
-    end
-
-    def test_a_failed_download_is_reported_with_its_filename
-      result = import('![c](/uploads/abc/shot.png)', fetcher(failed))
-
-      assert_equal 1, result.warnings.size
-      assert_includes result.warnings.first, 'shot.png'
-    end
-
-    # A GitLab login page answers 200 text/html. Refusing on content type is
-    # what stops it being attached as a "screenshot".
-    def test_a_non_image_response_is_refused
-      html = ok(body: '<html>login</html>', content_type: 'text/html')
-      result = import('![c](/uploads/abc/shot.png)', fetcher(html))
-
-      assert_equal 0, attachments.count
-      assert_equal 1, result.warnings.size
-    end
-
-    def test_a_failing_image_does_not_block_the_others
-      result = import("![a](/uploads/h1/a.png)\n![b](/uploads/h2/b.png)", fetcher(failed, ok))
-
-      assert_equal 'b.png', attachments.sole.file.filename.to_s
-      assert_includes result.markdown, '![a](/uploads/h1/a.png)'
-    end
-
-    def test_an_unexpected_error_degrades_instead_of_raising
-      result = import('![c](/uploads/abc/shot.png)', ->(*) { raise IOError, 'connection reset' })
-
-      assert_equal '![c](/uploads/abc/shot.png)', result.markdown
-      assert_equal 1, result.warnings.size
-    end
-
-    def test_a_missing_token_warns_without_downloading
-      result = import('![c](/uploads/abc/shot.png)', token: nil)
-
-      assert_empty @calls
-      assert_equal 1, result.warnings.size
     end
 
     # --- no-op ------------------------------------------------------
@@ -147,6 +82,8 @@ module Autospec
       assert_empty @calls
       assert_equal 'Trace: [debug.log](/uploads/abc/debug.log)', result.markdown
     end
+
+    # --- round-trip with the submitter -------------------------------
 
     # The point of rewriting to `rails_blob_path`: GitlabSubmitter matches on
     # exactly that string when it swaps local blobs back to GitLab uploads at

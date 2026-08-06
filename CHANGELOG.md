@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **GitLab uploads are actually downloadable now — the image import shipped in alpha.43 never worked, and neither did the issue images in danger-claude's context (Autodev #37 follow-up).** Verified against `source.modulotech.fr` while testing #37 on prod: a project's `<host>/<project>/uploads/<secret>/<file>.png` path is **session-cookie only**, so a `PRIVATE-TOKEN` request gets `200 text/html` — GitLab's sign-in page — not the image. Two call sites built exactly that URL: `Autospec::IssueImageImporter#download_url` (new in alpha.43, so every imported ticket kept its original `/uploads/` links and created no attachment) and `GitlabHelpers::ImageDownloader#replace_reference`, which is far older — it feeds `fetch_issue_context`, so **every issue image handed to danger-claude has been a `[Image: … format non supporté (text/html)]` placeholder rather than the picture**, for as long as that path has existed. Both now go through one new `ImageDownloader.upload_api_url`, which targets the token-authenticated `GET /api/v4/projects/:url_encoded_path/uploads/:secret/:filename` (fully escaping the project path, since a nested namespace like `modulosource/powerpanne/powerpanne/core` would otherwise read as path segments and 404). That endpoint answers `application/octet-stream` for a valid PNG, so the `content_type.start_with?('image/')` check would have rejected the very bytes the fix goes to fetch: validation moved to magic-byte sniffing (`ImageDownloader.sniff_image_type`, PNG/JPEG/GIF/WebP), which also keeps refusing the HTML sign-in page — the guard that stopped an error page being attached to a draft as a "screenshot" — and supplies the real MIME type stored on the attachment. End-to-end check against the real upload that failed in prod: `200`, 935 KB, sniffed `image/png`. New `test/gitlab_upload_download_test.rb` (10 cases) plus an octet-stream case on the importer; its test file was split into happy-path and degraded halves over a shared `ImageImporterSupport`.
+
 ## [1.0.0-alpha.43] - 2026-08-06
 
 ### Added
