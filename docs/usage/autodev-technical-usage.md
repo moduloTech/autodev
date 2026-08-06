@@ -41,9 +41,9 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/issues/:id/close` (POST) | `IssuesController#close` | Clôture manuelle (événement AASM `close`, gatée sur le membership projet) — `closed` depuis n'importe quel état |
 | `/issues/:id/deploy_review` (GET) | `IssuesController#deploy_review` | Turbo-frame paresseux : sonde la disponibilité du job `deploy_review` (`Autodev::DeployReview#availability`). Rendu **inconditionnellement** sur chaque page d'issue (task #28) — sur une issue sans branche/MR il renvoie `:no_branch` sans appel GitLab et affiche un bouton désactivé + un motif au lieu de rien |
 | `/issues/:id/deploy_review` (POST) | `IssuesController#trigger_deploy_review` | Déclenche le job CI `deploy_review` (redéploiement de l'env de review) |
-| `/deploy_review` (GET) | `DeployReviewsController#index` | Sélecteur de projet (parmi les projets visibles) + liste des MR ouvertes du projet (API GitLab, `per_page: 100`), chacune avec un `DeployReviewFrame` paresseux ; MR déjà suivie annotée d'un badge vers la fiche issue (task #43) |
+| `/deploy_review` (GET) | `DeployReviewsController#index` | Sélecteur de projet (parmi les projets visibles) + liste des MR ouvertes (`Autodev::DeployReviewSearch`, **`.auto_paginate`**), chacune avec un `DeployReviewFrame` paresseux ; MR déjà suivie annotée d'un badge vers la fiche issue (task #43). Params `q` (recherche ticket / MR / texte) et `untracked=1` (masquer les MR suivies) — task #45 |
 | `/deploy_review/mr` (GET) | `DeployReviewsController#availability` | Sonde paresseuse (`project`, `mr_iid`) — `Autodev::DeployReview#availability` sur une `Target` légère (`project_path`, `branch_name`, `mr_iid`) au lieu d'une row Issue |
-| `/deploy_review/mr` (POST) | `DeployReviewsController#trigger` | Déclenche le déploiement (`project`, `mr_iid`), audit `deploy_review.manual`. `authorize_project!` (403 hors projets visibles) gate `availability` **et** `trigger` — la sécurité ne repose pas sur l'UI |
+| `/deploy_review/mr` (POST) | `DeployReviewsController#trigger` | Déclenche le déploiement (`project`, `mr_iid`), audit `deploy_review.manual`, redirige en conservant `q` / `untracked`. `authorize_project!` (403 hors projets visibles) gate `availability` **et** `trigger` — la sécurité ne repose pas sur l'UI |
 | `/projects` | `ProjectsController#index` | Union des rows `projects` + entrées YAML pas encore importées |
 | `/projects/new` (+ POST `create`) | `ProjectsController#new`/`#create` | Création d'un projet en base (admin only) — enfile `SyncGitlabMembershipsJob` au succès |
 | `/projects/:slug/edit` (+ PATCH `update`) | `ProjectsController#edit`/`#update` | Édition de la config per-projet en base (gatée membership/admin) |
@@ -145,7 +145,7 @@ Une carte par composant, avec une pastille `OK` / `Attention` / `Hors service` :
 - **Poller** — fraîcheur du dernier heartbeat (`ActivityEvent` `kind: 'poller'`). `Hors service` si plus vieux que `poll_interval × monitoring.poll_stale_factor` (plancher 15 min).
 - **Workers** — process Solid Queue vivants (heartbeat < 5 min).
 - **File de jobs** — jobs en échec / en attente (Solid Queue).
-- **Quota Claude** — dernier état connu du `UsageChecker` (lu sur le dernier heartbeat, pas re-sondé).
+- **Quota Claude** — dernier verdict persisté par `Autodev::UsageGate` (écrit au moment de la sonde, en début de cycle — plus frais que le heartbeat de fin de cycle qu'il lisait avant). Jamais re-sondé ici. `OK` aussi quand aucune sonde n'est sur disque ou que le verdict est périmé : c'est la carte *Poller* qui signale un poller arrêté, pas celle-ci.
 - **Issues en erreur** — nombre d'issues `error` / `post_completion_error` (lien vers `/issues?tab=errors`).
 - **Issues bloquées** — issues dans un état actif qui n'avancent plus : une `pending` plus vieille que la fenêtre de péremption du poller, ou une issue active sans `ActivityEvent` depuis `monitoring.stuck_active_after_seconds` (défaut 2 h). Détecte les orphelines qu'un dashboard tout vert masquait (ex. une `pending` remise au redémarrage mais restée `label_doing` côté GitLab). Exclut `checking_pipeline` (attente pipeline) et `needs_clarification` (attente humaine).
 - **Base de données** — primaire + queue joignables.
@@ -347,7 +347,7 @@ Pas de webhook GitLab — Autodev poll régulièrement (`AutodevPollJob` toutes 
 
 ## Polling
 
-`Autodev::PollDispatcher#run_once` exécute 8 passes par projet, dans cet ordre :
+`Autodev::PollDispatcher#dispatch` exécute 8 passes par projet, dans cet ordre :
 
 1. `dispatch_new_issues` — nouveaux tickets `label_todo` → action `:process`
 2. `dispatch_pipelines` — issues en `checking_pipeline` → action `:check_pipeline`
@@ -359,6 +359,26 @@ Pas de webhook GitLab — Autodev poll régulièrement (`AutodevPollJob` toutes 
 8. `dispatch_infra_recheck` — issues `done` + `needs_attention` + `attention_reason: 'stagnation_pipeline'`, MR ouverte, sous le cap et backoff écoulé → action `:recheck_infra` (re-tentative auto d'une stagnation infra, voir plus bas)
 
 Chaque dispatch enfile un `IssueProcessJob(project_path, issue_iid, action)` sur Solid Queue. `limits_concurrency to: 1, key: "issue-#{path}-#{iid}"` garantit qu'un même ticket n'est jamais traité en parallèle. Le cap global de concurrence est `AUTODEV_MAX_WORKERS` (défaut 3).
+
+### Gate de quota Claude (par passe)
+
+`AutodevPollJob` sonde le quota **une fois par cycle** via `Autodev::UsageGate.probe!` et persiste le verdict dans un `ActivityEvent(kind: 'usage')`. Le verdict descend ensuite dans chaque `PollDispatcher` (`usage_ok:`) et ne bloque que ce qui aboutit à un appel `danger-claude` / `mr-review` :
+
+| Passe / action | Quota épuisé |
+|---|---|
+| `dispatch_new_issues` (`:process`) | **sautée** |
+| `dispatch_discussions` (`:fix_discussions`) | **sautée** |
+| `dispatch_retries` → `:retry_stuck` | **sautée** |
+| `dispatch_retries` → `:retry_errored` | tourne (transitions + labels) |
+| `dispatch_pipelines` (`:check_pipeline`) | tourne |
+| `dispatch_unassignment` (dont clôture GitLab) | tourne |
+| `dispatch_done_unassigned` (`:post_completion`) | tourne (commande shell) |
+| `dispatch_error_recheck` | tourne |
+| `dispatch_infra_recheck` (`:recheck_infra`) | tourne |
+
+`:check_pipeline` continue d'être enfilée, donc `PipelineMonitor` porte son propre gate aux deux points qui appellent Claude : pipeline verte avec `review_count == 0` (mr-review) et branche `code` de `triage_and_fix`. Le premier est placé **avant** `log_activity(:pipeline_green)` (sinon une coupure longue ajoute une ligne à la note GitLab à chaque poll et fait sauter le cap de 1 M caractères) ; le second retourne **avant** `update_stagnation_signature` (sinon un cycle en pause brûle le budget de stagnation). `IssueProcessJob` porte une garde défensive pour les jobs déjà en file (`:process`, `:fix_discussions`, `:retry_stuck`).
+
+Tout échoue **ouvert** : absence de sonde, payload illisible, ou verdict plus vieux que `max(2 × poll_interval, 600 s)` se lisent « disponible ». Ne pas réussir à *observer* le quota ne doit jamais arrêter le pipeline. Le verdict est lu par `HealthReport#check_claude_usage` et par la bannière du dashboard (`Autodev::UsageGate.state`).
 
 ## Implémentation (IssueProcessor)
 
@@ -516,7 +536,7 @@ DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`
 | Interruption en `reviewing` | Reset à `checking_pipeline` au boot |
 | Échec du hook `post_completion` | Non bloquant : `done` quand même, erreur stockée dans `post_completion_error`, visible via `--errors` et dans l'onglet *Livrée (à vérifier)* (`/issues?tab=delivered_review`) |
 | Interruption en `running_post_completion` | Reset à `done` au boot (non rejoué) |
-| Usage Claude exhausted | `AutodevPollJob` gate sur `UsageChecker#available?`, pause silencieuse au lieu de burn les retries |
+| Usage Claude exhausted | Gate **par passe** (`Autodev::UsageGate`) : seules les passes qui appellent `danger-claude` / `mr-review` sont sautées. Suivi des pipelines, clôtures GitLab, post-completion et rechecks continuent — une coupure ne gèle plus les tickets déjà implémentés. Bandeau warn sur le dashboard, carte *Quota Claude* sur `/admin/health`. Fail-open sur sonde absente / illisible / périmée |
 
 \newpage
 

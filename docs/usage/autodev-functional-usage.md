@@ -96,6 +96,7 @@ Chaque carte est un raccourci vers la liste filtrée correspondante (l'onglet de
 - **Vos projets** — un récap par projet avec le nombre de demandes actives et le nombre d'erreurs en cours.
 - **Brouillons à valider** — si vous êtes responsable d'un projet, ce bloc liste les brouillons de demande en attente de votre validation (que vous n'avez pas encore validés). Chaque ligne montre le titre, le projet, l'auteur, et un bouton **Voter** qui ouvre le brouillon.
 - **Banderole d'alerte** — si au moins une demande est en échec, un bandeau rouge en bas vous le rappelle avec un lien direct.
+- **Bandeau « Quota Claude épuisé »** — s'affiche en haut quand Autodev a temporairement épuisé son crédit de travail. Cela **ne veut pas dire qu'Autodev est en panne** : il arrête seulement de démarrer de nouvelles implémentations. Le suivi des demandes déjà en cours continue normalement — les tests qui passent au vert sont vus, les livraisons se font, les tickets clôturés sur GitLab sont détectés. Vos demandes en attente repartent d'elles-mêmes dès que le crédit revient, vous n'avez rien à faire.
 
 ## Le menu de gauche
 
@@ -259,13 +260,19 @@ Autodev peut déployer un **environnement de review** pour une *Merge Request*, 
 
 On y accède par **Déploiement review** dans la section *Autodev* du menu de gauche.
 
-![La page Déploiement review : le sélecteur de projet en haut, puis la liste des MR ouvertes avec un bouton Déployer / Redéployer par ligne.](screenshots/19-deploy-review.png)
+![La page Déploiement review : sélecteur de projet, champ de recherche et case « Masquer les MR suivies par autodev » en haut, puis la liste des MR ouvertes avec un bouton Déployer / Redéployer par ligne.](screenshots/19-deploy-review.png)
 
 1. **Choisissez un projet** dans le sélecteur (seuls apparaissent les projets auxquels vous avez accès).
 2. La page liste alors **toutes les MR ouvertes** du projet : titre, numéro, branche source et auteur.
 3. Pour chacune, un bouton **Déployer / Redéployer** déclenche le déploiement de son environnement de review.
 
+**Vous partez d'un numéro de ticket ?** C'est le cas le plus courant : vous avez un ticket en *Ready for QA* et vous voulez voir le résultat. Tapez simplement **son numéro** dans le champ de recherche (par exemple `16432`) et validez — la page ne garde que la ou les MR qui correspondent à ce ticket. Vous n'avez pas besoin de savoir quel numéro de MR lui correspond : Autodev fait le lien pour vous, y compris quand le nom de la branche ne porte pas le numéro du ticket. Le champ accepte aussi un **numéro de MR** ou **un mot du titre ou de la branche**.
+
+Sur un projet actif, la liste peut dépasser la centaine de MR : c'est pour cela que la recherche existe. La case **Masquer les MR suivies par autodev** est l'autre raccourci — elle ne laisse que les MR créées à la main, celles pour lesquelles vous n'avez pas déjà une demande à suivre.
+
 Les MR déjà suivies par Autodev sont signalées par un badge **Suivie par autodev** qui renvoie vers la demande correspondante ; elles restent listées (redéployer ne pose aucun problème).
+
+Après un déploiement, la page revient sur **la même recherche** : vous ne repartez pas de la liste complète.
 
 \newpage
 
