@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-07-10
+date: 2026-08-06
 lang: fr
 documentclass: article
 papersize: a4
@@ -56,7 +56,7 @@ L'instance prod tourne sur `https://autodev.netbird.modulotech.fr`, derrière le
 | `/locale/:lang` | `LocaleController#update` | Set le cookie `locale`, redirige sur `back` |
 | `/autospec_drafts` | `AutospecDraftsController#index` | Brouillons (AutoSpec), tabbé `?tab=` : `all` (défaut), `drafting`, `pending`, `to_validate`, `rejected`, `approved`. Les tabs de statut filtrent les brouillons de l'utilisateur ; `to_validate` est l'ensemble *vote owner* (`AutospecDraft.awaiting_vote_of` — pending sur un projet qu'il possède, pas encore voté) |
 | `/autospec_drafts/new` (+ POST `create`) | `AutospecDraftsController` | Formulaire de création + persistance |
-| `/autospec_drafts/import` (+ POST `create_from_import`) | `AutospecDraftsController` | Backfill depuis une URL d'issue GitLab |
+| `/autospec_drafts/import` (+ POST `create_from_import`) | `AutospecDraftsController` | Backfill depuis une URL d'issue GitLab. Les images inline du corps (`![…](/uploads/…)`) sont rapatriées en `AutospecAttachment` par `Autospec::IssueImageImporter` — inverse exact de `GitlabSubmitter`, la réécriture vise `rails_blob_path`, la chaîne que `rewrite_markdown` recherche à la soumission. Import dégradé jamais annulé : une image injoignable garde son lien d'origine et alimente `GitlabImporter#warnings`, affiché en flash (`web_autospec_import_images_failed`) |
 | `/autospec_drafts/:id` | `AutospecDraftsController#show` | Éditeur + chat + bandeau d'approbation |
 | `/autospec_drafts/:id` (PATCH) | `AutospecDraftsController#update` | Autosave titre/markdown/meta_chips (409 hors `drafting`) |
 | `/autospec_drafts/:id/chat` (POST) | `AutospecDraftsController#chat` | Tour de chat (`Autospec::Chat`), 503 si clé Anthropic absente |
@@ -175,8 +175,10 @@ Depuis le task #9 (phases 3-4, `v1.0.0-alpha.25`/`.26`), la config par projet vi
 | Général | `labels_todo` / `label_doing` / `label_done` | Les 3 labels du cycle de vie GitLab (listes, une entrée par ligne). |
 | Général | `extra_prompt` | Texte ajouté à tous les prompts `danger-claude` du projet. |
 | Exécution | `dc_timeout` | Délai max d'un appel `danger-claude` (s). |
-| Exécution | `max_retries` | Nb max de tentatives sur échec. |
+| Exécution | `max_retries` | Nb max de **retries** (pas de tentatives totales) sur échec — défaut `1`, soit 1 retry après le premier échec. Résolu par `Config.max_retries` et comparé de façon inclusive (`retry_count <= max_retries`) à chaque site. Un `max_retries` **global** dans `config.yml` est ignoré (`IGNORED_GLOBAL_FIELDS`) : seuls l'override par projet et le `DEFAULTS` s'appliquent. |
 | Exécution | `retry_backoff` | Délai de base entre deux tentatives (s). |
+| Exécution | `error_recheck_max` | Nb max de secondes chances accordées à une issue dont le budget de retry est épuisé (défaut 3, `DEFAULT_ERROR_RECHECK_MAX`). |
+| Exécution | `error_recheck_backoff` | Délai (s) entre deux secondes chances (défaut 3600, `DEFAULT_ERROR_RECHECK_BACKOFF`). |
 | Exécution | `stagnation_threshold` | Échecs identiques consécutifs avant abandon. |
 | Exécution | `infra_recheck_max` | Nb max de rechecks automatiques d'une stagnation infra (défaut 5, `DEFAULT_INFRA_RECHECK_MAX`). |
 | Exécution | `infra_recheck_backoff` | Délai (s) entre deux rechecks infra (défaut 3600, `DEFAULT_INFRA_RECHECK_BACKOFF`). |
@@ -322,12 +324,13 @@ pending → cloning → checking_spec → implementing → committing → pushin
 - `done` + désassigné au poll + `post_completion` configuré → `running_post_completion` → `done`.
 - `error` (depuis n'importe quel état actif) → `pending` (retry avec backoff).
 - `needs_clarification` (depuis `checking_spec`) → `pending` quand un commentaire de clarification est posté.
-- `close` (événement manuel, depuis n'importe quel état) → `closed`. État terminal : le poller ignore toute issue dont le `status != 'pending'`. Pour rouvrir, utiliser `#reset` qui force la row à `pending`.
+- `close` (depuis n'importe quel état) → `closed`. Tiré **manuellement** par `POST /issues/:id/close`, ou **automatiquement** par `dispatch_unassignment` quand le ticket est passé à `closed` côté GitLab (voir §*Passes de dispatch*). État terminal : le poller ignore toute issue dont le `status != 'pending'`. La réouverture n'est **pas** automatique — un ticket GitLab rouvert ne réveille pas la row ; utiliser `#reset`.
+- `error` avec budget de retry épuisé (`retry_count > max_retries`) → `dispatch_error_recheck` ré-arme le budget (`retry_count` à 0 + `next_retry_at` dû) si le ticket est toujours ouvert et assigné, au plus `error_recheck_max` fois, espacé de `error_recheck_backoff`. La reprise elle-même repasse par `dispatch_retries` — la passe ne réimplémente pas la mécanique de retry.
 - `done` + `needs_attention` + `attention_reason: 'stagnation_pipeline'` + MR ouverte → recheck auto (`:recheck_infra`) ; si la pipeline courante a récupéré, réentrée en `checking_pipeline` (voir §*Recheck automatique d'une stagnation infra*). Borné par `infra_recheck_max` / `infra_recheck_backoff`.
 
 ## Reset vs Transition (UI)
 
-- **`POST /issues/:id/reset`** — raw SQL `UPDATE` qui force `status = 'pending'`, vide `retry_count`, `error_message`, `next_retry_at`, `started_at`. **N'est pas une transition AASM** — les hooks `after_all_transitions` ne sont pas tirés. Une row est écrite directement dans `audits` via `Audit.record!`.
+- **`POST /issues/:id/reset`** — délègue à `Issue.reset_for_retry!(scope, reset_budget: true, clear_attention: true)`, le point de vérité partagé avec le `--reset` CLI et `Issue.recover_errored!`. Raw SQL `UPDATE`, donc **pas une transition AASM** — les hooks `after_all_transitions` ne sont pas tirés ; une row est écrite directement dans `audits` via `Audit.record!`. La règle appliquée a deux moitiés : une row **avec MR** reprend en `checking_pipeline` (que `dispatch_pipelines` interroge sans condition), une row **pré-MR** repart en `pending` **avec un `next_retry_at` dû** — `fetch_retryable` exige un stamp non NULL et `dispatch_new_issues` ne redécouvre que les `labels_todo` alors que la row porte encore `label_doing`, donc sans le stamp elle est orpheline (motif du task #26). `reset_budget:` distingue les deux intentions : un reset opérateur remet `retry_count` à 0, la reprise automatique au démarrage le préserve.
 - **`POST /issues/:id/transition?event=<aasm_event>`** — tire `issue.send("#{event}!")`, qui passe par AASM et déclenche les hooks. Le contrôleur vérifie que l'événement fait partie de `permitted_events_for(issue)` (extracteur AASM des transitions sortantes valides depuis l'état courant).
 - **`POST /issues/:id/close`** — clôture manuelle par un collaborateur du projet (gatée sur le membership). Tire l'événement AASM `close` depuis n'importe quel état → `closed` (terminal). Passe par les hooks (trace un audit). Rouvrir via `#reset`.
 
@@ -344,15 +347,16 @@ Pas de webhook GitLab — Autodev poll régulièrement (`AutodevPollJob` toutes 
 
 ## Polling
 
-`Autodev::PollDispatcher#run_once` exécute 7 passes par projet, dans cet ordre :
+`Autodev::PollDispatcher#run_once` exécute 8 passes par projet, dans cet ordre :
 
 1. `dispatch_new_issues` — nouveaux tickets `label_todo` → action `:process`
 2. `dispatch_pipelines` — issues en `checking_pipeline` → action `:check_pipeline`
 3. `dispatch_discussions` — issues en `fixing_discussions` → action `:fix_discussions`
-4. `dispatch_unassignment` — issues actives plus assignées → `done` inline (pas de job)
+4. `dispatch_unassignment` — issues actives : **une seule** lecture GitLab par row (`@client.issue`) qui tranche deux cas — ticket `closed` côté GitLab → `closed` inline via l'événement AASM `close` (`finished_at` stampé, trio `needs_attention` vidé) ; sinon plus assignée → `done` inline. La clôture l'emporte sur la désassignation. Pas de job dans les deux cas. Seules les rows **actives** sont balayées : un ticket clos alors qu'il était en `pending`/`error` est vu à son prochain mouvement
 5. `dispatch_done_unassigned` — issues `done` désassignées avec `post_completion` configuré → action `:post_completion`
-6. `dispatch_retries` — issues `error` + `pending` avec backoff écoulé → `:retry_errored` / `:retry_stuck`
-7. `dispatch_infra_recheck` — issues `done` + `needs_attention` + `attention_reason: 'stagnation_pipeline'`, MR ouverte, sous le cap et backoff écoulé → action `:recheck_infra` (re-tentative auto d'une stagnation infra, voir plus bas)
+6. `dispatch_error_recheck` — issues `error` à budget épuisé (`retry_count > max_retries`), sous `error_recheck_max` et backoff écoulé : une lecture GitLab décide si la row est encore récupérable (ticket `opened` **et** assigné à autodev) ; si oui le budget est ré-armé (`retry_count` à 0 + `next_retry_at` dû), sinon rien. Dans les deux cas la tentative est décomptée. Placée **avant** `dispatch_retries` pour qu'un budget ré-armé soit consommé dans le même cycle
+7. `dispatch_retries` — issues `error` + `pending` avec backoff écoulé → `:retry_errored` / `:retry_stuck`
+8. `dispatch_infra_recheck` — issues `done` + `needs_attention` + `attention_reason: 'stagnation_pipeline'`, MR ouverte, sous le cap et backoff écoulé → action `:recheck_infra` (re-tentative auto d'une stagnation infra, voir plus bas)
 
 Chaque dispatch enfile un `IssueProcessJob(project_path, issue_iid, action)` sur Solid Queue. `limits_concurrency to: 1, key: "issue-#{path}-#{iid}"` garantit qu'un même ticket n'est jamais traité en parallèle. Le cap global de concurrence est `AUTODEV_MAX_WORKERS` (défaut 3).
 
@@ -496,6 +500,8 @@ DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`
 | Push échoue | Retry avec `--force-with-lease` |
 | MR existe déjà pour la branche | Réutilisée |
 | Ticket fermé entre poll et processing | Direct `done` (guard `issue_closed?` sur `clone_complete!`) |
+| Ticket clôturé sur GitLab pendant le travail | `dispatch_unassignment` le détecte au tour suivant (aucun appel API en plus) → événement `close` → `closed`, `finished_at` stampé, `needs_attention` vidé, entrée `activity_closed_externally`. Rows **actives** uniquement |
+| Budget de retry épuisé (`retry_count > max_retries`) | `dispatch_error_recheck` ré-arme le budget si le ticket est toujours ouvert et assigné, au plus `error_recheck_max` (3) fois, espacé de `error_recheck_backoff` (3600 s). Une vraie erreur de code brûle le cap puis redevient terminale — pas de boucle. Colonnes `error_recheck_count` / `error_recheck_at` (migration `20260805000001_add_error_recheck_to_issues`) |
 | Issues en état actif au boot | `Issue.recover_on_startup!` reset les états transitoires |
 | Pipeline rouge (code, pré-triage) | `fixing_pipeline` immédiat (skip retrigger) |
 | Pipeline rouge (infra / incertaine, 1re fois) | Retrigger unique, recheck au poll suivant |
