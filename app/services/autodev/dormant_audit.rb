@@ -65,10 +65,17 @@ module Autodev
                   .each { |issue| exhaust!(issue) }
     end
 
+    # `attention_detail` is deliberately left nil here: the field renders
+    # verbatim (through `web_errors_attention_detail`, "Job(s) en cause : …")
+    # so it must hold only a technical token, e.g. a job name (see
+    # `stagnation_detector.rb`), never a full sentence — and there is no
+    # failing job to name for this reason anyway. The explanation the
+    # operator needs is already in `web_errors_explain_attention_dormant_exhausted`,
+    # in the right language; the attempt count is already in the activity log
+    # via `activity_dormant_exhausted`.
     def exhaust!(issue)
       ::Issue.where(id: issue.id).update_all(
-        needs_attention: true, attention_reason: 'dormant_exhausted',
-        attention_detail: "no restart after #{cap} dormant audits"
+        needs_attention: true, attention_reason: 'dormant_exhausted'
       )
       ::ActivityLogger.warn_event(issue, :dormant_exhausted, cap: cap)
       @logger.warn("Issue ##{issue.issue_iid}: dormant after #{cap} audits, giving up",

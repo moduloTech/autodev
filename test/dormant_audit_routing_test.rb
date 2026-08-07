@@ -206,6 +206,16 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
     assert_equal 'dormant_exhausted', issue.attention_reason
   end
 
+  # `attention_detail` renders verbatim on the web card ("Job(s) en cause :
+  # %{detail}"), so it must never hold a full sentence — there is no failing
+  # job to name for this reason. Pinned nil so a future edit doesn't
+  # reintroduce an untranslated sentence there (review round 1/5, Autodev #47).
+  def test_exhaustion_does_not_set_attention_detail
+    issue = run_audit(spent(dormant_recheck_count: CAP))
+
+    assert_nil issue.attention_detail
+  end
+
   def test_an_orphaned_pending_row_at_the_cap_is_flagged
     issue = run_audit(orphan(dormant_recheck_count: CAP))
 
