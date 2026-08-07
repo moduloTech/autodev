@@ -259,12 +259,23 @@ calls *per 5-minute cycle*, indefinitely.
 
 ### 7. Retroactive handling
 
-The 12 recoverable rows were already restarted by hand on 2026-08-06. `#16207`
-(closed) and `#15909` (unassigned) remain `pending` with `next_retry_at` NULL and
-no activity for months — they land squarely in the `pending` arm. They are left
-to the first cycle after deploy rather than fixed by hand: one row per routing
-outcome, so they double as the acceptance test. If they do not become `closed`
-and `done` on the first pass, the fix is wrong and we know immediately.
+`#16207` (closed) and `#15909` (unassigned) are left to the first cycle after
+deploy rather than fixed by hand: one row per routing outcome, so they double as
+the acceptance test. If they do not become `closed` and `done` on the first pass,
+the fix is wrong and we know immediately.
+
+**Check production before deploying.** The ticket records that the other 12 rows
+were restarted by hand on 2026-08-06, but that is not verifiable from the
+development copy of the database, whose newest activity event is 2026-08-06
+09:08 — plausibly earlier the same day. It matters, because it sets the blast
+radius of the first cycle: every row still dormant and still ours is re-armed,
+and `dispatch_retries` — which runs in the same cycle — turns each one into a
+full danger-claude implementation of a months-old ticket, throttled only by
+`max_workers` (default 3). Twelve at once is a very different first cycle from
+zero. Query the production DB for `status = 'pending' AND next_retry_at IS NULL`
+first; triage what is there on GitLab (unassign or close what is stale), or
+deploy during a quiet window. The §6 cost model covers the GitLab reads, not
+these implementations.
 
 ## Testing
 
