@@ -12,7 +12,7 @@ require 'autodev/gitlab_helpers'
 # spent budget is #34's population, unchanged. An active row with no activity
 # for 2h is a pruned worker: FailedJobReaper discards the job and no pass
 # re-dispatches those states.
-class DormantAuditSelectionTest < Minitest::Test
+class DormantAuditSelectionTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
   PROJECT_CONFIG = { 'path' => 'group/project', 'max_retries' => 1 }.freeze
@@ -157,6 +157,17 @@ class DormantAuditSelectionTest < Minitest::Test
     issue = orphan(dormant_recheck_count: 2)
 
     refute_includes candidate_iids(config: CONFIG.merge('error_recheck_max' => 2)), issue.issue_iid
+  end
+
+  # Both keys set: the new name must win. Without this, reordering the `||`
+  # chain in DormantAudit#cap would pass the whole suite unnoticed — each other
+  # config test sets only one key.
+  def test_the_new_key_wins_over_the_legacy_one
+    issue = orphan(dormant_recheck_count: 2)
+
+    assert_includes candidate_iids(config: CONFIG.merge('error_recheck_max' => 2,
+                                                        'dormant_audit_max' => 5)),
+                    issue.issue_iid
   end
 
   # --- scoping ------------------------------------------------------
