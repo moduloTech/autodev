@@ -175,10 +175,12 @@ catch — the exact gap that produced #47.
 ```ruby
 # app/models/issue.rb
 # No activity_events row since `cutoff`, falling back to issues.created_at when
-# the row has never emitted anything. The aggregation is scoped to the candidate
-# rows — never grouped over the whole activity_events table, a constraint
-# /healthz already imposes and HealthReport already honours.
-scope :without_activity_since, ->(cutoff) { <rows whose latest activity_events.created_at, or created_at when none, is older than cutoff> }
+# the row has never emitted anything. The lookup is bounded by the candidate
+# rows' ids — never by the time window alone, and never over the whole
+# activity_events table. No index on that table leads with `created_at`, so an
+# unbounded form degrades to a full scan (measured at 0.79s against ~1ms on an
+# 800k-row DB) on an endpoint /healthz may poll constantly.
+scope :without_activity_since, ->(cutoff) { <candidate rows whose latest activity_events.created_at, or created_at when none, is older than cutoff> }
 ```
 
 `HealthReport#stuck_issues` is rewritten on top of this scope. It keeps its two

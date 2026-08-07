@@ -299,11 +299,24 @@ Add to `app/models/issue.rb`, near the other class-level query helpers:
   # `issue_id: nil` is excluded from the subquery on purpose: activity_events
   # also holds issue-less rows ('poller', 'usage'), and a single NULL inside a
   # `NOT IN` makes SQL return the empty set for every row.
+  #
+  # The subquery is bounded by the outer relation's ids, not by the time window
+  # alone: no activity_events index leads with `created_at`, so a `created_at`-only
+  # bound cannot seek and SQLite scans the whole table — 0.79s per call on an
+  # 800k-row DB against ~1ms here, on an endpoint /healthz may poll constantly.
+  # `idx_ae_issue (issue_id, created_at)` makes the bounded form an indexed seek.
   scope :without_activity_since, lambda { |cutoff|
-    recent = ActivityEvent.where.not(issue_id: nil).where(created_at: cutoff..).select(:issue_id)
+    recent = ActivityEvent.where.not(issue_id: nil)
+                          .where(issue_id: all.select(:id))
+                          .where(created_at: cutoff..)
+                          .select(:issue_id)
     where.not(id: recent).where(created_at: ...cutoff)
   }
 ```
+
+The `where(issue_id: all.select(:id))` bound is load-bearing, not decoration:
+without it this scope violates the `/healthz` constraint listed above. Verify with
+`EXPLAIN QUERY PLAN` that the query seeks rather than scans.
 
 - [ ] **Step 4: Run test to verify it passes**
 
