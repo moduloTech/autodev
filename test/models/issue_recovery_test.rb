@@ -2,7 +2,7 @@
 
 require_relative '../rails_helper'
 
-# Coverage of Issue.recover_on_startup! / recover_stuck_processing!.
+# Coverage of Issue.recover_on_startup! / revive_stalled!.
 # Regression guard: a pre-MR issue reset to `pending` on startup must be
 # stamped with `next_retry_at` so `dispatch_retries` can re-enqueue it via
 # `:retry_stuck` — otherwise the GitLab label is still `label_doing`,

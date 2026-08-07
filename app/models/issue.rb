@@ -226,17 +226,10 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `bin/autodev` on boot. Idempotent — running with no stuck rows is a
   # no-op. Returns the total number of rows touched (for the log line).
   #
-  # Errors with an existing MR resume at checking_pipeline; without an
-  # MR, back at pending. Stuck active states (cloning..creating_mr) and
-  # `reviewing`/`fixing_pipeline`/`running_post_completion` are reset to
-  # their best resume point. Same rules as the legacy Sequel
-  # `Database::Recovery` module had — ported verbatim to AR semantics.
+  # Errors resolve via `recover_errored!`; every other stalled active state
+  # goes through `revive_stalled!` — see its comment for the per-state rules.
   def self.recover_on_startup!(max_retries:)
-    recover_errored!(max_retries) +
-      recover_fixing_pipeline! +
-      recover_reviewing! +
-      recover_post_completion! +
-      recover_stuck_processing!
+    recover_errored!(max_retries) + revive_stalled!(where(status: STALLED_STATES))
   end
 
   RECOVERABLE_ACTIVE_STATES = %w[cloning checking_spec implementing committing pushing creating_mr].freeze
@@ -284,31 +277,35 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
       scope.where(mr_iid: nil).update_all(**fields, status: 'pending', next_retry_at: Time.current)
   end
 
-  def self.recover_fixing_pipeline!
-    where(status: 'fixing_pipeline').update_all(status: 'checking_pipeline')
+  # How each stalled state gets back onto a path the poller walks. The rules are
+  # not uniform, which is the whole reason this lives in one place:
+  #
+  # - pre-MR work restarts as `pending` **with a stamp** (`reset_for_retry!`
+  #   owns that split — see its comment; without the stamp the row is orphaned
+  #   because the GitLab label is still `label_doing`);
+  # - post-MR work resumes at `checking_pipeline`, which `dispatch_pipelines`
+  #   polls unconditionally and where `PipelineMonitor` re-derives what is left
+  #   to do — including whether discussions remain;
+  # - `running_post_completion` carries an MR yet must end as `done`: the hook
+  #   is non-fatal and is deliberately not replayed.
+  #
+  # Two call sites: `recover_on_startup!` (a worker died and the service
+  # restarted) and `dispatch_dormant_audit` (a worker was pruned and the service
+  # did *not* restart — Autodev #47). `answering_question` and
+  # `fixing_discussions` are new here: HealthReport monitors them, but boot
+  # recovery had no rule for either, so a row frozen in one survived a restart.
+  REVIVE_TO_PENDING = (RECOVERABLE_ACTIVE_STATES + %w[answering_question]).freeze
+  REVIVE_TO_PIPELINE = %w[reviewing fixing_pipeline fixing_discussions].freeze
+  REVIVE_TO_DONE = %w[running_post_completion].freeze
+  STALLED_STATES = (REVIVE_TO_PENDING + REVIVE_TO_PIPELINE + REVIVE_TO_DONE).freeze
+
+  def self.revive_stalled!(scope)
+    reset_for_retry!(scope.where(status: REVIVE_TO_PENDING)) +
+      scope.where(status: REVIVE_TO_PIPELINE).update_all(status: 'checking_pipeline', started_at: nil) +
+      scope.where(status: REVIVE_TO_DONE).update_all(status: 'done', finished_at: Time.current)
   end
 
-  def self.recover_reviewing!
-    where(status: 'reviewing').update_all(status: 'checking_pipeline')
-  end
-
-  def self.recover_post_completion!
-    where(status: 'running_post_completion').update_all(status: 'done', finished_at: Time.current)
-  end
-
-  def self.recover_stuck_processing!
-    stuck = where(status: RECOVERABLE_ACTIVE_STATES)
-    # The pre-MR branch resets to `pending`, but the GitLab label is still
-    # `label_doing` (set when processing started) — so `dispatch_new_issues`,
-    # which only re-discovers `labels_todo` issues, will never re-enqueue it.
-    # Stamp `next_retry_at` so `dispatch_retries` picks it up via `:retry_stuck`
-    # on the next poll; otherwise the row is orphaned in `pending` forever.
-    stuck.where.not(mr_iid: nil).update_all(status: 'checking_pipeline', started_at: nil) +
-      stuck.where(mr_iid: nil).update_all(status: 'pending', started_at: nil, next_retry_at: Time.current)
-  end
-
-  private_class_method :recover_errored!, :recover_fixing_pipeline!, :recover_reviewing!,
-                       :recover_post_completion!, :recover_stuck_processing!
+  private_class_method :recover_errored!
 
   # A row that has stopped moving: no activity_events entry since `cutoff`.
   # The trailing `created_at: ...cutoff` is applied unconditionally, not as a

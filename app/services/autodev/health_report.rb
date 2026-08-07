@@ -36,9 +36,10 @@ module Autodev
     # external pipeline, re-polled every cycle — the documented "no blocked
     # state").
     PENDING_STUCK_STATES = %w[pending].freeze
-    ACTIVE_STUCK_STATES = %w[cloning checking_spec implementing committing pushing creating_mr
-                             reviewing fixing_discussions fixing_pipeline running_post_completion
-                             answering_question].freeze
+    # The states a stalled row can be revived out of — the same set
+    # `Issue.revive_stalled!` knows the rules for, by construction. A state this
+    # card flags but nothing can revive would be a card nobody can act on.
+    ACTIVE_STUCK_STATES = ::Issue::STALLED_STATES
     STUCK_ACTIVE_AFTER = 7200 # 2h with zero activity ⇒ a dead worker, not a long run
 
     # poller_expected: whether the recurring poll is supposed to be running here.
