@@ -17,6 +17,8 @@ module Autodev
   # boot — so this class can call `::Issue.where(...)` exactly like the
   # legacy handlers do.
   class PollDispatcher # rubocop:disable Metrics/ClassLength
+    include ExternalState
+
     ACTIVE_STATUSES = %w[cloning checking_spec implementing committing pushing creating_mr
                          checking_pipeline reviewing fixing_discussions fixing_pipeline].freeze
 
@@ -223,34 +225,13 @@ module Autodev
     # or `error` is noticed whenever it next moves, not proactively.
     def check_external_state(issue)
       gl_issue = @client.issue(@path, issue.issue_iid)
-      return close_externally(issue) if ::GitlabHelpers.field(gl_issue, :state) == 'closed'
+      return close_externally(issue) if externally_closed?(gl_issue)
       return if assigned_to_autodev?(gl_issue)
 
       stop_unassigned(issue)
     rescue ::Gitlab::Error::ResponseError => e
       @logger.error("Failed to check external state for ##{issue.issue_iid}: #{e.message}",
                     project: @path)
-    end
-
-    # Mirrors IssuesController#close_issue!, minus the audit actor: nobody
-    # clicked anything, the ticket just went away on GitLab.
-    def close_externally(issue)
-      return unless issue.may_close?
-
-      @logger.info("Issue ##{issue.issue_iid}: closed on GitLab, closing locally", project: @path)
-      issue.close!
-      ::Issue.where(id: issue.id).update_all(finished_at: Time.current, needs_attention: false,
-                                             attention_reason: nil, attention_detail: nil)
-      ::ActivityLogger.post(::ActivityLogger::Ctx.new(@client, @path, @logger),
-                            issue, :closed_externally)
-    end
-
-    def stop_unassigned(issue)
-      @logger.info("Issue ##{issue.issue_iid}: no longer assigned, transitioning to done",
-                   project: @path)
-      issue.update(status: 'done', finished_at: Time.current)
-      ::ActivityLogger.post(::ActivityLogger::Ctx.new(@client, @path, @logger),
-                            issue, :unassigned_stop)
     end
 
     def dispatch_done_unassigned
@@ -275,11 +256,6 @@ module Autodev
 
     def still_assigned?(issue)
       assigned_to_autodev?(@client.issue(@path, issue.issue_iid))
-    end
-
-    def assigned_to_autodev?(gl_issue)
-      (::GitlabHelpers.field(gl_issue, :assignees) || [])
-        .any? { |a| ::GitlabHelpers.field(a, :id) == ::GitlabHelpers.current_user_id(@client) }
     end
 
     def mr_closed_or_merged?(issue)
