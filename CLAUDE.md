@@ -216,7 +216,7 @@ Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log`
 - `dispatch_new_issues` — new `label_todo` issues → `:process`
 - `dispatch_pipelines` — `checking_pipeline` rows → `:check_pipeline`
 - `dispatch_discussions` — `fixing_discussions` rows → `:fix_discussions`
-- `dispatch_unassignment` — active rows closed on GitLab or no longer assigned → done inline (no job)
+- `dispatch_unassignment` — active rows closed on GitLab or no longer assigned → closed / done inline (no job)
 - `dispatch_done_unassigned` — `done` rows with `post_completion` configured → `:post_completion`
 - `dispatch_dormant_audit` — rows that stopped moving (orphaned `pending`, spent-budget `error`, worker-pruned active states) → closed / done / re-armed inline, at most `dormant_audit_max` times per row
 - `dispatch_retries` — `error` + `pending` with backoff elapsed → `:retry_errored` / `:retry_stuck`
