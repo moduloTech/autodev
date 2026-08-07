@@ -47,4 +47,5 @@ en:
   activity_unassigned_stop: ":stop_sign: Unassigned, stopping work in progress"
   activity_closed_externally: ":lock: Ticket closed on GitLab, stopping work in progress"
   activity_dc_parse_failed: ":warning: danger-claude output not parseable, session reuse disabled for this call"
+  activity_dormant_exhausted: ":mag: No restart possible after %{cap} checks, request left as is"
   activity_truncation_marker: "*[older entries truncated to stay below the GitLab note limit]*"

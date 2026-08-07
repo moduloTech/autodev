@@ -224,6 +224,7 @@ en:
   web_errors_explain_attention_review_failures_exhausted: Automated review failed several times in a row. The request is marked delivered but review could not complete — check the MR manually.
   web_errors_explain_attention_stagnation_pipeline: The pipeline kept failing on the same jobs despite fixes. The request is marked delivered but the MR needs manual intervention.
   web_errors_explain_attention_stagnation_discussions: The same discussions stayed unresolved despite fixes. The request is marked delivered but the MR needs manual intervention.
+  web_errors_explain_attention_dormant_exhausted: The request stopped progressing and the automatic checks could not restart it. It is left as is — check on GitLab whether it is still relevant.
   web_errors_attention_detail: "Failing job(s): %{detail}"
   web_errors_show_technical: Show technical details
   web_errors_view_detail: See details

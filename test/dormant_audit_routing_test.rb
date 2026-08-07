@@ -12,7 +12,7 @@ require 'autodev/activity_logger'
 # real cases found on 2026-08-06 were a ticket closed on GitLab (#16207) and one
 # handed back to a human (#15909), both still sitting in `pending`. Re-arming
 # either would have restarted work that is no longer ours.
-class DormantAuditRoutingTest < Minitest::Test
+class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
   PROJECT_CONFIG = { 'path' => 'group/project', 'max_retries' => 1 }.freeze
@@ -183,5 +183,86 @@ class DormantAuditRoutingTest < Minitest::Test
     issue = run_audit(orphan, client: FailingClient.new)
 
     assert_equal 1, issue.dormant_recheck_count
+  end
+
+  # --- end of cap -----------------------------------------------------
+
+  # #34's pass went silent when its cap ran out: the row became permanently
+  # immobile with no signal anywhere. That is #47's own complaint — "real,
+  # requested work, never done, with no signal" — so the pass replacing it must
+  # not inherit it.
+  #
+  # The moment to signal is NOT a refused attempt: every routing outcome
+  # resolves the row (closed, done, or given a path). A row dies quietly the
+  # other way — it gets revived, falls dormant again, and after `cap` rounds it
+  # simply stops being selected. So the condition is "at cap AND still dormant",
+  # which needs no GitLab read at all.
+  CAP = Autodev::PollDispatcher::DEFAULT_DORMANT_AUDIT_MAX
+
+  def test_a_row_at_the_cap_and_still_dormant_is_flagged
+    issue = run_audit(spent(dormant_recheck_count: CAP))
+
+    assert issue.needs_attention
+    assert_equal 'dormant_exhausted', issue.attention_reason
+  end
+
+  def test_an_orphaned_pending_row_at_the_cap_is_flagged
+    issue = run_audit(orphan(dormant_recheck_count: CAP))
+
+    assert issue.needs_attention
+  end
+
+  def test_a_row_under_the_cap_is_not_flagged
+    issue = run_audit(spent(dormant_recheck_count: CAP - 1))
+
+    refute issue.needs_attention
+  end
+
+  # It was just revived: it has a path forward and is no longer dormant, so it
+  # never enters the exhausted set even at the cap.
+  def test_a_revived_row_is_not_flagged
+    issue = run_audit(spent(dormant_recheck_count: CAP - 1))
+
+    assert_equal 0, issue.retry_count
+    refute issue.needs_attention
+  end
+
+  # Flagging must not rewrite the same signal on every single cycle: a first
+  # cycle flags a fresh row at the cap (one warn event); a second cycle, run
+  # against the now-flagged row, must not add a second one.
+  #
+  # NOTE: the brief's original version of this test pre-set needs_attention on
+  # the fixture and asserted count == 1 after a *single* run_audit call. That
+  # assertion holds with no ActivityEvent existing beforehand only if exhaust!
+  # fires on an already-flagged row — i.e. it passes precisely when the
+  # `.reject(&:needs_attention)` guard is *absent*, and fails when the guard is
+  # present (confirmed experimentally: removing the guard made all 22 tests in
+  # this file pass, including this one). That is backwards from "flag once,
+  # not every cycle." Rewritten here to run two cycles so the assertion
+  # actually exercises the guard.
+  def test_an_already_flagged_row_is_not_reflagged
+    at_cap = spent(dormant_recheck_count: CAP)
+    run_audit(at_cap)
+    run_audit(at_cap)
+
+    assert_equal 1, ActivityEvent.where(issue_id: at_cap.id, level: 'warn').count
+  end
+
+  # The row is past the cap: it is not a candidate, so it costs nothing.
+  def test_flagging_costs_no_gitlab_read
+    client = StubClient.new
+    spent(dormant_recheck_count: CAP)
+    Autodev::DormantAudit.new(client: client, path: PROJECT_CONFIG['path'], config: CONFIG,
+                              project_config: PROJECT_CONFIG, logger: @logger).run
+
+    assert_equal 0, client.calls
+  end
+
+  def test_exhaustion_writes_a_warn_activity_event
+    issue = run_audit(spent(dormant_recheck_count: CAP))
+    event = ActivityEvent.where(issue_id: issue.id, level: 'warn').last
+
+    refute_nil event
+    assert_includes event.payload_json, 'dormant_exhausted'
   end
 end

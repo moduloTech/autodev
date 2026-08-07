@@ -45,10 +45,35 @@ module Autodev
 
     # Returns the number of candidates audited.
     def run
+      flag_exhausted!
       candidates.each { |issue| audit(issue) }.size
     end
 
     private
+
+    # A row that reached the cap and is *still* dormant is one nothing will look
+    # at again — the silent death #34's pass had and #47 complains about. Flagged
+    # once, with no GitLab read: past the cap it is not a candidate.
+    #
+    # Nothing is posted to GitLab. The signal is for the operator (/errors, the
+    # /admin/health card), not the requester: a row usually gets here by falling
+    # dormant in a loop, and a comment would land on a ticket someone is already
+    # handling.
+    def flag_exhausted!
+      dormant_rows.reject { |issue| under_cap?(issue) }
+                  .reject(&:needs_attention)
+                  .each { |issue| exhaust!(issue) }
+    end
+
+    def exhaust!(issue)
+      ::Issue.where(id: issue.id).update_all(
+        needs_attention: true, attention_reason: 'dormant_exhausted',
+        attention_detail: "no restart after #{cap} dormant audits"
+      )
+      ::ActivityLogger.warn_event(issue, :dormant_exhausted, cap: cap)
+      @logger.warn("Issue ##{issue.issue_iid}: dormant after #{cap} audits, giving up",
+                   project: @path)
+    end
 
     # The three arms, before the bound is applied. Kept separate from
     # `candidates` because Task 6 needs the same three populations *past* the
