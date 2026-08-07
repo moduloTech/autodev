@@ -90,19 +90,19 @@ class ErrorRecheckDispatchTest < Minitest::Test
   end
 
   def test_excludes_when_the_cap_is_reached
-    issue = spent(error_recheck_count: Autodev::PollDispatcher::DEFAULT_ERROR_RECHECK_MAX)
+    issue = spent(dormant_recheck_count: Autodev::PollDispatcher::DEFAULT_DORMANT_AUDIT_MAX)
 
     refute_includes candidate_iids, issue.issue_iid
   end
 
   def test_excludes_when_the_backoff_is_still_running
-    issue = spent(error_recheck_at: 1.hour.from_now)
+    issue = spent(dormant_recheck_at: 1.hour.from_now)
 
     refute_includes candidate_iids, issue.issue_iid
   end
 
   def test_selects_once_the_backoff_has_elapsed
-    issue = spent(error_recheck_count: 1, error_recheck_at: 1.hour.ago)
+    issue = spent(dormant_recheck_count: 1, dormant_recheck_at: 1.hour.ago)
 
     assert_includes candidate_iids, issue.issue_iid
   end
@@ -113,10 +113,20 @@ class ErrorRecheckDispatchTest < Minitest::Test
     refute_includes candidate_iids, issue.issue_iid
   end
 
-  def test_the_cap_is_configurable
-    issue = spent(error_recheck_count: 2)
+  # A production config.yml already tuned for #34 must keep working after the
+  # rename — the operator set a policy, not a column name.
+  def test_the_legacy_error_recheck_max_key_still_applies
+    issue = spent(dormant_recheck_count: 2)
 
     refute_includes candidate_iids(config: CONFIG.merge('error_recheck_max' => 2)), issue.issue_iid
+  end
+
+  def test_the_new_key_wins_over_the_legacy_one
+    issue = spent(dormant_recheck_count: 2)
+
+    assert_includes candidate_iids(config: CONFIG.merge('error_recheck_max' => 2,
+                                                        'dormant_audit_max' => 5)),
+                    issue.issue_iid
   end
 
   # --- re-arming ----------------------------------------------------
@@ -144,8 +154,8 @@ class ErrorRecheckDispatchTest < Minitest::Test
   def test_rearming_costs_one_attempt_and_backs_off
     issue = rearm(spent)
 
-    assert_equal 1, issue.error_recheck_count
-    assert_operator issue.error_recheck_at, :>, Time.current
+    assert_equal 1, issue.dormant_recheck_count
+    assert_operator issue.dormant_recheck_at, :>, Time.current
   end
 
   # --- worth it? ----------------------------------------------------
@@ -167,6 +177,6 @@ class ErrorRecheckDispatchTest < Minitest::Test
   def test_declining_still_costs_an_attempt
     issue = rearm(spent, client: StubClient.new(state: 'closed'))
 
-    assert_equal 1, issue.error_recheck_count
+    assert_equal 1, issue.dormant_recheck_count
   end
 end

@@ -20,12 +20,13 @@ module Autodev
     ACTIVE_STATUSES = %w[cloning checking_spec implementing committing pushing creating_mr
                          checking_pipeline reviewing fixing_discussions fixing_pipeline].freeze
 
-    # Bounds of the second-chance recovery for a spent retry budget
-    # (`dispatch_error_recheck`, Autodev #34): at most 3 extra rounds per
-    # ticket, spaced an hour apart, so a transient failure gets another shot
-    # once its cause clears while a real code failure just burns the cap.
-    DEFAULT_ERROR_RECHECK_MAX = 3
-    DEFAULT_ERROR_RECHECK_BACKOFF = 3600
+    # Bounds of the second-chance recovery for a dormant row
+    # (`dispatch_dormant_audit`, Autodev #34 then #47/#48): at most 3 extra
+    # rounds per ticket, spaced an hour apart, so a transient failure gets
+    # another shot once its cause clears while a real code failure just burns
+    # the cap.
+    DEFAULT_DORMANT_AUDIT_MAX = 3
+    DEFAULT_DORMANT_AUDIT_BACKOFF = 3600
 
     # PollRouter's contract expects a `pool` arg with an `enqueue?` method. In
     # the Solid Queue world the router still routes (returns :next vs
@@ -327,8 +328,8 @@ module Autodev
     def fetch_error_recheck_candidates
       ::Issue.where(project_path: @path, status: 'error')
              .where('retry_count > ?', ::Config.max_retries(@project_config, @config))
-             .where('error_recheck_count < ?', error_recheck_max)
-             .where("error_recheck_at IS NULL OR error_recheck_at <= datetime('now')")
+             .where('dormant_recheck_count < ?', dormant_audit_max)
+             .where("dormant_recheck_at IS NULL OR dormant_recheck_at <= datetime('now')")
              .to_a
     end
 
@@ -336,9 +337,9 @@ module Autodev
     # so a closed-and-forgotten ticket can't make us call GitLab on every poll
     # forever.
     def recheck_errored(issue)
-      attempt = (issue.error_recheck_count || 0) + 1
-      stamps = { error_recheck_count: attempt,
-                 error_recheck_at: error_recheck_backoff.seconds.from_now }
+      attempt = (issue.dormant_recheck_count || 0) + 1
+      stamps = { dormant_recheck_count: attempt,
+                 dormant_recheck_at: dormant_audit_backoff.seconds.from_now }
       stamps.merge!(retry_count: 0, next_retry_at: Time.current) if worth_rearming?(issue)
       issue.update(**stamps)
       log_error_recheck(issue, attempt, stamps.key?(:retry_count))
@@ -357,18 +358,23 @@ module Autodev
 
     def log_error_recheck(issue, attempt, rearmed)
       verb = rearmed ? 'rearmed retry budget' : 'declined (closed or unassigned)'
-      @logger.info("Error recheck #{attempt}/#{error_recheck_max} for issue " \
+      @logger.info("Error recheck #{attempt}/#{dormant_audit_max} for issue " \
                    "##{issue.issue_iid}: #{verb}", project: @path)
     end
 
-    def error_recheck_max
-      (@project_config['error_recheck_max'] || @config['error_recheck_max'] ||
-        DEFAULT_ERROR_RECHECK_MAX).to_i
+    # `error_recheck_*` are the pre-#47 names of these knobs. A production
+    # config.yml tuned for #34 expressed a policy, not a column name, so it
+    # keeps working.
+    def dormant_audit_max
+      (@project_config['dormant_audit_max'] || @config['dormant_audit_max'] ||
+        @project_config['error_recheck_max'] || @config['error_recheck_max'] ||
+        DEFAULT_DORMANT_AUDIT_MAX).to_i
     end
 
-    def error_recheck_backoff
-      (@project_config['error_recheck_backoff'] || @config['error_recheck_backoff'] ||
-        DEFAULT_ERROR_RECHECK_BACKOFF).to_i
+    def dormant_audit_backoff
+      (@project_config['dormant_audit_backoff'] || @config['dormant_audit_backoff'] ||
+        @project_config['error_recheck_backoff'] || @config['error_recheck_backoff'] ||
+        DEFAULT_DORMANT_AUDIT_BACKOFF).to_i
     end
 
     # Gated by action, not by pass: `:retry_stuck` re-runs IssueProcessor inline
