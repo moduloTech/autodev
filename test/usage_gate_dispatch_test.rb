@@ -21,7 +21,7 @@ class UsageGateDispatchTest < Minitest::Test
 
   CONSUMING_PASSES = %i[dispatch_new_issues dispatch_discussions].freeze
   OBSERVATION_PASSES = %i[dispatch_pipelines dispatch_unassignment dispatch_done_unassigned
-                          dispatch_error_recheck dispatch_retries dispatch_infra_recheck].freeze
+                          dispatch_dormant_audit dispatch_retries dispatch_infra_recheck].freeze
   ALL_PASSES = (CONSUMING_PASSES + OBSERVATION_PASSES).freeze
 
   def setup

@@ -67,6 +67,17 @@ module Autodev
       { status: one[:status], generated_at: iso(@now), checks: { name => one } }
     end
 
+    # Public because Autodev::DormantAudit reads both windows too: the
+    # stuck-issues card and the dormant-rows pass must see the same rows, or
+    # the card keeps flagging what nothing recovers (Autodev #47).
+    def poll_stale_after
+      @poll_stale_after ||= [(poll_interval * poll_stale_factor), POLL_STALE_FLOOR].max
+    end
+
+    def stuck_active_after
+      (@config.dig('monitoring', 'stuck_active_after_seconds') || STUCK_ACTIVE_AFTER).to_i
+    end
+
     private
 
     def safe_check(name)
@@ -165,19 +176,11 @@ module Autodev
         Issue.where(status: ACTIVE_STUCK_STATES).without_activity_since(@now - stuck_active_after).to_a
     end
 
-    def stuck_active_after
-      (@config.dig('monitoring', 'stuck_active_after_seconds') || STUCK_ACTIVE_AFTER).to_i
-    end
-
     def last_poller_event
       unless defined?(@last_poller_event)
         @last_poller_event = ActivityEvent.where(kind: 'poller').order(created_at: :desc).first
       end
       @last_poller_event
-    end
-
-    def poll_stale_after
-      @poll_stale_after ||= [(poll_interval * poll_stale_factor), POLL_STALE_FLOOR].max
     end
 
     def poll_interval

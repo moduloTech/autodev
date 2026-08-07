@@ -99,7 +99,7 @@ module Autodev
       dispatch_done_unassigned
       # Before dispatch_retries, so a budget re-armed this cycle is picked up
       # by it immediately rather than waiting a full poll interval.
-      dispatch_error_recheck
+      dispatch_dormant_audit
       dispatch_retries
       dispatch_infra_recheck
     end
@@ -281,76 +281,13 @@ module Autodev
              .to_a
     end
 
-    # === bounded second chance for a spent retry budget ===
+    # === bounded second look at every row that has stopped moving ===
     #
-    # Exhausting `max_retries` is right for a genuine code failure but wrong for
-    # a transient one (network blip, GitLab/registry outage, the #33 `git push`
-    # stale-info case): the row sat in `error` forever, needing a manual UPDATE.
-    #
-    # This pass does NOT reimplement the retry mechanics. It re-arms the spent
-    # budget — `retry_count` back to 0 plus a due `next_retry_at` — and lets
-    # `dispatch_retries` (which runs right after) take it through the usual
-    # `:retry_errored` / `:retry_stuck` path, labels and activity log included.
-    #
-    # It deliberately does not classify the error. `JobClassifier` reads GitLab
-    # CI `failure_reason` values, not Ruby exceptions, so classifying here would
-    # mean a new brittle heuristic over `error_message`. A real code failure
-    # instead burns the cap — a few extra rounds spread over hours — and then
-    # rests terminal, which is the bound we actually need.
-    def dispatch_error_recheck
-      fetch_error_recheck_candidates.each { |issue| recheck_errored(issue) }
-    end
-
-    def fetch_error_recheck_candidates
-      ::Issue.where(project_path: @path, status: 'error')
-             .where('retry_count > ?', ::Config.max_retries(@project_config, @config))
-             .where('dormant_recheck_count < ?', dormant_audit_max)
-             .where("dormant_recheck_at IS NULL OR dormant_recheck_at <= datetime('now')")
-             .to_a
-    end
-
-    # Every candidate costs one bounded attempt whether or not it gets re-armed,
-    # so a closed-and-forgotten ticket can't make us call GitLab on every poll
-    # forever.
-    def recheck_errored(issue)
-      attempt = (issue.dormant_recheck_count || 0) + 1
-      stamps = { dormant_recheck_count: attempt,
-                 dormant_recheck_at: dormant_audit_backoff.seconds.from_now }
-      stamps.merge!(retry_count: 0, next_retry_at: Time.current) if worth_rearming?(issue)
-      issue.update(**stamps)
-      log_error_recheck(issue, attempt, stamps.key?(:retry_count))
-    rescue ::Gitlab::Error::ResponseError => e
-      @logger.error("Failed to recheck errored ##{issue.issue_iid}: #{e.message}", project: @path)
-    end
-
-    # One GitLab read answers both questions — a ticket that was closed or
-    # handed to a human is not ours to retry.
-    def worth_rearming?(issue)
-      gl_issue = @client.issue(@path, issue.issue_iid)
-      return false unless gl_issue.state == 'opened'
-
-      (gl_issue.assignees || []).any? { |a| a.id == ::GitlabHelpers.current_user_id(@client) }
-    end
-
-    def log_error_recheck(issue, attempt, rearmed)
-      verb = rearmed ? 'rearmed retry budget' : 'declined (closed or unassigned)'
-      @logger.info("Error recheck #{attempt}/#{dormant_audit_max} for issue " \
-                   "##{issue.issue_iid}: #{verb}", project: @path)
-    end
-
-    # `error_recheck_*` are the pre-#47 names of these knobs. A production
-    # config.yml tuned for #34 expressed a policy, not a column name, so it
-    # keeps working.
-    def dormant_audit_max
-      (@project_config['dormant_audit_max'] || @config['dormant_audit_max'] ||
-        @project_config['error_recheck_max'] || @config['error_recheck_max'] ||
-        DEFAULT_DORMANT_AUDIT_MAX).to_i
-    end
-
-    def dormant_audit_backoff
-      (@project_config['dormant_audit_backoff'] || @config['dormant_audit_backoff'] ||
-        @project_config['error_recheck_backoff'] || @config['error_recheck_backoff'] ||
-        DEFAULT_DORMANT_AUDIT_BACKOFF).to_i
+    # Replaces `dispatch_error_recheck` (#34), whose `error` population is now
+    # one of three arms. See Autodev::DormantAudit for the why.
+    def dispatch_dormant_audit
+      DormantAudit.new(client: @client, path: @path, config: @config,
+                       project_config: @project_config, logger: @logger).run
     end
 
     # Gated by action, not by pass: `:retry_stuck` re-runs IssueProcessor inline
