@@ -310,18 +310,41 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   private_class_method :recover_errored!, :recover_fixing_pipeline!, :recover_reviewing!,
                        :recover_post_completion!, :recover_stuck_processing!
 
-  # A row that has stopped moving: no activity_events entry since `cutoff`,
-  # falling back to its own created_at when it never emitted one.
+  # A row that has stopped moving: no activity_events entry since `cutoff`.
+  # The trailing `created_at: ...cutoff` is applied unconditionally, not as a
+  # conditional fallback — it is equivalent to "no activity, or its only
+  # activity predates cutoff" only because an event's created_at is always >=
+  # its issue's created_at (an issue can't emit before it exists). That
+  # invariant is what lets one AND-ed clause stand in for both "never emitted"
+  # and "emitted, but a while ago".
   #
   # Single source of truth for two readers that must never disagree —
   # HealthReport's stuck-issues card and `dispatch_dormant_audit` (Autodev #47).
   # A card that flags what no pass acts on is how 14 rows sat frozen since April.
   #
-  # `issue_id: nil` is excluded from the subquery on purpose: activity_events
-  # also holds issue-less rows ('poller', 'usage'), and a single NULL inside a
-  # `NOT IN` makes SQL return the empty set for every row.
+  # The subquery is bounded to `all.select(:id)` — the issues already selected
+  # by the outer relation — on purpose, not just for `issue_id: nil` NULL
+  # safety. activity_events only indexes `(issue_id, created_at)`
+  # (`idx_ae_issue`); with no index leading on `created_at`, scanning by time
+  # window alone forces a full covering-index scan of the whole (write-heavy,
+  # ever-growing) table. Bounding by the candidate issue_ids first lets SQLite
+  # seek `idx_ae_issue` per id instead. Do not widen this to an unbounded
+  # time-window scan, and do not add a `created_at`-leading index to make one
+  # cheap — the extra index would tax every activity_events write for a query
+  # this bound already makes fast.
+  #
+  # `issue_id: nil` is excluded explicitly, even though the `issue_id IN
+  # (real ids)` bound above already drops NULL rows as a side effect (SQL:
+  # `NULL IN (...)` is NULL, never true). Kept spelled out because it is the
+  # actual reason this scope is safe at all: activity_events holds issue-less
+  # rows ('poller', 'usage'), and a single NULL surviving into the outer
+  # `NOT IN` collapses that clause to the empty set for every row. Anyone
+  # loosening the bound above must not lose this exclusion along with it.
   scope :without_activity_since, lambda { |cutoff|
-    recent = ActivityEvent.where.not(issue_id: nil).where(created_at: cutoff..).select(:issue_id)
+    recent = ActivityEvent.where.not(issue_id: nil)
+                          .where(issue_id: all.select(:id))
+                          .where(created_at: cutoff..)
+                          .select(:issue_id)
     where.not(id: recent).where(created_at: ...cutoff)
   }
 end
