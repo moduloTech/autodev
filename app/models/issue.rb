@@ -309,4 +309,19 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
   private_class_method :recover_errored!, :recover_fixing_pipeline!, :recover_reviewing!,
                        :recover_post_completion!, :recover_stuck_processing!
+
+  # A row that has stopped moving: no activity_events entry since `cutoff`,
+  # falling back to its own created_at when it never emitted one.
+  #
+  # Single source of truth for two readers that must never disagree —
+  # HealthReport's stuck-issues card and `dispatch_dormant_audit` (Autodev #47).
+  # A card that flags what no pass acts on is how 14 rows sat frozen since April.
+  #
+  # `issue_id: nil` is excluded from the subquery on purpose: activity_events
+  # also holds issue-less rows ('poller', 'usage'), and a single NULL inside a
+  # `NOT IN` makes SQL return the empty set for every row.
+  scope :without_activity_since, lambda { |cutoff|
+    recent = ActivityEvent.where.not(issue_id: nil).where(created_at: cutoff..).select(:issue_id)
+    where.not(id: recent).where(created_at: ...cutoff)
+  }
 end

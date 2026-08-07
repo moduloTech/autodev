@@ -155,21 +155,13 @@ module Autodev
 
     # --- helpers -----------------------------------------------------------
 
+    # Two windows, one definition of dormancy (Issue.without_activity_since,
+    # Autodev #47). `pending` should leave within a poll cycle so it reuses the
+    # poller-staleness window; the active workflow states tolerate long
+    # danger-claude runs, which still emit activity, so they get a wider one.
     def stuck_issues
-      monitored = Issue.where(status: PENDING_STUCK_STATES + ACTIVE_STUCK_STATES).to_a
-      return [] if monitored.empty?
-
-      # Scope the aggregation to the (typically few) monitored issues — never
-      # group the whole activity_events table, which /healthz may probe often.
-      last_activity = ActivityEvent.where(issue_id: monitored.map(&:id))
-                                   .group(:issue_id).maximum(:created_at)
-      monitored.select { |issue| stuck?(issue, last_activity) }
-    end
-
-    def stuck?(issue, last_activity)
-      seen = last_activity.fetch(issue.id, issue.created_at)
-      cutoff = PENDING_STUCK_STATES.include?(issue.status) ? @now - poll_stale_after : @now - stuck_active_after
-      seen < cutoff
+      Issue.where(status: PENDING_STUCK_STATES).without_activity_since(@now - poll_stale_after).to_a +
+        Issue.where(status: ACTIVE_STUCK_STATES).without_activity_since(@now - stuck_active_after).to_a
     end
 
     def stuck_active_after
