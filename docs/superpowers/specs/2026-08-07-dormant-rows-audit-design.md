@@ -221,11 +221,18 @@ Today `dispatch_error_recheck` is silent when its cap runs out: the ticket goes
 permanently immobile with no signal. That is #47's own complaint, so the unified
 pass must not inherit it.
 
-On the last declined attempt, stamp the `needs_attention` trio
-(`attention_reason: 'dormant_exhausted'`, `attention_detail` naming the cap) and
-emit an activity event. The row then appears on `/errors`, in the `/admin/health`
-card and on the dashboard, with an explicit reason. The mechanism already exists
-(`stagnation_pipeline` uses it) and calls no GitLab API.
+The moment to signal is *not* a refused attempt. Every routing outcome in §1
+resolves the row: it ends `closed`, ends `done`, or gets a path forward. A row
+dies quietly the other way round — it is revived, falls dormant again, and after
+`cap` rounds it simply stops being selected, with nobody told.
+
+So the condition is **at cap and still dormant**, evaluated over the same three
+arms with the cap bound inverted. Such a row gets the `needs_attention` trio
+stamped once (`attention_reason: 'dormant_exhausted'`, `attention_detail` naming
+the cap) plus an activity event, and then appears on `/errors`, in the
+`/admin/health` card and on the dashboard with an explicit reason. The mechanism
+already exists (`stagnation_pipeline` uses it), and past the cap the row is not a
+candidate, so this costs no GitLab call at all.
 
 New i18n keys, in both `fr` and `en`:
 
@@ -277,9 +284,10 @@ extraction. One case per state in the table, including the two new rules
 (`fixing_discussions`, `answering_question`), asserted through both call sites so
 `recover_on_startup!` and the pass cannot drift apart.
 
-**Bounds** — the counter is consumed even when the outcome is a decline; on the
-last declined attempt the `needs_attention` trio is stamped with
-`dormant_exhausted`.
+**Bounds** — the counter is consumed whatever the outcome, including an
+unreachable GitLab; a row at the cap that is still dormant is stamped
+`dormant_exhausted` exactly once and costs no GitLab read; a row that was
+revived, closed or unassigned never enters that set.
 
 **#34 non-regression** — the existing `dispatch_error_recheck` tests are ported
 as-is onto the new pass. Identical behaviour on the `error` population; only
