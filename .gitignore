@@ -2,6 +2,9 @@
 docs/*.zip
 docs/**/*.pdf
 
+# Agent scratch workspace (ledger, task briefs, review packages)
+/.superpowers/
+
 # Rails (phase A railsification)
 /log/*
 !/log/.keep
