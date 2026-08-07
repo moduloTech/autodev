@@ -211,14 +211,16 @@ Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log`
 
 ### PollDispatcher + IssueProcessJob
 
-`app/services/autodev/poll_dispatcher.rb` runs one polling cycle per call: discovers issues from GitLab + DB, enqueues an `IssueProcessJob(project_path, issue_iid, action)` per work item. Six dispatch passes per project:
+`app/services/autodev/poll_dispatcher.rb` runs one polling cycle per call: discovers issues from GitLab + DB, enqueues an `IssueProcessJob(project_path, issue_iid, action)` per work item. Eight dispatch passes per project:
 
 - `dispatch_new_issues` — new `label_todo` issues → `:process`
 - `dispatch_pipelines` — `checking_pipeline` rows → `:check_pipeline`
 - `dispatch_discussions` — `fixing_discussions` rows → `:fix_discussions`
-- `dispatch_unassignment` — active rows no longer assigned → done inline (no job)
+- `dispatch_unassignment` — active rows closed on GitLab or no longer assigned → done inline (no job)
 - `dispatch_done_unassigned` — `done` rows with `post_completion` configured → `:post_completion`
+- `dispatch_dormant_audit` — rows that stopped moving (orphaned `pending`, spent-budget `error`, worker-pruned active states) → closed / done / re-armed inline, at most `dormant_audit_max` times per row
 - `dispatch_retries` — `error` + `pending` with backoff elapsed → `:retry_errored` / `:retry_stuck`
+- `dispatch_infra_recheck` — `done` + `stagnation_pipeline` rows → `:recheck_infra`
 
 `app/jobs/issue_process_job.rb` is a single ActiveJob class that dispatches on the action symbol to the right worker class. `limits_concurrency to: 1, key: "issue-#{project}-#{iid}"` serializes work per ticket; the queue.yml `threads` setting (`AUTODEV_MAX_WORKERS`, default 3) caps global concurrency.
 
@@ -300,6 +302,8 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | Interrupted reviewing | Reset to checking_pipeline on startup |
 | Post-completion command fails | Non-fatal: error stored in `post_completion_error`, issue still transitions to `done`, visible via `--errors` |
 | Interrupted running_post_completion | Reset to `done` on startup (non-fatal, not re-executed) |
+| Row dormant (`pending` with no `next_retry_at`, `error` with a spent budget, active state frozen 2h) | `dispatch_dormant_audit` gives it a bounded second look: closed on GitLab → `closed`, unassigned → `done`, still ours → re-armed. After `dormant_audit_max` fruitless rounds: `needs_attention` (`dormant_exhausted`) |
+| Interrupted `fixing_discussions` / `answering_question` | Revived by `Issue.revive_stalled!` — at startup and, if the service does not restart, by the dormant audit |
 
 ## Key Design Decisions
 

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A ticket that has stopped progressing is now caught automatically (Autodev #47).** A `pending` row with a NULL `next_retry_at` was invisible to every poll pass: not rediscovered via GitLab (it still carries `label_doing`, not `label_todo`), and not picked up by `dispatch_retries` either, which requires a non-NULL stamp. 14 such tickets sat frozen on one project, the oldest since April, 13 of them still open and still assigned — real requested work, never done, with nobody told.
+- **A ticket closed or reassigned on GitLab while parked `pending` or `error` is now detected (Autodev #48).** The sweep only ever looked at active rows, on the assumption that a row always eventually moves — false for a dormant one. Two real tickets (one closed, one handed back to a human) sat in a false state as a result.
+- **A ticket frozen by a worker dying mid-run (`cloning`, `implementing`, `answering_question`, `fixing_discussions`…) is now revived without waiting for a service restart.**
+
+### Changed
+
+- **`dispatch_error_recheck` becomes `dispatch_dormant_audit` and now covers three dormant populations instead of one.** Config keys `error_recheck_max` / `error_recheck_backoff` become `dormant_audit_max` / `dormant_audit_backoff`; the legacy names are still accepted.
+
 ## [1.0.0-alpha.45] - 2026-08-06
 
 ### Fixed
