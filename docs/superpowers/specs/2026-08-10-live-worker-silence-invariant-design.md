@@ -191,7 +191,11 @@ end
 `REVIVE_TO_DONE` and its shell command gets **no** heartbeat — it is not a
 danger-claude call — so its silence equals its timeout exactly. The `|| 300`
 literal in `lib/autodev/pipeline_monitor/post_completion.rb:25` becomes
-`DEFAULT_TIMEOUT`, read by both sites, so the two cannot drift.
+`Config::POST_COMPLETION_TIMEOUT`, read by both sites, so the two cannot drift.
+It lands on `Config` rather than on `PostCompletion` because `test/rails_helper.rb`
+boots Rails without `lib/autodev`'s tree (it requires only `locales`, `config`
+and `gitlab_helpers`): a constant on `PipelineMonitor` would `NameError` the
+moment `HealthReport` is exercised from `test/services/`.
 
 Consequences:
 
@@ -231,9 +235,13 @@ TDD, one test per claim.
 
 **Invisibility** (`test/activity_event_heartbeat_test.rb`, beside `activity_event_test.rb`)
 - A heartbeat row is not published to `Web::EventBus`.
-- `Issue.without_activity_since` **does** see it (the load-bearing assertion).
-- `weekly_activity_counts` ignores it.
-- `IssuesController#events_for` omits it from the issue timeline.
+- `Issue.without_activity_since` **does** see it (the load-bearing assertion),
+  and an out-of-window heartbeat does not hide a genuinely stale row.
+- `weekly_activity_counts` ignores it (extends `test/weekly_activity_counts_test.rb`,
+  whose `Host` class already mixes in `Web::Helpers`).
+- The issue timeline omits it, asserted through the rendered activity count
+  (`web_issue_activity` → "Activity (%{count})") in
+  `test/controllers/issues_controller_heartbeat_test.rb`.
 
 **Derived window** (`test/services/health_report_stuck_window_test.rb`)
 - Default config → 7200, unchanged.
