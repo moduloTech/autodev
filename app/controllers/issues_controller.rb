@@ -188,8 +188,12 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
     ).call
   end
 
+  # `user_visible` drops the danger-claude liveness markers (Autodev #50): one
+  # per call, no message, written only so the dormant audit can tell a live
+  # worker from a dead one.
   def events_for(issue_model)
-    activity_events_dataset.where(issue_id: issue_model.id)
+    activity_events_dataset.user_visible
+                           .where(issue_id: issue_model.id)
                            .order(created_at: :desc, id: :desc)
                            .limit(200).to_a
   end
