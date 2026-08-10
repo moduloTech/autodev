@@ -842,7 +842,7 @@ Finally, report the window in `check_stuck_issues`:
 
 Run: `mise x ruby -- bundle exec rake test TEST=test/services/health_report_stuck_window_test.rb`
 
-Expected: PASS, 10 runs, 0 failures.
+Expected: PASS, 9 runs, 0 failures.
 
 - [ ] **Step 7: Check the existing health-report and post-completion tests still pass**
 
