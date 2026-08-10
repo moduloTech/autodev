@@ -174,7 +174,7 @@ Depuis le task #9 (phases 3-4, `v1.0.0-alpha.25`/`.26`), la config par projet vi
 | Général | `target_branch` | Branche cible des MRs (défaut : branche par défaut du dépôt). |
 | Général | `labels_todo` / `label_doing` / `label_done` | Les 3 labels du cycle de vie GitLab (listes, une entrée par ligne). |
 | Général | `extra_prompt` | Texte ajouté à tous les prompts `danger-claude` du projet. |
-| Exécution | `dc_timeout` | Délai max d'un appel `danger-claude` (s). |
+| Exécution | `dc_timeout` | Délai max d'un appel `danger-claude`, et plafond d'une exécution de `mr-review` (s). |
 | Exécution | `max_retries` | Nb max de **retries** (pas de tentatives totales) sur échec — défaut `1`, soit 1 retry après le premier échec. Résolu par `Config.max_retries` et comparé de façon inclusive (`retry_count <= max_retries`) à chaque site. Un `max_retries` **global** dans `config.yml` est ignoré (`IGNORED_GLOBAL_FIELDS`) : seuls l'override par projet et le `DEFAULTS` s'appliquent. |
 | Exécution | `retry_backoff` | Délai de base entre deux tentatives (s). |
 | Exécution | `dormant_audit_max` | Nb max de secondes chances accordées à une ligne dormante (`pending` orpheline, budget de retry épuisé, ou état actif figé) avant abandon (défaut 3, `DEFAULT_DORMANT_AUDIT_MAX`). Ancien nom `error_recheck_max`, toujours accepté. |
