@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 class IssueProcessor
-  # Merge request creation, label management, and review execution.
+  # Merge request creation and lookup. Reviews are PipelineMonitor::Reviewer's
+  # job — this module used to carry a parallel, never-called copy of that path
+  # (removed in Autodev #54).
   module MrManager
     private
 
@@ -27,34 +29,6 @@ class IssueProcessor
       mr
     rescue Gitlab::Error::ResponseError
       nil
-    end
-
-    def run_review(mr_url)
-      unless command_exists?('mr-review')
-        log 'mr-review not installed, skipping review'
-        return
-      end
-
-      log 'Waiting 15s for GitLab to compute diff_refs...'
-      sleep 15
-      execute_review(mr_url)
-    rescue StandardError => e
-      log_error "mr-review error (non-fatal): #{e.message}"
-    end
-
-    def execute_review(mr_url)
-      log "Running mr-review on #{mr_url}..."
-      # mr-review is an Open3 call with no timeout and no danger-claude heartbeat of
-      # its own (Autodev #50 follow-up): mark liveness right before the unbounded
-      # call, as late as possible, so silence in `reviewing` is bounded at one run.
-      dc_heartbeat!('mr-review')
-      _, err, status = Open3.capture3(DangerClaudeRunner::CLEAN_ENV, 'mr-review', '-H', mr_url)
-      status.success? ? log('Review completed successfully') : log_error("mr-review failed (non-fatal): #{err[0, 300]}")
-    end
-
-    def command_exists?(cmd)
-      _, status = Open3.capture2e('which', cmd)
-      status.success?
     end
   end
 end
