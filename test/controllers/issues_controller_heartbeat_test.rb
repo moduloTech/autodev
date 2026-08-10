@@ -3,15 +3,6 @@
 require_relative '../rails_helper'
 require 'action_dispatch/testing/integration'
 require 'devise'
-# `Web::Helpers#screenshot_dir_for` (called by IssueShow's screenshots card)
-# references top-level `ScreenshotUploader`, which lives under lib/autodev and
-# is only pulled in by test_helper.rb's Sequel-side boot, not rails_helper.rb
-# (see rails_helper.rb's `AUTODEV_SKIP_LEGACY` note for the same class of gap
-# with GitlabHelpers). Without this require, running this file in isolation —
-# the first controller test to render a fully authenticated issue#show page —
-# raises `NameError: uninitialized constant Web::Helpers::ScreenshotUploader`
-# instead of exercising the heartbeat filtering under test.
-require 'autodev/screenshot_uploader'
 
 # The issue timeline must not show danger-claude liveness markers (Autodev #50).
 # They are written once per call — a single implementation run can produce a

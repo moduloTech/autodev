@@ -13,7 +13,16 @@ class ActivityEvent < ApplicationRecord
   # persists once per cycle (Autodev #46). `heartbeat` is different — it carries
   # an issue_id: it is the per-danger-claude-call liveness marker that bounds a
   # live worker's silence (Autodev #50, DangerClaudeRunner#dc_heartbeat!).
-  KINDS = %w[transition danger_claude poller error usage heartbeat].freeze
+  # `discussions_snapshot` (DiscussionSnapshot.capture) is rendered in the issue
+  # timeline and broadcast to /stream like any other row.
+  #
+  # This list is descriptive, not enforced: it documents the kinds writers use,
+  # it is not a DB-level or model-level constraint. Do not add
+  # `validates :kind, inclusion:` — ActivityLogger writes with non-bang
+  # ActivityEvent.create and swallows failures, so an inclusion validation
+  # would silently stop logging the first time anyone introduces an unlisted
+  # kind, which is strictly worse than this comment being stale.
+  KINDS = %w[transition danger_claude poller error usage heartbeat discussions_snapshot].freeze
   LEVELS = %w[info warn error].freeze
 
   belongs_to :issue, optional: true

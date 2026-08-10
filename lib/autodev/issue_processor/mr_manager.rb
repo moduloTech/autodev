@@ -44,6 +44,10 @@ class IssueProcessor
 
     def execute_review(mr_url)
       log "Running mr-review on #{mr_url}..."
+      # mr-review is an Open3 call with no timeout and no danger-claude heartbeat of
+      # its own (Autodev #50 follow-up): mark liveness right before the unbounded
+      # call, as late as possible, so silence in `reviewing` is bounded at one run.
+      dc_heartbeat!('mr-review')
       _, err, status = Open3.capture3(DangerClaudeRunner::CLEAN_ENV, 'mr-review', '-H', mr_url)
       status.success? ? log('Review completed successfully') : log_error("mr-review failed (non-fatal): #{err[0, 300]}")
     end

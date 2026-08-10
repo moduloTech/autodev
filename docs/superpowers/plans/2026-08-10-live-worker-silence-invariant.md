@@ -633,7 +633,7 @@ With the heartbeat in place, silence is one danger-claude call long — except f
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks (independent of 1–3).
-- Produces: `Config::POST_COMPLETION_TIMEOUT` (Integer, 300); `Autodev::HealthReport::HEARTBEAT_FACTOR` (Integer, 2); `HealthReport#stuck_active_after` → Integer, memoized, now derived. `DormantAudit#active_window` already delegates to it (Task 5 pins that).
+- Produces: `Config::POST_COMPLETION_TIMEOUT` (Integer, 300); `Autodev::HealthReport::TIMEOUT_SLACK_FACTOR` (Integer, 2; renamed from `HEARTBEAT_FACTOR` in final review — it multiplies a timeout, not a heartbeat interval); `HealthReport#stuck_active_after` → Integer, memoized, now derived. `DormantAudit#active_window` already delegates to it (Task 5 pins that).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -776,6 +776,10 @@ In `app/services/autodev/health_report.rb`, after the `STUCK_ACTIVE_AFTER` line,
     # has to clear that timeout; twice over, for loop overhead and margin.
     HEARTBEAT_FACTOR = 2
 ```
+
+(Renamed to `TIMEOUT_SLACK_FACTOR` in final review, with the comment restated
+around untimed inter-call work rather than "one call, plus one call of
+margin" — see the design doc's §2.)
 
 Replace `stuck_active_after`:
 

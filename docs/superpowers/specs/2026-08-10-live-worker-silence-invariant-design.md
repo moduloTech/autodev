@@ -101,9 +101,20 @@ dependency explicit instead of coincidental.
 
 `danger_claude_prompt` and `danger_claude_commit` (both in
 `lib/autodev/danger_claude_runner.rb`) are the only two methods that spawn
-danger-claude — every call site in the codebase goes through one of them, and
-both reach `run_with_timeout('danger-claude', …)`, which owns the `dc_timeout`
-kill. A private helper emits one activity row at the **start** of each:
+danger-claude for issue-scoped work — every issue-scoped call goes through one
+of them, and both reach `run_with_timeout('danger-claude', …)`, which owns the
+`dc_timeout` kill. A private helper emits one activity row at the **start** of
+each:
+
+Two danger-claude call sites bypass `DangerClaudeRunner` entirely and are
+**not** covered by this guarantee: `Autospec::ProjectBriefer#invoke_danger_claude!`
+(`app/services/autospec/project_briefer.rb`, raw `Open3.capture3`, no timeout)
+and `Autodev::UsageChecker#send_probe` (`lib/autodev/usage_checker.rb`). Neither
+is issue-scoped today, so nothing is broken — but a future issue-scoped call
+written in `ProjectBriefer`'s style would silently fall outside the invariant.
+"Every danger-claude call in the codebase funnels through here" was the
+original, broader claim; it does not hold once these two are counted, so the
+guarantee is stated as issue-scoped only.
 
 ```ruby
 # lib/autodev/danger_claude_runner.rb
@@ -168,11 +179,17 @@ heartbeat is the whole mechanism.
 
 ```ruby
 # app/services/autodev/health_report.rb
-HEARTBEAT_FACTOR = 2 # one full call, plus one call of margin
+# Heuristic, not a bound, for as long as any inter-call work is untimed: the
+# worst-case gap for a live worker is (heartbeat -> call end: <= dc_timeout +
+# kill grace + pipe drain) + (call end -> next heartbeat or transition: untimed
+# inter-call work — screenshot uploads, job_trace fetches, git operations, the
+# clone_and_checkout inside post_completion). The factor pays for the second
+# term; it multiplies a timeout, not a heartbeat interval, hence the name.
+TIMEOUT_SLACK_FACTOR = 2
 
 def stuck_active_after
   @stuck_active_after ||= [configured_stuck_active_after,
-                           HEARTBEAT_FACTOR * longest_worker_timeout].max
+                           TIMEOUT_SLACK_FACTOR * longest_worker_timeout].max
 end
 ```
 
@@ -196,6 +213,19 @@ It lands on `Config` rather than on `PostCompletion` because `test/rails_helper.
 boots Rails without `lib/autodev`'s tree (it requires only `locales`, `config`
 and `gitlab_helpers`): a constant on `PipelineMonitor` would `NameError` the
 moment `HealthReport` is exercised from `test/services/`.
+
+**Acknowledged exception: `reviewing`.** `mr-review` is an LLM review of the
+full MR diff, run via `Open3.capture3` with **no timeout**, at two call sites
+(`PipelineMonitor::Reviewer#run_mr_review_command`,
+`IssueProcessor::MrManager#execute_review`). It is not a danger-claude call, so
+unlike `running_post_completion` it contributes **no term** to
+`longest_worker_timeout` — there is no configured timeout to fold into the max.
+Both sites now call `dc_heartbeat!('mr-review')` immediately before the
+`Open3.capture3` line, so silence in `reviewing` is bounded to one mr-review run
+plus the 15 s pre-sleep, not unbounded. That collapses the exposure but does not
+close it: no configured value sizes the window for a run that never returns.
+Giving `mr-review` a real timeout is out of scope here and tracked as a
+separate ticket.
 
 Consequences:
 

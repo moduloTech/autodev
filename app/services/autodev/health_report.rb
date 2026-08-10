@@ -42,11 +42,15 @@ module Autodev
     ACTIVE_STUCK_STATES = ::Issue::STALLED_STATES
     STUCK_ACTIVE_AFTER = 7200 # 2h with zero activity ⇒ a dead worker, not a long run
 
-    # A live worker's silence is bounded by one danger-claude call — the
-    # DangerClaudeRunner heartbeat (Autodev #50) writes an activity row per call,
-    # so no loop can go quiet for longer than its own timeout. The window only
-    # has to clear that timeout; twice over, for loop overhead and margin.
-    HEARTBEAT_FACTOR = 2
+    # Heuristic, not a bound, for as long as any inter-call work is untimed. The
+    # DangerClaudeRunner heartbeat (Autodev #50) resets the clock when a call
+    # starts, so the worst-case gap for a live worker is (heartbeat -> call end:
+    # dc_timeout + kill grace + pipe drain) + (call end -> next heartbeat or
+    # transition: untimed inter-call work — screenshot uploads, job_trace
+    # fetches, git operations, the clone_and_checkout inside post_completion).
+    # This factor pays for the second term; it multiplies a timeout, not a
+    # heartbeat interval, hence the name.
+    TIMEOUT_SLACK_FACTOR = 2
 
     # poller_expected: whether the recurring poll is supposed to be running here.
     # Defaults to "not a local env" — config/recurring.yml disables recurring
@@ -88,7 +92,7 @@ module Autodev
     # two settings can no longer be configured into disagreement.
     def stuck_active_after
       @stuck_active_after ||= [configured_stuck_active_after,
-                               HEARTBEAT_FACTOR * longest_worker_timeout].max
+                               TIMEOUT_SLACK_FACTOR * longest_worker_timeout].max
     end
 
     private
