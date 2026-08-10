@@ -22,7 +22,7 @@ class PipelineMonitor
     def execute_post_completion(issue, cmd, work_dir)
       clone_and_checkout(work_dir, issue.branch_name)
       env = post_completion_env(issue)
-      timeout = (@project_config['post_completion_timeout'] || 300).to_i
+      timeout = (@project_config['post_completion_timeout'] || ::Config::POST_COMPLETION_TIMEOUT).to_i
       run_pc_with_timeout(issue, cmd, work_dir, env, timeout)
     end
 

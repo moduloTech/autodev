@@ -84,15 +84,19 @@ it rather than its twin.
 |---|---|---|
 | `pending` | `next_retry_at IS NULL` + no activity within the poller staleness window | Invisible to `dispatch_new_issues` (carries `label_doing`) *and* to `dispatch_retries` (needs a stamp) — the #47 bug |
 | `error` | `retry_count > max_retries` + backoff elapsed | Spent budget — #34's current population, unchanged |
-| active | `HealthReport::ACTIVE_STUCK_STATES` + no activity for 2h | Worker pruned in flight: `FailedJobReaper` discards the job, no pass re-dispatches |
+| active | `HealthReport::ACTIVE_STUCK_STATES` + no activity for `stuck_active_after` (derived — see below) | Worker pruned in flight: `FailedJobReaper` discards the job, no pass re-dispatches |
 
 All three share the same bound: `dormant_recheck_count < cap` and
 `dormant_recheck_at` NULL or elapsed.
 
 Windows are the ones `HealthReport` already defines, not new knobs:
 `poll_stale_after` = `max(poll_interval × poll_stale_factor, 900s)` for the
-`pending` arm, `stuck_active_after` (`STUCK_ACTIVE_AFTER = 7200`, overridable via
-`monitoring.stuck_active_after_seconds`) for the active arm.
+`pending` arm, `stuck_active_after` for the active arm — a flat `STUCK_ACTIVE_AFTER = 7200` at
+the time of this design, overridable via `monitoring.stuck_active_after_seconds`.
+Autodev #50 later made it derived (`max(configured, 2 × the longest configured
+dc_timeout / post_completion_timeout)`) and paired it with a per-call heartbeat,
+because a live worker could already outlast the flat window — see
+`2026-08-10-live-worker-silence-invariant-design.md`.
 
 The age threshold on the `pending` arm is load-bearing: `find_or_create_issue`
 creates a row with `next_retry_at` NULL and then enqueues

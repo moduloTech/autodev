@@ -78,6 +78,16 @@ class WeeklyActivityCountsTest < Minitest::Test
                  'only the work event counts; poller/error are excluded'
   end
 
+  # Liveness markers (Autodev #50) are written once per danger-claude call, so
+  # counting them would make the sparkline measure worker chatter instead of
+  # work done.
+  def test_heartbeat_events_are_excluded
+    insert_event("#{Time.zone.today} 12:00:00", kind: 'heartbeat')
+    insert_event("#{Time.zone.today} 12:00:00", kind: 'transition')
+
+    assert_equal 1, @helper.weekly_activity_counts.sum
+  end
+
   # An event at 00:30 Europe/Paris is stored ~22:30/23:30 the previous UTC day.
   # UTC-day bucketing would file it under yesterday; the zone-aware helper must
   # place it in today's (rightmost) bar.

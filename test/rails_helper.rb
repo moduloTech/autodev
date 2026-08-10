@@ -35,6 +35,13 @@ require 'autodev/config'
 # loaded the constant — run in isolation every probe degraded to :error
 # (NameError: uninitialized constant …::GitlabHelpers). Light dep (just 'time').
 require 'autodev/gitlab_helpers'
+# `Web::Helpers#screenshot_dir_for` (called by IssueShow's screenshots card)
+# references top-level `ScreenshotUploader`, which lives under lib/autodev and
+# is only pulled in by test_helper.rb's Sequel-side boot, not this one — same
+# class of gap as GitlabHelpers above. Without this require, the first
+# controller test to render a fully authenticated issue#show page run in
+# isolation raises `NameError: uninitialized constant Web::Helpers::ScreenshotUploader`.
+require 'autodev/screenshot_uploader'
 
 require 'minitest/autorun'
 require 'active_support/test_case'

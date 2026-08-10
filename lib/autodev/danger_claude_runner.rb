@@ -43,13 +43,14 @@ module DangerClaudeRunner
     @last_session_id = nil
   end
 
-  # rubocop:disable Metrics/ParameterLists
+  # rubocop:disable Metrics/ParameterLists, Metrics/MethodLength
   def danger_claude_prompt(work_dir, prompt, label: '-p', agent: nil, model: nil, resume: nil)
     args = dc_global_args(model_default: model)
     args.push('-r', resume) if resume
     args.push('-a', agent) if agent
     args += ['-p', prompt]
     log_dc_prompt(prompt, agent)
+    dc_heartbeat!(label)
     out, err, ok = run_with_timeout('danger-claude', args, chdir: work_dir, label: label)
     text = capture_session_and_text(out)
     check_dc_failures!(text, err)
@@ -57,17 +58,39 @@ module DangerClaudeRunner
 
     text
   end
-  # rubocop:enable Metrics/ParameterLists
+  # rubocop:enable Metrics/ParameterLists, Metrics/MethodLength
 
   def log_dc_prompt(prompt, agent)
     prefix = agent ? "danger-claude -a #{agent} -p" : 'danger-claude -p'
     @logger.debug("#{prefix} prompt:\n#{prompt}", project: @project_path)
   end
 
+  # The invariant dispatch_dormant_audit rests on (Autodev #50): a live worker's
+  # silence must stay under HealthReport#stuck_active_after, or the audit can
+  # reposition a row while an IssueProcessJob holds the concurrency lock on it —
+  # silently, since the model runs with `whiny_transitions: false`.
+  #
+  # Business events do not provide that bound (PipelineFixer: one event per
+  # state, two calls per failed job), so liveness is recorded per call, here,
+  # where every issue-scoped danger-claude call funnels through. Two bypasses sit
+  # outside that guarantee, both not issue-scoped today: Autospec::ProjectBriefer
+  # (raw Open3.capture3, no timeout) and Autodev::UsageChecker's probe. Neither
+  # is broken by that — this class only bounds silence on rows the dormant audit
+  # can touch — but a future issue-scoped call written in ProjectBriefer's style
+  # would not be covered.
+  #
+  # Before the call, not after: the clock resets when the call starts, so the
+  # longest possible gap is one call's dc_timeout plus loop overhead — whatever
+  # the surrounding loop does.
+  def dc_heartbeat!(label)
+    ActivityLogger.heartbeat!(@dc_issue, label)
+  end
+
   def danger_claude_commit(work_dir, label: '-c', resume: nil)
     args = dc_global_args
     args.push('-r', resume) if resume
     args += ['-c']
+    dc_heartbeat!(label)
     out, err, ok = run_with_timeout('danger-claude', args, chdir: work_dir, label: label)
     text = capture_session_and_text(out)
     check_dc_failures!(text, err)

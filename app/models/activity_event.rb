@@ -10,8 +10,19 @@
 class ActivityEvent < ApplicationRecord
   # `poller`, `error` and `usage` are system events (issue_id nil): heartbeats,
   # cycle-failure markers, and the Claude-quota verdict Autodev::UsageGate
-  # persists once per cycle (Autodev #46).
-  KINDS = %w[transition danger_claude poller error usage].freeze
+  # persists once per cycle (Autodev #46). `heartbeat` is different — it carries
+  # an issue_id: it is the per-danger-claude-call liveness marker that bounds a
+  # live worker's silence (Autodev #50, DangerClaudeRunner#dc_heartbeat!).
+  # `discussions_snapshot` (DiscussionSnapshot.capture) is rendered in the issue
+  # timeline and broadcast to /stream like any other row.
+  #
+  # This list is descriptive, not enforced: it documents the kinds writers use,
+  # it is not a DB-level or model-level constraint. Do not add
+  # `validates :kind, inclusion:` — ActivityLogger writes with non-bang
+  # ActivityEvent.create and swallows failures, so an inclusion validation
+  # would silently stop logging the first time anyone introduces an unlisted
+  # kind, which is strictly worse than this comment being stale.
+  KINDS = %w[transition danger_claude poller error usage heartbeat discussions_snapshot].freeze
   LEVELS = %w[info warn error].freeze
 
   belongs_to :issue, optional: true
@@ -27,6 +38,15 @@ class ActivityEvent < ApplicationRecord
   attribute :created_at, :datetime
 
   after_create_commit :broadcast_to_event_bus
+
+  # Rows that exist for one reader only: Issue.without_activity_since, which
+  # bounds how long a live worker may stay silent before dispatch_dormant_audit
+  # repositions its row (Autodev #50). They are machinery, not activity anyone
+  # asked to see, so every path that *renders* events goes through this scope —
+  # one definition rather than a `where.not` repeated per consumer. The
+  # staleness query itself must NOT use it: counting the heartbeat is the whole
+  # mechanism.
+  scope :user_visible, -> { where.not(kind: 'heartbeat') }
 
   def payload
     return {} if payload_json.nil? || payload_json.empty?
@@ -52,6 +72,9 @@ class ActivityEvent < ApplicationRecord
     # They feed Autodev::HealthReport, not the per-issue SSE activity feed — and
     # broadcasting a 5-minute heartbeat would spam /stream. Skip them here.
     return if issue_id.nil?
+    # danger-claude liveness markers DO carry an issue_id, so the guard above
+    # does not cover them: one frame per call would flood the feed (Autodev #50).
+    return if kind == 'heartbeat'
 
     Web::EventBus.publish(self)
   rescue StandardError
