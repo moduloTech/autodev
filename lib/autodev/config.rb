@@ -61,6 +61,13 @@ module Config # rubocop:disable Metrics/ModuleLength
     'monitoring' => { 'token' => nil, 'poll_stale_factor' => 3 }
   }.freeze
 
+  # Baked default for the per-project `post_completion_timeout`, in seconds.
+  # Deliberately a standalone constant rather than a DEFAULTS key: it has no
+  # global form (there is no `post_completion` outside a project). It lives here
+  # because Autodev::HealthReport sizes the stuck-issues window on it (Autodev
+  # #50) and must not have to load the PipelineMonitor tree to read it.
+  POST_COMPLETION_TIMEOUT = 300
+
   ENV_MAPPING = {
     'GITLAB_API_TOKEN' => 'gitlab_token',
     'GITLAB_URL' => 'gitlab_url'

@@ -42,6 +42,12 @@ module Autodev
     ACTIVE_STUCK_STATES = ::Issue::STALLED_STATES
     STUCK_ACTIVE_AFTER = 7200 # 2h with zero activity ⇒ a dead worker, not a long run
 
+    # A live worker's silence is bounded by one danger-claude call — the
+    # DangerClaudeRunner heartbeat (Autodev #50) writes an activity row per call,
+    # so no loop can go quiet for longer than its own timeout. The window only
+    # has to clear that timeout; twice over, for loop overhead and margin.
+    HEARTBEAT_FACTOR = 2
+
     # poller_expected: whether the recurring poll is supposed to be running here.
     # Defaults to "not a local env" — config/recurring.yml disables recurring
     # jobs in development, so a missing heartbeat there is normal, not a fault.
@@ -74,8 +80,15 @@ module Autodev
       @poll_stale_after ||= [(poll_interval * poll_stale_factor), POLL_STALE_FLOOR].max
     end
 
+    # Derived, not just configured (Autodev #50). DormantAudit#active_window
+    # reads this too and repositions rows by update_all, outside the
+    # concurrency lock that serialises IssueProcessJob — so a window narrower
+    # than the longest configured timeout does not merely mis-report, it lets
+    # the audit mutate a row a live worker still holds. Deriving it means the
+    # two settings can no longer be configured into disagreement.
     def stuck_active_after
-      (@config.dig('monitoring', 'stuck_active_after_seconds') || STUCK_ACTIVE_AFTER).to_i
+      @stuck_active_after ||= [configured_stuck_active_after,
+                               HEARTBEAT_FACTOR * longest_worker_timeout].max
     end
 
     private
@@ -158,7 +171,9 @@ module Autodev
 
     def check_stuck_issues
       stuck = stuck_issues
-      meta = { count: stuck.size }
+      # window_seconds so the effective value is visible: it is derived, so a
+      # narrower `monitoring.stuck_active_after_seconds` does not apply.
+      meta = { count: stuck.size, window_seconds: stuck_active_after }
       return build(:ok, 'no stuck issues', meta) if stuck.empty?
 
       meta[:sample] = stuck.first(5).map { |i| "##{i.issue_iid}(#{i.status})" }.join(' ')
@@ -189,6 +204,33 @@ module Autodev
 
     def poll_stale_factor
       (@config.dig('monitoring', 'poll_stale_factor') || DEFAULT_POLL_STALE_FACTOR).to_i
+    end
+
+    def configured_stuck_active_after
+      (@config.dig('monitoring', 'stuck_active_after_seconds') || STUCK_ACTIVE_AFTER).to_i
+    end
+
+    # The longest a worker can legitimately go quiet: one danger-claude call
+    # (dc_timeout) or one post_completion command (post_completion_timeout —
+    # not a danger-claude call, so it gets no heartbeat and its silence equals
+    # its timeout exactly). Both are per-project only, so the window is sized on
+    # the widest value in play. The baked defaults are always in the max: a
+    # project that overrides neither still runs with them.
+    def longest_worker_timeout
+      [::Config::DEFAULTS['dc_timeout'], ::Config::POST_COMPLETION_TIMEOUT,
+       Project.maximum(:dc_timeout), Project.maximum(:post_completion_timeout),
+       *yaml_project_timeouts].compact.map(&:to_i).max
+    end
+
+    # Projects configured in config.yml but not yet imported into the projects
+    # table: still live config, since IssueProcessJob falls back to the YAML hash
+    # for a project with no row.
+    def yaml_project_timeouts
+      Array(@config['projects']).flat_map do |project|
+        next [] unless project.is_a?(Hash)
+
+        [project['dc_timeout'], project['post_completion_timeout']]
+      end
     end
 
     def build(status, detail, meta = {})
