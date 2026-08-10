@@ -120,6 +120,35 @@ class DormantAuditSelectionTest < Minitest::Test # rubocop:disable Metrics/Class
     refute_includes candidate_iids, issue.issue_iid
   end
 
+  # The window is derived from the longest configured timeout (Autodev #50), so
+  # a project that raises dc_timeout widens it instead of letting the audit
+  # reposition a row a live worker still holds. 5400s ⇒ a 10800s (3h) window.
+  #
+  # The Project row is created here rather than in setup because
+  # DatabaseTestHelper only wipes issues + activity_events, and these tests are
+  # not transactional — an escaped row would widen the window for every other
+  # test in the process.
+  def test_an_active_row_within_a_widened_window_is_not_a_candidate
+    Project.create!(gitlab_path: 'group/project', slug: 'group__project', dc_timeout: 5400)
+    issue = create_issue(status: 'implementing', created_at: 4.hours.ago)
+    ActivityEvent.create!(issue_id: issue.id, kind: 'heartbeat', level: 'info',
+                          payload_json: '{}', created_at: 150.minutes.ago)
+
+    refute_includes candidate_iids, issue.issue_iid
+  ensure
+    Project.where(gitlab_path: 'group/project').delete_all
+  end
+
+  # Control for the test above: the same row, the same 2.5h silence, with no
+  # project widening the window, IS dormant under the 2h default.
+  def test_the_same_row_is_a_candidate_under_the_default_window
+    issue = create_issue(status: 'implementing', created_at: 4.hours.ago)
+    ActivityEvent.create!(issue_id: issue.id, kind: 'heartbeat', level: 'info',
+                          payload_json: '{}', created_at: 150.minutes.ago)
+
+    assert_includes candidate_iids, issue.issue_iid
+  end
+
   def test_a_done_row_is_never_a_candidate
     issue = create_issue(status: 'done', created_at: 4.hours.ago)
 

@@ -119,6 +119,16 @@ module Autodev
     # Both windows belong to HealthReport, on purpose: the stuck-issues card and
     # this pass must see the same rows, or the card keeps flagging what nothing
     # recovers — the shape of #47.
+    #
+    # `active_window` is also the safety boundary of this pass (Autodev #50).
+    # `revive` mutates by update_all, from the poll cycle, outside the
+    # `limits_concurrency` that serialises IssueProcessJob — so the window must
+    # exceed the longest a *live* worker can stay silent, or a row gets
+    # repositioned under the job that holds it. Two things hold that up:
+    # DangerClaudeRunner writes an activity row per danger-claude call, and
+    # HealthReport#stuck_active_after is derived from the longest configured
+    # timeout. Neither is optional; see
+    # docs/superpowers/specs/2026-08-10-live-worker-silence-invariant-design.md.
     def pending_window = health_report.poll_stale_after
 
     def active_window = health_report.stuck_active_after
