@@ -796,6 +796,9 @@ Replace `stuck_active_after`:
     end
 ```
 
+(`HEARTBEAT_FACTOR` in this quote too — renamed to `TIMEOUT_SLACK_FACTOR` in
+final review, as noted above.)
+
 Then in the `private` section, next to `poll_interval` / `poll_stale_factor`:
 
 ```ruby
