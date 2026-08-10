@@ -2,7 +2,7 @@
 title: "Autodev — Guide technique"
 subtitle: "Routes admin, configuration projet, CLI, machine à états"
 author: "Modulotech"
-date: 2026-08-06
+date: 2026-08-10
 lang: fr
 documentclass: article
 papersize: a4

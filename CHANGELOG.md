@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.46] - 2026-08-10
+
 ### Fixed
 
 - **A ticket that has stopped progressing is now caught automatically (Autodev #47).** A `pending` row with a NULL `next_retry_at` was invisible to every poll pass: not rediscovered via GitLab (it still carries `label_doing`, not `label_todo`), and not picked up by `dispatch_retries` either, which requires a non-NULL stamp. 14 such tickets sat frozen on one project, the oldest since April, 13 of them still open and still assigned — real requested work, never done, with nobody told.
@@ -11,6 +13,8 @@
 ### Changed
 
 - **`dispatch_error_recheck` becomes `dispatch_dormant_audit` and now covers three dormant populations instead of one.** Config keys `error_recheck_max` / `error_recheck_backoff` become `dormant_audit_max` / `dormant_audit_backoff`; the legacy names are still accepted.
+
+- **Both usage guides refreshed for this release.** Functional (`/help`): the "what each card asks of you" list gains the new *La demande ne progresse plus* case — Autodev noticed on its own that a request had stalled, tried several times to restart it, and could not; the answer is to check the ticket on GitLab, since most of the time it is simply no longer relevant. Technical (`/admin/help`): the polling list, the config-fields table, the Claude-quota gate matrix and the error catalog all follow `dispatch_error_recheck` → `dispatch_dormant_audit`, with the three arms, the three outcomes, the `dormant_audit_*` keys and their legacy fallbacks, the two migrations behind the `dormant_recheck_*` columns, and a new row for a run interrupted in `fixing_discussions` / `answering_question`. Screenshots not recaptured — no screen layout changed.
 
 ## [1.0.0-alpha.45] - 2026-08-06
 

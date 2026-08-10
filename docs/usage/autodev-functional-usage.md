@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-08-06
+date: 2026-08-10
 lang: fr
 documentclass: article
 papersize: a4
@@ -187,6 +187,7 @@ La réponse attendue dépend de la situation :
 - **Échec technique** (onglet *Erreurs*) — *« Une erreur a empêché autodev de continuer. »* C'est probablement un bug d'Autodev lui-même. Avant d'agir, laissez-lui sa chance : Autodev **réessaie tout seul**, et redonne même une seconde chance espacée d'une heure à une demande dont les tentatives sont épuisées — beaucoup de ces échecs sont passagers (coupure réseau, GitLab indisponible) et se résorbent sans vous. Si la demande est toujours en échec après ça, relancez-la avec **Réessayer maintenant** ; si l'échec persiste, **prévenez l'équipe autodev** (les *détails techniques* sont utiles à transmettre). Vous n'avez rien à corriger côté ticket.
 - **Question en attente** (onglet *Question en attente*) — *« Autodev a posé une question pour préciser la demande. »* Là, c'est à **vous de répondre** : Autodev a posté une question dans le ticket GitLab et attend votre réponse pour reprendre. **Répondez-lui en commentaire sur le ticket GitLab** (le bouton **Voir la question** vous y emmène directement). Tant que personne ne répond, la demande reste en attente.
 - **Intervention manuelle requise** (onglet *Livrée (à vérifier)*) — la demande a été **livrée**, mais Autodev a atteint une limite (trop de corrections de pipeline ou de tours de relecture) et l'a livrée telle quelle. **Vérifiez la MR à la main** ; quand c'est bon, **Clôturer** la range. Quand le blocage vient d'un souci d'infrastructure (un job qui échoue en boucle), la carte indique désormais **le ou les jobs en cause** (par exemple *deploy_review*) pour vous aiguiller. Bonne nouvelle : dès que l'infrastructure est réparée et que les tests repassent au vert, Autodev **relance tout seul** ce genre de demande — vous n'avez en général rien à faire. Sous l'explication, la carte rappelle aussi **qui contacter** — un développeur du projet — pour finaliser la livraison.
+- **La demande ne progresse plus** (onglet *Livrée (à vérifier)*) — *« La demande ne progresse plus et les vérifications automatiques n'ont pas permis de la relancer. »* Autodev a repéré tout seul qu'elle était à l'arrêt et a tenté plusieurs fois de la remettre en route, sans succès. **Allez voir le ticket sur GitLab** : la plupart du temps il n'est tout simplement plus d'actualité, et il suffit de le clôturer ou de retirer Autodev des assignés. Si le travail est toujours attendu, prévenez l'équipe autodev.
 
 ## Les actions sur chaque carte
 
