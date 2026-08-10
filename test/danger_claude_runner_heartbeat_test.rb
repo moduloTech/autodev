@@ -15,6 +15,20 @@ require 'autodev/danger_claude_runner'
 class DangerClaudeRunnerHeartbeatTest < Minitest::Test
   include DatabaseTestHelper
 
+  # Proves the DB-only claim rather than assuming it: raises on any message,
+  # so if ActivityLogger.heartbeat! (or anything else in the call path) ever
+  # touched the GitLab client, the test would error instead of passing
+  # regardless of whether it did.
+  class RaisingClient
+    def method_missing(name, *)
+      raise "unexpected GitLab client call: #{name}"
+    end
+
+    def respond_to_missing?(*)
+      true
+    end
+  end
+
   # Host for DangerClaudeRunner's two danger-claude entry points with the
   # subprocess stubbed: what is under test is the activity row the call writes,
   # not danger-claude itself.
@@ -23,8 +37,8 @@ class DangerClaudeRunnerHeartbeatTest < Minitest::Test
 
     attr_reader :timeout_calls
 
-    def initialize(issue:, logger:)
-      init_runner(client: nil, config: { 'dc_timeout' => 1800 },
+    def initialize(issue:, logger:, client: nil)
+      init_runner(client: client, config: { 'dc_timeout' => 1800 },
                   project_config: { 'path' => 'group/project' },
                   logger: logger, token: 'tok')
       @dc_issue = issue
@@ -76,10 +90,14 @@ class DangerClaudeRunnerHeartbeatTest < Minitest::Test
     assert_equal 6, heartbeats.size
   end
 
-  # No GitLab round-trip: the client is nil, so any attempt to post would raise.
-  # The activity note on the issue is deliberately left alone.
+  # No GitLab round-trip: the client raises on any message, so the heartbeat
+  # path must never touch it. If it did, this call would raise instead of
+  # reaching the assertion. The activity note on the issue is deliberately
+  # left alone.
   def test_no_gitlab_call_is_made
-    @harness.send(:danger_claude_prompt, '/tmp/wd', 'do the thing')
+    harness = Harness.new(issue: @issue, logger: StubLogger.new, client: RaisingClient.new)
+
+    harness.send(:danger_claude_prompt, '/tmp/wd', 'do the thing')
 
     assert_equal 1, heartbeats.size
   end
