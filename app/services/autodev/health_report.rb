@@ -215,15 +215,19 @@ module Autodev
     end
 
     # The longest a worker can legitimately go quiet: one danger-claude call
-    # (dc_timeout) or one post_completion command (post_completion_timeout —
-    # not a danger-claude call, so it gets no heartbeat and its silence equals
-    # its timeout exactly). Both are per-project only, so the window is sized on
-    # the widest value in play. The baked defaults are always in the max: a
-    # project that overrides neither still runs with them.
+    # (dc_timeout), one post_completion command (post_completion_timeout — not a
+    # danger-claude call, so it gets no heartbeat and its silence equals its
+    # timeout exactly), or one mr-review run (mr_review_timeout — also no
+    # heartbeat of its own beyond the marker written before the call, Autodev
+    # #54). All three are per-project only, so the window is sized on the widest
+    # value in play. The baked defaults are always in the max: a project that
+    # overrides none of them still runs with them — and 2 × MR_REVIEW_TIMEOUT
+    # (3600) is exactly the existing 7200 floor, so adding this term does not
+    # move the default window.
     def longest_worker_timeout
-      [::Config::DEFAULTS['dc_timeout'], ::Config::POST_COMPLETION_TIMEOUT,
+      [::Config::DEFAULTS['dc_timeout'], ::Config::POST_COMPLETION_TIMEOUT, ::Config::MR_REVIEW_TIMEOUT,
        Project.maximum(:dc_timeout), Project.maximum(:post_completion_timeout),
-       *yaml_project_timeouts].compact.map(&:to_i).max
+       Project.maximum(:mr_review_timeout), *yaml_project_timeouts].compact.map(&:to_i).max
     end
 
     # Projects configured in config.yml but not yet imported into the projects
@@ -233,7 +237,7 @@ module Autodev
       Array(@config['projects']).flat_map do |project|
         next [] unless project.is_a?(Hash)
 
-        [project['dc_timeout'], project['post_completion_timeout']]
+        [project['dc_timeout'], project['post_completion_timeout'], project['mr_review_timeout']]
       end
     end
 

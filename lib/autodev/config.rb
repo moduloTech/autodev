@@ -68,6 +68,11 @@ module Config # rubocop:disable Metrics/ModuleLength
   # #50) and must not have to load the PipelineMonitor tree to read it.
   POST_COMPLETION_TIMEOUT = 300
 
+  # Baked default for the per-project `mr_review_timeout`, in seconds. Sized on
+  # production data rather than symmetry with dc_timeout: the longest successful
+  # mr-review on record took 2641s (Autodev #54).
+  MR_REVIEW_TIMEOUT = 3600
+
   ENV_MAPPING = {
     'GITLAB_API_TOKEN' => 'gitlab_token',
     'GITLAB_URL' => 'gitlab_url'
@@ -94,8 +99,8 @@ module Config # rubocop:disable Metrics/ModuleLength
   # project identity, not config, so it's excluded.
   DB_BACKED_PROJECT_FIELDS = %w[target_branch labels_todo label_doing label_done extra_prompt
                                 dc_timeout max_retries retry_backoff stagnation_threshold clone_depth
-                                sparse_checkout post_completion post_completion_timeout model effort
-                                parallel_agents split_implementation implementer_agent
+                                sparse_checkout post_completion post_completion_timeout mr_review_timeout
+                                model effort parallel_agents split_implementation implementer_agent
                                 test_writer_agent mr_fixer_agent app].freeze
   VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
 

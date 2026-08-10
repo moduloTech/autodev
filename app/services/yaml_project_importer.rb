@@ -55,7 +55,7 @@ class YamlProjectImporter
   CONFIG_KEYS = %w[target_branch labels_todo label_doing label_done extra_prompt
                    dc_timeout max_retries retry_backoff stagnation_threshold
                    clone_depth sparse_checkout post_completion post_completion_timeout
-                   model effort parallel_agents split_implementation
+                   mr_review_timeout model effort parallel_agents split_implementation
                    implementer_agent test_writer_agent mr_fixer_agent].freeze
 
   def initialize(yaml:)

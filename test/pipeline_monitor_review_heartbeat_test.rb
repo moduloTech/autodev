@@ -135,4 +135,37 @@ class PipelineMonitorReviewHeartbeatTest < Minitest::Test
 
     assert_equal 1, heartbeats.size
   end
+
+  # The cap is mr_review_timeout, not dc_timeout: a review's duration profile is
+  # not an implementation call's (production data: 317 reviews, longest 2641s and
+  # successful, against dc_timeout's 1800s default).
+  def test_the_wrapper_is_called_with_the_baked_review_timeout
+    calls = stub_timeout_wrapper(['', '', true])
+    @harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
+
+    assert_equal Config::MR_REVIEW_TIMEOUT, calls.first[:opts][:timeout]
+  end
+
+  def test_a_project_override_wins_over_the_baked_review_timeout
+    harness = Harness.new(issue: @issue, logger: StubLogger.new)
+    harness.instance_variable_set(:@project_config, { 'path' => 'group/project', 'mr_review_timeout' => 5400 })
+    harness.define_singleton_method(:command_exists?) { |_cmd| true }
+    calls = []
+    harness.define_singleton_method(:run_with_timeout) do |cmd, args, **opts|
+      calls << { cmd: cmd, args: args, opts: opts }
+      ['', '', true]
+    end
+    harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
+
+    assert_equal 5400, calls.first[:opts][:timeout]
+  end
+
+  # ProcessRunner builds its tag as "#{cmd} #{label}", so label: 'mr-review'
+  # would read "mr-review mr-review timed out after 3600s".
+  def test_no_redundant_label_is_passed
+    calls = stub_timeout_wrapper(['', '', true])
+    @harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
+
+    refute calls.first[:opts].key?(:label), 'cmd already names the command'
+  end
 end

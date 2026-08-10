@@ -48,6 +48,18 @@ class ProjectConfigTest < ActiveSupport::TestCase
     assert_predicate project, :valid?
   end
 
+  def test_mr_review_timeout_must_be_a_positive_integer
+    assert_predicate project(mr_review_timeout: 5400), :valid?
+    refute_predicate project(mr_review_timeout: 0), :valid?
+    refute_predicate project(mr_review_timeout: -1), :valid?
+  end
+
+  def test_mr_review_timeout_is_emitted_in_to_project_config
+    cfg = project(mr_review_timeout: 5400).to_project_config
+
+    assert_equal 5400, cfg['mr_review_timeout']
+  end
+
   # -- advanced keys (phase 2) --
 
   def test_advanced_string_fields_reject_blank_but_allow_nil

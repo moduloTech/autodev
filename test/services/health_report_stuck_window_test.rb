@@ -94,4 +94,22 @@ class HealthReportStuckWindowTest < ActiveSupport::TestCase
 
     assert_equal :ok, check[:status]
   end
+
+  # 2 × the baked review default (3600) is exactly the 7200 floor, so adding the
+  # term must not move the default window. A changed default here is a bug.
+  test 'the baked review timeout does not move the default window' do
+    assert_equal BASE, window
+  end
+
+  test 'derives from a project mr_review_timeout that exceeds the floor' do
+    project(mr_review_timeout: 5400)
+
+    assert_equal 10_800, window
+  end
+
+  test 'counts mr_review_timeout on a YAML-only project' do
+    config = CONFIG.merge('projects' => [{ 'path' => 'group/yaml', 'mr_review_timeout' => 5400 }])
+
+    assert_equal 10_800, window(config: config)
+  end
 end

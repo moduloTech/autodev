@@ -33,7 +33,7 @@ class Project < ApplicationRecord
   # shapes the YAML validator did. All fields are optional (a project may
   # configure none of them and fall back to the global defaults).
   POSITIVE_INT_FIELDS = %i[dc_timeout max_retries retry_backoff stagnation_threshold
-                           post_completion_timeout].freeze
+                           post_completion_timeout mr_review_timeout].freeze
   # "Advanced" keys columnized in phase 2 (were YAML-only in phase 1).
   STRING_CONFIG_FIELDS = %i[model effort implementer_agent test_writer_agent mr_fixer_agent].freeze
   BOOLEAN_CONFIG_FIELDS = %i[parallel_agents split_implementation].freeze
@@ -66,7 +66,7 @@ class Project < ApplicationRecord
 
   SCALAR_CONFIG_KEYS = %i[target_branch label_doing label_done extra_prompt dc_timeout
                           max_retries retry_backoff stagnation_threshold clone_depth
-                          post_completion_timeout model effort parallel_agents
+                          post_completion_timeout mr_review_timeout model effort parallel_agents
                           split_implementation implementer_agent test_writer_agent
                           mr_fixer_agent].freeze
   LIST_CONFIG_KEYS = %i[labels_todo sparse_checkout post_completion].freeze
