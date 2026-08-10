@@ -32,8 +32,10 @@ describes, on the one state #50 could not cover.
 
 ## Design
 
-Smaller than the ticket anticipated, because two of its five steps turn out to be
-unnecessary.
+Close to what the ticket anticipated. Its step 5 (verify the timeout stays
+non-fatal) turns out to need no code, only a test — the behaviour already holds.
+Its step 2 (choose the setting) was first answered "reuse `dc_timeout`" and then
+reversed on production data; see below.
 
 ### 1. Route `mr-review` through `run_with_timeout`
 
@@ -51,7 +53,8 @@ def run_mr_review_command(mr_url)
   # the process's cwd, and mr-review works through the GitLab API rather than in
   # a local clone, so it has no repo to sit in. run_with_timeout requires the
   # argument, so it is passed explicitly rather than left implicit.
-  _, err, ok = run_with_timeout('mr-review', ['-H', mr_url], chdir: Dir.pwd, label: 'mr-review')
+  _, err, ok = run_with_timeout('mr-review', ['-H', mr_url], chdir: Dir.pwd,
+                                timeout: mr_review_timeout)
   return log('Review completed successfully') || true if ok
 
   log_error "mr-review failed (non-fatal): #{err[0, 300]}"
@@ -59,11 +62,15 @@ def run_mr_review_command(mr_url)
 end
 ```
 
-The timeout is `dc_timeout` — `run_with_timeout` resolves
-`@project_config['dc_timeout'] || @config['dc_timeout'] || 600`, and the global
-is always the baked `Config::DEFAULTS` value (a `config.yml` global is in
-`IGNORED_GLOBAL_FIELDS`). So the cap is 30 minutes by default, raisable per
-project.
+No `label:` is passed: `ProcessRunner` builds its tag as `"#{cmd} #{label}"`, so
+`label: 'mr-review'` would read `mr-review mr-review timed out after 3600s`. The
+other callers use `label` as a *sub-operation* discriminator (`'-p'`, `'-c'` →
+`danger-claude -p`), and there is only one kind of mr-review call.
+
+The cap comes from `mr_review_timeout` — `@project_config['mr_review_timeout'] ||
+Config::MR_REVIEW_TIMEOUT` (3600) — passed through a new `timeout:` kwarg on
+`run_with_timeout`, which otherwise keeps resolving `dc_timeout` for its two
+danger-claude callers.
 
 **One side effect inherited, and why it is benign.** `run_with_timeout` calls
 `PortAllocator.release(@port_mappings) if @port_mappings` — a danger-claude
@@ -75,16 +82,45 @@ on the green one), and `PortAllocator.release` swallows per-socket errors, so ev
 a stale mapping would be a no-op. Worth stating rather than discovering: the
 coupling is real, the exposure is not.
 
-**Why not a dedicated setting.** The ticket proposed a per-project
-`mr_review_timeout`. It would cost a `timeout:` kwarg on `run_with_timeout`, a
-migration and column, `Project` validations plus `CONFIG_INTEGER_FIELDS` /
-`SCALAR_CONFIG_KEYS` / `#to_project_config`, `Config::DB_BACKED_PROJECT_FIELDS`,
-`ProjectValidator`, `YamlProjectImporter`, the project-edit form with its hint
-and two i18n keys, and one more term in `longest_worker_timeout` — eight files
-for a knob nobody has asked for, chosen against no data on how long reviews
-actually take. Reusing `dc_timeout` costs nothing and makes step 3 below
-disappear. If a project ever needs the two decoupled, the plumbing is mechanical
-and the need will come with a number attached.
+**Reversed after measurement: a dedicated per-project setting.** This design
+first reused `dc_timeout` and argued a dedicated `mr_review_timeout` was a knob
+"nobody has asked for, chosen against no data on how long reviews actually
+take", adding that "the need will come with a number attached". The final review
+went and got the number, from the production-copy DB — 317 completed reviews, all
+on `powerpanne/core`, whose `dc_timeout` is NULL and therefore 1800 s:
+
+| | duration |
+|---|---|
+| 263 of them | under 5 min |
+| mean | 213 s |
+| 20–30 min | **10 reviews** |
+| longest | **2641 s (44 min), and it ended in `review_done` — a success** |
+| second longest | 1752 s, 48 s under the cap |
+
+A 1800 s cap would therefore have killed roughly one **successful** review in 317
+— about one a quarter at current volume — with six more within seven minutes of
+the edge, and review duration tracks MR size, which is not shrinking.
+
+The blast radius makes that worse than a lost review. `review_count` is
+incremented only on success, so the next poll re-enters `reviewing` and reruns
+`mr-review` from scratch; five rounds later `give_up_reviewing` forces `done`,
+sets `label_done`, reassigns the author, flags
+`needs_attention: review_failures_exhausted` and notifies GitLab. The outcome is
+a false "exhausted" alarm and **no review at all**, on precisely the large MRs
+that most need one, having burned ~2.5 h of Claude quota.
+
+So the plumbing is worth it: a per-project `mr_review_timeout`, baked default
+`Config::MR_REVIEW_TIMEOUT = 3600` (covering every observed run), with
+`run_with_timeout` gaining a `timeout:` kwarg and `longest_worker_timeout`
+gaining a term. Note the term is window-neutral at the default —
+`2 × 3600 = 7200`, exactly the existing floor — so §3's "no behaviour change at
+the default configuration" still holds; what changes is that a project raising
+its own review cap now widens the window automatically, which is the whole point
+of the derivation.
+
+Rejecting the setting was the right call **on the information the design had**;
+the mistake was writing "no data" without looking for it, when a `SELECT` over
+`activity_events` was available the whole time.
 
 ### 2. The non-fatal semantics already hold
 
@@ -103,13 +139,13 @@ So the behaviour is a consequence of code that already exists. What is missing i
 a test saying so — without one, a future refactor of `execute_mr_review`'s rescue
 could turn a timeout into a hard failure and nothing would notice.
 
-### 3. No change to `HealthReport`
+### 3. One term added to `HealthReport`
 
-The ticket's step 3 was "add the new timeout to `longest_worker_timeout`". Once
-the cap is `dc_timeout`, that term is already there — `longest_worker_timeout`
-maxes over `dc_timeout` and `post_completion_timeout` across DB rows, YAML
-entries and the baked defaults. The derived window covers `reviewing` the moment
-mr-review is bounded by `dc_timeout`, with `HealthReport` untouched.
+`longest_worker_timeout` maxes over `dc_timeout` and `post_completion_timeout`
+across DB rows, YAML entries and the baked defaults; `mr_review_timeout` joins
+them on all three. Window-neutral at the default (`2 × 3600 = 7200`, the existing
+floor), and a project raising its own review cap widens the window automatically
+— which is what makes `reviewing` covered rather than excepted.
 
 The docs move in the opposite direction: `reviewing` **leaves** the exceptions
 list.
@@ -191,8 +227,6 @@ rendered through Redcarpet — no code span nested inside another.
 
 ## Out of scope
 
-- A per-project `mr_review_timeout` (see §1 for the cost, and the condition under
-  which it becomes worth it).
 - Moving the heartbeat into `run_with_timeout` (see Rejected).
 - `http.lowSpeedLimit` in `CLEAN_ENV` for the untimed git operations #50's final
   review inventoried (`clone`, `push`, rebase, the `clone_and_checkout` inside

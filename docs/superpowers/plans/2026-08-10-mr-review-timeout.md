@@ -501,3 +501,371 @@ Before reporting the work done, confirm all three:
 3. `git log --oneline master..HEAD` — four commits (the spec, then Tasks 1–3).
 
 Then hand back for review. The branch is `fix/54-mr-review-timeout`; the repo's convention is a merge commit per `fix/*` branch (e.g. `8249d2a`), and Skynet #54 gets its progress note.
+
+---
+
+## Addendum — Tasks 4 and 5 (final-review reversal)
+
+The final whole-branch review measured `mr-review`'s real durations in the
+production-copy DB: 317 completed reviews, longest **2641 s and successful**, ten
+between 20 and 30 min. The 1800 s `dc_timeout` cap would kill roughly one
+successful review a quarter, and because `review_count` only increments on
+success, each kill costs five reruns and ends in a false
+`review_failures_exhausted` — no review at all on the largest MRs. The spec's
+"reuse `dc_timeout`" decision is reversed to a per-project `mr_review_timeout`;
+see the spec's §1 for the data.
+
+Tasks 1–3 stay as merged. These two tasks change the cap and its plumbing on top.
+
+### Task 4: Per-project `mr_review_timeout`
+
+**Files:**
+- Create: `db/migrate/20260810000001_add_mr_review_timeout_to_projects.rb`
+- Modify: `lib/autodev/config.rb` (add `MR_REVIEW_TIMEOUT`, extend `DB_BACKED_PROJECT_FIELDS`)
+- Modify: `app/models/project.rb` (`POSITIVE_INT_FIELDS`, `SCALAR_CONFIG_KEYS`)
+- Modify: `lib/autodev/project_validator.rb` (`validate_numerics!`'s field list)
+- Modify: `app/services/yaml_project_importer.rb` (`CONFIG_KEYS`)
+- Modify: `app/components/web/views/project_edit.rb` (`SECTIONS` execution group, `DEFAULT_HINT_VALUES`)
+- Modify: `config/locales/web.fr.yml`, `config/locales/web.en.yml` (one description key each)
+- Modify: `lib/autodev/process_runner.rb` (`run_with_timeout` gains `timeout:`)
+- Modify: `lib/autodev/pipeline_monitor/reviewer.rb` (pass the resolved timeout, drop `label:`)
+- Modify: `app/services/autodev/health_report.rb` (`longest_worker_timeout` gains the term)
+- Test: `test/pipeline_monitor_review_heartbeat_test.rb` (extend), `test/models/project_config_test.rb` (extend), `test/services/health_report_stuck_window_test.rb` (extend)
+
+**Interfaces:**
+- Consumes: Task 1's `run_mr_review_command`, which currently calls `run_with_timeout('mr-review', ['-H', mr_url], chdir: Dir.pwd, label: 'mr-review')`.
+- Produces: `Config::MR_REVIEW_TIMEOUT` (Integer, 3600); a `projects.mr_review_timeout` integer column; `run_with_timeout(cmd, args, chdir:, label: nil, timeout: nil)` where a nil `timeout:` keeps today's `dc_timeout` resolution.
+
+**Two properties that must hold, and that the tests must pin:**
+
+1. **The two danger-claude callers keep resolving `dc_timeout`.** The kwarg is additive: `timeout: nil` must fall through to `@project_config['dc_timeout'] || @config['dc_timeout'] || 600`, unchanged. A regression here silently re-caps every implementation call.
+2. **Window-neutral at the default.** `2 × 3600 = 7200` is exactly the existing floor, so `stuck_active_after` must still return 7200 with no project overrides. A test that asserts a *changed* default window is asserting a bug.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `test/pipeline_monitor_review_heartbeat_test.rb`, add to the existing class (its `stub_timeout_wrapper` helper already records `opts`):
+
+```ruby
+  # The cap is mr_review_timeout, not dc_timeout: a review's duration profile is
+  # not an implementation call's (production data: 317 reviews, longest 2641s and
+  # successful, against dc_timeout's 1800s default).
+  def test_the_wrapper_is_called_with_the_baked_review_timeout
+    calls = stub_timeout_wrapper(['', '', true])
+    @harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
+
+    assert_equal Config::MR_REVIEW_TIMEOUT, calls.first[:opts][:timeout]
+  end
+
+  def test_a_project_override_wins_over_the_baked_review_timeout
+    harness = Harness.new(issue: @issue, logger: StubLogger.new)
+    harness.instance_variable_set(:@project_config, { 'path' => 'group/project', 'mr_review_timeout' => 5400 })
+    harness.define_singleton_method(:command_exists?) { |_cmd| true }
+    calls = []
+    harness.define_singleton_method(:run_with_timeout) do |cmd, args, **opts|
+      calls << { cmd: cmd, args: args, opts: opts }
+      ['', '', true]
+    end
+    harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
+
+    assert_equal 5400, calls.first[:opts][:timeout]
+  end
+
+  # ProcessRunner builds its tag as "#{cmd} #{label}", so label: 'mr-review'
+  # would read "mr-review mr-review timed out after 3600s".
+  def test_no_redundant_label_is_passed
+    calls = stub_timeout_wrapper(['', '', true])
+    @harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
+
+    refute calls.first[:opts].key?(:label), 'cmd already names the command'
+  end
+```
+
+In `test/models/project_config_test.rb`, add beside the existing positive-int assertions (the file's `project(...)` helper builds an unsaved `Project`):
+
+```ruby
+  def test_mr_review_timeout_must_be_a_positive_integer
+    assert_predicate project(mr_review_timeout: 5400), :valid?
+    refute_predicate project(mr_review_timeout: 0), :valid?
+    refute_predicate project(mr_review_timeout: -1), :valid?
+  end
+
+  def test_mr_review_timeout_is_emitted_in_to_project_config
+    cfg = project(mr_review_timeout: 5400).to_project_config
+
+    assert_equal 5400, cfg['mr_review_timeout']
+  end
+```
+
+In `test/services/health_report_stuck_window_test.rb`, add:
+
+```ruby
+  # 2 × the baked review default (3600) is exactly the 7200 floor, so adding the
+  # term must not move the default window. A changed default here is a bug.
+  test 'the baked review timeout does not move the default window' do
+    assert_equal BASE, window
+  end
+
+  test 'derives from a project mr_review_timeout that exceeds the floor' do
+    project(mr_review_timeout: 5400)
+
+    assert_equal 10_800, window
+  end
+
+  test 'counts mr_review_timeout on a YAML-only project' do
+    config = CONFIG.merge('projects' => [{ 'path' => 'group/yaml', 'mr_review_timeout' => 5400 }])
+
+    assert_equal 10_800, window(config: config)
+  end
+```
+
+- [ ] **Step 2: Run the three test files to verify they fail**
+
+```bash
+mise x ruby -- bundle exec rake test TEST=test/pipeline_monitor_review_heartbeat_test.rb
+mise x ruby -- bundle exec rake test TEST=test/models/project_config_test.rb
+mise x ruby -- bundle exec rake test TEST=test/services/health_report_stuck_window_test.rb
+```
+
+Expected: FAIL. The review tests get `NameError: uninitialized constant Config::MR_REVIEW_TIMEOUT` and a `nil` timeout; the model tests fail on an unknown attribute; the two new window derivations return 7200. `the baked review timeout does not move the default window` passes immediately — it is a guard, not a new behaviour.
+
+- [ ] **Step 3: Migration**
+
+Create `db/migrate/20260810000001_add_mr_review_timeout_to_projects.rb`:
+
+```ruby
+# frozen_string_literal: true
+
+# Per-project cap for one `mr-review` run (Autodev #54). Separate from
+# `dc_timeout` on measured grounds: on the production copy, 317 completed reviews
+# ran up to 2641s *successfully*, against dc_timeout's 1800s default — reusing it
+# would have killed a good review roughly once a quarter, and because
+# review_count only increments on success each kill costs five reruns and ends in
+# a false review_failures_exhausted.
+#
+# `if_not_exists`-aware so it is a no-op on a DB that already has the column,
+# matching the other project-config migrations.
+class AddMrReviewTimeoutToProjects < ActiveRecord::Migration[8.1]
+  def change
+    add_column :projects, :mr_review_timeout, :integer, if_not_exists: true
+  end
+end
+```
+
+- [ ] **Step 4: The baked default and the config plumbing**
+
+In `lib/autodev/config.rb`, next to `POST_COMPLETION_TIMEOUT`:
+
+```ruby
+  # Baked default for the per-project `mr_review_timeout`, in seconds. Sized on
+  # production data rather than symmetry with dc_timeout: the longest successful
+  # mr-review on record took 2641s (Autodev #54).
+  MR_REVIEW_TIMEOUT = 3600
+```
+
+And add `mr_review_timeout` to `DB_BACKED_PROJECT_FIELDS` (so setting it under a
+YAML `projects:` entry emits the same deprecation warning as its siblings).
+
+In `app/models/project.rb`, add `mr_review_timeout` to **`POSITIVE_INT_FIELDS`**
+and to **`SCALAR_CONFIG_KEYS`**. Nothing else in that file needs touching:
+`CONFIG_INTEGER_FIELDS` is derived from `POSITIVE_INT_FIELDS`, which is what
+carries the field into the validations, `ProjectsController`'s
+`integer_or_nil` handling, and the edit form's input type.
+
+In `lib/autodev/project_validator.rb`, add `mr_review_timeout` to
+`validate_numerics!`'s field list.
+
+In `app/services/yaml_project_importer.rb`, add `mr_review_timeout` to
+`CONFIG_KEYS`.
+
+- [ ] **Step 5: The edit form and its two locale keys**
+
+In `app/components/web/views/project_edit.rb`, add `mr_review_timeout` to
+`SECTIONS`' execution group (after `post_completion_timeout`), and
+`mr_review_timeout: 3600` to `DEFAULT_HINT_VALUES`.
+
+In `config/locales/web.fr.yml`, beside `web_project_edit_desc_post_completion_timeout`:
+
+```yaml
+  web_project_edit_desc_mr_review_timeout: Délai maximum d'une exécution de mr-review, en secondes. Au-delà, la review est interrompue et comptée comme un échec.
+```
+
+In `config/locales/web.en.yml`, at the matching position:
+
+```yaml
+  web_project_edit_desc_mr_review_timeout: Maximum time for a single mr-review run, in seconds. Past it the review is killed and counted as a failure.
+```
+
+- [ ] **Step 6: The `timeout:` kwarg**
+
+In `lib/autodev/process_runner.rb`, change `run_with_timeout`'s signature and its
+first line only:
+
+```ruby
+  # `timeout:` overrides the danger-claude cap for a caller that runs a different
+  # program (Autodev #54: mr-review has its own, measured profile). Left nil, the
+  # resolution is unchanged for the two danger-claude entry points.
+  def run_with_timeout(cmd, args, chdir:, label: nil, timeout: nil)
+    timeout = (timeout || @project_config['dc_timeout'] || @config['dc_timeout'] || 600).to_i
+```
+
+Everything below that line stays as it is.
+
+- [ ] **Step 7: Use it in the reviewer**
+
+In `lib/autodev/pipeline_monitor/reviewer.rb`, replace the `run_with_timeout`
+call inside `run_mr_review_command` and add the resolver. Keep the surrounding
+comment block, amending its `chdir`/cap sentences to match:
+
+```ruby
+      _, err, ok = run_with_timeout('mr-review', ['-H', mr_url], chdir: Dir.pwd,
+                                    timeout: mr_review_timeout)
+```
+
+```ruby
+    # Per-project override, else the baked default. A review's duration profile is
+    # not an implementation call's, which is why this is not dc_timeout.
+    def mr_review_timeout
+      (@project_config['mr_review_timeout'] || ::Config::MR_REVIEW_TIMEOUT).to_i
+    end
+```
+
+Note the `label:` argument is **dropped**: `ProcessRunner`'s tag is
+`"#{cmd} #{label}"`, so passing `'mr-review'` produced `mr-review mr-review timed
+out after …` in the raised message, the log line and the `@dc_stdout` header.
+
+- [ ] **Step 8: The `HealthReport` term**
+
+In `app/services/autodev/health_report.rb`, add the field to all three sources
+inside `longest_worker_timeout` / `yaml_project_timeouts`: the baked
+`::Config::MR_REVIEW_TIMEOUT`, `Project.maximum(:mr_review_timeout)`, and
+`project['mr_review_timeout']` in the YAML branch. Amend the method's comment so
+it names the third timeout and states that `2 × 3600` equals the existing floor,
+so the default window is unchanged.
+
+- [ ] **Step 9: Run the three test files, then the full suite**
+
+```bash
+mise x ruby -- bundle exec rake test TEST=test/pipeline_monitor_review_heartbeat_test.rb
+mise x ruby -- bundle exec rake test TEST=test/models/project_config_test.rb
+mise x ruby -- bundle exec rake test TEST=test/services/health_report_stuck_window_test.rb
+mise x ruby -- bundle exec rake test
+```
+
+Expected: all pass; the full suite reports 0 failures and 0 errors. The suite is
+the gate that proves property 1 above — `test/danger_claude_runner_heartbeat_test.rb`,
+`test/services/yaml_project_importer_config_test.rb` and
+`test/controllers/projects_controller_edit_test.rb` all exercise paths the new
+field touches. Quote the counts.
+
+- [ ] **Step 10: RuboCop**
+
+```bash
+mise x ruby -- rubocop db/migrate/20260810000001_add_mr_review_timeout_to_projects.rb lib/autodev/config.rb app/models/project.rb lib/autodev/project_validator.rb app/services/yaml_project_importer.rb app/components/web/views/project_edit.rb lib/autodev/process_runner.rb lib/autodev/pipeline_monitor/reviewer.rb app/services/autodev/health_report.rb test/pipeline_monitor_review_heartbeat_test.rb test/models/project_config_test.rb test/services/health_report_stuck_window_test.rb
+```
+
+Expected: no offenses.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add -A
+git commit -F - <<'MSG'
+feat: give mr-review its own per-project timeout (Autodev #54)
+
+Capping mr-review at dc_timeout was window-cheap but wrong on the data. On the
+production copy, 317 completed reviews ran up to 2641s *successfully*, ten of
+them between 20 and 30 minutes, against dc_timeout's 1800s default — so the cap
+would have killed a good review roughly once a quarter, with six more within
+seven minutes of the edge, and review duration tracks MR size.
+
+The cost of a kill is worse than a lost review: review_count only increments on
+success, so the next poll reruns mr-review from scratch, and five rounds later
+give_up_reviewing forces done, sets label_done, reassigns the author and flags
+review_failures_exhausted. A false "exhausted" alarm and no review at all, on
+precisely the largest MRs, after ~2.5h of quota.
+
+mr_review_timeout is therefore its own per-project column, defaulting to
+Config::MR_REVIEW_TIMEOUT (3600, covering every observed run), with
+run_with_timeout gaining an additive `timeout:` kwarg — nil keeps the dc_timeout
+resolution for its two danger-claude callers — and longest_worker_timeout gaining
+a term so a project raising its review cap widens the stuck-window automatically.
+The default window does not move: 2 × 3600 is exactly the existing 7200 floor.
+
+Also drops the redundant `label: 'mr-review'`: ProcessRunner tags as
+"#{cmd} #{label}", so it read "mr-review mr-review timed out after …".
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
+```
+
+### Task 5: Docs for the reversal
+
+**Files:**
+- Modify: `CHANGELOG.md` (the `[Unreleased]` `### Fixed` bullet added by Task 3)
+- Modify: `docs/usage/autodev-technical-usage.md` (the `dc_timeout` row, plus a new `mr_review_timeout` row)
+- Modify: `docs/observability.md` (the `stuck_issues` bullet's list of timeouts)
+
+**Interfaces:** consumes Task 4; produces nothing.
+
+- [ ] **Step 1: Correct the changelog bullet**
+
+Task 3's bullet says the cap is `dc_timeout` and that `HealthReport` needed no
+change. Both are now false. Rewrite that bullet so it states: `mr-review` runs
+under `run_with_timeout` capped by a new per-project `mr_review_timeout` (baked
+default 3600, sized on 317 production reviews whose longest successful run took
+2641 s); `longest_worker_timeout` gains the term, which is window-neutral at the
+default because `2 × 3600` is the existing 7200 floor; `reviewing` leaves the
+exceptions list, leaving `running_post_completion` as the only remaining one; a
+timeout stays non-fatal and counts a review failure. Keep the sentence about the
+deleted `MrManager` trio, and drop the now-wrong "~25 lines" count in favour of
+"a parallel review path with no caller".
+
+- [ ] **Step 2: The technical guide's config table**
+
+In `docs/usage/autodev-technical-usage.md`, revert the `dc_timeout` row to its
+original wording (it no longer caps mr-review):
+
+```
+| Exécution | `dc_timeout` | Délai max d'un appel `danger-claude` (s). |
+```
+
+And add a row after it, in the same French register:
+
+```
+| Exécution | `mr_review_timeout` | Délai max d'une exécution de `mr-review` (s, défaut 3600). Au-delà, la review est interrompue et comptée comme un échec ; 5 échecs consécutifs clôturent la demande et la réassignent à son auteur. |
+```
+
+- [ ] **Step 3: The observability bullet**
+
+In `docs/observability.md`'s `stuck_issues` bullet, the window is described as
+taken over `dc_timeout` **et** `post_completion_timeout`. Add `mr_review_timeout`
+to that enumeration, keeping each identifier in its own backtick span (never
+nested — Redcarpet breaks on that).
+
+- [ ] **Step 4: Full suite and RuboCop**
+
+```bash
+mise x ruby -- bundle exec rake test
+mise x ruby -- rubocop
+```
+
+Expected: 0 failures, 0 errors; RuboCop at master's 46-offence baseline across the
+same 9 untouched boilerplate files. Quote both.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add CHANGELOG.md docs/usage/autodev-technical-usage.md docs/observability.md
+git commit -F - <<'MSG'
+docs: record mr_review_timeout as its own setting (Autodev #54)
+
+The changelog bullet and the technical guide were written when the cap was
+dc_timeout; production data reversed that decision, so both said something false.
+The guide's dc_timeout row goes back to its original wording and mr_review_timeout
+gets its own row — including the consequence an operator actually needs: past the
+cap the review is killed and counted as a failure, and five consecutive failures
+close the request and reassign it.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+MSG
+```
