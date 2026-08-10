@@ -6,7 +6,7 @@
 # Two usage modes:
 # - Instance method `log_activity` for processors (via DangerClaudeRunner include)
 # - Class method `ActivityLogger.post` for standalone callers (Poller) via a Ctx struct
-module ActivityLogger
+module ActivityLogger # rubocop:disable Metrics/ModuleLength
   def self.tag
     @tag ||= "**autodev** (v#{Autodev::VERSION})".freeze
   end
@@ -46,6 +46,26 @@ module ActivityLogger
 
     entry = build_entry(issue, key, **vars)
     persist_event!(issue, key, entry, vars, level: 'warn')
+  rescue StandardError
+    nil
+  end
+
+  # Liveness marker for one danger-claude call (Autodev #50). DB only — no
+  # GitLab note update, so it costs one INSERT and leaves the issue thread
+  # untouched — and no locale entry, because nothing renders it:
+  # Issue.without_activity_since is its only reader.
+  #
+  # This is what bounds a live worker's silence. Per-state business events do
+  # not: PipelineFixer emits one event on entering fixing_pipeline, then loops
+  # over N failed jobs with two calls each and nothing in between.
+  #
+  # No-op without a tracked issue, same contract as warn_event.
+  def self.heartbeat!(issue, label)
+    return unless issue
+
+    ActivityEvent.create(issue_id: issue.id, kind: 'heartbeat', level: 'info',
+                         payload_json: JSON.generate(event: 'dc_call', label: label))
+    nil
   rescue StandardError
     nil
   end
