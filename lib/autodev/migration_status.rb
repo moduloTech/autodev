@@ -84,6 +84,23 @@ module Autodev
         migration_versions(db_config) - applied_versions(connection)
       end
 
+      # The log line a failed migration pass deserves, as [level, message] ready
+      # for `Rails.logger.public_send`. Lives here rather than inline in the
+      # initializer because the initializer is the one file in this change that no
+      # test can execute: it returns early in `test`, and `development` /
+      # `production` both point at the real ~/.autodev/autodev.db.
+      #
+      # Never raises. An exception escaping the initializer's rescue would abort
+      # its loop with ActiveRecord::Base still pointed at the queue pool — a far
+      # worse outcome than a vague log line.
+      def failure_report(db_config, error)
+        summary = "[auto_migrate] #{db_config.name} migration failed: #{error.class}: #{error.message}"
+        return [:warn, "#{summary} — expected when two processes boot at once; the winner applied it"] if
+          benign_race?(error)
+
+        [:error, "#{summary} — #{outcome(db_config)}"]
+      end
+
       # nil when every migration on disk is recorded; otherwise a message ready to
       # print as the reason autodev refuses to start.
       def incomplete_schema_report
@@ -98,6 +115,17 @@ module Autodev
       end
 
       private
+
+      # What the failure actually cost, read from `schema_migrations` rather than
+      # guessed from the exception: a pass can fail and still leave a complete
+      # schema (a peer applied it), and saying so is worth as much as naming a gap.
+      def outcome(db_config)
+        unapplied = pending[db_config.name]
+        return 'the schema is complete nonetheless, nothing left unapplied' unless unapplied
+
+        "INCOMPLETE SCHEMA, unapplied: #{unapplied.join(', ')}. Jobs will fail until this is resolved; " \
+          'see the migrations card on /admin/health.'
+      end
 
       def describe(name, versions)
         "#{versions.size} migration(s) not applied on #{name} (#{versions.join(', ')})"

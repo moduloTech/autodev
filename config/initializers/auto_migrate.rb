@@ -20,9 +20,29 @@ require 'autodev/migration_status'
 # queue migrations to land in the right file we explicitly point
 # `ActiveRecord::Base` at each pool in turn, then restore primary at the end.
 #
-# Safe to do here because Autodev is a single-user, single-SQLite-file CLI:
-# no concurrent writers and no shared production database. `migrate` is
-# idempotent — re-running after everything is applied is a no-op.
+# Concurrency (Autodev #55 — this paragraph used to claim there were "no
+# concurrent writers", which the supervisor invalidated long ago). `bin/autodev`
+# requires `config/environment` before it reaches `run_supervisor`, so the parent
+# plays this pass FIRST and alone; it then spawns `bin/rails server` and
+# `bin/jobs start`, each of which boots its own Rails app against the same file
+# and plays the pass again. Those two are no-ops in the normal case, and they are
+# kept as the safety net for a child restarted on its own after an upgrade.
+#
+# When they are not no-ops, SQLite offers no help: `supports_advisory_locks?` is
+# `false`, so Rails does not serialise two migrators. DDL is transactional, so
+# the loser of such a race fails on `duplicate column name` or on the UNIQUE
+# insert into `schema_migrations` — expected, and harmless, because the winner
+# created the column. `Autodev::MigrationStatus.benign_race?` is what recognises
+# those, and anything else is logged as an error instead. Either way this
+# initializer never raises: it is on the boot path of `bin/rails runner`, of
+# `autodev --status` / `--errors` / `--reset`, of a standalone `bin/rails server`
+# and of the test suite — the very tools needed to diagnose a broken schema. The
+# hard refusal lives in `bin/autodev`, which gates on
+# `MigrationStatus.incomplete_schema_report` (a set difference, not this
+# heuristic) before spawning any child; the `migrations` card on `/admin/health`
+# reports the same condition for the entry points that do boot.
+#
+# `migrate` is idempotent — re-running after everything is applied is a no-op.
 #
 # Skipped when:
 #   - AUTODEV_SKIP_AUTO_MIGRATE=1 (for explicit control in tests / scripts)
@@ -42,9 +62,13 @@ Rails.application.config.after_initialize do
     ActiveRecord::Base.establish_connection(db_config)
     ActiveRecord::MigrationContext.new(paths).migrate
   rescue StandardError => e
-    Rails.logger.warn(
-      "[auto_migrate] #{db_config.name} migration failed: #{e.class}: #{e.message}"
-    )
+    # `failure_report` classifies (warn for a boot race, error otherwise) and
+    # never raises — an exception escaping this rescue would abort the loop with
+    # ActiveRecord::Base still pointed at the queue pool. It lives in
+    # Autodev::MigrationStatus because this file is the one thing here no test can
+    # execute, so everything but the two lines below is covered there.
+    level, message = Autodev::MigrationStatus.failure_report(db_config, e)
+    Rails.logger.public_send(level, message)
   end
 
   # Restore the primary connection on ActiveRecord::Base so any model that

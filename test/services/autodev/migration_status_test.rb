@@ -14,7 +14,7 @@ require_relative '../../rails_helper'
 # the only predicate that gates anything (bin/autodev refuses to spawn the
 # supervisor's children on a non-empty answer), which is why it must be exact
 # rather than inferred from whatever exception the pass happened to raise.
-class MigrationStatusTest < ActiveSupport::TestCase
+class MigrationStatusTest < ActiveSupport::TestCase # rubocop:disable Metrics/ClassLength
   # --- Q1: benign boot race ------------------------------------------------
 
   # Two Rails apps boot back to back against the same SQLite file and SQLite
@@ -124,6 +124,49 @@ class MigrationStatusTest < ActiveSupport::TestCase
     assert_empty Autodev::MigrationStatus.pending_versions(primary_config)
   ensure
     ActiveRecord::Base.connection.execute("DELETE FROM schema_migrations WHERE version = '29999999999999'")
+  end
+
+  # --- The log line the initializer prints ---------------------------------
+  #
+  # config/initializers/auto_migrate.rb is the one file in this change no test can
+  # execute — it returns early in `test`, and development / production point at
+  # the real ~/.autodev/autodev.db. So everything but its two-line rescue body
+  # lives here and is pinned here.
+
+  test 'a benign race is reported as a warning' do
+    error = ActiveRecord::StatementInvalid.new('SQLite3::SQLException: duplicate column name: x')
+
+    level, message = Autodev::MigrationStatus.failure_report(primary_config, error)
+
+    assert_equal :warn, level
+    assert_includes message, '[auto_migrate] primary migration failed'
+    assert_includes message, 'the winner applied it'
+  end
+
+  test 'anything else is reported as an error naming what is unapplied' do
+    version = applied_versions.max
+    ActiveRecord::Base.connection.execute("DELETE FROM schema_migrations WHERE version = '#{version}'")
+    error = ActiveRecord::StatementInvalid.new('SQLite3::BusyException: database is locked')
+
+    level, message = Autodev::MigrationStatus.failure_report(primary_config, error)
+
+    assert_equal :error, level
+    assert_match(%r{INCOMPLETE SCHEMA, unapplied: #{version}\b.*/admin/health}, message)
+  ensure
+    ActiveRecord::Base.connection.execute("INSERT INTO schema_migrations (version) VALUES ('#{version}')")
+  end
+
+  # A pass can fail and still leave a complete schema — the peer that won the race
+  # applied it. Saying so is worth as much as naming a gap.
+  test 'an unclassified failure that left nothing unapplied says so' do
+    error = ActiveRecord::StatementInvalid.new('SQLite3::BusyException: database is locked')
+
+    Autodev::MigrationStatus.stub(:pending, {}) do
+      level, message = Autodev::MigrationStatus.failure_report(primary_config, error)
+
+      assert_equal :error, level
+      assert_includes message, 'complete nonetheless'
+    end
   end
 
   # --- Q2: the abort message ----------------------------------------------
