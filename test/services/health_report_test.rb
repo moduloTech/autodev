@@ -108,7 +108,34 @@ class HealthReportTest < ActiveSupport::TestCase # rubocop:disable Metrics/Class
     end
 
     assert_equal :down, result[:status]
-    assert_equal %i[poller workers queue claude_usage issues_error stuck_issues database], result[:checks].keys
+    assert_equal %i[poller workers queue claude_usage issues_error stuck_issues database migrations],
+                 result[:checks].keys
+  end
+
+  # --- migrations (Autodev #55) -------------------------------------------
+  #
+  # The check reads Autodev::MigrationStatus.pending, a set difference between the
+  # migration files and schema_migrations. In this environment the real answer is
+  # non-empty — test/rails_helper.rb migrates the primary in-memory DB but never
+  # the queue one — so both arms are asserted against a stubbed answer. That the
+  # *primary* arm reads empty on a migrated DB is pinned in
+  # test/services/autodev/migration_status_test.rb, against the real thing.
+
+  test 'migrations ok when every migration is applied' do
+    Autodev::MigrationStatus.stub(:pending, {}) do
+      assert_equal :ok, report.check(:migrations)[:status]
+    end
+  end
+
+  # down, not warn: /healthz answers 503 only on a real outage, and an incomplete
+  # schema is one — Project#to_project_config raises NoMethodError on every job.
+  test 'migrations down when a migration is unapplied, with the versions in meta' do
+    Autodev::MigrationStatus.stub(:pending, { 'primary' => [20_260_810_000_001] }) do
+      check = report.check(:migrations)[:checks][:migrations]
+
+      assert_equal :down, check[:status]
+      assert_equal '20260810000001', check[:meta][:pending_primary]
+    end
   end
 
   # --- stuck_issues -------------------------------------------------------
