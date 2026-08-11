@@ -25,7 +25,8 @@ Le système est piloté par des jobs en arrière-plan (poller récurrent → dis
     "claude_usage": { "status": "ok",   "detail": "...", "meta": { "checked_at": "..." } },
     "issues_error": { "status": "warn", "detail": "...", "meta": { "count": 2 } },
     "stuck_issues": { "status": "warn", "detail": "...", "meta": { "count": 1, "sample": "#15830(pending)" } },
-    "database":     { "status": "ok",   "detail": "..." }
+    "database":     { "status": "ok",   "detail": "..." },
+    "migrations":   { "status": "ok",   "detail": "..." }
   }
 }
 ```
@@ -41,11 +42,13 @@ Sémantique de `status` (`ok` < `warn` < `down`, le global = le pire) :
 | **issues_error** | aucune issue en erreur | ≥ 1 issue `error` / `post_completion_error` | — |
 | **stuck_issues** | aucune issue bloquée | ≥ 1 issue dans un état actif sans avancement | — |
 | **database** | primaire + queue joignables | — | exception SQL |
+| **migrations** | toutes les migrations appliquées | — | au moins une migration non appliquée |
 
 - **poller** se base sur le dernier `ActivityEvent` `kind: 'poller'`. Seuil de péremption = `poll_interval × monitoring.poll_stale_factor`, avec un plancher de 15 min. En environnement local (dev/test, où `config/recurring.yml` désactive les jobs récurrents), l'absence de heartbeat n'est **pas** une faute → `ok` (`poller disabled`).
 - **issues_error** est un `warn`, jamais un `down` : des tickets en erreur sont un état opérationnel normal, pas une panne système.
 - **stuck_issues** matérialise l'invariant qu'un dashboard tout vert masquait : toute issue dans un état non-terminal et non-attente-humaine a une passe du dispatcher qui la fait avancer, donc elle doit produire de l'activité. Lève un `warn` (jamais `down`) si une issue `pending` dépasse la fenêtre de péremption du poller (`max(poll_interval × poll_stale_factor, 900s)` — elle devrait quitter `pending` en un cycle) ou si une issue active (`cloning`…`creating_mr`, `reviewing`, `fixing_*`, `running_post_completion`, `answering_question`) n'a plus d'`ActivityEvent` depuis la fenêtre d'inactivité — `max(monitoring.stuck_active_after_seconds ou 2 h, 2 × le plus long timeout configuré)`, pris sur `dc_timeout`, `mr_review_timeout` **et** `post_completion_timeout` de tous les projets connus (Autodev #50). Cette fenêtre est aussi la borne de sûreté de `dispatch_dormant_audit`, qui mute les lignes hors du verrou de concurrence par ticket : elle doit dépasser le plus long silence qu'un worker *vivant* peut produire. C'est pourquoi un réglage explicite plus étroit est ignoré (la valeur effective est renvoyée dans `meta.window_seconds`) et pourquoi chaque appel danger-claude écrit un `ActivityEvent` `kind: 'heartbeat'` (DB uniquement, invisible dans l'UI) : sans lui, une boucle comme `PipelineFixer` — deux appels par job échoué, aucun événement entre les jobs — dépasse la fenêtre alors que le worker travaille toujours ; avec lui, le calcul reste basé sur la dernière activité (heartbeat compris), donc un run danger-claude long mais vivant n'est pas flaggé. **Exclus volontairement** : `done`/`closed` (terminaux), `error` (panneau dédié + backoff), `needs_clarification` (attente humaine), `checking_pipeline` (attente d'un pipeline externe, re-pollé chaque cycle). Cas typique détecté : une issue remise à `pending` au redémarrage dont le label GitLab est resté `label_doing`, donc invisible à `dispatch_new_issues`.
 - **Corollaire à noter** : la carte mesurait auparavant l'absence d'activité *métier* ; elle mesure maintenant l'absence d'appel danger-claude *démarré* depuis la fenêtre. Un run long mais vivant n'est donc plus signalé à tort — c'est le but — mais un worker qui tournerait sans avancer (boucle danger-claude qui s'auto-relance sans jamais atteindre une transition) échapperait désormais à ce check. Aucune boucle de ce type n'existe dans le code à ce jour ; c'est une perte de sensibilité assumée du seul check censé détecter « plus de chemin possible ».
+- **migrations** compare les versions des fichiers de `db/migrate` et `db/queue_migrate` aux lignes de `schema_migrations`, base par base, via `Autodev::MigrationStatus`. C'est le seul signal fiable que la passe de migration du boot a fonctionné : `config/initializers/auto_migrate.rb` avale volontairement ses échecs (il est aussi sur le chemin de boot de `bin/rails runner`, des commandes CLI, d'un `bin/rails server` seul et de la suite de tests, qui doivent tous continuer à démarrer). `down` et non `warn` : avec une colonne manquante, `Project#to_project_config` lève `NoMethodError` sur chaque job — c'est une panne totale de traitement, pas un état dégradé mais debout, donc elle appartient au niveau qui fait sonner une sonde (503) au même titre que « aucun worker vivant ». Les versions non appliquées sont renvoyées dans `meta`, sous la clé `pending_<base>`. Une base qui porte des versions dont le fichier n'existe pas (retour à une version antérieure d'autodev) est lue comme complète : la différence n'est calculée que dans un sens. Le refus dur, lui, est côté `bin/autodev`, qui ne lance pas ses enfants tant qu'il reste une migration non appliquée (Autodev #55).
 - Toute exception dans un check est rattrapée et dégradée en `down` (la page / l'endpoint ne plante jamais).
 
 ## Heartbeat du poller — `kind: 'poller'` / `kind: 'error'`
@@ -73,7 +76,7 @@ La colonne `activity_events.issue_id` est nullable depuis la migration `20260617
 |---|---|---|
 | `GET /up` | Liveness pure (le process Rails répond) — `Rails::HealthController` | 200 |
 | `GET /healthz(.json)` | `HealthReport` complet en JSON | **503 seulement si `down`** ; `ok` **et** `warn` → 200 |
-| `GET /healthz/:check` | Un seul composant (`poller`, `workers`, `queue`, `claude_usage`, `issues_error`, `database`) | idem (503 si `down`) |
+| `GET /healthz/:check` | Un seul composant (`poller`, `workers`, `queue`, `claude_usage`, `issues_error`, `stuck_issues`, `database`, `migrations`) | idem (503 si `down`) |
 
 Les sondes alertent sur le **code HTTP** ; le corps JSON sert au diagnostic.
 

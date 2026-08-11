@@ -236,6 +236,12 @@ Two SQLite files:
 
 AR migrations live under `db/migrate/` (primary) and `db/queue_migrate/` (queue). `config/initializers/auto_migrate.rb` runs both on Rails boot — idempotent, every `create_table` is `if_not_exists: true`. The same migration handles fresh installs and upgrades from the pre-rails Sequel-created prod DB.
 
+**Who migrates, and what happens when it fails (Autodev #55).** `bin/autodev` requires `config/environment` before it reaches `run_supervisor`, so the **parent plays the pass first and alone**; the two children then boot their own Rails apps and play it again, which is a no-op in the normal case and the safety net for a child restarted on its own. SQLite reports `supports_advisory_locks? == false`, so Rails does not serialise two migrators: the loser of a boot race fails on `duplicate column name` or on the UNIQUE insert into `schema_migrations`, harmlessly, because the winner created the column. `Autodev::MigrationStatus` (`lib/autodev/migration_status.rb`) separates that case from a real failure:
+
+- **the initializer never raises** — it logs a `warn` for a recognised race and an `error` otherwise, naming what is unapplied. It sits on the boot path of `bin/rails runner`, of `autodev --status` / `--errors` / `--reset`, of a standalone `bin/rails server` and of the test suite, all of which must keep booting;
+- **`bin/autodev` refuses to start** when the pass left anything unapplied (`ConfigError` → exit 1, before any child is spawned). The predicate is a set difference between the migration files and `schema_migrations`, not an interpretation of the exception, so a benign race cannot trip it. The supervisor is the only entry point that refuses, because it is the one that starts the workers — a worker on an incomplete schema raises `NoMethodError` in `Project#to_project_config` on every job;
+- **`/admin/health` carries a `migrations` card** (`down`, so `/healthz` answers 503) for the entry points that do boot.
+
 Issue lifecycle (AASM):
 
 ```
