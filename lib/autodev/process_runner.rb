@@ -85,11 +85,18 @@ module ProcessRunner
     status
   end
 
+  # The Process::Status is returned as a fourth, optional element (Autodev #49).
+  # `status.success?` alone cannot tell "the program ran and refused" (exit 1)
+  # from "there was no program to run" (exit 127) from "it was killed before it
+  # could say anything" (a termsig) — and on the failure shape that ticket is
+  # about, where both streams come back empty, that distinction is the entire
+  # diagnostic. Surplus on a three-variable destructuring, so the two
+  # danger-claude callers are unaffected.
   def finish_process(status, tag, out_thread, err_thread)
     out, err = record_output(tag, nil, out_thread, err_thread)
     raise Interrupt, "#{tag} interrupted by signal" if status.signaled? && status.termsig == Signal.list['INT']
 
-    [out, err, status.success?]
+    [out, err, status.success?, status]
   end
 
   def record_output(tag, suffix, out_thread, err_thread)
