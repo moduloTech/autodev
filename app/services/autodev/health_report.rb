@@ -14,7 +14,7 @@ module Autodev
   #     checks: { <name> => { status:, detail:, meta: {} }, ... } }
   # where the top-level status is the worst severity across checks.
   class HealthReport # rubocop:disable Metrics/ClassLength
-    CHECKS = %i[poller workers queue claude_usage issues_error stuck_issues database].freeze
+    CHECKS = %i[poller workers queue claude_usage issues_error stuck_issues database migrations].freeze
     SEVERITY = { ok: 0, warn: 1, down: 2 }.freeze
 
     DEFAULT_POLL_INTERVAL = 300
@@ -171,6 +171,22 @@ module Autodev
       ActiveRecord::Base.connection.execute('SELECT 1')
       SolidQueue::Job.connection.execute('SELECT 1')
       build(:ok, 'primary + queue reachable')
+    end
+
+    # `auto_migrate.rb` runs the migration pass at every boot and swallows its
+    # failures by design, so the only trustworthy signal that it worked is the
+    # state it left: the migration files minus the `schema_migrations` rows, per
+    # database (Autodev #55). `down` rather than `warn` — an incomplete schema is
+    # a real outage, not a degraded-but-up condition: `Project#to_project_config`
+    # raises `NoMethodError` on a missing column, so every job fails. That puts
+    # it in the paging tier next to "no worker alive" and "database unreachable".
+    def check_migrations
+      pending = MigrationStatus.pending
+      return build(:ok, 'schema up to date') if pending.empty?
+
+      meta = pending.transform_keys { |name| :"pending_#{name}" }
+                    .transform_values { |versions| versions.join(', ') }
+      build(:down, "#{pending.values.sum(&:size)} migration(s) not applied", meta)
     end
 
     def check_stuck_issues
