@@ -406,7 +406,9 @@ Tire la pipeline head de la MR via l'API GitLab et applique une matrice de déci
 | Red (code) | * | * | `pipeline_failed_code!` → `fixing_pipeline` |
 | Red (infra, 1re fois) | * | * | Retrigger une fois, recheck au poll suivant |
 | Red (infra, après retrigger) | * | * | Reste en `checking_pipeline` (manuel) |
-| Canceled / skipped | * | * | Reste en `checking_pipeline` (manuel) |
+| Manual / skipped | * | * | Verdict pris sur les **jobs bloquants** (hors `allow_failure: true` et hors portes `manual` non jouées) : aucun en échec → vert ; au moins un en échec → chemin rouge |
+| Manual / skipped, jobs illisibles (erreur API) | * | * | Reste en `checking_pipeline`, nouvelle tentative au poll suivant |
+| Canceled | * | * | Reste en `checking_pipeline` (manuel) |
 
 `MAX_REVIEW_ROUNDS = 3`. `review_count` incrémenté uniquement sur succès `mr-review`.
 
@@ -529,7 +531,8 @@ DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`
 | Pipeline rouge (code, pré-triage) | `fixing_pipeline` immédiat (skip retrigger) |
 | Pipeline rouge (infra / incertaine, 1re fois) | Retrigger unique, recheck au poll suivant |
 | Pipeline rouge (infra / incertaine, après retrigger) | Reste en `checking_pipeline` (manuel) |
-| Pipeline canceled / skipped | Reste en `checking_pipeline` (manuel) |
+| Pipeline manual / skipped | Résolu sur les jobs bloquants : aucun en échec → vert → `mr-review` → livraison ; un en échec → chemin rouge. `manual` est l'état final normal d'une MR verte sur un projet dont la pipeline se termine par un `deploy_review` manuel — l'attente était infinie par construction |
+| Pipeline canceled | Reste en `checking_pipeline` (manuel) : un run interrompu n'a pas de verdict lisible, et il est en général remplacé par une nouvelle pipeline |
 | Stagnation pipeline (5 corrections identiques) | `done` + `needs_attention` (`stagnation_pipeline`), commentaire d'alerte incluant le job en cause (`attention_detail`, ex. `deploy_review (script_failure)`). Re-tentative auto une fois CI rétablie (voir ligne suivante) |
 | Stagnation pipeline infra — CI rétabli | `dispatch_infra_recheck` ré-enfile `:recheck_infra` ; pipeline courante verte → réentrée `checking_pipeline`. Borné par `infra_recheck_max` (5) / `infra_recheck_backoff` (3600 s) ; jamais de boucle |
 | Stagnation discussions | `done` avec commentaire d'alerte |

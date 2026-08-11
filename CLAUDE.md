@@ -205,7 +205,8 @@ Handles `checking_pipeline`: fetches MR head pipeline via GitLab API.
 - **Red (code)** → `pipeline_failed_code!` → `fixing_pipeline` → `pipeline_fix_done!` (with stagnation detection)
 - **Red (infra/uncertain, first time)** → retrigger once, recheck next poll
 - **Red (infra, after retrigger)** → stay in `checking_pipeline`, but track the failure signature; once the same infra job set recurs `stagnation_threshold` times, bail via `handle_stagnation` → `done` + `needs_attention` (`stagnation_pipeline`), so a never-recovering infra/deploy job can't poll forever
-- **Canceled/skipped** → stay in `checking_pipeline` (manual intervention needed)
+- **Manual/skipped** → verdict taken on the **blocking jobs** instead of the roll-up status (`allow_failure: true` jobs and unplayed `manual` gates excluded): no blocking job `failed` → `handle_green`, one or more failed → `handle_red`. `manual` is the normal end state of a green MR on any project whose pipeline ends with a manual `deploy_review`, so treating it as "wait" waited forever (Autodev #51). A GitLab error fetching the jobs leaves the row untouched for the next cycle — never read as green
+- **Canceled** → stay in `checking_pipeline` (manual intervention needed)
 
 Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log` files in the work directory (no truncation). Prompts reference these files by path so danger-claude reads the complete log. Each failed job is fixed in a separate danger-claude call + commit (same pattern as MrFixer's per-discussion approach).
 
@@ -300,7 +301,9 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | Pipeline red (code by pre-triage) | Skip retrigger, go straight to fix phase |
 | Pipeline red (infra/uncertain, first time) | Retrigger once, recheck next poll |
 | Pipeline red (infra/uncertain, after retrigger) | Stay in checking_pipeline; if the same infra job set recurs `stagnation_threshold` times, bail via stagnation → done + needs_attention (`stagnation_pipeline`) |
-| Pipeline canceled/skipped | Stay in checking_pipeline (manual intervention) |
+| Pipeline manual / skipped | Resolved on the blocking jobs (`allow_failure: false`, not an unplayed manual gate): none failed → green → mr-review → done; one failed → the red path |
+| Pipeline manual / skipped, jobs endpoint unreachable | Stay in checking_pipeline, recheck next poll (an API error must never read as "nothing failed") |
+| Pipeline canceled | Stay in checking_pipeline (manual intervention) |
 | Stagnation detected (pipeline or discussions) | Transition to done with alert comment |
 | Review limit reached (3 rounds) | Transition to done with alert comment |
 | Unassigned during implementation | Transition to done at next poll cycle |
@@ -322,7 +325,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 - **Polling by assignee**: Issues are discovered by querying GitLab for issues assigned to the autodev user with `labels_todo`, replacing the old `trigger_label`-based approach.
 - **3 labels only**: `labels_todo`, `label_doing`, `label_done`. Label stays `label_doing` during the entire implementation + pipeline + fix + review cycle, and switches to `label_done` only when reaching `done`.
 - **Post-completion at unassignment**: The `post_completion` hook triggers when autodev is unassigned from a `done` issue (not immediately after pipeline green).
-- **No blocked state**: Canceled pipelines keep the issue in `checking_pipeline` indefinitely until manual intervention or natural resolution. Infrastructure failures do the same *only until stagnation* — a recurring infra/deploy failure that never recovers is bailed out via `handle_stagnation` (→ `done` + `needs_attention`) after `stagnation_threshold` identical polls, so it can't loop forever.
+- **No blocked state**: Canceled pipelines keep the issue in `checking_pipeline` indefinitely until manual intervention or natural resolution — an interrupted run has no verdict to read (its blocking jobs are `canceled`, not `failed`), and unlike a manual gate it is usually superseded by a new pipeline that `head_pipeline` re-points to. This deliberately **no longer covers `manual`/`skipped`** (Autodev #51): a manual `deploy_review` is the normal end of a green MR on some projects, so that wait was infinite by construction, and the blocking jobs answer the question the roll-up cannot. Infrastructure failures do the same *only until stagnation* — a recurring infra/deploy failure that never recovers is bailed out via `handle_stagnation` (→ `done` + `needs_attention`) after `stagnation_threshold` identical polls, so it can't loop forever.
 - **danger-claude as implementation engine**: Leverages the existing Docker-based Claude CLI wrapper for sandboxed code generation.
 - **Solid Queue concurrency control**: `IssueProcessJob`'s `limits_concurrency to: 1, key: "issue-#{path}-#{iid}"` ensures no two jobs touch the same issue at once. Global concurrency cap comes from `queue.yml`'s `threads` setting (`AUTODEV_MAX_WORKERS`, default 3) — mirrors the legacy `max_workers`.
 

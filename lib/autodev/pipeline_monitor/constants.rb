@@ -12,6 +12,17 @@ class PipelineMonitor
 
   RUNNING_STATUSES = %w[running pending created waiting_for_resource preparing scheduled].freeze
 
+  # Pipeline statuses that are terminal but inconclusive: GitLab will never move
+  # them on its own, yet the roll-up is neither `success` nor `failed`. Resolved
+  # by looking at the blocking jobs instead (Autodev #51). `canceled` is
+  # deliberately NOT here — see the "No blocked state" decision in CLAUDE.md.
+  BLOCKED_STATUSES = %w[manual skipped].freeze
+
+  # Job statuses that cannot gate a merge. An unplayed `manual` job has no
+  # result and will never acquire one without a human, which is exactly why
+  # waiting on it is waiting forever.
+  NON_BLOCKING_JOB_STATUSES = %w[manual].freeze
+
   # Automatic infra-recovery recheck (see PipelineMonitor::InfraRecheck).
   # Cap: how many times the dispatch pass will re-classify a stagnated
   # infra/deploy ticket's current pipeline before giving up for good.

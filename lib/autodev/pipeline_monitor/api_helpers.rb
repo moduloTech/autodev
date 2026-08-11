@@ -5,6 +5,25 @@ class PipelineMonitor
   module ApiHelpers
     private
 
+    # The pipeline's full job list, or nil when GitLab could not be reached.
+    #
+    # nil, not [] — the distinction is the whole safety of the `manual` path
+    # (Autodev #51): [] means "this pipeline genuinely has no jobs" and reads as
+    # green, so an API error swallowed into [] would deliver a ticket nobody
+    # verified. fetch_failed_jobs below can afford `[]` because its caller
+    # already knows the pipeline is red.
+    #
+    # per_page: 100 without auto_paginate, matching fetch_failed_jobs and
+    # DeployReview#find_deploy_review_job: no configured project has a
+    # >100-job pipeline, and the three call sites should move together if one
+    # appears.
+    def fetch_pipeline_jobs(pipeline)
+      @client.pipeline_jobs(@project_path, pipeline_id(pipeline), per_page: 100)
+    rescue Gitlab::Error::ResponseError => e
+      log_error "Failed to fetch pipeline jobs: #{e.message}"
+      nil
+    end
+
     def fetch_failed_jobs(pipeline)
       pid = pipeline_id(pipeline)
       jobs = @client.pipeline_jobs(@project_path, pid, per_page: 100)
