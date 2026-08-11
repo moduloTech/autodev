@@ -13,7 +13,8 @@ require 'autodev/pipeline_monitor/reviewer'
 # under a live worker. #50 added a heartbeat immediately before the call, bounding
 # that silence at one mr-review run; #54 routes the call through
 # ProcessRunner#run_with_timeout, so "one run" is now a bounded number of seconds
-# (dc_timeout), which HealthReport#longest_worker_timeout already accounts for.
+# (the new per-project mr_review_timeout, baked default 3600s), a term
+# HealthReport#longest_worker_timeout now accounts for.
 #
 # The timeout must stay NON-FATAL: run_with_timeout raises, execute_mr_review's
 # rescue turns that into `false`, and launch_review counts it as a review failure
