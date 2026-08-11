@@ -82,4 +82,21 @@ class CheckingPipelineSinceTest < Minitest::Test
     assert_equal ['checking_pipeline', nil],
                  [issue.reload.status, issue.checking_pipeline_since]
   end
+
+  # The lazy stamp only fills a NULL (`PollTracker#seed_watch_clock`), so the
+  # two `update_all` entries must arrive at NULL — they cannot inherit whatever
+  # the row was carrying. Not every exit from `checking_pipeline` clears the
+  # column: the ones that bypass AASM with a direct `update` leave it set, and
+  # `handle_stagnation` is one of them. Without this, an operator pressing
+  # Reset on a long-dead stagnation row hands it a months-old clock and the age
+  # bound abandons it at the very next poll — the reset silently undone.
+  def test_a_row_reset_by_an_operator_starts_a_fresh_clock
+    issue = create_issue(status: 'done', mr_iid: 5)
+    issue.update_columns(checking_pipeline_since: 200.days.ago)
+
+    Issue.reset_for_retry!(Issue.where(id: issue.id), reset_budget: true, clear_attention: true)
+
+    assert_equal ['checking_pipeline', nil],
+                 [issue.reload.status, issue.checking_pipeline_since]
+  end
 end

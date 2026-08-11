@@ -80,7 +80,11 @@ class PipelineMonitor
     # (whose templates don't reference %{detail}, so the extra var is ignored).
     def handle_stagnation(issue, type, detail: nil)
       log "Issue ##{issue.issue_iid}: #{type} stagnation detected → done"
-      issue.update(status: 'done', finished_at: Time.current,
+      # `checking_pipeline_since: nil` for the same reason `give_up_on_watch`
+      # clears it (Autodev #53): this writes the status directly, so the AASM
+      # callback that owns the column never runs, and a stale clock left behind
+      # is picked back up by any later `reset_for_retry!`.
+      issue.update(status: 'done', finished_at: Time.current, checking_pipeline_since: nil,
                    needs_attention: true, attention_reason: "stagnation_#{type}",
                    attention_detail: detail)
       apply_label_done(issue.issue_iid)

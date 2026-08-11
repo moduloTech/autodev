@@ -203,8 +203,12 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # quantity that never bounds an infra loop.
   #
   # The two `update_all` writers that set this status (`reset_for_retry!`,
-  # `revive_stalled!`) bypass AASM and leave the column NULL;
-  # `PipelineMonitor::PollTracker` seeds it at the first poll.
+  # `revive_stalled!`) bypass AASM and clear the column explicitly;
+  # `PipelineMonitor::PollTracker` seeds it at the first poll. They clear rather
+  # than leave it alone because not every exit from `checking_pipeline` goes
+  # through AASM — `handle_stagnation` writes `status: 'done'` directly — so an
+  # untouched column can still be carrying the clock of a watch that ended
+  # months ago, which the lazy seed would then keep (it only fills NULL).
   def stamp_pipeline_watch!
     self.checking_pipeline_since = aasm.to_state == :checking_pipeline ? Time.current : nil
   end
@@ -308,7 +312,8 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     fields[:retry_count] = 0 if reset_budget
     fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention
 
-    scope.where.not(mr_iid: nil).update_all(**fields, status: 'checking_pipeline', next_retry_at: nil) +
+    scope.where.not(mr_iid: nil)
+         .update_all(**fields, status: 'checking_pipeline', next_retry_at: nil, checking_pipeline_since: nil) +
       scope.where(mr_iid: nil).update_all(**fields, status: 'pending', next_retry_at: Time.current)
   end
 
@@ -336,7 +341,8 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
   def self.revive_stalled!(scope)
     reset_for_retry!(scope.where(status: REVIVE_TO_PENDING)) +
-      scope.where(status: REVIVE_TO_PIPELINE).update_all(status: 'checking_pipeline', started_at: nil) +
+      scope.where(status: REVIVE_TO_PIPELINE)
+           .update_all(status: 'checking_pipeline', started_at: nil, checking_pipeline_since: nil) +
       scope.where(status: REVIVE_TO_DONE).update_all(status: 'done', finished_at: Time.current)
   end
 
