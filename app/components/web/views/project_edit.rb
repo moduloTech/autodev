@@ -21,7 +21,7 @@ module Web
          %i[target_branch labels_todo label_doing label_done extra_prompt]],
         [:web_project_edit_section_execution,
          %i[dc_timeout max_retries retry_backoff stagnation_threshold clone_depth
-            sparse_checkout post_completion post_completion_timeout]],
+            sparse_checkout post_completion post_completion_timeout mr_review_timeout]],
         [:web_project_edit_section_advanced,
          %i[model effort parallel_agents split_implementation implementer_agent
             test_writer_agent mr_fixer_agent]]
@@ -35,7 +35,7 @@ module Web
       # hint via HINT_KEYS instead.
       DEFAULT_HINT_VALUES = {
         dc_timeout: 1800, max_retries: 1, retry_backoff: 10, stagnation_threshold: 5,
-        clone_depth: 1, post_completion_timeout: 300,
+        clone_depth: 1, post_completion_timeout: 300, mr_review_timeout: ::Config::MR_REVIEW_TIMEOUT,
         parallel_agents: 'false', split_implementation: 'false'
       }.freeze
       private_constant :DEFAULT_HINT_VALUES

@@ -8,8 +8,11 @@
 module ProcessRunner
   private
 
-  def run_with_timeout(cmd, args, chdir:, label: nil)
-    timeout = (@project_config['dc_timeout'] || @config['dc_timeout'] || 600).to_i
+  # `timeout:` overrides the danger-claude cap for a caller that runs a different
+  # program (Autodev #54: mr-review has its own, measured profile). Left nil, the
+  # resolution is unchanged for the two danger-claude entry points.
+  def run_with_timeout(cmd, args, chdir:, label: nil, timeout: nil)
+    timeout = resolve_timeout(timeout)
     tag = label ? "#{cmd} #{label}" : cmd
     pid, stdout_r, stderr_r = spawn_process(cmd, args, chdir)
     PortAllocator.release(@port_mappings) if @port_mappings
@@ -19,6 +22,12 @@ module ProcessRunner
   ensure
     stdout_r&.close
     stderr_r&.close
+  end
+
+  # Extracted from run_with_timeout to keep its cyclomatic complexity under the
+  # RuboCop threshold once the `timeout:` kwarg added a fourth fallback term.
+  def resolve_timeout(timeout)
+    (timeout || @project_config['dc_timeout'] || @config['dc_timeout'] || 600).to_i
   end
 
   def spawn_process(cmd, args, chdir)

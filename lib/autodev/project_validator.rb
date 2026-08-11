@@ -12,7 +12,7 @@ module ProjectValidator
   end
 
   def self.validate_numerics!(project_config, path)
-    %w[dc_timeout max_retries retry_backoff stagnation_threshold].each do |field|
+    %w[dc_timeout max_retries retry_backoff stagnation_threshold mr_review_timeout].each do |field|
       next unless project_config.key?(field)
 
       value = project_config[field].to_i

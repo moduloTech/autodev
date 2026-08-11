@@ -77,17 +77,36 @@ class PipelineMonitor
       false
     end
 
+    # mr-review is not a danger-claude call, so it gets no heartbeat of its own
+    # from DangerClaudeRunner — hence the explicit marker (Autodev #50), written
+    # before the call so the clock starts as late as possible.
+    #
+    # It runs under run_with_timeout rather than a raw Open3 (Autodev #54): the
+    # cap is `mr_review_timeout` (a per-project override, else
+    # Config::MR_REVIEW_TIMEOUT), which HealthReport#longest_worker_timeout
+    # already folds into the stuck-window, so `reviewing` stops being an
+    # exception the window cannot size. On timeout the wrapper raises
+    # ImplementationError, which execute_mr_review's rescue turns into `false`
+    # — a review failure counted by launch_review, not a failed request.
+    #
+    # chdir: Dir.pwd keeps the previous behaviour. Open3.capture3 inherited the
+    # process's cwd, and mr-review works through the GitLab API rather than in a
+    # local clone, so it has no repo to sit in.
     def run_mr_review_command(mr_url)
       log "Running mr-review on #{mr_url}..."
-      # mr-review is an Open3 call with no timeout and no danger-claude heartbeat of
-      # its own (Autodev #50 follow-up): mark liveness right before the unbounded
-      # call, as late as possible, so silence in `reviewing` is bounded at one run.
       dc_heartbeat!('mr-review')
-      _, err, status = Open3.capture3(DangerClaudeRunner::CLEAN_ENV, 'mr-review', '-H', mr_url)
-      return log('Review completed successfully') || true if status.success?
+      _, err, ok = run_with_timeout('mr-review', ['-H', mr_url], chdir: Dir.pwd,
+                                                                 timeout: mr_review_timeout)
+      return log('Review completed successfully') || true if ok
 
       log_error "mr-review failed (non-fatal): #{err[0, 300]}"
       false
+    end
+
+    # Per-project override, else the baked default. A review's duration profile is
+    # not an implementation call's, which is why this is not dc_timeout.
+    def mr_review_timeout
+      (@project_config['mr_review_timeout'] || ::Config::MR_REVIEW_TIMEOUT).to_i
     end
 
     def increment_review_count(issue)

@@ -214,18 +214,23 @@ boots Rails without `lib/autodev`'s tree (it requires only `locales`, `config`
 and `gitlab_helpers`): a constant on `PipelineMonitor` would `NameError` the
 moment `HealthReport` is exercised from `test/services/`.
 
-**Acknowledged exception: `reviewing`.** `mr-review` is an LLM review of the
-full MR diff, run via `Open3.capture3` with **no timeout**, at two call sites
+**`reviewing` was an acknowledged exception; Autodev #54 closed it.** `mr-review`
+is an LLM review of the full MR diff, and at the time of this design it ran via
+`Open3.capture3` with **no timeout**, at two call sites
 (`PipelineMonitor::Reviewer#run_mr_review_command`,
-`IssueProcessor::MrManager#execute_review`). It is not a danger-claude call, so
-unlike `running_post_completion` it contributes **no term** to
-`longest_worker_timeout` — there is no configured timeout to fold into the max.
-Both sites now call `dc_heartbeat!('mr-review')` immediately before the
-`Open3.capture3` line, so silence in `reviewing` is bounded to one mr-review run
-plus the 15 s pre-sleep, not unbounded. That collapses the exposure but does not
-close it: no configured value sizes the window for a run that never returns.
-Giving `mr-review` a real timeout is out of scope here and tracked as a
-separate ticket.
+`IssueProcessor::MrManager#execute_review` — the latter since found to be dead
+code and deleted). Not being a danger-claude call, it contributed **no term** to
+`longest_worker_timeout`: unlike `running_post_completion` there was no configured
+timeout to fold into the max. Both sites got `dc_heartbeat!('mr-review')`
+immediately before the call, which bounded silence in `reviewing` at one mr-review
+run plus the 15 s pre-sleep rather than leaving it unbounded — but it did not
+close the exposure, because nothing sized the window for a run that never
+returned. #54 routes the call through `run_with_timeout`, capping it at a new
+per-project `mr_review_timeout` (baked default `Config::MR_REVIEW_TIMEOUT` =
+3600 s) — a term `HealthReport#longest_worker_timeout` **gained**, rather than an
+existing one it reused — so `reviewing` is now covered like any other state and
+`running_post_completion` is the only remaining exception. See
+`2026-08-10-mr-review-timeout-design.md`.
 
 Consequences:
 
