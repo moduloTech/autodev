@@ -35,7 +35,7 @@ module Web
       # hint via HINT_KEYS instead.
       DEFAULT_HINT_VALUES = {
         dc_timeout: 1800, max_retries: 1, retry_backoff: 10, stagnation_threshold: 5,
-        clone_depth: 1, post_completion_timeout: 300, mr_review_timeout: 3600,
+        clone_depth: 1, post_completion_timeout: 300, mr_review_timeout: ::Config::MR_REVIEW_TIMEOUT,
         parallel_agents: 'false', split_implementation: 'false'
       }.freeze
       private_constant :DEFAULT_HINT_VALUES

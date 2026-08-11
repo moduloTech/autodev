@@ -213,9 +213,9 @@ suite must stay green, which is what proves nothing referenced it.
 - `docs/observability.md` — drop the `reviewing` exception bullet.
 - `docs/superpowers/specs/2026-08-10-live-worker-silence-invariant-design.md` —
   rewrite the exception paragraph to point here.
-- `docs/usage/autodev-technical-usage.md` — the config-fields table documents
-  `dc_timeout` as "délai max d'un appel `danger-claude`"; it now also caps
-  `mr-review`, so the description changes.
+- `docs/usage/autodev-technical-usage.md` — per §1's reversal, the `dc_timeout`
+  row keeps its original wording (it does not cap `mr-review`); a new
+  `mr_review_timeout` row is added instead.
 
 ## Constraints
 

@@ -6,9 +6,10 @@ require_relative '../rails_helper'
 #
 # The window must clear the longest a live worker can legitimately go quiet:
 # one danger-claude call (dc_timeout, bounded per call by the DangerClaudeRunner
-# heartbeat) or one post_completion command (post_completion_timeout, which gets
-# no heartbeat — it is not a danger-claude call). Both are per-project, so the
-# window is sized on the widest value in play, doubled for margin.
+# heartbeat), one mr-review run (mr_review_timeout, bounded per call by the same
+# heartbeat), or one post_completion command (post_completion_timeout, which gets
+# no heartbeat — it is not a danger-claude call). All three are per-project, so
+# the window is sized on the widest value in play, doubled for margin.
 #
 # Getting this wrong is not a monitoring nit: DormantAudit#active_window reads
 # the same method and repositions rows by update_all, outside the concurrency
@@ -98,7 +99,7 @@ class HealthReportStuckWindowTest < ActiveSupport::TestCase
   # 2 × the baked review default (3600) is exactly the 7200 floor, so adding the
   # term must not move the default window. A changed default here is a bug.
   test 'the baked review timeout does not move the default window' do
-    assert_equal BASE, window
+    assert_equal BASE, Autodev::HealthReport::TIMEOUT_SLACK_FACTOR * Config::MR_REVIEW_TIMEOUT
   end
 
   test 'derives from a project mr_review_timeout that exceeds the floor' do

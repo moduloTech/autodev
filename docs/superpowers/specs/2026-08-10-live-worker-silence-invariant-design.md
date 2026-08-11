@@ -225,9 +225,11 @@ timeout to fold into the max. Both sites got `dc_heartbeat!('mr-review')`
 immediately before the call, which bounded silence in `reviewing` at one mr-review
 run plus the 15 s pre-sleep rather than leaving it unbounded — but it did not
 close the exposure, because nothing sized the window for a run that never
-returned. #54 routes the call through `run_with_timeout`, capping it at
-`dc_timeout` — a term already in the max — so `reviewing` is now covered like any
-other state and `running_post_completion` is the only remaining exception. See
+returned. #54 routes the call through `run_with_timeout`, capping it at a new
+per-project `mr_review_timeout` (baked default `Config::MR_REVIEW_TIMEOUT` =
+3600 s) — a term `HealthReport#longest_worker_timeout` **gained**, rather than an
+existing one it reused — so `reviewing` is now covered like any other state and
+`running_post_completion` is the only remaining exception. See
 `2026-08-10-mr-review-timeout-design.md`.
 
 Consequences:

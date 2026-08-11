@@ -750,11 +750,15 @@ mise x ruby -- bundle exec rake test TEST=test/services/health_report_stuck_wind
 mise x ruby -- bundle exec rake test
 ```
 
-Expected: all pass; the full suite reports 0 failures and 0 errors. The suite is
-the gate that proves property 1 above — `test/danger_claude_runner_heartbeat_test.rb`,
+Expected: all pass; the full suite reports 0 failures and 0 errors. Quote the
+counts. Note, recorded during the final review: the suite does **not** prove
+property 1 above. `test/danger_claude_runner_heartbeat_test.rb`,
 `test/services/yaml_project_importer_config_test.rb` and
-`test/controllers/projects_controller_edit_test.rb` all exercise paths the new
-field touches. Quote the counts.
+`test/controllers/projects_controller_edit_test.rb` exercise paths the new field
+touches, but the first *stubs* `run_with_timeout` rather than exercising
+`resolve_timeout`, and none of the three reaches `resolve_timeout` at all —
+property 1 rested on inspection alone until `test/process_runner_test.rb` was
+added in the final-review fix pass to pin it directly.
 
 - [ ] **Step 10: RuboCop**
 
