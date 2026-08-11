@@ -96,6 +96,15 @@ class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/Clas
     issue.reload
   end
 
+  # A whole cycle, with the jobs captured instead of enqueued.
+  def cycle(client)
+    calls = []
+    IssueProcessJob.stub(:perform_later, ->(*args) { calls << args.last }) do
+      dispatcher(client).send(:dispatch_existing)
+    end
+    calls
+  end
+
   def active(overrides = {})
     create_issue({ status: 'checking_pipeline', mr_iid: 42 }.merge(overrides))
   end
@@ -265,5 +274,30 @@ class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/Clas
     issue = sweep(active, FailingClient.new)
 
     assert_equal 'checking_pipeline', issue.status
+  end
+
+  # --- ordering within one cycle ------------------------------------
+
+  # The sweep only helps if it runs before the row is handed to a worker.
+  # `dispatch_pipelines` *enqueues*, and `IssueProcessJob#perform` reloads the
+  # row but never checks its status, so Solid Queue picking the job up
+  # immediately puts `PipelineMonitor#check` in a race the inline sweep loses
+  # almost every time. Losing it costs exactly what #52 exists to prevent: a
+  # pipeline resolving on the same cycle as the handover drives the row to
+  # `done` through `handle_green`, `done` is not in `ACTIVE_STATUSES` so the
+  # sweep never looks at it again, and `apply_label_done` overwrites the
+  # workflow label the human just set — GitLab drops `Development::Awaiting CR`
+  # to make room for it.
+  def test_a_handed_over_row_is_not_dispatched_to_a_worker_in_the_same_cycle
+    active
+
+    assert_empty cycle(handover_client(HUMAN_ID))
+  end
+
+  # The converse, so the reordering cannot be "fixed" by simply not dispatching.
+  def test_an_untouched_row_is_still_dispatched
+    active
+
+    assert_equal [:check_pipeline], cycle(StubClient.new)
   end
 end

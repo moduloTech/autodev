@@ -93,9 +93,18 @@ module Autodev
     end
 
     def dispatch_existing
+      # First, and before anything enqueues: this pass decides whether a row is
+      # still ours at all (closed on GitLab, unassigned, or handed back by a
+      # label — Autodev #44, #52). It mutates inline, while the two dispatch
+      # passes below only enqueue, and `IssueProcessJob#perform` does not
+      # re-check the status it was enqueued for. Run after them, a row a human
+      # just took back is already in a worker's hands, and a pipeline resolving
+      # on the same cycle drives it to `done` — out of `ACTIVE_STATUSES`, so
+      # this pass never gets a second look at it — while `apply_label_done`
+      # overwrites the label that human set.
+      dispatch_unassignment
       dispatch_pipelines
       dispatch_discussions if claude_available?
-      dispatch_unassignment
       dispatch_done_unassigned
       # Before dispatch_retries, so a budget re-armed this cycle is picked up
       # by it immediately rather than waiting a full poll interval.
