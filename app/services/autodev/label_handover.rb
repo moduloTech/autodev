@@ -105,9 +105,27 @@ module Autodev
 
       moved = foreign_scoped(labels).first
       return Verdict.new(:workflow_moved, moved) if moved
-      return Verdict.new(:doing_removed, label_doing) if label_doing && !labels.include?(label_doing)
+      return Verdict.new(:doing_removed, label_doing) if doing_dropped?(labels)
 
       nil
+    end
+
+    # `label_doing` being gone is the weakest of the three signals: an absence,
+    # not an edit naming where the ticket went. A todo label sitting on the row
+    # explains that absence differently. GitLab allows one label per scope, so
+    # on a project whose todo shares the workflow scope — ff/fast/core configures
+    # `Development::ToDo` against `Development::Doing` — the documented "repose
+    # the todo label and reassign me" gesture drops `label_doing` in the same
+    # edit and arrives here looking exactly like a handover. Stopping on it
+    # would park the ticket for good: the row goes to `closed`, and
+    # `todo_reapplied_after?` gates reentry on a todo applied *after*
+    # `finished_at`, which this one precedes. Somebody asking for work is never
+    # a reason to stop, so the absence is left to PollRouter to read.
+    def doing_dropped?(labels)
+      return false unless label_doing
+      return false if labels.include?(label_doing)
+
+      !labels_todo.intersect?(labels)
     end
 
     # Labels sitting in autodev's own workflow scope that are none of the three

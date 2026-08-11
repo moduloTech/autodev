@@ -30,6 +30,14 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     'label_done' => 'Development::Awaiting Feature Review'
   }.freeze
 
+  # The real ff/fast/core shape: the todo label sits in the *same* scope as the
+  # two autodev owns, so applying it displaces `label_doing`.
+  FAST = {
+    'labels_todo' => ['Development::ToDo'],
+    'label_doing' => 'Development::Doing',
+    'label_done' => 'Development::Done'
+  }.freeze
+
   # A project whose two autodev-owned labels share no scope: the rule must
   # self-disable down to the two presence checks.
   UNSCOPED = {
@@ -163,6 +171,27 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   # owns, never a stop.
   def test_re_adding_the_todo_label_is_not_a_stop
     assert_nil verdict(labels: ['Development::Doing', 'To Do'])
+  end
+
+  # The same gesture on a project whose todo label shares the workflow scope,
+  # which the test above cannot express: GitLab allows one label per scope, so
+  # applying `Development::ToDo` *removes* `Development::Doing` in the same edit
+  # and the row arrives here with the doing label already gone. Read as
+  # `doing_removed` that closes the row — and because the todo label was applied
+  # before `finished_at`, `PollRouter#todo_reapplied_after?` then refuses the
+  # reentry it gates, so the documented "repose the todo label and reassign me"
+  # loop parks the ticket in `closed` for good.
+  #
+  # Real shape: ff/fast/core configures `labels_todo: ["Development::ToDo"]`
+  # against `label_doing: "Development::Doing"`. powerpanne/core carries both
+  # `To do` and `Development::ToDo`, so it is exposed through the scoped one.
+  def test_a_scoped_todo_label_that_displaced_the_doing_label_is_not_a_stop
+    v = verdict(labels: ['Development::ToDo', 'PM::Evolution'], config: FAST,
+                events: [ev('add', 'Development::Doing', AUTODEV_ID),
+                         ev('remove', 'Development::Doing', HUMAN_ID),
+                         ev('add', 'Development::ToDo', HUMAN_ID)])
+
+    assert_nil v
   end
 
   # --- scope derivation ---------------------------------------------
