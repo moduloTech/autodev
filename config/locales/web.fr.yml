@@ -225,6 +225,7 @@ fr:
   web_errors_explain_attention_review_failures_exhausted: La review automatique a échoué plusieurs fois de suite. La demande est marquée livrée mais la review n'a pas pu aboutir — vérifiez la MR manuellement.
   web_errors_explain_attention_stagnation_pipeline: La pipeline a échoué de façon répétée sur les mêmes jobs malgré les corrections. La demande est marquée livrée mais la MR nécessite une intervention manuelle.
   web_errors_explain_attention_stagnation_discussions: Les mêmes discussions sont restées non résolues malgré les corrections. La demande est marquée livrée mais la MR nécessite une intervention manuelle.
+  web_errors_explain_attention_pipeline_watch_expired: "La pipeline de cette demande n'a plus évolué pendant des semaines (jamais verte, jamais rouge — en attente manuelle, annulée, ou bloquée). Autodev a arrêté de la surveiller. La MR reste ouverte : vérifiez la pipeline sur GitLab, ou fermez la demande si elle n'est plus d'actualité."
   web_errors_explain_attention_dormant_exhausted: La demande ne progresse plus et les vérifications automatiques n'ont pas permis de la relancer. Elle reste en l'état — vérifiez sur GitLab si elle est toujours d'actualité.
   web_errors_attention_detail: "Job(s) en cause : %{detail}"
   web_errors_show_technical: Afficher les détails techniques

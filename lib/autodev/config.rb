@@ -50,6 +50,19 @@ module Config # rubocop:disable Metrics/ModuleLength
     'retry_backoff' => 10,
     'pickup_delay' => 600,
     'stagnation_threshold' => 5,
+    # Absolute age bound on a pipeline watch, in days (Autodev #53). Nothing
+    # else bounds one: stagnation detection is fed only from the red branch, so
+    # a pipeline that is never `failed` — manual, canceled, skipped — polls
+    # forever. 0 disables the bound.
+    #
+    # 14 days: above the longest legitimate human absence (a two-week holiday, a
+    # shutdown week with a weekend either side), far below the "nobody will look
+    # at this again" horizon the ticket sets at six weeks, and far above the
+    # bounds that already cover the diagnosable cases (stagnation resolves a red
+    # loop in ~25 min, infra recheck in ~5 h) — a safety net must only fire on
+    # what the specific mechanisms cannot see. Read by
+    # PipelineMonitor::WatchBound, which does not restate the number.
+    'pipeline_watch_max_days' => 14,
     'log_dir' => File.join(CONFIG_DIR, 'logs'),
     'log_level' => 'INFO',
     'projects' => [],
@@ -87,6 +100,10 @@ module Config # rubocop:disable Metrics/ModuleLength
   IGNORED_GLOBAL_FIELDS = %w[dc_timeout max_retries retry_backoff
                              stagnation_threshold pickup_delay database_url].freeze
 
+  # Doubles as ConfigValidator's "must be a positive integer" list, which is why
+  # `pipeline_watch_max_days` is absent from it: 0 is a meaningful value there
+  # (it disables the bound), and `PipelineMonitor::WatchBound` coerces at read
+  # time anyway.
   INTEGER_FIELDS = %w[poll_interval max_workers dc_timeout max_retries retry_backoff pickup_delay
                       stagnation_threshold].freeze
 

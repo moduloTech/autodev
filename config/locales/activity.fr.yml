@@ -44,6 +44,7 @@ fr:
   activity_review_limit_reached: ":warning: Limite de review atteinte (3 tours) → termine"
   activity_stagnation_pipeline: ":warning: Stagnation pipeline detectee : %{detail} → termine"
   activity_stagnation_discussions: ":warning: Stagnation discussions detectee → termine"
+  activity_pipeline_watch_expired: ":hourglass: Pipeline sans evolution depuis plus de %{days} jours, surveillance arretee → termine"
   activity_unassigned_stop: ":stop_sign: Desassigne, travail en cours arrete"
   activity_closed_externally: ":lock: Ticket cloture sur GitLab, travail en cours arrete"
   activity_dc_parse_failed: ":warning: Sortie danger-claude non parsable, session reuse desactive pour cet appel"
