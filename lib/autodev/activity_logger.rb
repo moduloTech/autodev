@@ -15,10 +15,11 @@ module ActivityLogger # rubocop:disable Metrics/ModuleLength
   Ctx = Struct.new(:client, :project_path, :logger)
 
   # Post an activity entry. When `replace_pattern` is given, the last line of
-  # the note is replaced instead of appended if it matches the pattern.
+  # the note is replaced instead of appended if it matches the pattern — and,
+  # since Autodev #53, so is the `activity_events` row: one rule, both sinks.
   def self.post(ctx, issue, key, replace_pattern: nil, **vars)
     entry = build_entry(issue, key, **vars)
-    persist_event!(issue, key, entry, vars)
+    persist_event!(issue, key, payload_for(key, entry, vars), collapse: !replace_pattern.nil?)
     note_id = issue.activity_note_id
     note_id ? upsert(ctx, issue, note_id, entry, replace_pattern) : create(ctx, issue, entry)
   rescue StandardError => e
@@ -27,15 +28,53 @@ module ActivityLogger # rubocop:disable Metrics/ModuleLength
 
   # Best-effort persistence to the activity_events table. Failures here must
   # never abort the GitLab note update — they are logged and swallowed.
-  def self.persist_event!(issue, key, entry, vars, level: 'info')
-    ActivityEvent.create(
-      issue_id: issue.id,
-      kind: 'danger_claude',
-      level: level,
-      payload_json: JSON.generate(key: key.to_s, vars: vars, message: entry)
-    )
+  #
+  # `collapse:` mirrors the note's `replace_pattern` (Autodev #53). Without it,
+  # a ticket polled every cycle in `checking_pipeline` grew one row per poll:
+  # 477 827 of production's 898 424 rows, 29 773 of them on a single issue,
+  # which made both /issues/:id and the GitLab thread unreadable and put the
+  # SQLite file at 264 MB.
+  def self.persist_event!(issue, key, payload, level: 'info', collapse: false)
+    previous = collapse ? last_collapsible_event(issue, key) : nil
+    return supersede!(previous, level, payload) if previous
+
+    ActivityEvent.create(issue_id: issue.id, kind: 'danger_claude', level: level, payload_json: payload)
   rescue StandardError
     nil
+  end
+
+  def self.payload_for(key, entry, vars)
+    JSON.generate(key: key.to_s, vars: vars, message: entry)
+  end
+
+  # The previous occurrence of `key` on this issue, or nil.
+  #
+  # Bounded to the issue's own rows first, which is what keeps it cheap:
+  # `idx_ae_issue` (issue_id, created_at) seeks the issue, and the LIKE filters
+  # within that seek rather than scanning a table that is 900k rows wide. The
+  # key is a literal JSON prefix because `payload_json` is always produced by
+  # `JSON.generate(key:, vars:, message:)` right above.
+  def self.last_collapsible_event(issue, key)
+    ActivityEvent.where(issue_id: issue.id, kind: 'danger_claude')
+                 .where('payload_json LIKE ? ESCAPE ?', "#{like_escape(%({"key":"#{key}",))}%", '\\')
+                 .order(created_at: :desc, id: :desc).first
+  end
+
+  # Activity keys are snake_case and `_` is a LIKE wildcard, so an unescaped
+  # `pipeline_checking` pattern would also match `pipelineXchecking`. No such
+  # key exists; escaping costs one line and removes the class of bug.
+  def self.like_escape(text) = text.gsub(/[\\%_]/) { |char| "\\#{char}" }
+
+  # `update_columns`, not `update`: skipping `after_create_commit` is the point.
+  # A re-occurrence must not push a Turbo frame — one per poll per watched row
+  # is exactly the /stream noise this change removes. `created_at` deliberately
+  # moves forward: for a collapsed row it means "last occurrence", the same
+  # thing the note line's leading timestamp means, and it is what keeps
+  # `Issue.without_activity_since` seeing the freshness it saw before the
+  # collapse (Autodev #50's invariant reads this column).
+  def self.supersede!(event, level, payload)
+    event.update_columns(created_at: Time.current, level: level, payload_json: payload)
+    event
   end
 
   # Emit a warn-level activity event to the DB only (no GitLab note update).
@@ -45,7 +84,7 @@ module ActivityLogger # rubocop:disable Metrics/ModuleLength
     return unless issue
 
     entry = build_entry(issue, key, **vars)
-    persist_event!(issue, key, entry, vars, level: 'warn')
+    persist_event!(issue, key, payload_for(key, entry, vars), level: 'warn')
   rescue StandardError
     nil
   end
@@ -152,7 +191,8 @@ module ActivityLogger # rubocop:disable Metrics/ModuleLength
 
   private_class_method :build_entry, :create, :upsert, :replace_or_append, :persist_event!,
                        :enforce_size_cap, :take_tail_within, :truncation_marker,
-                       :strip_existing_marker, :budget_for
+                       :strip_existing_marker, :budget_for, :last_collapsible_event,
+                       :like_escape, :supersede!, :payload_for
 
   # Instance method for processors (uses @client, @project_path from DangerClaudeRunner).
   private
