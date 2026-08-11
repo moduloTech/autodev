@@ -47,6 +47,10 @@ require 'optparse'
 ENV['RAILS_ENV'] ||= 'production'
 require_relative '../config/environment'
 require_relative '../lib/autodev/supervisor'
+# Required explicitly rather than relying on config/initializers/auto_migrate.rb
+# having already pulled it in — the gate in setup_database is the one thing
+# standing between a broken schema and a worker that fails every job.
+require_relative '../lib/autodev/migration_status'
 
 # == Argument parsing ==========================================================
 
@@ -213,9 +217,27 @@ end
 
 def setup_database(config, logger)
   # AR connections are configured via config/database.yml and the auto_migrate
-  # initializer runs the migrations on Rails boot — by the time we reach
-  # here `Issue` / `ActivityEvent` are ready. We only owe startup recovery
-  # of any rows the previous process left in a transient state.
+  # initializer already ran the migrations — `require config/environment` at the
+  # top of this file boots Rails, so the parent plays the pass FIRST and alone,
+  # before any child is spawned. What it does not do is check that it worked: it
+  # swallows every failure by design, because it also sits on the boot path of
+  # `bin/rails runner`, of the --status / --errors / --reset commands above, of a
+  # standalone `bin/rails server` and of the test suite.
+  #
+  # The supervisor is the one caller that can afford to refuse, and the one that
+  # must: it starts the workers, and a worker on an incomplete schema fails every
+  # job (`Project#to_project_config` raises NoMethodError on a missing column) —
+  # a total processing outage announced by one log line. The predicate is a set
+  # difference between the migration files and `schema_migrations`, not a guess
+  # at what the exception meant, so a benign boot race (the loser's ALTER fails,
+  # the winner's column is there) leaves nothing pending and does not trip it.
+  # Autodev #55.
+  incomplete = Autodev::MigrationStatus.incomplete_schema_report
+  raise ConfigError, incomplete if incomplete
+
+  # We only owe startup recovery of any rows the previous process left in a
+  # transient state. Note this runs *after* the gate: it touches the very columns
+  # a half-applied schema would be missing.
   reset_count = Issue.recover_on_startup!(max_retries: config['max_retries'])
   logger.warn("Recovered #{reset_count} issue(s) on startup") if reset_count.positive?
 end
