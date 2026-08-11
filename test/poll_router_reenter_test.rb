@@ -21,6 +21,8 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
   FakeMr = Struct.new(:state)
   FakeGlIssue = Struct.new(:iid, :title)
   FakeNote = Struct.new(:system, :created_at, :body)
+  FakeLabel = Struct.new(:name)
+  FakeLabelEvent = Struct.new(:action, :label, :created_at)
 
   # Mimics the gitlab gem's paginated response (responds to auto_paginate).
   Paginated = Struct.new(:items) do
@@ -42,13 +44,20 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
   end
 
   class StubClient
-    attr_reader :merge_request_calls, :label_calls
+    attr_reader :merge_request_calls, :label_calls, :label_event_calls
 
-    def initialize(mr_state:, issue_notes: [])
+    def initialize(mr_state:, issue_notes: [], label_events: [])
       @mr_state = mr_state
       @issue_notes = issue_notes
+      @label_events = label_events
       @merge_request_calls = []
       @label_calls = []
+      @label_event_calls = 0
+    end
+
+    def issue_label_events(_project_path, _iid)
+      @label_event_calls += 1
+      @label_events
     end
 
     def merge_request(project_path, mr_iid)
@@ -209,6 +218,73 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
     assert_equal 'done', issue.status
     # But we still poked GitLab labels to strip todo and re-apply done.
     refute_empty client.label_calls
+  end
+
+  # --- reentry from `closed` (Autodev #52) ---------------------------
+  #
+  # A stop decided by a human now ends in `closed` rather than `done`, so the
+  # documented loop — repose the todo label, reassign autodev — has to keep
+  # working from there or the stop becomes a trap. What keeps that safe is the
+  # threshold: only a todo label applied *after* the row was closed counts.
+
+  def closed_issue_with_mr(mr_iid:, finished_at: Time.parse('2026-07-01T10:00:00Z'))
+    issue = done_issue_with_mr(mr_iid: mr_iid)
+    issue.close!
+    issue.update(finished_at: finished_at)
+    issue
+  end
+
+  def todo_event(at)
+    FakeLabelEvent.new('add', FakeLabel.new('To do'), at)
+  end
+
+  def test_a_closed_row_reenters_when_the_todo_label_was_reapplied_after_the_stop
+    issue = closed_issue_with_mr(mr_iid: 42)
+    client = StubClient.new(mr_state: 'opened', label_events: [todo_event('2026-07-02T09:00:00Z')])
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal 'checking_pipeline', issue.reload.status
+  end
+
+  def test_a_closed_row_without_an_mr_reenters_to_pending
+    issue = closed_issue_with_mr(mr_iid: nil)
+    client = StubClient.new(mr_state: 'opened', label_events: [todo_event('2026-07-02T09:00:00Z')])
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal 'pending', issue.reload.status
+  end
+
+  # The dashboard close button stays an off-switch: the todo label was already
+  # on the ticket when the operator clicked, so nothing new was asked.
+  def test_a_closed_row_whose_todo_label_predates_the_close_stays_closed
+    issue = closed_issue_with_mr(mr_iid: 42)
+    client = StubClient.new(mr_state: 'opened', label_events: [todo_event('2026-06-30T09:00:00Z')])
+
+    verdict = build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal :next, verdict
+    assert_equal 'closed', issue.reload.status
+  end
+
+  def test_a_closed_row_with_no_label_events_stays_closed
+    issue = closed_issue_with_mr(mr_iid: 42)
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'),
+                       StubClient.new(mr_state: 'opened'))
+
+    assert_equal 'closed', issue.reload.status
+  end
+
+  # A `done` row must not pay for the new question.
+  def test_a_done_row_costs_no_label_event_read
+    issue = done_issue_with_mr(mr_iid: 42)
+    client = StubClient.new(mr_state: 'opened')
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal 0, client.label_event_calls
   end
 
   private

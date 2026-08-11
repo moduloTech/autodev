@@ -79,6 +79,33 @@ Every nominal completion path ends with `apply_label_done` + `reassign_to_author
 is a deploy hook running over work that was interrupted on purpose — which the
 docs already describe as running "sur désassignation" *après livraison*.
 
+**The second side effect, which the ticket does not flag: reentry.** `closed` was
+terminal by design — `PollRouter#route_by_state` re-enters from `done` and from
+nothing else, and `CLAUDE.md` records "reopen via the manual `#reset` action".
+Moving `stop_unassigned` to `closed` therefore turns the documented loop into a
+dead end: `docs/powerpanne-lifecycle.md` tells a CSM to repose `To Do` and
+reassign autodev after a KO test or a KO code review, and the GitLab notice this
+change adds says the same thing. A stop that cannot be undone by the gesture the
+notice recommends is a trap, and it is a trap this ticket would have introduced.
+
+So `closed` becomes a reentry source — `reenter` and `reenter_to_check_pipeline`
+gain it in their `from:` list — **gated on a threshold**, because the dashboard's
+close button writes `closed` too and must keep working as an off-switch. The
+gate: a todo label applied *after* `finished_at`. On a row an operator closed by
+hand, the todo label was already on the ticket when they clicked, so its `add`
+event predates the close and the row stays closed. On a row autodev stopped, a
+human reposing `To Do` produces a fresh `add` and the row re-enters. The question
+the gate asks is the honest one — *did somebody ask again after we stopped?* —
+and it reuses `LabelHandover`'s events reader rather than inventing a second
+signal.
+
+Cost: one `issue_label_events` call per `closed`-but-still-todo-labelled row per
+cycle, and only for rows GitLab returns in the `labels_todo` query (open, still
+assigned to autodev). The population empties itself — a reentry leaves `closed`,
+and the merged-MR branch strips the todo label — except for a row an operator
+closed while leaving the label on GitLab, which is exactly the case to remove the
+label for.
+
 ### 2. Detecting the label handover: scope-derived, self-disabling
 
 "An unknown label" cannot be read literally. On `powerpanne/core` tickets
@@ -266,6 +293,13 @@ Extended `test/dormant_audit_routing_test.rb`: unassigned dormant row → `close
 (was `done`); a dormant row moved to another workflow label is closed rather than
 re-armed.
 
+Extended `test/poll_router_reenter_test.rb`: a `closed` row whose todo label was
+reapplied after the stop re-enters (to `checking_pipeline` with an open MR, to
+`pending` without one); one whose todo label predates the close stays closed —
+the dashboard off-switch; no label events at all → stays closed; and a `done` row
+costs zero `issue_label_events` calls, so the existing path pays nothing for the
+new question.
+
 `test/locales_test.rb`'s FR/EN parity checks cover the six new keys for free.
 
 ## Docs
@@ -293,8 +327,8 @@ written **without accents** (see the existing file); the new keys follow.
 
 - Reacting to a label change on a `done`/`closed` row. Reentry from `done` is
   `PollRouter::ResumeHandler`'s job and has its own rules.
-- Reopening a row when the human puts `label_doing` back. `closed` is terminal by
-  design; the documented path is re-adding the todo label and reassigning, which
-  `dispatch_new_issues` already handles.
+- Reopening a row when the human puts `label_doing` back. The documented path is
+  re-adding the *todo* label and reassigning, which §1 keeps working from
+  `closed`; nothing re-enters on `label_doing` alone.
 - Making `post_completion` reachable from `closed`. If a project ever needs a
   hook on an interrupted ticket that is a different hook with a different name.

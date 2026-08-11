@@ -65,7 +65,33 @@ module Autodev
       suspicion
     end
 
+    # Did somebody ask again *after* we stopped? Autodev #52 makes a stop
+    # terminal (`closed`), which would otherwise turn the documented "repose the
+    # todo label and reassign me" loop into a dead end — `PollRouter` only ever
+    # re-entered from `done`.
+    #
+    # The threshold is what makes this safe to allow from `closed` at all: a row
+    # an operator closed by hand from the dashboard carries a todo label that was
+    # applied *before* the close, so it stays closed and the button keeps working
+    # as an off-switch. Only a fresh application counts as a new request.
+    def todo_reapplied_after?(issue_iid, threshold)
+      return false if threshold.nil? || labels_todo.empty?
+
+      events(issue_iid).any? do |event|
+        ::GitlabHelpers.field(event, :action).to_s == 'add' &&
+          labels_todo.include?(label_name(event)) &&
+          applied_after?(event, threshold)
+      end
+    end
+
     private
+
+    def applied_after?(event, threshold)
+      at = ::GitlabHelpers.field(event, :created_at)
+      at && Time.parse(at.to_s) > threshold
+    rescue ArgumentError, TypeError
+      false
+    end
 
     # Stage 1 — free: the labels came with the issue payload the caller already
     # fetched.
@@ -128,14 +154,19 @@ module Autodev
 
     # GitLab returns resource label events in chronological order, so the last
     # entry naming the label is the edit that produced the state we just read.
-    # `label` is null once the label itself has been deleted; `field` answers
-    # nil for that without a special case.
-    def last_event_for(issue_iid, label_name)
-      events = Array(@client.issue_label_events(@path, issue_iid))
-      events.select { |e| ::GitlabHelpers.field(::GitlabHelpers.field(e, :label), :name) == label_name }.last
+    def last_event_for(issue_iid, name)
+      events(issue_iid).select { |e| label_name(e) == name }.last
+    end
+
+    # `label` is null once the label itself has been deleted; `field` answers nil
+    # for that without a special case.
+    def label_name(event) = ::GitlabHelpers.field(::GitlabHelpers.field(event, :label), :name)
+
+    def events(issue_iid)
+      Array(@client.issue_label_events(@path, issue_iid))
     rescue ::Gitlab::Error::ResponseError => e
       @logger.error("Failed to read label events for ##{issue_iid}: #{e.message}", project: @path)
-      nil
+      []
     end
   end
 end

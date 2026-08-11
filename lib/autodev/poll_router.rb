@@ -46,12 +46,37 @@ class PollRouter
   def route_by_state(gl_issue, existing)
     return :process unless existing
 
-    if existing.status == 'done'
+    if reenterable?(existing)
       handle_reenter(gl_issue, existing)
       return :next
     end
 
     existing.status == 'pending' ? :process : :next
+  end
+
+  # `done` always reenters. `closed` only does when somebody applied a todo label
+  # *after* the row was closed (Autodev #52).
+  #
+  # That threshold is what makes reentry from a terminal state safe. A stop
+  # decided by a human — unassignment, or a workflow-label handover — now ends in
+  # `closed`, and the documented loop ("repose the todo label, reassign autodev")
+  # has to keep working or the stop is a trap. But `closed` is also what the
+  # dashboard's close button writes, and there the todo label was already on the
+  # ticket before the click: comparing against `finished_at` tells the two apart,
+  # so the button keeps working as an off-switch and only a fresh request wins.
+  #
+  # Costs one `issue_label_events` call per closed-but-still-todo-labelled row
+  # per cycle. That population empties itself — a reentry leaves `closed`, and a
+  # merged-MR reentry strips the todo label — except for a row an operator closed
+  # while leaving the label on GitLab, which is the case to remove the label for.
+  def reenterable?(existing)
+    return true if existing.status == 'done'
+    return false unless existing.status == 'closed'
+
+    Autodev::LabelHandover
+      .new(client: @route_client, path: @project_path,
+           project_config: @project_config, logger: @logger)
+      .todo_reapplied_after?(existing.issue_iid, existing.finished_at)
   end
 
   def enqueue_issue_processing(gl_issue, existing)
