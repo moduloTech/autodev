@@ -15,7 +15,22 @@ en:
   review_failures_exhausted: ":warning: %{tag}: mr-review failed %{count} times in a row on %{mr_url}. Manual intervention required (binary, token, or MR issue)."
   stagnation_pipeline: ":warning: %{tag}: stagnation detected — the same jobs keep failing on %{mr_url}. Failing job(s): %{detail}. Manual intervention required."
   stagnation_discussions: ":warning: %{tag}: stagnation detected — the same discussions remain unresolved on %{mr_url}. Manual intervention required."
-  unassigned_stop: ":stop_sign: %{tag}: unassigned, stopping work in progress."
+  unassigned_stop: |-
+    :stop_sign: %{tag}: I was unassigned from this ticket, I'm stopping the work in progress.
+
+    :arrow_right: **Want me to pick it up again?** Put the _%{label_todo}_ label back and reassign me.
+  handover_doing_removed: |-
+    :stop_sign: %{tag}: the _%{label}_ label was removed by someone else, I'm stopping the work in progress.
+
+    :arrow_right: **Was that a mistake?** Put the _%{label_todo}_ label back and reassign me.
+  handover_done_added: |-
+    :stop_sign: %{tag}: the _%{label}_ label was applied by someone else, I'm stopping the work in progress.
+
+    :arrow_right: **Was that a mistake?** Put the _%{label_todo}_ label back and reassign me.
+  handover_workflow_moved: |-
+    :stop_sign: %{tag}: this ticket moved to the _%{label}_ label, I'm stopping the work in progress.
+
+    :arrow_right: **Was that a mistake?** Put the _%{label_todo}_ label back and reassign me.
   done_nominal: |-
     :checkered_flag: %{tag}: I'm done working on this ticket!
 
