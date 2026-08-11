@@ -116,7 +116,16 @@ Si tu resous une discussion toi-meme, Autodev la laisse tranquille.
 
 ## Arreter Autodev sur un ticket
 
-**Desassigne `autodev`** du ticket. Au prochain poll, il s'arrete proprement, quel que soit l'etat en cours (implementation, attente de pipeline, correction de discussions...). Il poste un commentaire de confirmation et marque le ticket comme termine (label `Development::Awaiting Feature Review`).
+Deux facons, equivalentes. Dans les deux cas Autodev s'arrete au prochain poll, proprement, quel que soit l'etat en cours (implementation, attente de pipeline, correction de discussions...), poste un commentaire de confirmation sur le ticket, et **ne touche pas aux labels** -- la main est a toi.
+
+- **Desassigne `autodev`** du ticket.
+- **Ou deplace le label de workflow** : retire `Development::Doing`, ou pose `Development::Awaiting CR`, `Development::Awaiting Feature Review`, ou n'importe quel autre label du scope `Development::`. C'est le geste naturel quand tu reprends la main apres avoir teste -- inutile de penser a desassigner en plus.
+
+Les labels hors du scope `Development::` (`PM::Evolution`, `Backlog`, noms de clients, `To Do`...) n'arretent rien : tu peux les poser et les retirer librement pendant qu'Autodev travaille.
+
+Autodev pose et retire lui-meme `Development::Doing` et `Development::Awaiting Feature Review` en fonctionnement normal ; il fait la difference et ne s'arrete que sur une edition faite par quelqu'un d'autre.
+
+Le ticket passe alors en **cloture** cote Autodev (il ne le suit plus). Pour qu'il reprenne : **repose `To Do`** et **reassigne `autodev`** -- c'est le meme geste que pour un retour de recette ou de CR, et il refonctionne meme apres un arret.
 
 ## Quand Autodev abandonne
 
@@ -147,7 +156,7 @@ C'est informatif : utile au CSM pour le test fonctionnel.
 | Assigne `autodev` + `To Do` | Julien | Ticket | Declenche Autodev |
 | Repond a une clarification d'Autodev | Julien / CSM | Commentaire ticket | Autodev reprend |
 | Teste la fonctionnalite | CSM | Staging | Decide si c'est OK |
-| Pose `Development::Awaiting CR` | CSM | Ticket | Passe la main aux devs |
+| Pose `Development::Awaiting CR` | CSM | Ticket | Passe la main aux devs (et arrete Autodev s'il travaillait encore) |
 | Reassigne `autodev` + `To Do` apres test KO | CSM | Ticket | Autodev reprend avec le commentaire |
 | Fait la Code Review | Devs | MR | Decide si c'est OK |
 | Pose `Ready for QA` | Devs | Ticket | Passe la main au CSM pour la QA |
@@ -215,8 +224,8 @@ sequenceDiagram
     end
 
     opt Autodev doit etre arrete en cours de route
-        Julien->>GL: Desassigne @autodev
-        AD->>GL: Confirme l'arret, pose "Awaiting Feature Review"
+        Julien->>GL: Desassigne @autodev<br/>ou deplace le label "Development::*"
+        AD->>GL: Confirme l'arret en commentaire,<br/>laisse les labels en l'etat
     end
 
     opt Autodev n'arrive plus a progresser
