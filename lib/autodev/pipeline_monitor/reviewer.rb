@@ -56,8 +56,12 @@ class PipelineMonitor
       issue.review_giveup!
       apply_label_done(issue.issue_iid)
       reassign_to_author(issue)
+      # The diagnostic outlives log rotation, in the same columns every other
+      # failure in the product uses (Autodev #49). No view renders them for a
+      # `done` row yet — surfacing them is a follow-up; losing them is not.
       Issue.where(id: issue.id).update_all(finished_at: Time.current, needs_attention: true,
-                                           attention_reason: 'review_failures_exhausted')
+                                           attention_reason: 'review_failures_exhausted',
+                                           dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
       notify_localized(issue.issue_iid, :review_failures_exhausted,
                        mr_url: issue.mr_url, count: REVIEW_FAILURE_THRESHOLD)
       log_activity(issue, :review_failures_exhausted, count: REVIEW_FAILURE_THRESHOLD)
