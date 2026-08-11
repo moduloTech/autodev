@@ -68,7 +68,10 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     state :answering_question, :needs_clarification
     state :done, :error, :closed
 
-    after_all_transitions :persist_status_change!, :emit_activity_event!, :emit_audit_log!
+    # `stamp_pipeline_watch!` is first on purpose: it only assigns, and
+    # `persist_status_change!` right after is the save that writes it.
+    after_all_transitions :stamp_pipeline_watch!, :persist_status_change!,
+                          :emit_activity_event!, :emit_audit_log!
 
     # === Happy path ===
 
@@ -173,6 +176,26 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   end
 
   # -- AASM callbacks --
+
+  # The clock the absolute pipeline-watch bound reads (Autodev #53). One
+  # callback rather than a clear at each of the six exits from
+  # `checking_pipeline`, because "reset on any transition" is exactly the
+  # semantics the bound needs: it gives up after N days *without a transition*,
+  # so a row that ping-pongs through a fix cycle keeps restarting the clock —
+  # correctly, since that row is moving and stagnation detection is what bounds
+  # it.
+  #
+  # Not `pipeline_poll_since`, which `clear_pipeline_poll_since` resets whenever
+  # a poll resolves to green or red — including the infra-red case that stays in
+  # the state. That column measures consecutive unresolved polls, the one
+  # quantity that never bounds an infra loop.
+  #
+  # The two `update_all` writers that set this status (`reset_for_retry!`,
+  # `revive_stalled!`) bypass AASM and leave the column NULL;
+  # `PipelineMonitor::PollTracker` seeds it at the first poll.
+  def stamp_pipeline_watch!
+    self.checking_pipeline_since = aasm.to_state == :checking_pipeline ? Time.current : nil
+  end
 
   # Sequel had `save_changes` which only emits an UPDATE for dirty columns;
   # AR's `save` does the same automatically (via the dirty-tracking layer).
