@@ -224,6 +224,7 @@ en:
   web_errors_explain_attention_review_failures_exhausted: Automated review failed several times in a row. The request is marked delivered but review could not complete — check the MR manually.
   web_errors_explain_attention_stagnation_pipeline: The pipeline kept failing on the same jobs despite fixes. The request is marked delivered but the MR needs manual intervention.
   web_errors_explain_attention_stagnation_discussions: The same discussions stayed unresolved despite fixes. The request is marked delivered but the MR needs manual intervention.
+  web_errors_explain_attention_pipeline_watch_expired: "This request's pipeline stopped moving for weeks (never green, never red — waiting on a manual action, canceled, or blocked). Autodev stopped watching it. The MR is still open: check the pipeline on GitLab, or close the request if it is no longer relevant."
   web_errors_explain_attention_dormant_exhausted: The request stopped progressing and the automatic checks could not restart it. It is left as is — check on GitLab whether it is still relevant.
   web_errors_attention_detail: "Failing job(s): %{detail}"
   web_errors_show_technical: Show technical details

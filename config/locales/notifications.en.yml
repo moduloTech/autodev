@@ -15,6 +15,7 @@ en:
   review_failures_exhausted: ":warning: %{tag}: mr-review failed %{count} times in a row on %{mr_url}. Manual intervention required (binary, token, or MR issue)."
   stagnation_pipeline: ":warning: %{tag}: stagnation detected — the same jobs keep failing on %{mr_url}. Failing job(s): %{detail}. Manual intervention required."
   stagnation_discussions: ":warning: %{tag}: stagnation detected — the same discussions remain unresolved on %{mr_url}. Manual intervention required."
+  pipeline_watch_expired: ":warning: %{tag}: the pipeline on %{mr_url} has not moved for more than %{days} days — I am no longer watching it. The MR stays open; please take it from here."
   unassigned_stop: ":stop_sign: %{tag}: unassigned, stopping work in progress."
   done_nominal: |-
     :checkered_flag: %{tag}: I'm done working on this ticket!

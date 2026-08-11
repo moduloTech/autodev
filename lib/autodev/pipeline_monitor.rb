@@ -12,6 +12,7 @@ require_relative 'pipeline_monitor/infra_recheck'
 require_relative 'pipeline_monitor/pipeline_fixer'
 require_relative 'pipeline_monitor/reviewer'
 require_relative 'pipeline_monitor/mr_state_checker'
+require_relative 'pipeline_monitor/watch_bound'
 
 # Monitors CI pipeline status and triages failures for tracked MRs.
 class PipelineMonitor # rubocop:disable Metrics/ClassLength
@@ -26,6 +27,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include PipelineFixer
   include Reviewer
   include MrStateChecker
+  include WatchBound
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)
@@ -35,10 +37,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     @dc_issue = issue
     log "Checking pipeline for MR !#{issue.mr_iid} (issue ##{issue.issue_iid})..."
     log_pipeline_poll(issue)
-    mr = @client.merge_request(@project_path, issue.mr_iid)
-    return handle_mr_closed(issue, mr) if mr.state != 'opened'
-
-    dispatch_pipeline(issue, mr.head_pipeline)
+    poll_open_mr(issue)
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to check pipeline for MR !#{issue.mr_iid}: #{e.message}"
   rescue StandardError => e
@@ -46,6 +45,18 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   end
 
   private
+
+  def poll_open_mr(issue)
+    mr = @client.merge_request(@project_path, issue.mr_iid)
+    return handle_mr_closed(issue, mr) if mr.state != 'opened'
+
+    dispatch_pipeline(issue, mr.head_pipeline)
+    # Last, and only if the poll left the row where it was: the absolute age
+    # bound (Autodev #53) must never pre-empt a poll that resolved, and it must
+    # cover every branch that goes nowhere without enumerating any of them —
+    # including the ones Autodev #51 is currently rewriting.
+    abandon_expired_watch(issue)
+  end
 
   def dispatch_pipeline(issue, pipeline)
     return dispatch_status(issue, pipeline) if pipeline
