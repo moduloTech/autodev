@@ -414,6 +414,11 @@ Delete the entire bullet at line 48, which begins:
 
 It is one line (a single long bullet). The `stuck_issues` bullet above it (line 47) and the "Toute exception dans un check" bullet below it stay untouched: line 47 already describes the window generically (`2 × le plus long timeout configuré`, `pris sur dc_timeout et post_completion_timeout`), which remains accurate now that `mr-review` is capped by `dc_timeout`.
 
+> **Superseded by the Addendum.** The cap is `mr_review_timeout`, not `dc_timeout`,
+> and line 47 therefore does *not* remain accurate as written: the Addendum's Task 5
+> adds `mr_review_timeout` to that enumeration. If you are executing this plan from
+> scratch, apply Task 5 Step 3's version of this bullet, not this sentence's premise.
+
 - [ ] **Step 3: Update the `dc_timeout` row in the technical guide**
 
 In `docs/usage/autodev-technical-usage.md`, line 177 currently reads:
@@ -451,6 +456,16 @@ other state and `running_post_completion` is the only remaining exception. See
 ```
 
 Do not edit anything else in that file — it is the record of what was known when, and the rest of it stays as written.
+
+> **Superseded by the Addendum — do not insert the paragraph above verbatim.** Its
+> last sentence asserts the cap is `dc_timeout` and that the term already existed in
+> the max; the Addendum reversed both (the cap is `mr_review_timeout`, baked default
+> 3600, and `longest_worker_timeout` *gained* a term for it). The final review had to
+> catch this text in the real file as a finding, and unlike Task 3's changelog bullet
+> — which Task 5 Step 1 explicitly rewrites — the Addendum's file list never touches
+> this spec, so nothing downstream would catch it on a from-scratch run. Replace those
+> two clauses accordingly, and see the shipped wording in
+> `docs/superpowers/specs/2026-08-10-live-worker-silence-invariant-design.md`.
 
 - [ ] **Step 5: Run the full suite**
 
