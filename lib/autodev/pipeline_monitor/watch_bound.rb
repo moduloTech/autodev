@@ -23,7 +23,6 @@ class PipelineMonitor
     # ended without a transition" is a condition rather than an enumeration of
     # the branches that go nowhere — which also means the branches Autodev #51
     # is currently rewriting are covered without naming any of them.
-    #
     def abandon_expired_watch(issue)
       return unless issue.status == 'checking_pipeline'
 

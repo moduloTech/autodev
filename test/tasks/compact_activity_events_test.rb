@@ -112,4 +112,23 @@ class CompactActivityEventsTest < Minitest::Test
 
     assert_equal 0, ActivityEvent.count
   end
+
+  # VACUUM is a second opt-in on top of APPLY, never a side effect of the
+  # report: it takes an exclusive lock and needs free disk equal to the file.
+  def test_vacuum_is_skipped_without_apply
+    compact(vacuum: true)
+
+    assert_match(/VACUUM skipped/, @out.string)
+  end
+
+  # Runs against the connected database, which here is the in-memory test one.
+  def test_vacuum_runs_after_a_real_delete
+    issue = create_issue
+    2.times { poll_event(issue) }
+
+    compact(apply: true, vacuum: true)
+
+    assert_match(/VACUUM done/, @out.string)
+    assert_equal 1, ActivityEvent.count
+  end
 end
