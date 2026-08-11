@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-08-10
+date: 2026-08-11
 lang: fr
 documentclass: article
 papersize: a4
@@ -434,7 +434,9 @@ Répondez directement sur le ticket GitLab en commentaire, comme à n'importe qu
 Relancez-la d'abord avec **Réessayer maintenant** (l'erreur est peut-être passagère). Si elle échoue de nouveau, c'est probablement un bug d'Autodev : **prévenez l'équipe autodev** et transmettez les *détails techniques* dépliés sur la carte. Rien à corriger de votre côté sur le ticket.
 
 **Autodev s'est trompé ou a fait n'importe quoi, je peux annuler ?**
-Oui. Deux options : désassignez-le du ticket sur GitLab (il s'arrête, vous reprenez la main), ou ouvrez le détail de la demande et cliquez sur **Clôturer** pour la mettre de côté directement depuis le tableau de bord. Dans les deux cas vous pouvez ensuite l'assigner à un humain. La MR créée reste disponible — vous pouvez la fermer ou la modifier librement.
+Oui, de trois façons. **Déplacez le label de suivi** du ticket sur GitLab (passez-le en revue, en recette, où vous voulez) : Autodev s'en aperçoit au tour suivant, arrête le travail en cours et vous laisse un commentaire sur le ticket pour confirmer qu'il a bien lâché la main. **Désassignez-le** du ticket : même effet, même commentaire. Ou ouvrez le détail de la demande et cliquez sur **Clôturer** pour la mettre de côté depuis le tableau de bord. Dans tous les cas vous pouvez ensuite assigner le ticket à un humain, et la MR déjà créée reste disponible — vous pouvez la fermer ou la modifier librement.
+
+Une précision utile : remettre le label *{{label_todo|à traiter}}* n'arrête **pas** Autodev, c'est au contraire la façon de lui redemander du travail (voir plus bas).
 
 **La MR n'est pas mergée, est-ce qu'il faut que je le fasse moi ?**
 Oui. Autodev livre une MR prête à merger, mais le merge final reste à un humain (validation finale, déploiement, etc.).
@@ -444,6 +446,9 @@ Remettez le label *{{label_todo|à traiter}}* sur le ticket **et laissez un comm
 
 **Une demande est bloquée en *Test de la fonctionnalité* depuis longtemps. Pourquoi ?**
 C'est généralement une pipeline d'infra (pas un bug du code) qui a échoué de façon répétée. La demande bascule alors en *Livrée (à vérifier)*, et la carte vous indique le job en cause. Autodev **retente automatiquement** une fois l'infrastructure réparée (les tests repassés au vert) : la plupart du temps il n'y a donc rien à faire. Si le souci persiste, ouvrez le détail, regardez les **détails techniques**, et faites suivre à l'équipe technique.
+
+**Est-ce qu'Autodev peut surveiller une demande indéfiniment ?**
+Non, plus depuis cette version. Si une demande reste **14 jours sans le moindre mouvement** pendant qu'Autodev attend les tests, il arrête de la surveiller : elle bascule en *Livrée (à vérifier)* et il laisse un commentaire sur le ticket pour le dire. La MR reste ouverte, rien n'est perdu — c'est à un humain de reprendre. Ça évite les demandes qu'Autodev surveillait depuis des semaines sans que personne ne le sache.
 
 **Qui peut valider les demandes AutoSpec d'un projet, et comment sont désignés les responsables ?**
 Les **membres** d'un projet sont synchronisés automatiquement depuis GitLab : toute personne ayant accès au dépôt devient contributeur. Les **responsables (owners)** — ceux qui valident les demandes rédigées dans AutoSpec — sont désignés **à la main**, dans l'onglet *Équipe* de la page du projet, par un administrateur ou un responsable déjà en place. La synchronisation GitLab ne touche jamais à cette liste. Tant qu'aucun responsable n'a été désigné sur un projet, un administrateur doit poser le premier.

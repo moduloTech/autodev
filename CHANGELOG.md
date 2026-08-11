@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.47] - 2026-08-11
+
 ### Fixed
 
 - **The documented "give it back to autodev" gesture no longer parks a ticket for good (Autodev #52).** GitLab allows one label per scope, so on a project whose todo label sits in the workflow scope — ff/fast/core configures `labels_todo: ["Development::ToDo"]` against `label_doing: "Development::Doing"`, and powerpanne/core carries both `To do` and `Development::ToDo` — reposing the todo label on an **active** row makes GitLab drop `label_doing` in the same edit. `LabelHandover#suspect` read that absence as `doing_removed`, closed the row, and posted a comment telling the reader to repose the todo label and reassign — which they had just done. `PollRouter#todo_reapplied_after?` then refused the reentry it gates, because it wants the todo applied *after* `finished_at` and this one preceded it: the ticket sat in `closed` until somebody removed and re-applied the label by hand. `doing_removed` is the weakest of the three signals — an absence, not an edit naming a destination — so it now yields whenever a todo label is present on the row: somebody asking for work is never a reason to stop, and the absence is left to `PollRouter` to read. The two positive signals (`done_added`, `workflow_moved`) are untouched.
