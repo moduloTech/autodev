@@ -215,20 +215,22 @@ module Autodev
       end
     end
 
-    # One GitLab read answers both questions, so detecting a closure costs
-    # nothing on top of the assignment sweep that already ran here (Autodev
-    # #44 — the `state` field used to be fetched and thrown away).
+    # One GitLab read answers all three questions, so detecting a closure or a
+    # label handover costs nothing on top of the assignment sweep that already
+    # ran here (Autodev #44 for `state`, #52 for `labels` — both used to be
+    # fetched and thrown away).
     #
-    # Closure wins over unassignment: a ticket closed on GitLab is closed
-    # whether or not it is still assigned, and `closed` says more than `done`.
-    # Only active rows are swept, so a ticket closed while parked in `pending`
-    # or `error` is noticed whenever it next moves, not proactively.
+    # The order is the ranking: a ticket closed on GitLab is closed whether or
+    # not it is still assigned, and a ticket reassigned to a human is theirs
+    # whatever its labels say. Only active rows are swept, so a ticket closed
+    # while parked in `pending` or `error` is noticed whenever it next moves,
+    # not proactively — `dispatch_dormant_audit` covers that population.
     def check_external_state(issue)
       gl_issue = @client.issue(@path, issue.issue_iid)
       return close_externally(issue) if externally_closed?(gl_issue)
-      return if assigned_to_autodev?(gl_issue)
+      return stop_unassigned(issue) unless assigned_to_autodev?(gl_issue)
 
-      stop_unassigned(issue)
+      stop_on_handover(issue, gl_issue)
     rescue ::Gitlab::Error::ResponseError => e
       @logger.error("Failed to check external state for ##{issue.issue_iid}: #{e.message}",
                     project: @path)

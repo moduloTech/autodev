@@ -162,13 +162,19 @@ module Autodev
     end
 
     # Closure wins over unassignment (a closed ticket is closed whether or not
-    # it is still assigned), and both win over re-arming — a ticket that went
-    # away or was handed to a human is not ours to restart. That ordering is the
-    # substance of #48 and it is a `return`, not a pass ordering.
+    # it is still assigned), unassignment wins over the label handover (a ticket
+    # handed to a human is theirs whatever its labels say), and all three win
+    # over re-arming — a ticket that went away, was reassigned, or was moved on
+    # in the workflow is not ours to restart. That ordering is the substance of
+    # #48 and it is a `return`, not a pass ordering.
     #
-    # All three outcomes resolve the row: it leaves the arms either terminally
-    # (`closed` / `done`) or with a path forward. There is no "declined" outcome
-    # here, unlike #34's pass — see Task 6 for where a row can still die quietly.
+    # The handover arm is #52's: without it the audit happily re-arms a dormant
+    # row a human already moved to another workflow label.
+    #
+    # All four outcomes resolve the row: it leaves the arms either terminally
+    # (`closed`) or with a path forward. There is no "declined" outcome here,
+    # unlike #34's pass — see `flag_exhausted!` for where a row still dies
+    # quietly.
     def route(issue, gl_issue, attempt)
       if externally_closed?(gl_issue)
         log_outcome(issue, attempt, 'closed on GitLab')
@@ -177,9 +183,18 @@ module Autodev
         log_outcome(issue, attempt, 'unassigned')
         stop_unassigned(issue)
       else
-        log_outcome(issue, attempt, 'revived')
-        revive(issue)
+        route_still_assigned(issue, gl_issue, attempt)
       end
+    end
+
+    # Open and still ours on paper — but the labels may say a human already moved
+    # it on, and re-arming then restarts work that is no longer ours (#52).
+    def route_still_assigned(issue, gl_issue, attempt)
+      verdict = stop_on_handover(issue, gl_issue)
+      return log_outcome(issue, attempt, "handed over via labels (#{verdict.reason})") if verdict
+
+      log_outcome(issue, attempt, 'revived')
+      revive(issue)
     end
 
     def log_outcome(issue, attempt, verb)

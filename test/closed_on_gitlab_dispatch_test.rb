@@ -4,7 +4,8 @@ require_relative 'test_helper'
 require 'autodev/gitlab_helpers'
 require 'autodev/activity_logger'
 
-# Closing a ticket on GitLab now closes it on autodev too (Autodev #44).
+# The active sweep: what `dispatch_unassignment` concludes from one GitLab read
+# (Autodev #44, extended by #52).
 #
 # Until now a GitLab closure was only noticed at the very start of a
 # processing run (`IssueProcessor#process`'s early return and the
@@ -16,31 +17,61 @@ require 'autodev/activity_logger'
 # field away — so this costs zero extra API calls. Only active rows are swept
 # (decision): a ticket closed while sitting in `pending` or `error` is picked
 # up whenever it next moves, not proactively.
-class ClosedOnGitlabDispatchTest < Minitest::Test
+#
+# #52 adds the third question to the same read: the `labels` array came with the
+# payload too and was thrown away just like `state` used to be. A ticket a human
+# moved to another workflow label is stopped the same way a closed one is, and
+# an unassigned row now ends in `closed` rather than `done`.
+class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
-  PROJECT_CONFIG = { 'path' => 'group/project' }.freeze
+  PROJECT_CONFIG = {
+    'path' => 'group/project',
+    'labels_todo' => ['To Do'],
+    'label_doing' => 'Development::Doing',
+    'label_done' => 'Development::Awaiting Feature Review'
+  }.freeze
   CONFIG = { 'gitlab_token' => 'x', 'gitlab_url' => 'https://gitlab.example' }.freeze
   AUTODEV_ID = 7
+  HUMAN_ID = 999
+  DOING = 'Development::Doing'
+  AWAITING_CR = 'Development::Awaiting CR'
 
   FakeUser = Struct.new(:id)
   FakeAssignee = Struct.new(:id)
-  FakeIssue = Struct.new(:state, :assignees)
+  FakeIssue = Struct.new(:state, :assignees, :labels)
+  FakeLabel = Struct.new(:name)
+  FakeEvent = Struct.new(:action, :label, :user)
+  FakeNote = Struct.new(:id, :body)
 
   class StubClient
-    attr_reader :calls
+    attr_reader :calls, :event_calls, :notes
 
-    def initialize(state: 'opened', assignee_ids: [AUTODEV_ID])
+    def initialize(state: 'opened', assignee_ids: [AUTODEV_ID], labels: [DOING], events: [])
       @state = state
       @assignee_ids = assignee_ids
+      @labels = labels
+      @events = events
       @calls = 0
+      @event_calls = 0
+      @notes = []
     end
 
     def user = FakeUser.new(AUTODEV_ID)
 
     def issue(_project, _iid)
       @calls += 1
-      FakeIssue.new(@state, @assignee_ids.map { |id| FakeAssignee.new(id) })
+      FakeIssue.new(@state, @assignee_ids.map { |id| FakeAssignee.new(id) }, @labels)
+    end
+
+    def issue_label_events(_project, _iid)
+      @event_calls += 1
+      @events
+    end
+
+    def create_issue_note(_project, _iid, body)
+      @notes << body
+      FakeNote.new(@notes.size, body)
     end
   end
 
@@ -109,11 +140,61 @@ class ClosedOnGitlabDispatchTest < Minitest::Test
     assert_equal 'checking_pipeline', issue.status
   end
 
-  # The pre-existing unassignment behaviour must survive the refactor.
-  def test_an_open_unassigned_ticket_still_goes_to_done
-    issue = sweep(active, StubClient.new(assignee_ids: [999]))
+  # `closed`, not `done` (#52): a ticket a human pulled back mid-implementation
+  # was never delivered. The visible consequence is that it leaves
+  # `dispatch_done_unassigned`'s population — pinned in
+  # test/post_completion_after_unassignment_test.rb.
+  def test_an_open_unassigned_ticket_is_closed
+    issue = sweep(active, StubClient.new(assignee_ids: [HUMAN_ID]))
 
-    assert_equal 'done', issue.status
+    assert_equal 'closed', issue.status
+  end
+
+  def test_an_unassigned_ticket_gets_a_gitlab_notice
+    client = StubClient.new(assignee_ids: [HUMAN_ID])
+    sweep(active, client)
+
+    assert(client.notes.any? { |n| n.include?("j'arrete le travail en cours") })
+  end
+
+  # --- the label handover (#15894) -----------------------------------
+
+  # A human removed `Development::Doing` and applied `Development::Awaiting CR`
+  # while autodev was watching the pipeline. Autodev polled that MR for two
+  # weeks because nothing ever read a label.
+  def handover_client(actor_id)
+    StubClient.new(labels: [AWAITING_CR, 'PM::Evolution'],
+                   events: [FakeEvent.new('add', FakeLabel.new(DOING), FakeUser.new(AUTODEV_ID)),
+                            FakeEvent.new('remove', FakeLabel.new(DOING), FakeUser.new(actor_id)),
+                            FakeEvent.new('add', FakeLabel.new(AWAITING_CR), FakeUser.new(actor_id))])
+  end
+
+  def test_a_ticket_moved_to_another_workflow_label_is_closed
+    issue = sweep(active, handover_client(HUMAN_ID))
+
+    assert_equal 'closed', issue.status
+  end
+
+  def test_the_handover_is_announced_on_the_ticket
+    client = handover_client(HUMAN_ID)
+    sweep(active, client)
+
+    assert(client.notes.any? { |n| n.include?(AWAITING_CR) })
+  end
+
+  # Autodev applies and removes these labels itself; only somebody else's edit
+  # counts.
+  def test_the_same_move_made_by_autodev_leaves_the_row_alone
+    issue = sweep(active, handover_client(AUTODEV_ID))
+
+    assert_equal 'checking_pipeline', issue.status
+  end
+
+  # The objection the naive rule fails: these sit on every ticket, permanently.
+  def test_labels_outside_the_workflow_scope_leave_the_row_alone
+    issue = sweep(active, StubClient.new(labels: [DOING, 'PM::Evolution', 'Backlog']))
+
+    assert_equal 'checking_pipeline', issue.status
   end
 
   # Decision: only active rows are swept, so pending/error rows cost nothing.
@@ -135,13 +216,33 @@ class ClosedOnGitlabDispatchTest < Minitest::Test
   # --- cost ---------------------------------------------------------
 
   # The whole point of grafting onto dispatch_unassignment: one read answers
-  # both questions. A second call would mean the refactor missed its goal.
+  # all three questions. A second call would mean the refactor missed its goal.
   def test_one_gitlab_read_per_row
     client = StubClient.new(state: 'closed')
     active
     dispatcher(client).send(:dispatch_unassignment)
 
     assert_equal 1, client.calls
+  end
+
+  # The label events are read only once the free label check has a candidate,
+  # so a healthy ticket adds nothing to the cycle's API budget (#52). Without
+  # this pin the two-stage shape can silently collapse into one call per active
+  # row per cycle, forever.
+  def test_a_healthy_row_costs_no_label_event_read
+    client = StubClient.new
+    active
+    dispatcher(client).send(:dispatch_unassignment)
+
+    assert_equal 0, client.event_calls
+  end
+
+  def test_a_suspicious_row_costs_exactly_one_label_event_read
+    client = handover_client(HUMAN_ID)
+    active
+    dispatcher(client).send(:dispatch_unassignment)
+
+    assert_equal 1, client.event_calls
   end
 
   # --- resilience ---------------------------------------------------

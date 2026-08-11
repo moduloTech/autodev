@@ -114,8 +114,13 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     event(:discussions_fixed)        { transitions from: :fixing_discussions, to: :checking_pipeline }
     event(:pipeline_fix_done)        { transitions from: :fixing_pipeline, to: :checking_pipeline }
     event(:clarification_received)   { transitions from: :needs_clarification, to: :pending }
-    event(:reenter)                  { transitions from: :done, to: :pending }
-    event(:reenter_to_check_pipeline) { transitions from: :done, to: :checking_pipeline }
+    # `closed` is a reentry source since Autodev #52: a stop decided by a human
+    # (unassignment or a workflow-label handover) now ends in `closed` rather
+    # than `done`, and the documented way back — repose the todo label, reassign
+    # autodev — has to keep working. `PollRouter#reenterable?` guards which
+    # `closed` rows qualify; the state machine only says the move is legal.
+    event(:reenter)                  { transitions from: %i[done closed], to: :pending }
+    event(:reenter_to_check_pipeline) { transitions from: %i[done closed], to: :checking_pipeline }
 
     # === Error handling ===
 
@@ -133,9 +138,16 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # === Manual close ===
     #
     # A project collaborator can manually close a ticket from any state
-    # (IssuesController#close, gated on project membership). `closed` is
-    # terminal — the poller skips any status != 'pending'. Reopen via the
-    # manual #reset action, which forces the row back to `pending`.
+    # (IssuesController#close, gated on project membership). Autodev also closes
+    # a row itself when GitLab says the ticket is gone, when it has been
+    # unassigned, or when a human moved its workflow label (Autodev::ExternalState).
+    #
+    # `closed` is *almost* terminal: the poller skips any status != 'pending',
+    # and the only automatic way back is reposing a todo label **after** the row
+    # was closed (PollRouter#reenterable? — Autodev #52), which is what keeps a
+    # human-decided stop from being a trap while leaving the dashboard's close
+    # button an off-switch. Otherwise reopen via the manual #reset action, which
+    # forces the row back to `pending`.
     event :close do
       transitions from: %i[pending cloning checking_spec implementing committing
                            pushing creating_mr reviewing checking_pipeline

@@ -16,7 +16,22 @@ fr:
   stagnation_pipeline: ":warning: %{tag} : stagnation detectee — les memes jobs echouent de maniere repetee sur %{mr_url}. Job(s) en cause : %{detail}. Intervention manuelle requise."
   stagnation_discussions: ":warning: %{tag} : stagnation detectee — les memes discussions restent non resolues sur %{mr_url}. Intervention manuelle requise."
   pipeline_watch_expired: ":warning: %{tag} : la pipeline de %{mr_url} n'a pas evolue depuis plus de %{days} jours — j'arrete de la surveiller. La MR reste ouverte ; a reprendre a la main."
-  unassigned_stop: ":stop_sign: %{tag} : desassigne, arret du travail en cours."
+  unassigned_stop: |-
+    :stop_sign: %{tag} : j'ai ete desassigne de ce ticket, j'arrete le travail en cours.
+
+    :arrow_right: **Vous souhaitez que je reprenne ?** Remettez le label _%{label_todo}_ et reassignez-moi.
+  handover_doing_removed: |-
+    :stop_sign: %{tag} : le label _%{label}_ a ete retire par quelqu'un d'autre, j'arrete le travail en cours.
+
+    :arrow_right: **C'etait une erreur ?** Remettez le label _%{label_todo}_ et reassignez-moi.
+  handover_done_added: |-
+    :stop_sign: %{tag} : le label _%{label}_ a ete pose par quelqu'un d'autre, j'arrete le travail en cours.
+
+    :arrow_right: **C'etait une erreur ?** Remettez le label _%{label_todo}_ et reassignez-moi.
+  handover_workflow_moved: |-
+    :stop_sign: %{tag} : ce ticket est passe au label _%{label}_, j'arrete le travail en cours.
+
+    :arrow_right: **C'etait une erreur ?** Remettez le label _%{label_todo}_ et reassignez-moi.
   done_nominal: |-
     :checkered_flag: %{tag} : j'ai termine mon travail sur ce ticket !
 

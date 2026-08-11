@@ -218,9 +218,9 @@ Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log`
 - `dispatch_new_issues` — new `label_todo` issues → `:process`
 - `dispatch_pipelines` — `checking_pipeline` rows → `:check_pipeline`
 - `dispatch_discussions` — `fixing_discussions` rows → `:fix_discussions`
-- `dispatch_unassignment` — active rows closed on GitLab or no longer assigned → closed / done inline (no job)
+- `dispatch_unassignment` — active rows closed on GitLab, no longer assigned, or handed over via the labels → `closed` inline (no job). One `@client.issue` read answers all three questions
 - `dispatch_done_unassigned` — `done` rows with `post_completion` configured → `:post_completion`
-- `dispatch_dormant_audit` — rows that stopped moving (orphaned `pending`, spent-budget `error`, worker-pruned active states) → closed / done / re-armed inline, at most `dormant_audit_max` times per row
+- `dispatch_dormant_audit` — rows that stopped moving (orphaned `pending`, spent-budget `error`, worker-pruned active states) → closed / re-armed inline, at most `dormant_audit_max` times per row
 - `dispatch_retries` — `error` + `pending` with backoff elapsed → `:retry_errored` / `:retry_stuck`
 - `dispatch_infra_recheck` — `done` + `stagnation_pipeline` rows → `:recheck_infra`
 
@@ -282,6 +282,9 @@ pending → cloning → checking_spec → implementing → committing → pushin
 
 done + label_todo detected at poll → pending (reentry)
 done + unassigned at poll → running_post_completion → done (if post_completion configured + MR not merged)
+active + unassigned at poll → closed (+ GitLab comment) — a mid-flight stop, so no post_completion
+active + workflow label moved by a human at poll → closed (+ GitLab comment)
+closed + label_todo reapplied *after* finished_at → pending / checking_pipeline (reentry)
 error (from any active state) → pending (on retry, with backoff)
 needs_clarification (from checking_spec) → pending (when clarification comment posted)
 ```
@@ -308,7 +311,9 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | Pipeline watch with no transition for `pipeline_watch_max_days` (default 14 days) | `done` + `needs_attention` (`pipeline_watch_expired`) + `label_done` + GitLab comment. Safety net for every cause of a frozen watch that stagnation detection cannot see. Deliberately not `stagnation_pipeline` — `dispatch_infra_recheck` selects that reason and would re-arm the row |
 | Stagnation detected (pipeline or discussions) | Transition to done with alert comment |
 | Review limit reached (3 rounds) | Transition to done with alert comment |
-| Unassigned during implementation | Transition to done at next poll cycle |
+| Unassigned during implementation | `closed` at next poll cycle (was `done` before #52) + an explicit GitLab comment. Leaves `dispatch_done_unassigned`'s population on purpose — no `post_completion` over interrupted work |
+| `label_doing` removed / `label_done` applied by somebody else | `closed` at next poll cycle + a GitLab comment naming the label (`Autodev::LabelHandover`) |
+| Workflow label moved to another value in autodev's label scope | Same. Scope derived from `label_doing` + `label_done`; labels outside it are ignored, and the rule self-disables when those two share no scope |
 | Interrupted fixing_pipeline | Reset to checking_pipeline on startup |
 | Interrupted reviewing | Reset to checking_pipeline on startup |
 | Post-completion command fails | Non-fatal: error stored in `post_completion_error`, issue still transitions to `done`, visible via `--errors` |
@@ -326,7 +331,9 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 - **Stagnation detection**: Replaces `max_fix_rounds`. SHA256 signatures of failed job names (pipeline) or unresolved discussion IDs (discussions) detect when the same failures repeat consecutively. Configurable threshold (`stagnation_threshold`, default 5).
 - **Polling by assignee**: Issues are discovered by querying GitLab for issues assigned to the autodev user with `labels_todo`, replacing the old `trigger_label`-based approach.
 - **3 labels only**: `labels_todo`, `label_doing`, `label_done`. Label stays `label_doing` during the entire implementation + pipeline + fix + review cycle, and switches to `label_done` only when reaching `done`.
-- **Post-completion at unassignment**: The `post_completion` hook triggers when autodev is unassigned from a `done` issue (not immediately after pipeline green).
+- **Labels are re-read on every active row, and a handover is scope-derived**: a human who moves the workflow label stops autodev within one poll cycle. "A label autodev does not know" cannot be read literally — real tickets permanently carry out-of-workflow labels (`PM::Evolution`, client names, `Backlog`), so the verdict is confined to the GitLab label *scope* derived from `label_doing` + `label_done` (the two labels autodev owns and writes). `labels_todo` is excluded from the derivation on purpose: it is the human entry point and is often unscoped (`To Do`), so including it would disable the rule. No shared scope → the rule self-disables to "`label_doing` removed / `label_done` applied". Authorship comes from GitLab's resource label events, not from the state machine's expectation, because `apply_label_done` writes the label just before the row reaches `done`, outside the per-issue lock the poll cycle holds — but the events are read **only** once the free label check has a candidate, so a healthy ticket adds no API call.
+- **Post-completion at unassignment**: The `post_completion` hook triggers when autodev is unassigned from a `done` issue (not immediately after pipeline green). Since #52 an *active* row unassigned mid-flight goes to `closed` instead, so it never reaches this hook — the hook is for delivered work, not for work a human interrupted.
+- **`closed` is almost terminal**: the poller skips any `status != 'pending'`, and the one automatic way back is reposing a `labels_todo` label **after** `finished_at` (`PollRouter#reenterable?`). Without that gate #52's stop would be a trap — the GitLab notice it posts tells the reader to repose the todo label and reassign. With it, the dashboard's close button keeps working as an off-switch: there the todo label predates the click, so nothing new was asked. Everything else still reopens only via `#reset`.
 - **No blocked state, but not an unbounded one**: Canceled pipelines keep the issue in `checking_pipeline` until manual intervention or natural resolution — an interrupted run has no verdict to read (its blocking jobs are `canceled`, not `failed`), and unlike a manual gate it is usually superseded by a new pipeline that `head_pipeline` re-points to. That wait is capped at `pipeline_watch_max_days` (default 14) since Autodev #53, because "indefinitely" meant 29 773 polls on one production ticket. This deliberately **no longer covers `manual`/`skipped`** (Autodev #51): a manual `deploy_review` is the normal end of a green MR on some projects, so that wait was infinite by construction, and the blocking jobs answer the question the roll-up cannot. Infrastructure failures do the same *only until stagnation* — a recurring infra/deploy failure that never recovers is bailed out via `handle_stagnation` (→ `done` + `needs_attention`) after `stagnation_threshold` identical polls, so it can't loop forever.
 - **danger-claude as implementation engine**: Leverages the existing Docker-based Claude CLI wrapper for sandboxed code generation.
 - **Solid Queue concurrency control**: `IssueProcessJob`'s `limits_concurrency to: 1, key: "issue-#{path}-#{iid}"` ensures no two jobs touch the same issue at once. Global concurrency cap comes from `queue.yml`'s `threads` setting (`AUTODEV_MAX_WORKERS`, default 3) — mirrors the legacy `max_workers`.
