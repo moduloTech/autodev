@@ -61,6 +61,25 @@ class PipelineMonitor
       { verdict: :code, explanation: 'Tous les jobs en echec ont script_failure comme raison' }
     end
 
+    # A job is blocking when its result gates the merge. Two exclusions
+    # (Autodev #51): `allow_failure: true`, where GitLab itself says the result
+    # does not count, and an unplayed `manual` job, which has no result at all.
+    # Anything else — including `created` or `skipped` jobs sitting downstream
+    # of a manual gate — counts, and is simply not failed.
+    def blocking_jobs(jobs)
+      jobs.reject { |job| non_blocking_job?(job) }
+    end
+
+    def non_blocking_job?(job)
+      return true if GitlabHelpers.field(job, :allow_failure)
+
+      NON_BLOCKING_JOB_STATUSES.include?(GitlabHelpers.field(job, :status).to_s)
+    end
+
+    def failed_blocking_jobs(jobs)
+      blocking_jobs(jobs).select { |job| GitlabHelpers.field(job, :status).to_s == 'failed' }
+    end
+
     def categorize_jobs!(job_entries, log_dir)
       job_entries.each { |entry| entry[:category] = categorize_job(entry, log_dir) }
     end

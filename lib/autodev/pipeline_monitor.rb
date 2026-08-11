@@ -3,6 +3,7 @@
 require_relative 'pipeline_monitor/constants'
 require_relative 'pipeline_monitor/api_helpers'
 require_relative 'pipeline_monitor/job_classifier'
+require_relative 'pipeline_monitor/blocked_pipeline'
 require_relative 'pipeline_monitor/evaluator'
 require_relative 'pipeline_monitor/poll_tracker'
 require_relative 'pipeline_monitor/post_completion'
@@ -18,6 +19,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include DangerClaudeRunner
   include ApiHelpers
   include JobClassifier
+  include BlockedPipeline
   include Evaluator
   include PollTracker
   include PostCompletion
@@ -61,6 +63,11 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     when *RUNNING_STATUSES then log "Pipeline still running for MR !#{issue.mr_iid}, skipping"
     when 'success'         then handle_green(issue)
     when 'failed'          then handle_red(issue, pipeline)
+    when *BLOCKED_STATUSES then dispatch_blocked(issue, pipeline, status)
+    # `canceled` and any future GitLab status land here: an interrupted run has
+    # no verdict to read (its blocking jobs are `canceled`, not `failed`), and
+    # unlike `manual` the wait usually resolves — a new pipeline supersedes it
+    # and head_pipeline re-points. The unbounded tail is Autodev #53's job.
     else log "Pipeline #{status} for MR !#{issue.mr_iid}, skipping"
     end
   end
