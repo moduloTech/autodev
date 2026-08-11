@@ -15,29 +15,47 @@ require 'autodev/activity_logger'
 class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
-  PROJECT_CONFIG = { 'path' => 'group/project', 'max_retries' => 1 }.freeze
+  PROJECT_CONFIG = { 'path' => 'group/project', 'max_retries' => 1,
+                     'labels_todo' => ['To Do'], 'label_doing' => 'Development::Doing',
+                     'label_done' => 'Development::Awaiting Feature Review' }.freeze
   CONFIG = { 'gitlab_token' => 'x', 'gitlab_url' => 'https://gitlab.example',
              'poll_interval' => 300 }.freeze
   AUTODEV_ID = 7
+  HUMAN_ID = 999
+  DOING = 'Development::Doing'
+  AWAITING_CR = 'Development::Awaiting CR'
 
   FakeUser = Struct.new(:id)
   FakeAssignee = Struct.new(:id)
-  FakeIssue = Struct.new(:state, :assignees)
+  FakeIssue = Struct.new(:state, :assignees, :labels)
+  FakeLabel = Struct.new(:name)
+  FakeEvent = Struct.new(:action, :label, :user)
+  FakeNote = Struct.new(:id, :body)
 
   class StubClient
-    attr_reader :calls
+    attr_reader :calls, :notes
 
-    def initialize(state: 'opened', assignee_ids: [AUTODEV_ID])
+    def initialize(state: 'opened', assignee_ids: [AUTODEV_ID], labels: [DOING], events: [])
       @state = state
       @assignee_ids = assignee_ids
+      @labels = labels
+      @events = events
       @calls = 0
+      @notes = []
     end
 
     def user = FakeUser.new(AUTODEV_ID)
 
     def issue(_project, _iid)
       @calls += 1
-      FakeIssue.new(@state, @assignee_ids.map { |id| FakeAssignee.new(id) })
+      FakeIssue.new(@state, @assignee_ids.map { |id| FakeAssignee.new(id) }, @labels)
+    end
+
+    def issue_label_events(_project, _iid) = @events
+
+    def create_issue_note(_project, _iid, body)
+      @notes << body
+      FakeNote.new(@notes.size, body)
     end
   end
 
@@ -90,16 +108,40 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
 
   # --- outcome 2: handed back to a human (#15909) -------------------
 
-  def test_an_unassigned_pending_row_goes_to_done
-    issue = run_audit(orphan, client: StubClient.new(assignee_ids: [999]))
+  # `closed` since #52: a ticket a human took back was never delivered.
+  def test_an_unassigned_pending_row_is_closed
+    issue = run_audit(orphan, client: StubClient.new(assignee_ids: [HUMAN_ID]))
 
-    assert_equal 'done', issue.status
+    assert_equal 'closed', issue.status
   end
 
   def test_an_unassigned_row_is_not_rearmed
-    issue = run_audit(spent, client: StubClient.new(assignee_ids: [999]))
+    issue = run_audit(spent, client: StubClient.new(assignee_ids: [HUMAN_ID]))
 
     assert_equal 2, issue.retry_count
+  end
+
+  # --- outcome 2b: handed over via the labels (#52) -----------------
+  #
+  # A dormant row whose workflow label a human already moved on must not be
+  # re-armed: the audit would restart work that is no longer ours. Same #48
+  # ordering as the closure and the unassignment, applied to the third question.
+
+  def handover_client
+    StubClient.new(labels: [AWAITING_CR],
+                   events: [FakeEvent.new('add', FakeLabel.new(AWAITING_CR), FakeUser.new(HUMAN_ID))])
+  end
+
+  def test_a_row_moved_to_another_workflow_label_is_closed
+    issue = run_audit(orphan, client: handover_client)
+
+    assert_equal 'closed', issue.status
+  end
+
+  def test_a_row_moved_to_another_workflow_label_is_not_rearmed
+    issue = run_audit(orphan, client: handover_client)
+
+    assert_nil issue.next_retry_at
   end
 
   # --- outcome 3: still ours -----------------------------------------
