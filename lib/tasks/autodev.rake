@@ -11,6 +11,19 @@
 # delegate to `Autodev::OpsCommands` so `bin/autodev`'s CLI flags
 # (alpha.7+) and these rake tasks share one source of truth.
 
+def autodev_migrate_projects_from_yaml
+  config_path = File.expand_path(ENV.fetch('AUTODEV_CONFIG', '~/.autodev/config.yml'))
+  unless File.exist?(config_path)
+    warn "[autodev:migrate_projects_from_yaml] config file not found: #{config_path}"
+    exit 1
+  end
+
+  yaml = YAML.safe_load_file(config_path, permitted_classes: [Symbol], aliases: true)
+  summary = YamlProjectImporter.new(yaml: yaml).import!(dry_run: ENV['DRY_RUN'] == '1')
+  puts "[autodev:migrate_projects_from_yaml] #{config_path}"
+  puts summary
+end
+
 def autodev_seed_admin
   email = ENV.fetch('EMAIL') { abort '[autodev:seed_admin] EMAIL=... required' }
   puts Autodev::OpsCommands.seed_admin(email: email)
@@ -52,22 +65,18 @@ rescue StandardError => e
   warn "  ##{issue.issue_iid} (#{issue.project_path}): #{e.message}"
 end
 
+# Autodev #53. Reports by default — it deletes rows, so the destructive half is
+# opt-in, and VACUUM (exclusive lock, needs free disk equal to the file) is a
+# second opt-in on top. Back the database up first; the production procedure is
+# in docs/superpowers/specs/2026-08-11-bound-pipeline-watch-design.md.
+def autodev_compact_activity_events
+  Autodev::ActivityEventCompaction.new(apply: ENV['APPLY'] == '1', vacuum: ENV['VACUUM'] == '1').run
+end
+
 namespace :autodev do
   desc 'Import ~/.autodev/config.yml `projects:` block into projects + project_app_commands. ' \
        'DRY_RUN=1 logs the summary without writing. AUTODEV_CONFIG=path overrides the file path.'
-  task migrate_projects_from_yaml: :environment do
-    config_path = File.expand_path(ENV.fetch('AUTODEV_CONFIG', '~/.autodev/config.yml'))
-    unless File.exist?(config_path)
-      warn "[autodev:migrate_projects_from_yaml] config file not found: #{config_path}"
-      exit 1
-    end
-
-    yaml = YAML.safe_load_file(config_path, permitted_classes: [Symbol], aliases: true)
-    importer = YamlProjectImporter.new(yaml: yaml)
-    summary = importer.import!(dry_run: ENV['DRY_RUN'] == '1')
-    puts "[autodev:migrate_projects_from_yaml] #{config_path}"
-    puts summary
-  end
+  task(migrate_projects_from_yaml: :environment) { autodev_migrate_projects_from_yaml }
 
   # PR2 of the users-rollout chantier (cf. docs/users-rollout.md §5).
   desc 'Seed an admin User by email. Usage: bin/rails autodev:seed_admin EMAIL=marc@modulotech.fr'
@@ -84,4 +93,8 @@ namespace :autodev do
   desc 'Backfill issue_author_name for pre-existing issues (one GitLab call per issue). ' \
        'Idempotent — only fills NULL/empty rows. Usage: bin/rails autodev:backfill_issue_author_names'
   task(backfill_issue_author_names: :environment) { autodev_backfill_issue_author_names }
+
+  desc 'Delete superseded occurrences of collapsible activity entries, keeping the newest per issue. ' \
+       'Reports only unless APPLY=1. VACUUM=1 reclaims the file afterwards. Idempotent.'
+  task(compact_activity_events: :environment) { autodev_compact_activity_events }
 end
