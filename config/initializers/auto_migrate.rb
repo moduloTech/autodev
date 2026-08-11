@@ -1,5 +1,11 @@
 # frozen_string_literal: true
 
+# Deliberately ABOVE the guards below: everything after them is skipped in the
+# test environment and under AUTODEV_SKIP_AUTO_MIGRATE, but `Autodev::HealthReport`
+# needs the constant in every environment for its `migrations` check. Do not move
+# this require below the returns (Autodev #55).
+require 'autodev/migration_status'
+
 # Apply any pending ActiveRecord migrations at boot, so that:
 #   - `bin/rails server` doesn't 500 with `PendingMigrationError` in dev
 #     (Rails 8's `Migration::CheckPending` middleware fires when files exist
