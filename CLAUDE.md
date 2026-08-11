@@ -123,7 +123,7 @@ Implementation:
 - Helpers live under `app/helpers/web/{helpers,i18n_helpers,issues_filter,turbo_stream_helpers}.rb`.
 - `Web::EventBus` (`app/services/web/event_bus.rb`) is an in-process pub/sub (Mutex around `Array<Queue>`). `ActivityEvent.after_create_commit` publishes; `/stream` subscribes. Backpressure drops events past 100.
 - `Web::config` accessor (`app/services/web.rb`) holds the loaded `~/.autodev/config.yml` hash; populated by `config/initializers/load_autodev_config.rb` on Rails boot.
-- Persistence: every AASM transition + every `ActivityLogger.post` writes an `activity_events` row (`kind: 'transition'` or `'danger_claude'`). A `post` carrying `replace_pattern:` **supersedes** its previous occurrence instead of appending — one rule for the GitLab note line and the DB row (Autodev #53); `created_at` moves forward, so `Issue.without_activity_since` keeps reading the freshness Autodev #50's invariant depends on. Hooks live in `Issue#emit_activity_event!` (AR) and `ActivityLogger.persist_event!`, both wrapped in `rescue StandardError`.
+- Persistence: every AASM transition + every `ActivityLogger.post` writes an `activity_events` row (`kind: 'transition'` or `'danger_claude'`; `ActivityLogger.heartbeat!` is a third writer, `kind: 'heartbeat'` — Autodev #50). A `post` carrying `replace_pattern:` **supersedes** its previous occurrence instead of appending — one rule for the GitLab note line and the DB row (Autodev #53); `created_at` moves forward, so `Issue.without_activity_since` keeps reading the freshness Autodev #50's invariant depends on. Hooks live in `Issue#emit_activity_event!` (AR) and `ActivityLogger.persist_event!`, both wrapped in `rescue StandardError`.
 - Localhost only by default (`web.bind: 127.0.0.1`). Expose via reverse proxy / NetBird if needed; autodev itself stays plain HTTP, no built-in auth gate on the dashboard (Devise is wired for AutoSpec — phase D — but no `before_action :authenticate_user!` is applied to the existing routes).
 - Localized: views use `t_web(key, **vars)` → `Locales.t(key, locale: ...)`. Strings live in `config/locales/{notifications,activity,web}.{fr,en}.yml`. Locale comes from `web.locale` (default `fr`).
 
@@ -318,7 +318,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | Interrupted reviewing | Reset to checking_pipeline on startup |
 | Post-completion command fails | Non-fatal: error stored in `post_completion_error`, issue still transitions to `done`, visible via `--errors` |
 | Interrupted running_post_completion | Reset to `done` on startup (non-fatal, not re-executed) |
-| Row dormant (`pending` with no `next_retry_at`, `error` with a spent budget, active state frozen 2h) | `dispatch_dormant_audit` gives it a bounded second look: closed on GitLab → `closed`, unassigned → `done`, still ours → re-armed. After `dormant_audit_max` fruitless rounds: `needs_attention` (`dormant_exhausted`) |
+| Row dormant (`pending` with no `next_retry_at`, `error` with a spent budget, active state frozen 2h) | `dispatch_dormant_audit` gives it a bounded second look: closed on GitLab → `closed`, unassigned → `closed`, handed over by label → `closed`, still ours → re-armed. After `dormant_audit_max` fruitless rounds: `needs_attention` (`dormant_exhausted`) |
 | Interrupted `fixing_discussions` / `answering_question` | Revived by `Issue.revive_stalled!` — at startup and, if the service does not restart, by the dormant audit |
 
 ## Key Design Decisions

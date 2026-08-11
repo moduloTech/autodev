@@ -63,10 +63,10 @@ Sémantique de `status` (`ok` < `warn` < `down`, le global = le pire) :
 
 > Ces deux `kind` étaient déclarés dans `ActivityEvent::KINDS` depuis l'origine mais n'étaient jamais émis — la brique de heartbeat était prévue puis jamais branchée.
 
-**Règle des events système** : un `ActivityEvent` sans `issue_id` (heartbeat / marqueur d'erreur cycle) :
+**Règle des events système** : un `ActivityEvent` de `kind` `poller`, `error` ou `heartbeat`. La règle porte sur le `kind`, pas sur l'absence d'`issue_id` : depuis #50 un `heartbeat` **porte** un `issue_id` (c'est tout son intérêt — `Issue.without_activity_since` doit le compter) et subit quand même les deux exclusions ci-dessous. `broadcast_to_event_bus` a d'ailleurs une seconde garde explicite pour ça.
 
 - **n'est pas diffusé** sur le flux SSE `/stream` (`ActivityEvent#broadcast_to_event_bus` court-circuite) — sinon un heartbeat toutes les 5 min spammerait le live feed ;
-- **n'est pas compté** dans le sparkline « Activité de la semaine » (`Web::Helpers#weekly_activity_counts` exclut `kind IN ('poller','error')`) — sinon ~288 heartbeats/jour noieraient l'activité réelle.
+- **n'est pas compté** dans le sparkline « Activité de la semaine » (`Web::Helpers#weekly_activity_counts` exclut `kind IN ('poller','error','heartbeat')`) — sinon ~288 heartbeats/jour noieraient l'activité réelle.
 
 La colonne `activity_events.issue_id` est nullable depuis la migration `20260617000002` (le modèle déclarait déjà `belongs_to :issue, optional: true`).
 
