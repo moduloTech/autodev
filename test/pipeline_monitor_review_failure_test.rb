@@ -65,6 +65,21 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     assert_equal 'review_failures_exhausted', @issue.attention_reason
   end
 
+  # A given-up review is the one terminal, human-facing outcome that recorded
+  # nothing about why (Autodev #49). production.log rotates; the row does not.
+  def test_giving_up_keeps_the_last_mr_review_output_on_the_row
+    @issue.update(review_failure_count: PipelineMonitor::Reviewer::REVIEW_FAILURE_THRESHOLD - 1)
+    @monitor.instance_variable_set(:@dc_stdout, +"=== mr-review ===\nunknown option -H\n")
+    @monitor.instance_variable_set(:@dc_stderr, +"=== mr-review ===\n\n")
+    stub_mr_review(success: false)
+
+    @monitor.send(:launch_review, @issue)
+    @issue.reload
+
+    assert_includes @issue.dc_stdout, 'unknown option -H'
+    assert_equal 'review_failures_exhausted', @issue.attention_reason
+  end
+
   def test_successful_review_resets_failure_counter
     @issue.update(review_failure_count: 3)
     stub_mr_review(success: true)

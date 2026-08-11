@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'test_helper'
+require 'autodev/danger_claude_runner'
 require 'autodev/process_runner'
 
 # resolve_timeout's fallback chain (Autodev #54 final-review fix).
@@ -44,5 +45,41 @@ class ProcessRunnerTest < Minitest::Test
     harness = Harness.new(project_config: {}, config: {})
 
     assert_equal 600, harness.send(:resolve_timeout, nil)
+  end
+
+  # What run_with_timeout hands back (Autodev #49).
+  #
+  # A real subprocess is the only honest way to pin it, and it doubles as the
+  # suite's first direct proof that stdout is captured at all — the premise of
+  # #49, whose bug was that the mr-review caller threw stdout away. Keep the
+  # number of real spawns here to these two: wait_for_completion polls with
+  # `sleep 1`, so each costs up to a second.
+  SCRIPT = 'printf hello; printf oops >&2; exit 3'
+
+  def spawn_harness
+    harness = Harness.new
+    harness.instance_variable_set(:@dc_stdout, +'')
+    harness.instance_variable_set(:@dc_stderr, +'')
+    harness
+  end
+
+  def test_a_failed_run_reports_both_streams_and_the_exit_status
+    out, err, _ok, status = spawn_harness.send(:run_with_timeout, '/bin/sh', ['-c', SCRIPT],
+                                               chdir: Dir.pwd, timeout: 30)
+
+    assert_equal 'hello', out
+    assert_equal 'oops', err
+    assert_equal 3, status.exitstatus
+  end
+
+  # The compatibility claim the two danger-claude callers rest on: a surplus
+  # fourth element must not disturb a three-variable destructuring.
+  def test_a_three_element_destructuring_still_binds
+    out, err, ok = spawn_harness.send(:run_with_timeout, '/bin/sh', ['-c', SCRIPT],
+                                      chdir: Dir.pwd, timeout: 30)
+
+    assert_equal 'hello', out
+    assert_equal 'oops', err
+    refute ok
   end
 end
