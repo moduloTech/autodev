@@ -183,6 +183,7 @@ Depuis le task #9 (phases 3-4, `v1.0.0-alpha.25`/`.26`), la config par projet vi
 | Exécution | `stagnation_threshold` | Échecs identiques consécutifs avant abandon. |
 | Exécution | `infra_recheck_max` | Nb max de rechecks automatiques d'une stagnation infra (défaut 5, `DEFAULT_INFRA_RECHECK_MAX`). |
 | Exécution | `infra_recheck_backoff` | Délai (s) entre deux rechecks infra (défaut 3600, `DEFAULT_INFRA_RECHECK_BACKOFF`). |
+| Exécution | `pipeline_watch_max_days` | Borne d'âge absolue d'une surveillance de pipeline, en jours (défaut 14, `Config::DEFAULTS`). Au-delà, la demande est abandonnée : `done` + `needs_attention` (`pipeline_watch_expired`) + `label_done` + commentaire GitLab. `0` désactive la borne. Comme `infra_recheck_max`, ce réglage est lu dans `@project_config` puis dans la config globale, **mais n'est pas une colonne de `projects`** : pour un projet en base, `to_project_config` n'émet que ses colonnes, donc seul le réglage global s'applique aujourd'hui. |
 | Exécution | `clone_depth` | Profondeur du `git clone` (0 = historique complet). |
 | Exécution | `sparse_checkout` | Chemins du sparse checkout (liste, pour monorepos). |
 | Exécution | `post_completion` | Commande(s) lancée(s) après livraison (sur désassignation). |
@@ -528,9 +529,10 @@ DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`
 | Pipeline rouge (code, pré-triage) | `fixing_pipeline` immédiat (skip retrigger) |
 | Pipeline rouge (infra / incertaine, 1re fois) | Retrigger unique, recheck au poll suivant |
 | Pipeline rouge (infra / incertaine, après retrigger) | Reste en `checking_pipeline` (manuel) |
-| Pipeline canceled / skipped | Reste en `checking_pipeline` (manuel) |
+| Pipeline canceled / skipped | Reste en `checking_pipeline` (manuel), **borné** par `pipeline_watch_max_days` |
 | Stagnation pipeline (5 corrections identiques) | `done` + `needs_attention` (`stagnation_pipeline`), commentaire d'alerte incluant le job en cause (`attention_detail`, ex. `deploy_review (script_failure)`). Re-tentative auto une fois CI rétablie (voir ligne suivante) |
 | Stagnation pipeline infra — CI rétabli | `dispatch_infra_recheck` ré-enfile `:recheck_infra` ; pipeline courante verte → réentrée `checking_pipeline`. Borné par `infra_recheck_max` (5) / `infra_recheck_backoff` (3600 s) ; jamais de boucle |
+| Surveillance de pipeline trop ancienne (aucune transition depuis `pipeline_watch_max_days`, défaut 14 j) | `done` + `needs_attention` (`pipeline_watch_expired`) + `label_done` + commentaire GitLab. Filet de sécurité indépendant du statut de la pipeline : la stagnation n'est alimentée que par la branche rouge, donc une pipeline `manual` / `canceled` / `skipped` — ou restée `created` — n'accumule aucune signature et n'était jamais abandonnée. Horloge : colonne `issues.checking_pipeline_since`, écrite à chaque transition AASM et semée par `PollTracker` pour les lignes arrivées par `update_all`. Vérifié **après** le poll et seulement si la ligne n'a pas bougé, donc une pipeline verte au 15e jour se termine normalement. Volontairement pas `stagnation_pipeline` : `dispatch_infra_recheck` sélectionne cette raison-là et ré-armerait la ligne |
 | Stagnation discussions | `done` avec commentaire d'alerte |
 | Limite de review atteinte (3 passes) | `done` avec commentaire d'alerte |
 | Désassigné en cours d'implémentation | Direct `done` au poll suivant |

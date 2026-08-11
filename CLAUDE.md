@@ -65,7 +65,7 @@ The first dev sign-in inserts your `users` row, runs the GitLab sync, and lands 
 
 Settings are resolved in 4 layers (highest priority wins):
 
-1. **Defaults** — `poll_interval: 300`, `max_workers: 3`, `pickup_delay: 600`, `stagnation_threshold: 5`
+1. **Defaults** — `poll_interval: 300`, `max_workers: 3`, `pickup_delay: 600`, `stagnation_threshold: 5`, `pipeline_watch_max_days: 14`
 2. **Config file** — `~/.autodev/config.yml`
 3. **Environment variables** — `GITLAB_API_TOKEN`, `GITLAB_URL`, plus `AUTODEV_HOME` (default `~/.autodev`), `AUTODEV_DB`, `AUTODEV_QUEUE_DB`, `AUTODEV_MAX_WORKERS`, `AUTODEV_POLL_INTERVAL`
 4. **CLI flags** — `-c`, `-d`, `-t`, `-n`, `-i`
@@ -123,7 +123,7 @@ Implementation:
 - Helpers live under `app/helpers/web/{helpers,i18n_helpers,issues_filter,turbo_stream_helpers}.rb`.
 - `Web::EventBus` (`app/services/web/event_bus.rb`) is an in-process pub/sub (Mutex around `Array<Queue>`). `ActivityEvent.after_create_commit` publishes; `/stream` subscribes. Backpressure drops events past 100.
 - `Web::config` accessor (`app/services/web.rb`) holds the loaded `~/.autodev/config.yml` hash; populated by `config/initializers/load_autodev_config.rb` on Rails boot.
-- Persistence: every AASM transition + every `ActivityLogger.post` writes an `activity_events` row (`kind: 'transition'` or `'danger_claude'`). Hooks live in `Issue#emit_activity_event!` (AR) and `ActivityLogger.persist_event!`, both wrapped in `rescue StandardError`.
+- Persistence: every AASM transition + every `ActivityLogger.post` writes an `activity_events` row (`kind: 'transition'` or `'danger_claude'`). A `post` carrying `replace_pattern:` **supersedes** its previous occurrence instead of appending — one rule for the GitLab note line and the DB row (Autodev #53); `created_at` moves forward, so `Issue.without_activity_since` keeps reading the freshness Autodev #50's invariant depends on. Hooks live in `Issue#emit_activity_event!` (AR) and `ActivityLogger.persist_event!`, both wrapped in `rescue StandardError`.
 - Localhost only by default (`web.bind: 127.0.0.1`). Expose via reverse proxy / NetBird if needed; autodev itself stays plain HTTP, no built-in auth gate on the dashboard (Devise is wired for AutoSpec — phase D — but no `before_action :authenticate_user!` is applied to the existing routes).
 - Localized: views use `t_web(key, **vars)` → `Locales.t(key, locale: ...)`. Strings live in `config/locales/{notifications,activity,web}.{fr,en}.yml`. Locale comes from `web.locale` (default `fr`).
 
@@ -206,6 +206,7 @@ Handles `checking_pipeline`: fetches MR head pipeline via GitLab API.
 - **Red (infra/uncertain, first time)** → retrigger once, recheck next poll
 - **Red (infra, after retrigger)** → stay in `checking_pipeline`, but track the failure signature; once the same infra job set recurs `stagnation_threshold` times, bail via `handle_stagnation` → `done` + `needs_attention` (`stagnation_pipeline`), so a never-recovering infra/deploy job can't poll forever
 - **Canceled/skipped** → stay in `checking_pipeline` (manual intervention needed)
+- **Any poll that ends without a transition, on a watch older than `pipeline_watch_max_days` (default 14)** → `done` + `needs_attention` (`pipeline_watch_expired`) + `label_done` + GitLab comment. The absolute age bound (Autodev #53): stagnation detection is fed only from `handle_red`, so a pipeline that is never `failed` — `manual`, `canceled`, `skipped`, or stuck at `created` — accumulated no signature and was polled forever. Checked *after* `dispatch_pipeline` and only while the row is still `checking_pipeline`, so a green pipeline on day 15 still completes. Clock: `issues.checking_pipeline_since`, written by an AASM callback on every transition and seeded by `PollTracker` for the rows that arrive through `update_all`. `0` disables the bound.
 
 Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log` files in the work directory (no truncation). Prompts reference these files by path so danger-claude reads the complete log. Each failed job is fixed in a separate danger-claude call + commit (same pattern as MrFixer's per-discussion approach).
 
@@ -294,7 +295,8 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | Pipeline red (code by pre-triage) | Skip retrigger, go straight to fix phase |
 | Pipeline red (infra/uncertain, first time) | Retrigger once, recheck next poll |
 | Pipeline red (infra/uncertain, after retrigger) | Stay in checking_pipeline; if the same infra job set recurs `stagnation_threshold` times, bail via stagnation → done + needs_attention (`stagnation_pipeline`) |
-| Pipeline canceled/skipped | Stay in checking_pipeline (manual intervention) |
+| Pipeline canceled/skipped | Stay in checking_pipeline (manual intervention), bounded by `pipeline_watch_max_days` |
+| Pipeline watch with no transition for `pipeline_watch_max_days` (default 14 days) | `done` + `needs_attention` (`pipeline_watch_expired`) + `label_done` + GitLab comment. Safety net for every cause of a frozen watch that stagnation detection cannot see. Deliberately not `stagnation_pipeline` — `dispatch_infra_recheck` selects that reason and would re-arm the row |
 | Stagnation detected (pipeline or discussions) | Transition to done with alert comment |
 | Review limit reached (3 rounds) | Transition to done with alert comment |
 | Unassigned during implementation | Transition to done at next poll cycle |
@@ -316,7 +318,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 - **Polling by assignee**: Issues are discovered by querying GitLab for issues assigned to the autodev user with `labels_todo`, replacing the old `trigger_label`-based approach.
 - **3 labels only**: `labels_todo`, `label_doing`, `label_done`. Label stays `label_doing` during the entire implementation + pipeline + fix + review cycle, and switches to `label_done` only when reaching `done`.
 - **Post-completion at unassignment**: The `post_completion` hook triggers when autodev is unassigned from a `done` issue (not immediately after pipeline green).
-- **No blocked state**: Canceled pipelines keep the issue in `checking_pipeline` indefinitely until manual intervention or natural resolution. Infrastructure failures do the same *only until stagnation* — a recurring infra/deploy failure that never recovers is bailed out via `handle_stagnation` (→ `done` + `needs_attention`) after `stagnation_threshold` identical polls, so it can't loop forever.
+- **No blocked state, but not an unbounded one**: Canceled pipelines keep the issue in `checking_pipeline` until manual intervention or natural resolution — capped at `pipeline_watch_max_days` (default 14) since Autodev #53, because "indefinitely" meant 29 773 polls on one production ticket. Infrastructure failures do the same *only until stagnation* — a recurring infra/deploy failure that never recovers is bailed out via `handle_stagnation` (→ `done` + `needs_attention`) after `stagnation_threshold` identical polls, so it can't loop forever.
 - **danger-claude as implementation engine**: Leverages the existing Docker-based Claude CLI wrapper for sandboxed code generation.
 - **Solid Queue concurrency control**: `IssueProcessJob`'s `limits_concurrency to: 1, key: "issue-#{path}-#{iid}"` ensures no two jobs touch the same issue at once. Global concurrency cap comes from `queue.yml`'s `threads` setting (`AUTODEV_MAX_WORKERS`, default 3) — mirrors the legacy `max_workers`.
 
