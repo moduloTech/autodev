@@ -14,15 +14,20 @@ require 'autodev/pipeline_monitor'
 class PipelineMonitorInfraStagnationTest < Minitest::Test
   # Minimal Issue stand-in: records `update` writes and reflects the
   # stagnation_signatures column back so `stagnated?` sees fresh counts.
+  #
+  # `abandon!` stands in for the AASM event the give-up path fires since Autodev
+  # #60. The real machine's from-state restriction and its callbacks are pinned
+  # against real AR rows in test/issue_abandonment_test.rb.
   class FakeIssue
-    attr_reader :attrs, :issue_iid, :mr_url
+    attr_reader :attrs, :issue_iid, :mr_url, :issue_author_id
     attr_accessor :stagnation_signatures
 
     def initialize(stagnation_signatures: nil, issue_iid: 16_081, mr_url: 'http://mr')
       @stagnation_signatures = stagnation_signatures
       @issue_iid = issue_iid
       @mr_url = mr_url
-      @attrs = {}
+      @issue_author_id = 7
+      @attrs = { status: 'checking_pipeline' }
     end
 
     def update(hash)
@@ -30,6 +35,16 @@ class PipelineMonitorInfraStagnationTest < Minitest::Test
       @stagnation_signatures = hash[:stagnation_signatures] if hash.key?(:stagnation_signatures)
       self
     end
+
+    # rubocop:disable Naming/PredicateMethod -- mirrors AASM's bang event, which
+    # returns whether the transition happened.
+    def abandon!
+      return false unless status == 'checking_pipeline'
+
+      @attrs[:status] = 'done'
+      true
+    end
+    # rubocop:enable Naming/PredicateMethod
 
     def status = @attrs[:status]
     def needs_attention = @attrs[:needs_attention]
@@ -40,17 +55,21 @@ class PipelineMonitorInfraStagnationTest < Minitest::Test
   # Records the vars each user-facing sink received so tests can assert the
   # infra detail is threaded all the way through.
   def monitor(project_config: {}, config: {})
-    sink = { notify: [], activity: [] }
-    m = PipelineMonitor.allocate.tap do |mon|
-      mon.instance_variable_set(:@project_config, project_config)
-      mon.instance_variable_set(:@config, config)
-      # External boundaries (GitLab label + notification + activity log).
-      mon.define_singleton_method(:log) { |*| nil }
-      mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
-      mon.define_singleton_method(:apply_label_done) { |*| nil }
-      mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
-    end
+    sink = { notify: [], activity: [], reassigned: [] }
+    m = PipelineMonitor.allocate
+    m.instance_variable_set(:@project_config, project_config)
+    m.instance_variable_set(:@config, config)
+    stub_boundaries(m, sink)
     [m, sink]
+  end
+
+  # External boundaries: GitLab label + assignee + notification + activity log.
+  def stub_boundaries(mon, sink)
+    mon.define_singleton_method(:log) { |*| nil }
+    mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
+    mon.define_singleton_method(:apply_label_done) { |*| nil }
+    mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
+    mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
   end
 
   # deploy job carrying a concrete failure_reason + GitLab URL, the shape the
@@ -84,6 +103,15 @@ class PipelineMonitorInfraStagnationTest < Minitest::Test
     issue, = run_bail_out
 
     assert_equal BAIL_DETAIL, issue.attention_detail
+  end
+
+  # Autodev #60: an abandon hands the ticket back to its author, in all three
+  # give-up paths. This one used to leave it assigned to autodev, which is what
+  # made a bailed-out ticket invisible.
+  def test_bail_out_hands_the_ticket_back_to_its_author
+    _issue, sink, = run_bail_out
+
+    assert_equal [16_081], sink[:reassigned]
   end
 
   def test_bail_out_threads_the_detail_into_notification_and_activity

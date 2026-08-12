@@ -35,27 +35,24 @@ class PipelineMonitor
       give_up_on_watch(issue, days)
     end
 
-    # Mirrors `handle_stagnation`: the ticket is delivered as far as autodev is
-    # concerned, and flagged for a human. Two properties are inherited from that
-    # path on purpose — the write bypasses AASM (so no `transition` row, no
-    # audit entry) and the ticket stays assigned to the autodev user. Both are
-    # pre-existing across three give-up paths and changing them belongs in their
-    # own ticket.
+    # One of the four give-up paths, all of which now share
+    # `IssueAbandonment#abandon_issue`: one AASM `abandon` event (so a transition
+    # row, an activity-journal entry, an audit entry and the callback that clears
+    # `checking_pipeline_since`) and one reassignment policy — the ticket goes back
+    # to its author, because an abandon means a human has to pick it up (Autodev
+    # #60). This used to write `status: 'done'` itself, clear the clock by hand and
+    # leave the ticket assigned to autodev.
     #
     # `attention_reason` is deliberately not `stagnation_pipeline`:
     # `dispatch_infra_recheck` selects exactly that value and would re-arm the
     # row. An expired watch is a give-up, not a deferral.
     #
-    # `attention_detail` stays nil — it renders through
-    # `web_errors_attention_detail` ("Job(s) en cause : %{detail}"), so it may
-    # only carry a technical token, and there is no failing job to name here.
+    # No `detail:` — it renders through `web_errors_attention_detail` ("Job(s) en
+    # cause : %{detail}"), so it may only carry a technical token, and there is no
+    # failing job to name here.
     def give_up_on_watch(issue, days)
       log "Issue ##{issue.issue_iid}: pipeline watch older than #{days} days → done"
-      issue.update(status: 'done', finished_at: Time.current, checking_pipeline_since: nil,
-                   needs_attention: true, attention_reason: 'pipeline_watch_expired')
-      apply_label_done(issue.issue_iid)
-      notify_localized(issue.issue_iid, :pipeline_watch_expired, mr_url: issue.mr_url, days: days)
-      log_activity(issue, :pipeline_watch_expired, days: days)
+      abandon_issue(issue, :pipeline_watch_expired, days: days)
     end
 
     # Same resolution shape as `infra_recheck_max`: per-project override, then

@@ -3,6 +3,7 @@
 require_relative 'auth_failure_detector'
 require_relative 'label_manager'
 require_relative 'issue_notifier'
+require_relative 'issue_abandonment'
 require_relative 'process_runner'
 require_relative 'rate_limit_detector'
 require_relative 'repo_operations'
@@ -24,6 +25,7 @@ module DangerClaudeRunner
   include ShellHelpers
   include LabelManager
   include IssueNotifier
+  include IssueAbandonment
   include ProcessRunner
   include RepoOperations
   include RepoRebaser

@@ -16,6 +16,7 @@ fr:
   stagnation_pipeline: ":warning: %{tag} : stagnation detectee — les memes jobs echouent de maniere repetee sur %{mr_url}. Job(s) en cause : %{detail}. Intervention manuelle requise."
   stagnation_discussions: ":warning: %{tag} : stagnation detectee — les memes discussions restent non resolues sur %{mr_url}. Intervention manuelle requise."
   pipeline_watch_expired: ":warning: %{tag} : la pipeline de %{mr_url} n'a pas evolue depuis plus de %{days} jours — j'arrete de la surveiller. La MR reste ouverte ; a reprendre a la main."
+  abandon_reassigned: ":arrow_right: Je t'ai reassigne le ticket : autodev ne le suit plus. A toi de reprendre la main sur la MR."
   unassigned_stop: |-
     :stop_sign: %{tag} : j'ai ete desassigne de ce ticket, j'arrete le travail en cours.
 

@@ -33,8 +33,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # facts about the row. Same model the legacy IssueBehavior used.
   attr_writer :_issue_closed, :_skip_to_mr,
               :_unresolved_discussions_empty, :_post_completion,
-              :_review_count_zero, :_review_count_over_zero,
-              :_max_review_rounds_reached
+              :_review_count_zero, :_review_count_over_zero
 
   # Audit context set by IssuesController before firing a manual
   # transition. `_audit_origin == :manual` → the after_all_transitions
@@ -95,7 +94,6 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # === Pipeline monitoring ===
 
     event :pipeline_green do
-      transitions from: :checking_pipeline, to: :done, guard: :max_review_rounds_reached?
       transitions from: :checking_pipeline, to: :reviewing, guard: :review_count_zero?
       transitions from: :checking_pipeline, to: :done,
                   guard: %i[review_count_over_zero? no_unresolved_discussions?]
@@ -108,6 +106,22 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     event(:review_giveup)         { transitions from: :reviewing, to: :done }
     event(:pipeline_failed_code)  { transitions from: :checking_pipeline, to: :fixing_pipeline }
     event(:mr_closed)             { transitions from: :checking_pipeline, to: :done }
+
+    # === Giving up ===
+    #
+    # The single point at which autodev stops working a ticket short of a nominal
+    # delivery (Autodev #60, item 2). Four call sites used to write
+    # `status: 'done'` themselves — pipeline stagnation, discussion stagnation, an
+    # expired pipeline watch, the review-round limit — so none of them produced a
+    # `transition` row, none appeared in the activity journal or the audit log, and
+    # none of the callbacks below ran: that is what left the stale
+    # `checking_pipeline_since` clock Autodev #53 had to patch at each site.
+    #
+    # `IssueAbandonment#abandon_issue` is the only caller. The *reason* stays
+    # per-site (`attention_reason`) because `dispatch_infra_recheck` selects
+    # `stagnation_pipeline` and must not re-arm rows given up for another cause;
+    # only the mechanics are shared.
+    event(:abandon) { transitions from: %i[checking_pipeline fixing_discussions], to: :done }
 
     # === Fix cycles, clarification, reentry ===
 
@@ -183,10 +197,6 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     @_review_count_over_zero == true
   end
 
-  def max_review_rounds_reached?
-    @_max_review_rounds_reached == true
-  end
-
   # -- AASM callbacks --
 
   # The clock the absolute pipeline-watch bound reads (Autodev #53). One
@@ -205,10 +215,13 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # The two `update_all` writers that set this status (`reset_for_retry!`,
   # `revive_stalled!`) bypass AASM and clear the column explicitly;
   # `PipelineMonitor::PollTracker` seeds it at the first poll. They clear rather
-  # than leave it alone because not every exit from `checking_pipeline` goes
-  # through AASM — `handle_stagnation` writes `status: 'done'` directly — so an
-  # untouched column can still be carrying the clock of a watch that ended
-  # months ago, which the lazy seed would then keep (it only fills NULL).
+  # than leave it alone because an untouched column can still be carrying the
+  # clock of a watch that ended months ago, which the lazy seed would then keep
+  # (it only fills NULL). Every *workflow* exit from `checking_pipeline` does go
+  # through AASM since Autodev #60 — the four give-up paths that used to write
+  # `status: 'done'` themselves now fire the `abandon` event — so this callback is
+  # the single owner of the column and those two `update_all` writers are the only
+  # remaining bypass.
   def stamp_pipeline_watch!
     self.checking_pipeline_since = aasm.to_state == :checking_pipeline ? Time.current : nil
   end

@@ -245,11 +245,22 @@ module Autodev
                     project: @path)
     end
 
+    # `needs_attention: false` is the delivered-vs-given-up discriminator (Autodev
+    # #60). This hook is a *delivery* hook — that is the whole argument behind #52
+    # routing an interrupted row to `closed` — and an abandoned row is `done`
+    # without being delivered: pipeline stagnation, discussion stagnation, an
+    # expired pipeline watch, the review-round limit, an exhausted review budget.
+    # Two of those already reassigned the ticket to its author and so already
+    # slipped past the `still_assigned?` guard into this pass; #60 made the
+    # reassignment uniform, which would have let the other three in too. No nominal
+    # completion path sets the flag and every give-up path does, so the clause
+    # separates the two populations exactly.
     def dispatch_done_unassigned
       pc_cmd = @project_config['post_completion']
       return unless pc_cmd.is_a?(Array) && pc_cmd.any?
 
-      ::Issue.where(project_path: @path, status: 'done').where.not(mr_iid: nil).find_each do |issue|
+      ::Issue.where(project_path: @path, status: 'done', needs_attention: false)
+             .where.not(mr_iid: nil).find_each do |issue|
         check_post_completion_needed(issue)
       end
     end
