@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A queued job no longer replays the side effects of a transition that did not happen (Autodev #61).** The queue is not a snapshot: `dispatch_pipelines` enqueues the whole `checking_pipeline` population every cycle, so any job outliving the poll interval leaves duplicates behind it — and once alpha.47's `manual`-pipeline resolution turned that job from a millisecond no-op into a full mr-review run, that became the normal case. The state machine did not stop the duplicates. `whiny_transitions: false` makes an impossible transition a silent no-op rather than a raise, and the callers treat the event as a command that always succeeds: `green_first_review` calls `launch_review` after a `pipeline_green!` that did nothing, and `give_up_reviewing` re-applies `label_done`, reassigns the author and posts a GitLab comment after a `review_giveup!` that did nothing. In production on 11/08/2026 that put **486 comments on 28 powerpanne tickets in two hours** — issue #15839 alone took 26 identical "mr-review failed 5 times" comments, one every 105 seconds, every one of them after its last real transition, while its `review_failure_count` climbed to 30 for 5 real rounds. `IssueProcessJob#perform` now checks the row against `DISPATCHED_FROM`, the state each action's dispatch pass selects on, and logs a skip instead of running. One declaration covers all seven actions; the row was being read anyway, so it costs no query. This is not a substitute for `limits_concurrency` — that answers "is another job touching this row", this answers "does the work this job was queued for still need doing".
+
 ## [1.0.0-alpha.47] - 2026-08-11
 
 ### Fixed

@@ -40,6 +40,15 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
   PROJECT_PATH = 'group/foo'
   ISSUE_IID = 42
 
+  # The row state `Autodev::PollDispatcher` dispatches each action *from*,
+  # written out literally rather than read off the production constant — the
+  # point of the stale-job tests below is that the two agree, so a test that
+  # derived one from the other would pass whatever the constant said.
+  ACTION_STATUS = { process: 'pending', check_pipeline: 'checking_pipeline',
+                    fix_discussions: 'fixing_discussions', post_completion: 'done',
+                    retry_errored: 'error', retry_stuck: 'pending',
+                    recheck_infra: 'done' }.freeze
+
   setup do
     @config = {
       'gitlab_url' => 'https://gitlab.example.com',
@@ -119,6 +128,7 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
   end
 
   test ':retry_errored fires retry_processing for issues without an MR' do
+    @issue.status = ACTION_STATUS.fetch(:retry_errored)
     transitions = capture_transitions(@issue)
     Config.stub(:load, @config) do
       Issue.stub(:where, ->(**_) { fake_dataset(@issue) }) do
@@ -136,6 +146,7 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
   end
 
   test ':retry_errored fires retry_pipeline when an MR exists' do
+    @issue.status = ACTION_STATUS.fetch(:retry_errored)
     @issue.mr_iid = 17
     transitions = capture_transitions(@issue)
     Config.stub(:load, @config) do
@@ -192,15 +203,87 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
     end
   end
 
+  # -- Stale-job guard (Autodev #61) --
+  #
+  # The queue is not a snapshot: `dispatch_pipelines` enqueues the whole
+  # `checking_pipeline` population every cycle, and a job that takes longer
+  # than the poll interval leaves duplicates behind it. Those duplicates run
+  # against a row that has since moved on, and the state machine does not stop
+  # them — `whiny_transitions: false` makes an impossible transition a silent
+  # no-op, so `green_first_review` calls `launch_review` after a
+  # `pipeline_green!` that did nothing, and `give_up_reviewing` posts its
+  # GitLab comment after a `review_giveup!` that did nothing.
+  #
+  # Production, 11/08/2026: issue #15839 recorded 5 `pipeline_green`
+  # transitions and 1 `review_giveup` — and 26 identical "mr-review failed 5
+  # times" comments, one every 105 seconds, all after the last transition.
+  # 486 comments across 28 tickets in two hours.
+  #
+  # The action carries the state it was dispatched from, so re-reading the row
+  # at the top of the job is enough: no lock, no version column, one query
+  # already being made.
+  test ':check_pipeline is skipped once the row has left checking_pipeline' do
+    refute action_reached?(:check_pipeline, status: 'done'),
+           'a queued pipeline check must not run against a row already delivered'
+  end
+
+  test 'no action reaches its body when the row no longer matches it' do
+    IssueProcessJob::ACTIONS.each do |action|
+      refute action_reached?(action, status: 'cloning'), "#{action} ran against a row in cloning"
+    end
+  end
+
+  # The converse, so the guard cannot be "fixed" by simply never dispatching.
+  # It also pins ACTION_STATUS against the dispatcher: an action whose source
+  # state is misdeclared would silently stop running in production, and this
+  # is the test that would catch it.
+  test 'every action still reaches its body from the state it is dispatched from' do
+    IssueProcessJob::ACTIONS.each do |action|
+      assert action_reached?(action, status: ACTION_STATUS.fetch(action)),
+             "#{action} did not run from #{ACTION_STATUS.fetch(action)}"
+    end
+  end
+
   private
+
+  # Did the job get past the guard? Every action's body is replaced by a flag,
+  # which measures the gate itself rather than each action's collaborators —
+  # `:retry_errored` reaches no worker class at all, and `:post_completion`
+  # fires a transition before it reaches one.
+  def action_reached?(action, status:)
+    @issue.status = status
+    reached = false
+    job = IssueProcessJob.new
+    job.define_singleton_method(:"perform_#{action}") { |*| reached = true }
+    perform_stubbed(job, action)
+    reached
+  end
+
+  # The quota gate is held open throughout: it is Autodev #46's concern, and
+  # letting it fire here would make three of the seven actions look guarded
+  # for the wrong reason.
+  def perform_stubbed(job, action)
+    stub_usage(available: true) do
+      Config.stub(:load, @config) do
+        Issue.stub(:where, ->(**_) { fake_dataset(@issue) }) do
+          GitlabHelpers.stub(:build_gitlab_client, @client) do
+            job.perform(PROJECT_PATH, ISSUE_IID, action)
+          end
+        end
+      end
+    end
+  end
 
   def stub_usage(available:, &)
     Autodev::UsageGate.stub(:available?, available, &)
   end
 
   # Same wiring as assert_action_routes, but returns the flag instead of
-  # asserting it, so the gate tests can assert either way.
-  def assert_action_called(action, klass:, method:) # rubocop:disable Metrics/MethodLength
+  # asserting it, so the gate tests can assert either way. `status:` overrides
+  # the state the action is dispatched from — that is the whole subject of the
+  # stale-job tests.
+  def assert_action_called(action, klass:, method:, status: nil) # rubocop:disable Metrics/MethodLength
+    @issue.status = status || ACTION_STATUS.fetch(action)
     called = false
     fake_worker = Object.new
     fake_worker.define_singleton_method(method) { |issue| called = !issue.nil? }
@@ -221,6 +304,7 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
   end
 
   def assert_action_routes(action, klass:, method:) # rubocop:disable Metrics/MethodLength
+    @issue.status = ACTION_STATUS.fetch(action)
     called = false
     fake_worker = Object.new
     fake_worker.define_singleton_method(method) do |issue|
