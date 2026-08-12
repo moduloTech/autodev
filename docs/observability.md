@@ -63,12 +63,29 @@ Sémantique de `status` (`ok` < `warn` < `down`, le global = le pire) :
 
 > Ces deux `kind` étaient déclarés dans `ActivityEvent::KINDS` depuis l'origine mais n'étaient jamais émis — la brique de heartbeat était prévue puis jamais branchée.
 
-**Règle des events système** : un `ActivityEvent` de `kind` `poller`, `error` ou `heartbeat`. La règle porte sur le `kind`, pas sur l'absence d'`issue_id` : depuis #50 un `heartbeat` **porte** un `issue_id` (c'est tout son intérêt — `Issue.without_activity_since` doit le compter) et subit quand même les deux exclusions ci-dessous. `broadcast_to_event_bus` a d'ailleurs une seconde garde explicite pour ça.
+**Règle des events machinerie** : un `ActivityEvent` dont le `kind` est dans `ActivityEvent::MACHINERY_KINDS` — `poller`, `error`, `usage`, `heartbeat`. La règle porte sur le `kind`, pas sur l'absence d'`issue_id` : depuis #50 un `heartbeat` **porte** un `issue_id` (c'est tout son intérêt — `Issue.without_activity_since` doit le compter) et subit quand même les exclusions ci-dessous. `broadcast_to_event_bus` a d'ailleurs une seconde garde explicite pour ça.
 
 - **n'est pas diffusé** sur le flux SSE `/stream` (`ActivityEvent#broadcast_to_event_bus` court-circuite) — sinon un heartbeat toutes les 5 min spammerait le live feed ;
-- **n'est pas compté** dans le sparkline « Activité de la semaine » (`Web::Helpers#weekly_activity_counts` exclut `kind IN ('poller','error','heartbeat')`) — sinon ~288 heartbeats/jour noieraient l'activité réelle.
+- **n'est pas rendu** : toute lecture destinée à un humain passe par le scope `ActivityEvent.user_visible` (`where.not(kind: MACHINERY_KINDS)`) — timeline de l'issue **et** sparkline « Activité de la semaine ». Une seule définition depuis #57 : `weekly_activity_counts` portait sa propre liste en dur `('poller','error','heartbeat')`, et c'est par cet écart que le verdict de quota `usage` (720 lignes/jour, #46) s'est retrouvé compté comme du travail — majoritaire dans la barre depuis que #53 a fait tomber les lignes `danger_claude` à ~50/jour ;
+- **est purgeable** : les mêmes `kind` sont le périmètre de la rétention glissante (#57, voir plus bas). Une ligne que personne n'a demandé à voir et dont un seul lecteur ne veut que la plus récente est une ligne qu'on peut supprimer.
+
+`Issue.without_activity_since` est la seule lecture qui n'applique **pas** `user_visible` : compter le heartbeat est tout le mécanisme de #50.
 
 La colonne `activity_events.issue_id` est nullable depuis la migration `20260617000002` (le modèle déclarait déjà `belongs_to :issue, optional: true`).
+
+## Rétention d'`activity_events` — `Autodev::ActivityEventJanitor`
+
+Avant #57, rien ne supprimait jamais une ligne : la table pesait 930 816 lignes / 275 Mo (187 Mo pour la table + ses index) sur le fichier de prod du 12/08/2026. #53 a colmaté la fuite rapide (une ligne `danger_claude` par poll et par ticket surveillé, 53 % de la table) et livré `bin/rails autodev:compact_activity_events` pour l'arriéré — mais un one-shot manuel ne borne pas la croissance, et #50 avait ouvert une fuite lente (`heartbeat`) dans la même famille.
+
+Ce qui reste après le collapse de #53 est **presque uniquement de la machinerie** : le 12/08/2026 la prod a écrit 720 lignes `poller`, 720 `usage` et ~650 `heartbeat` contre ~50 `danger_claude` et ~20 `transition`. La rétention ne porte donc que sur `MACHINERY_KINDS` ; les `kind` métier (`transition`, `danger_claude`, `discussions_snapshot`) ne sont jamais supprimés — c'est la piste d'audit que rend la timeline, et #53 les borne déjà par issue.
+
+**La fenêtre est dérivée, pas configurée** : `12 × HealthReport#stuck_active_after`, soit **24 h** au réglage par défaut. C'est le piège central du sujet : `Issue.without_activity_since` compte les heartbeats, donc supprimer un heartbeat *à l'intérieur* de `stuck_active_after` rendrait dormante une ligne vivante et `dispatch_dormant_audit` — qui mute par `update_all`, hors du verrou de concurrence par ticket — la repositionnerait sous le worker qui travaille. Un projet qui relève son `dc_timeout` élargit les deux fenêtres ensemble.
+
+`monitoring.activity_event_retention_seconds` est donc un **plancher**, jamais un plafond : on peut garder les lignes plus longtemps (forensics), pas moins longtemps que la fenêtre de sûreté. Une valeur plus courte est ignorée, exactement comme `monitoring.stuck_active_after_seconds`.
+
+La purge tourne dans `PruneActivityEventsJob` (`config/recurring.yml`, bloc `production` uniquement, 04:45 quotidien) — best-effort, un échec ne casse pas le worker et la passe suivante reprend. Elle est idempotente par construction, supprime par lots de 10 000 en `delete_all`, et ne fait **pas** de `VACUUM` : récupérer les 187 Mo de l'arriéré reste la procédure manuelle de #53 (sauvegarde → `APPLY=1` → `VACUUM` séparé).
+
+Les lecteurs de machinerie continuent de lire : `check_poller` veut la ligne `poller` la plus récente et la fenêtre de péremption du poller (`max(poll_interval × 3, 900 s)`) est deux ordres de grandeur sous la rétention ; `UsageGate.state` veut la ligne `usage` la plus récente, valable deux intervalles de poll.
 
 ## Endpoints de monitoring (non authentifiés)
 
@@ -123,6 +140,8 @@ Bloc `monitoring` dans `~/.autodev/config.yml` (défauts dans `lib/autodev/confi
 monitoring:
   token: null            # nil = endpoints ouverts ; sinon Bearer/?token= requis
   poll_stale_factor: 3   # poller "down" après poll_stale_factor × poll_interval (plancher 15 min)
+  stuck_active_after_seconds: 7200        # plancher ; la valeur effective est max(ceci, 2 × plus long timeout)
+  activity_event_retention_seconds: null  # plancher ; défaut = 12 × stuck_active_after (24 h)
 ```
 
 Réglage global associé, hors bloc `monitoring` (défaut dans `lib/autodev/config.rb`) :

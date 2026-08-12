@@ -24,6 +24,12 @@ module Autodev
   # Deletes nothing unless `apply:`. The production procedure — backup first,
   # then delete, then VACUUM separately — is in
   # docs/superpowers/specs/2026-08-11-bound-pipeline-watch-design.md.
+  #
+  # This is the *arrears*, and it is the only thing it is. Bounding growth is a
+  # different job: `Autodev::ActivityEventJanitor`, a sliding retention window
+  # over the machinery kinds, run automatically by PruneActivityEventsJob
+  # (Autodev #57). Do not extend this class into a scheduled pass — a 478 000-row
+  # DELETE plus a VACUUM is exactly what must stay a deliberate manual act.
   class ActivityEventCompaction
     # The activity keys whose call sites pass `replace_pattern:`, i.e. the ones
     # the runtime now collapses. Kept in sync with `PipelineMonitor`'s four
