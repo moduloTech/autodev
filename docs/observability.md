@@ -133,6 +133,8 @@ pipeline_watch_max_days: 14   # abandon d'une surveillance de pipeline sans tran
 
 `poll_interval` (défaut 300 s) est la cadence du poller (`config/recurring.yml`, dérivée de `AUTODEV_POLL_INTERVAL`).
 
+Depuis Autodev #58, tous ces réglages numériques déclarent leur type **et** leur plage dans `NumericSettings::SPECS` (`lib/autodev/numeric_settings.rb`). Conséquence pour la fenêtre d'inactivité ci-dessus : les trois timeouts qu'elle agrège sont plafonnés à 6 h, donc la fenêtre est plafonnée à 12 h. Sans ce plafond, une faute de frappe dans le `mr_review_timeout` d'un seul projet (`86400000` au lieu de `86400`) la portait à ~5,5 ans et éteignait d'un coup l'audit dormant et la carte « Issues bloquées », sans rien signaler. Symétriquement, `pipeline_watch_max_days` accepte `0` (borne désactivée) mais plus une valeur non numérique, qui se coerçait en `0` — donc désactivait la borne — en silence.
+
 ## TODO / pistes futures
 
 Volontairement hors du périmètre de la première itération :

@@ -6,7 +6,7 @@ module ConfigValidator
 
   def self.validate_globals!(config)
     validate_gitlab_token!(config)
-    validate_positive_integers!(config)
+    validate_numeric_settings!(config)
     validate_log_level!(config)
     validate_web!(config)
   end
@@ -24,15 +24,22 @@ module ConfigValidator
   end
   private_class_method :validate_gitlab_token!
 
-  def self.validate_positive_integers!(config)
-    Config::INTEGER_FIELDS.each do |field|
-      value = config[field]
-      unless value.is_a?(Integer) && value.positive?
-        raise ConfigError, "'#{field}' must be a positive integer, got: #{value.inspect}"
-      end
+  # Every numeric global is checked against its NumericSettings declaration
+  # (Autodev #58) rather than against one blanket "> 0" rule. The mandatory
+  # ones must be present; the rest are only checked when the operator set them,
+  # since an absent optional key means "use the default".
+  def self.validate_numeric_settings!(config)
+    Config::REQUIRED_NUMERIC_GLOBALS.each do |field|
+      raise ConfigError, "'#{field}' is required." unless config.key?(field)
+    end
+    NumericSettings.fields.each do |field|
+      next unless config.key?(field)
+
+      reason = NumericSettings.violation(field, config[field])
+      raise ConfigError, NumericSettings.config_error_message(field, config[field]) if reason
     end
   end
-  private_class_method :validate_positive_integers!
+  private_class_method :validate_numeric_settings!
 
   def self.validate_log_level!(config)
     level = config['log_level'].to_s.upcase

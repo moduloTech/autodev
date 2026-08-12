@@ -54,6 +54,9 @@ class ProjectConfigTest < ActiveSupport::TestCase
     refute_predicate project(mr_review_timeout: -1), :valid?
   end
 
+  # The declared floor/ceiling on those same columns (Autodev #58) live in
+  # test/models/project_numeric_bounds_test.rb.
+
   def test_mr_review_timeout_is_emitted_in_to_project_config
     cfg = project(mr_review_timeout: 5400).to_project_config
 

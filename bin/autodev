@@ -259,6 +259,7 @@ def bootstrap(config, logger, pastel)
   offer_template_config(config_path, logger, pastel)
   validate_config(config, config_path, logger)
   setup_database(config, logger)
+  warn_rejected_numeric_settings(config, logger, pastel)
   setup_chrome_devtools(config, logger)
   warn_dev_recurring_disabled(logger, pastel)
   warn_stub_azure_credentials(config, logger, pastel)
@@ -276,6 +277,40 @@ def warn_dev_recurring_disabled(logger, pastel)
   logger.warn('Trigger a poll cycle manually:')
   logger.warn("  #{pastel.cyan("bin/rails runner 'AutodevPollJob.perform_now'")}")
   logger.warn("  #{pastel.cyan("bin/rails runner 'SyncGitlabMembershipsJob.perform_now'")}")
+end
+
+# A numeric per-project setting outside its declared range (Autodev #58) is not
+# a startup failure — the value lives in the `projects` table, so refusing to
+# boot over it would strand the operator with no dashboard to fix it from. But
+# it must not be silent either: `mr_review_timeout` and
+# `pipeline_watch_max_days` drive safety nets, and a bad value there does not
+# break anything visible, it switches a protection off. Same shape as the
+# "mr-review not installed" warning above — one line the operator reads at boot.
+#
+# A bad value in config.yml never reaches this point: ConfigValidator (globals)
+# and ProjectValidator (a YAML `projects:` entry) raise ConfigError from
+# validate_config, and the supervisor refuses to start. This is the DB path,
+# where a row may predate the range or have been written around the validations
+# (the YAML importer, a rake task, a manual UPDATE).
+def warn_rejected_numeric_settings(config, logger, pastel)
+  violations = NumericSettings.audit(Project.runtime_configs(config['projects']))
+  warn_numeric_violations(violations, config, logger, pastel)
+end
+
+def warn_numeric_violations(violations, config, logger, pastel)
+  return if violations.empty?
+
+  locale = cli_locale(config)
+  logger.warn(pastel.bold(Locales.t(:cli_numeric_settings_rejected_header,
+                                    locale: locale, count: violations.size)))
+  violations.each { |violation| logger.warn("  #{NumericSettings.describe(violation, locale: locale)}") }
+end
+
+# Locale for CLI diagnostics: the operator configured one for the dashboard, and
+# they are the same person reading the log. Falls back to :fr, the documented
+# default for this layer (cf. CLAUDE.md's locale-resolution table).
+def cli_locale(config)
+  (config.dig('web', 'locale') || :fr).to_sym
 end
 
 # Detect the case where Azure SSO is unconfigured (or still on the

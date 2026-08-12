@@ -70,6 +70,25 @@ Settings are resolved in 4 layers (highest priority wins):
 3. **Environment variables** — `GITLAB_API_TOKEN`, `GITLAB_URL`, plus `AUTODEV_HOME` (default `~/.autodev`), `AUTODEV_DB`, `AUTODEV_QUEUE_DB`, `AUTODEV_MAX_WORKERS`, `AUTODEV_POLL_INTERVAL`
 4. **CLI flags** — `-c`, `-d`, `-t`, `-n`, `-i`
 
+### Numeric settings: type and range (`NumericSettings`)
+
+Every numeric setting — global or per-project — declares its **type** and its **acceptable range** in one line of `NumericSettings::SPECS` (`lib/autodev/numeric_settings.rb`). Adding a numeric setting means adding that line; there is no second place to update.
+
+The two are deliberately separate (Autodev #58). `Config::INTEGER_FIELDS` used to answer both with one list, and every setting that needed something other than "> 0" became a special case or an omission — which is how the only two settings that drive a *safety net* ended up unguarded. `mr_review_timeout` had no ceiling, and it is a term of `HealthReport#longest_worker_timeout`, so a dropped digit (`86400000` for `86400`) widened `stuck_active_after` to years and silently switched off both the dormant audit and the "Issues bloquées" card. `pipeline_watch_max_days` was kept *out* of the list because `0` is meaningful there (it disables the age bound), which left it with no coercion at all, so a non-numeric value read as `.to_i` → `0` → bound disabled, in silence.
+
+- **Type**: `NumericSettings.integer(raw)` returns an Integer or `nil`. It never turns a non-numeric value into `0` (and reads strings in base 10, so `'010'` is 10, not 8). `Config.load` coerces a numeric string and **leaves a non-numeric value exactly as written**, so the validator can name it.
+- **Range**: a closed `[min, max]`. `min: 0` is how a field says "0 is a sentinel" (`pipeline_watch_max_days` = bound disabled, `clone_depth` = full clone) — a statement about the range, not permission for anything that coerces to 0.
+- **Bounds in force**: the three worker timeouts (`dc_timeout`, `post_completion_timeout`, `mr_review_timeout`) are `60`…`21_600` s (6 h — 6× the largest baked default, 8× the longest successful mr-review on record, and what caps the dormant-detection window at 12 h); `pipeline_watch_max_days` is `0`…`365`; the counters (`max_retries`, `stagnation_threshold`, `infra_recheck_max`, `dormant_audit_max`) are `1`…`100`; the spacings (`retry_backoff`, `pickup_delay`, `infra_recheck_backoff`, `dormant_audit_backoff`) are `1`…`86_400` s.
+
+Where a rejection surfaces:
+
+| Source | Layer | Behaviour |
+|---|---|---|
+| Global key in `config.yml` | `ConfigValidator.validate_numeric_settings!` | `ConfigError` → `bin/autodev` exits 1 |
+| Per-project key under `projects:` | `ProjectValidator.validate_numerics!` | `ConfigError` → `bin/autodev` exits 1 |
+| `projects` table column | `Project`'s `numericality` (type) + `#validate_numeric_ranges` (range) | invalid record; the dashboard form re-renders 422 with a localized message and the accepted range |
+| A row already in `projects` | `bin/autodev`'s `warn_rejected_numeric_settings` | boot **warning** naming project, field, value and range — never a refusal, or there would be no dashboard left to fix it from |
+
 ### CLI flags
 
 - `-c` / `--config PATH` — Config file path
@@ -355,13 +374,14 @@ All under `config/locales/`:
 | `notifications.{fr,en}.yml` | One-off GitLab issue comments (errors, MR links, completion, stagnation, etc.) |
 | `activity.{fr,en}.yml` | Per-issue activity-log entries (the single updated comment) |
 | `web.{fr,en}.yml` | Every string rendered by the embedded web UI |
+| `cli.{fr,en}.yml` | `bin/autodev`'s boot diagnostics (locale from `web.locale`, default `fr`) |
 | `en.yml` | Rails default English (used by gems we depend on) |
 
 Templates are loaded by Rails' i18n railtie. `Locales.t(key, locale:, **vars)` is a thin adapter around `I18n.t` with strict `:fr` fallback (`Locales` includes `I18n::Backend::Fallbacks`). Vocabulary follows `docs/autospec.md` §I — business-facing language, not technical step names.
 
 ### How to add a new string
 
-1. Pick a key with the right prefix: `notify_*`, `activity_*`, `web_*`. Keep them flat (no nesting).
+1. Pick a key with the right prefix: `notify_*`, `activity_*`, `web_*`, `cli_*`. Keep them flat (no nesting). A new thematic file also has to be added to `Locales::LOCALE_FILES_GLOB`, or `Locales.t` won't see it outside the Rails process (and the FR/EN parity test won't cover it).
 2. Add it to the matching `config/locales/<area>.{fr,en}.yml` files **in both `fr` and `en`**, with the same `%{var}` placeholders in each.
 3. Use the right helper at the call site:
    - **Ruby code (CLI, processors, services)**: `Locales.t(:my_key, locale: <locale>, **vars)`. The `locale` argument is mandatory in this layer — pick from `issue.locale`, a config field, or default to `:fr`.
@@ -375,6 +395,7 @@ Templates are loaded by Rails' i18n railtie. `Locales.t(key, locale:, **vars)` i
 | Web UI | cookie `locale` > config `web.locale` > `:fr` | `Web::I18nHelpers#web_locale` + `t_web` |
 | GitLab activity log / notifications | `issue.locale` column (per-issue, set on creation, default `:fr`) | `Locales.t(..., locale: issue.locale.to_sym)` |
 | CLI dashboard / `--status` / `--errors` | `:fr` for now (no flag) | `Locales.t(..., locale: :fr)` — still go through it so adding `--locale en` later is a one-line change |
+| `bin/autodev` boot diagnostics | config `web.locale` > `:fr` | `Locales.t(..., locale: cli_locale(config))` (`bin/autodev`) |
 
 ### What NOT to do
 

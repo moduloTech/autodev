@@ -40,6 +40,14 @@ module Web
       }.freeze
       private_constant :DEFAULT_HINT_VALUES
 
+      # ActiveModel error types the numeric-bounds validation produces
+      # (`numericality` for the type question, Project#validate_numeric_ranges
+      # for the range one), mapped to their localized web template.
+      NUMERIC_ERROR_KEYS = { out_of_range: :web_project_edit_error_out_of_range,
+                             not_a_number: :web_project_edit_error_not_a_number,
+                             not_an_integer: :web_project_edit_error_not_a_number }.freeze
+      private_constant :NUMERIC_ERROR_KEYS
+
       def initialize(project:, **)
         super(**)
         @project = project
@@ -153,9 +161,20 @@ module Web
             t_web(:web_project_edit_error_banner)
           end
           ul(style: 'margin: 0; padding-left: 18px; font-size: 12px; color: var(--err-fg);') do
-            @project.errors.full_messages.each { |msg| li { plain msg } }
+            @project.errors.each { |error| li { plain error_line(error) } }
           end
         end
+      end
+
+      # A numeric-bounds rejection (Autodev #58) is rendered through t_web so
+      # the operator reads it in the UI locale and sees the accepted range;
+      # every other validation error keeps ActiveModel's own full message.
+      def error_line(error)
+        key = NUMERIC_ERROR_KEYS[error.type]
+        spec = key && ::NumericSettings.spec(error.attribute.to_s)
+        return @project.errors.full_message(error.attribute, error.message) unless spec
+
+        t_web(key, field: error.attribute, min: spec.min, max: spec.max)
       end
 
       def render_form
@@ -244,10 +263,14 @@ module Web
         end
       end
 
+      # min/max come from the field's NumericSettings declaration, so the
+      # browser refuses an out-of-bounds entry before it is ever submitted and
+      # `clone_depth`'s floor of 0 is no longer a hand-written special case.
       def render_integer_field(key)
+        spec = ::NumericSettings.spec(key.to_s)
         field_shell(key) do
           input(type: 'number', name: key.to_s, value: @project.public_send(key)&.to_s,
-                min: key == :clone_depth ? '0' : '1', style: input_style)
+                min: spec.min.to_s, max: spec.max.to_s, style: input_style)
         end
       end
 
@@ -288,12 +311,15 @@ module Web
       # The inline hint under a field: a one-line description of what the
       # option does (web_project_edit_desc_<key>), with the baked global
       # default appended ("Défaut : N") for the fields that have a fixed one
-      # (the rest state their default inline in the description text).
+      # (the rest state their default inline in the description text), and the
+      # accepted range for the numeric ones — the bounds have to be readable
+      # where the value is typed, not only in the error that follows.
       def field_hint(key)
-        desc = t_web(:"web_project_edit_desc_#{key}")
-        return desc unless DEFAULT_HINT_VALUES.key?(key)
-
-        "#{desc} #{t_web(:web_project_edit_default, value: DEFAULT_HINT_VALUES[key])}"
+        parts = [t_web(:"web_project_edit_desc_#{key}")]
+        parts << t_web(:web_project_edit_default, value: DEFAULT_HINT_VALUES[key]) if DEFAULT_HINT_VALUES.key?(key)
+        spec = ::NumericSettings.spec(key.to_s)
+        parts << t_web(:web_project_edit_range, min: spec.min, max: spec.max) if spec
+        parts.join(' ')
       end
 
       def render_submit_row

@@ -130,4 +130,7 @@ class ProjectsControllerEditTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
     assert_nil @project.reload.target_branch
   end
+
+  # The numeric-bounds behaviour of the same form (Autodev #58) lives in
+  # test/controllers/projects_controller_numeric_bounds_test.rb.
 end

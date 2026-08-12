@@ -11,21 +11,27 @@ module ProjectValidator
     AppValidator.validate!(project_config, path)
   end
 
+  # Every numeric per-project override is checked against its NumericSettings
+  # declaration (Autodev #58). Enumerating the declarations instead of a local
+  # list is what makes a new numeric setting a one-line addition, and it is how
+  # `clone_depth` (0 = full clone) and `pipeline_watch_max_days` (0 = bound
+  # disabled) stop needing hand-written special cases: their declared floor is
+  # 0, which is a statement about the range and no longer doubles as permission
+  # for any value that happens to coerce to 0.
   def self.validate_numerics!(project_config, path)
-    %w[dc_timeout max_retries retry_backoff stagnation_threshold mr_review_timeout].each do |field|
+    NumericSettings.fields.each do |field|
       next unless project_config.key?(field)
 
-      value = project_config[field].to_i
-      unless value.positive?
-        raise ConfigError, "#{path}: '#{field}' must be a positive integer, got: #{project_config[field].inspect}"
-      end
+      value = project_config[field]
+      next unless NumericSettings.violation(field, value)
+
+      raise ConfigError, NumericSettings.config_error_message(field, value, scope: path)
     end
   end
   private_class_method :validate_numerics!
 
   def self.validate_post_completion!(project_config, path)
     validate_post_completion_cmd!(project_config, path)
-    validate_post_completion_timeout!(project_config, path)
     return unless project_config.key?('post_completion_timeout') && !project_config.key?('post_completion')
 
     raise ConfigError, "#{path}: 'post_completion_timeout' is set but 'post_completion' is missing."
@@ -42,34 +48,14 @@ module ProjectValidator
   end
   private_class_method :validate_post_completion_cmd!
 
-  def self.validate_post_completion_timeout!(project_config, path)
-    return unless project_config.key?('post_completion_timeout')
-
-    value = project_config['post_completion_timeout'].to_i
-    return if value.positive?
-
-    raise ConfigError,
-          "#{path}: 'post_completion_timeout' must be a positive integer, " \
-          "got: #{project_config['post_completion_timeout'].inspect}"
-  end
-  private_class_method :validate_post_completion_timeout!
-
+  # `post_completion_timeout` and `clone_depth` are numeric, so their bounds are
+  # applied by `validate_numerics!` from their NumericSettings declaration. What
+  # is left here is the non-numeric half: sparse_checkout's shape, and (in
+  # `validate_post_completion!`) the pairing rule.
   def self.validate_clone_options!(project_config, path)
-    validate_clone_depth!(project_config, path)
     validate_sparse_checkout!(project_config, path)
   end
   private_class_method :validate_clone_options!
-
-  def self.validate_clone_depth!(project_config, path)
-    return unless project_config.key?('clone_depth')
-
-    value = project_config['clone_depth'].to_i
-    return unless value.negative?
-
-    raise ConfigError,
-          "#{path}: 'clone_depth' must be a non-negative integer, got: #{project_config['clone_depth'].inspect}"
-  end
-  private_class_method :validate_clone_depth!
 
   def self.validate_sparse_checkout!(project_config, path)
     return unless project_config.key?('sparse_checkout')
