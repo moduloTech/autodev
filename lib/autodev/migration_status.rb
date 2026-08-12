@@ -50,6 +50,11 @@ module Autodev
     PRIMARY_DATABASE = 'primary'
     QUEUE_DATABASE = 'queue'
 
+    # Guards the per-process migration-file cache below. `pending` runs inside
+    # `HealthReport#check_migrations`, i.e. inside a Puma request thread, and two
+    # probes landing at once would otherwise write the memo Hash concurrently.
+    FILE_SCAN_LOCK = Mutex.new
+
     class << self
       def benign_race?(error)
         return true if error.is_a?(::ActiveRecord::ConcurrentMigrationError)
@@ -143,9 +148,28 @@ module Autodev
       end
 
       # Filename parsing only — MigrationContext#migrations touches no connection.
+      #
+      # Memoised for the life of the process (Autodev #60). Half of `pending` has
+      # to be re-read on every call — `schema_migrations` is the side that
+      # changes — but this half is a walk of `db/migrate` / `db/queue_migrate`,
+      # and those files are baked into the release tarball: they cannot appear or
+      # disappear while autodev runs. `pending` sits behind
+      # `HealthReport#check_migrations`, so without the memo an external probe
+      # bought one directory traversal per database per request on an endpoint
+      # whose whole point is being called often.
+      #
+      # Keyed on the resolved paths rather than the database name so a config
+      # that repoints `migrations_paths` is not served another database's answer.
       def migration_versions(db_config)
-        paths = Array(db_config.migrations_paths || 'db/migrate').map { |path| ::Rails.root.join(path).to_s }
-        ::ActiveRecord::MigrationContext.new(paths).migrations.map(&:version)
+        paths = migration_paths(db_config)
+        FILE_SCAN_LOCK.synchronize do
+          @migration_versions ||= {}
+          @migration_versions[paths] ||= ::ActiveRecord::MigrationContext.new(paths).migrations.map(&:version)
+        end
+      end
+
+      def migration_paths(db_config)
+        Array(db_config.migrations_paths || 'db/migrate').map { |path| ::Rails.root.join(path).to_s }
       end
 
       def applied_versions(connection)

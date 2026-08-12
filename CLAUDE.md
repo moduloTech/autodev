@@ -244,7 +244,7 @@ AR migrations live under `db/migrate/` (primary) and `db/queue_migrate/` (queue)
 
 - **the initializer never raises** — it logs a `warn` for a recognised race and an `error` otherwise, naming what is unapplied. It sits on the boot path of `bin/rails runner`, of `autodev --status` / `--errors` / `--reset`, of a standalone `bin/rails server` and of the test suite, all of which must keep booting;
 - **`bin/autodev` refuses to start** when the pass left anything unapplied (`ConfigError` → exit 1, before any child is spawned). The predicate is a set difference between the migration files and `schema_migrations`, not an interpretation of the exception, so a benign race cannot trip it. The supervisor is the only entry point that refuses, because it is the one that starts the workers — a worker on an incomplete schema raises `NoMethodError` in `Project#to_project_config` on every job;
-- **`/admin/health` carries a `migrations` card** (`down`, so `/healthz` answers 503) for the entry points that do boot.
+- **`/admin/health` carries a `migrations` card** (`down`, so `/healthz` answers 503) for the entry points that do boot. Only the `schema_migrations` half of the difference is re-read per call; the migration *file* list is memoised for the life of the process (Autodev #60), because it cannot change while autodev runs and `/healthz` is polled by external probes.
 
 Issue lifecycle (AASM):
 
