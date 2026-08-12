@@ -65,6 +65,17 @@ production:
     class: LogJanitorJob
     queue: default
     schedule: "30 4 * * *"
+  # Bounds activity_events growth: drops the machinery rows (poller / usage /
+  # error / heartbeat) past a retention window derived from
+  # HealthReport#stuck_active_after — 24 h at default settings
+  # (Autodev::ActivityEventJanitor, Autodev #57). Recurring rather than a rake
+  # task on purpose: Autodev #53 already shipped the manual one and it cannot
+  # bound growth. 04:45 — after prune_logs, staggered from the 03:00 sync, the
+  # hourly briefing and the */5 poll.
+  prune_activity_events:
+    class: PruneActivityEventsJob
+    queue: default
+    schedule: "45 4 * * *"
   # Discards transient process-lifecycle failures (worker pruned/exited on box
   # sleep or supervisor restart) so they don't accumulate in the "Failed" tab
   # (Autodev::FailedJobReaper). Hourly at minute 18 — staggered from the other

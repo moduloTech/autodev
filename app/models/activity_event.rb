@@ -25,6 +25,16 @@ class ActivityEvent < ApplicationRecord
   KINDS = %w[transition danger_claude poller error usage heartbeat discussions_snapshot].freeze
   LEVELS = %w[info warn error].freeze
 
+  # The kinds that exist for the machinery, not for a reader: liveness and
+  # per-cycle verdicts, each written on a clock rather than in response to work.
+  # Every one of them has exactly one reader, and that reader only ever wants
+  # the newest row — `HealthReport#check_poller`, `UsageGate.state`, and
+  # `Issue.without_activity_since` for the heartbeat. That is what makes them
+  # both invisible (`user_visible` below) and disposable
+  # (Autodev::ActivityEventJanitor, Autodev #57): a row nobody asked to see and
+  # nobody will read again is a row we may delete.
+  MACHINERY_KINDS = %w[poller error usage heartbeat].freeze
+
   belongs_to :issue, optional: true
 
   # The legacy Sequel migration created `created_at` as a TEXT column (the
@@ -39,14 +49,17 @@ class ActivityEvent < ApplicationRecord
 
   after_create_commit :broadcast_to_event_bus
 
-  # Rows that exist for one reader only: Issue.without_activity_since, which
-  # bounds how long a live worker may stay silent before dispatch_dormant_audit
-  # repositions its row (Autodev #50). They are machinery, not activity anyone
-  # asked to see, so every path that *renders* events goes through this scope —
-  # one definition rather than a `where.not` repeated per consumer. The
-  # staleness query itself must NOT use it: counting the heartbeat is the whole
-  # mechanism.
-  scope :user_visible, -> { where.not(kind: 'heartbeat') }
+  # The one definition of "a row somebody asked to see". Every path that
+  # *renders* events goes through it — the issue timeline, the dashboard
+  # sparkline, the /stream guard — rather than repeating a `where.not` per
+  # consumer. It hid `heartbeat` alone until Autodev #57; the sparkline mean-
+  # while carried its own hardcoded `poller`/`error`/`heartbeat` list, and the
+  # gap between the two lists is how `usage` came to make the majority of the
+  # sparkline once Autodev #53 collapsed the per-poll danger_claude row.
+  #
+  # The staleness query must NOT use this scope: `Issue.without_activity_since`
+  # counting the heartbeat is the whole mechanism of Autodev #50.
+  scope :user_visible, -> { where.not(kind: MACHINERY_KINDS) }
 
   def payload
     return {} if payload_json.nil? || payload_json.empty?

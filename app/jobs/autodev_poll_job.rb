@@ -59,7 +59,9 @@ class AutodevPollJob < ApplicationJob
   # reads the latest `kind: 'poller'` event to answer "is the poller still ticking?".
   # issue_id is nil (system event): such events are deliberately not broadcast to the
   # SSE feed nor counted in the activity sparkline (see ActivityEvent#broadcast_to_event_bus
-  # and Web::Helpers#weekly_activity_counts). Fire-and-forget: never let it break a cycle.
+  # and ActivityEvent.user_visible). Both `poller` and `error` are machinery kinds, so
+  # they are also dropped past the retention window (Autodev #57) — only the newest row
+  # is ever read. Fire-and-forget: never let it break a cycle.
   def record_heartbeat(usage_ok:, projects:, started:, level: 'info')
     duration_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
     ActivityEvent.create(

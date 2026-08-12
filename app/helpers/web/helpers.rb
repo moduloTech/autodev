@@ -227,9 +227,11 @@ module Web
     def weekly_activity_counts
       bounds = weekly_activity_day_bounds
       row = activity_events_dataset
-            # system heartbeats/markers (issue_id nil) + danger-claude liveness
-            # markers (Autodev #50), which measure chatter, not work done
-            .where.not(kind: %w[poller error heartbeat])
+            # `user_visible` is the single definition of what a reader asked to
+            # see (Autodev #57). This helper used to carry its own hardcoded
+            # `poller`/`error`/`heartbeat` list, which is how the per-cycle
+            # `usage` verdict (Autodev #46) ended up counted as work.
+            .user_visible
             .where('created_at >= ? AND created_at < ?', bounds.first, bounds.last)
             .pick(*weekly_activity_buckets(bounds))
       Array(row).map(&:to_i)

@@ -88,6 +88,28 @@ class WeeklyActivityCountsTest < Minitest::Test
     assert_equal 1, @helper.weekly_activity_counts.sum
   end
 
+  # The Claude-quota verdict (Autodev #46) is one row per poll cycle — 720/day
+  # in production. It slipped past the hardcoded three-kind list this helper
+  # used to carry, and once Autodev #53 collapsed the per-poll danger_claude row
+  # it became the *majority* of the bar: 382 usage rows against 30 danger_claude
+  # on 12/08/2026. Routing through `user_visible` (Autodev #57) is what fixes it.
+  def test_usage_events_are_excluded
+    insert_event("#{Time.zone.today} 12:00:00", kind: 'usage')
+    insert_event("#{Time.zone.today} 12:00:00", kind: 'transition')
+
+    assert_equal 1, @helper.weekly_activity_counts.sum
+  end
+
+  # Constat 3 of Autodev #57: the sparkline and `ActivityEvent.user_visible` had
+  # two competing definitions of "masqué", free to diverge at the next kind
+  # added — which is precisely how `usage` slipped in. One definition now, and
+  # this pins the sparkline to it rather than to a copy of its contents.
+  def test_counts_exactly_what_user_visible_admits
+    ActivityEvent::KINDS.each { |kind| insert_event("#{Time.zone.today} 12:00:00", kind: kind) }
+
+    assert_equal ActivityEvent.user_visible.count, @helper.weekly_activity_counts.sum
+  end
+
   # An event at 00:30 Europe/Paris is stored ~22:30/23:30 the previous UTC day.
   # UTC-day bucketing would file it under yesterday; the zone-aware helper must
   # place it in today's (rightmost) bar.

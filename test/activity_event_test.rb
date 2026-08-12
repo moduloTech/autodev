@@ -89,4 +89,21 @@ class ActivityEventTest < Minitest::Test
 
     assert_equal [issue.id], published.map(&:issue_id)
   end
+
+  # `user_visible` is the one definition of "a row somebody asked to see"
+  # (Autodev #57). It used to hide `heartbeat` alone while the dashboard
+  # sparkline carried its own three-kind list — two definitions of the same
+  # notion, and `usage` had already fallen through the gap. It now hides every
+  # machinery kind, which is also exactly the set the retention purge deletes.
+  def test_user_visible_admits_the_business_kinds_and_hides_the_machinery_ones
+    issue = create_issue
+    ActivityEvent::KINDS.each { |kind| ActivityEvent.create!(issue_id: issue.id, kind: kind) }
+
+    assert_equal (ActivityEvent::KINDS - ActivityEvent::MACHINERY_KINDS).sort,
+                 ActivityEvent.user_visible.pluck(:kind).sort
+  end
+
+  def test_machinery_kinds_are_all_declared_kinds
+    assert_empty ActivityEvent::MACHINERY_KINDS - ActivityEvent::KINDS
+  end
 end

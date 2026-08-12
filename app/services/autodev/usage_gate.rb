@@ -15,6 +15,14 @@ module Autodev
   # `ActivityEvent#broadcast_to_event_bus` already skips issue-less rows, so
   # these never reach the SSE feed.
   #
+  # KIND is one of `ActivityEvent::MACHINERY_KINDS`, so these rows are invisible
+  # to every rendering path and are dropped past the retention window
+  # (Autodev::ActivityEventJanitor, Autodev #57). Only the newest verdict is ever
+  # read, and it is trusted for two poll intervals — four orders of magnitude
+  # inside that window. Do not start reading this kind as a *history*: at 720
+  # rows a day it was the single largest remaining source of table growth, and
+  # nothing keeps it.
+  #
   # Everything fails OPEN — no probe, an unreadable payload, or a verdict older
   # than the TTL all read as "available". A failure to *observe* the quota must
   # never be what stops the pipeline; the worst case is one danger-claude call
