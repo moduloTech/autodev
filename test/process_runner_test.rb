@@ -82,4 +82,52 @@ class ProcessRunnerTest < Minitest::Test
     assert_equal 'oops', err
     refute ok
   end
+
+  # Autodev #59. `record_output` is the *only* writer of @dc_stdout / @dc_stderr,
+  # and twelve persistence sites across the four workers copy those two ivars
+  # straight into `issues.dc_stdout` / `issues.dc_stderr` — none of them scrubbed.
+  # The scrub therefore belongs here rather than at any one call site: a token
+  # that never enters the buffer cannot leak out of whichever site persists it.
+  #
+  # No subprocess needed — `record_output` reads its streams off the two reader
+  # threads, so a plain `Thread` carrying the payload exercises the real path
+  # without paying `wait_for_completion`'s `sleep 1`.
+  TOKEN = 'glpat-Abc123DEF456ghi789'
+  PUSH_URL = 'https://oauth2:glpat-Abc123DEF456ghi789@source.example.fr/g/p.git'
+
+  def record(harness, out, err)
+    harness.send(:record_output, 'mr-review', nil, Thread.new { out }, Thread.new { err })
+  end
+
+  def test_a_bare_gitlab_token_on_stdout_never_reaches_the_diagnostic_buffer
+    harness = spawn_harness
+    record(harness, "token=#{TOKEN}\n", '')
+
+    buffer = harness.instance_variable_get(:@dc_stdout)
+
+    refute_includes buffer, TOKEN, 'a PAT must not survive into the persisted diagnostic'
+    assert_includes buffer, 'token=***'
+  end
+
+  def test_credentials_embedded_in_a_url_on_stderr_never_reach_the_diagnostic_buffer
+    harness = spawn_harness
+    record(harness, '', "fatal: could not read from #{PUSH_URL}\n")
+
+    buffer = harness.instance_variable_get(:@dc_stderr)
+
+    refute_includes buffer, TOKEN
+    assert_includes buffer, 'https://oauth2:***@source.example.fr/g/p.git'
+  end
+
+  # The scrub is confined to the buffer. What comes back to the caller stays
+  # byte-identical, because `capture_session_and_text` JSON-parses stdout and
+  # both fatal-signature detectors match on it — rewriting the caller's copy
+  # would change how danger-claude output is read, which this ticket is not
+  # about (`review_failure_diagnostic` already scrubs its own message).
+  def test_the_streams_handed_back_to_the_caller_are_untouched
+    out, err = record(spawn_harness, "token=#{TOKEN}\n", "url=#{PUSH_URL}\n")
+
+    assert_equal "token=#{TOKEN}\n", out
+    assert_equal "url=#{PUSH_URL}\n", err
+  end
 end

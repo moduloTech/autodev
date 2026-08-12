@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'redactor'
+
 # Extracted from DangerClaudeRunner to reduce module length.
 # Provides process spawning, timeout handling, and output capture
 # for long-running subprocesses.
@@ -99,12 +101,27 @@ module ProcessRunner
     [out, err, status.success?, status]
   end
 
+  # The two buffers are a durable, human-facing sink: eleven error/give-up paths
+  # across the four workers copy them into `issues.dc_stdout` /
+  # `issues.dc_stderr`, the CLI `--errors` prints stderr back, and the issue
+  # detail page renders both. So they get the same treatment as every other such
+  # sink and are scrubbed on the way in (Autodev #59).
+  #
+  # Here rather than at the persistence sites: this is the only writer of the two
+  # ivars, so one scrub covers every current site and every future one — #49
+  # scrubbed the log message it built from these streams but persisted the
+  # columns raw, and the eleven older sites never scrubbed at all.
+  #
+  # The caller's copy is deliberately left alone: `capture_session_and_text`
+  # JSON-parses stdout and RateLimitDetector / AuthFailureDetector match fatal
+  # signatures in it, so rewriting it would change how danger-claude output is
+  # read rather than where a secret can be read back.
   def record_output(tag, suffix, out_thread, err_thread)
     out = out_thread.value
     err = err_thread.value
     header = suffix ? "#{tag} (#{suffix})" : tag
-    @dc_stdout << "=== #{header} ===\n#{out}\n"
-    @dc_stderr << "=== #{header} ===\n#{err}\n"
+    @dc_stdout << Redactor.scrub("=== #{header} ===\n#{out}\n")
+    @dc_stderr << Redactor.scrub("=== #{header} ===\n#{err}\n")
     [out, err]
   end
 end
