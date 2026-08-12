@@ -85,6 +85,7 @@ module Web
           div(style: 'display: flex; flex-direction: column; gap: 22px;') do
             render_activity_card
             render_screenshots_card
+            render_diagnostic_card
             render_raw_card
           end
           div(style: 'display: flex; flex-direction: column; gap: 22px;') do
@@ -280,15 +281,76 @@ module Web
         end
       end
 
+      # === Diagnostic =======================================================
+
+      # What the tool that gave up actually printed (Autodev #59). Autodev #49
+      # persists `dc_stdout` / `dc_stderr` on the review give-up so the reason a
+      # `mr-review` failed survives log rotation, and nothing rendered them: a
+      # delivered-but-flagged request said review had failed and never said why,
+      # with the answer on the row.
+      #
+      # Scoped to `done` + `needs_attention` — the delivered_review tab's own
+      # population — for two reasons. On a live request the two columns hold
+      # whatever the last phase left behind, which is not a verdict on anything;
+      # and `needs_attention` alone is not enough, because `dormant_exhausted`
+      # sets it without finishing the row.
+      #
+      # Scrubbed here as well as at capture: every writer scrubs since #59, but
+      # the rows already in the database were written raw, and this card is the
+      # first thing that shows them to a reader who is not the machine's owner.
+      DIAGNOSTIC_STREAMS = { dc_stdout: :web_issue_diagnostic_stdout,
+                             dc_stderr: :web_issue_diagnostic_stderr }.freeze
+      private_constant :DIAGNOSTIC_STREAMS
+
+      def render_diagnostic_card
+        streams = captured_streams
+        return if streams.empty?
+
+        render(Components::Card.new) do
+          h3(class: 'sidecard-title') { t_web(:web_issue_diagnostic) }
+          p(class: 'muted', style: 'font-size: 11px; margin: 0 0 12px;') do
+            t_web(:web_issue_diagnostic_hint)
+          end
+          streams.each { |key, text| render_diagnostic_stream(key, text) }
+        end
+      end
+
+      def captured_streams
+        return {} unless @issue[:status].to_s == 'done' && @issue[:needs_attention]
+
+        DIAGNOSTIC_STREAMS.filter_map do |column, key|
+          text = @issue[column].to_s
+          [key, Redactor.scrub(text)] unless text.strip.empty?
+        end.to_h
+      end
+
+      # Same collapsible as the watch cards on the /issues tabs — chevron in the
+      # summary, monospace `pre` in the body. Capped in height because a
+      # danger-claude capture runs to several thousand characters where an
+      # `error_message` runs to a few hundred.
+      def render_diagnostic_stream(key, text)
+        details(class: 'technical-details', style: 'margin-top: 10px;') do
+          summary(class: 'technical-summary') do
+            render Components::Icon.new(name: 'chevron-d', size: 12, stroke_width: 2)
+            plain " #{t_web(key)}"
+          end
+          pre(class: 'technical-pre', style: 'max-height: 320px;') { text }
+        end
+      end
+
       # === Raw data =========================================================
 
+      # `@issue` is every column of the row, `dc_stdout` / `dc_stderr` included,
+      # so this card has been publishing the captured output verbatim to every
+      # signed-in viewer since those columns existed — which is why it is scrubbed
+      # too, and not only the diagnostic card above (Autodev #59).
       def render_raw_card
         render(Components::Card.new(padding: 0)) do
           details do
             summary(class: 'card-section-header', style: 'cursor: pointer; list-style: none;') do
               h3(class: 'card-section-title', style: 'display: inline;') { t_web(:web_issue_raw_data) }
             end
-            pre(class: 'yaml-pre') { JSON.pretty_generate(@issue) }
+            pre(class: 'yaml-pre') { Redactor.scrub(JSON.pretty_generate(@issue)) }
           end
         end
       end
