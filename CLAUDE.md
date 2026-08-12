@@ -226,6 +226,8 @@ Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log`
 
 `app/jobs/issue_process_job.rb` is a single ActiveJob class that dispatches on the action symbol to the right worker class. `limits_concurrency to: 1, key: "issue-#{project}-#{iid}"` serializes work per ticket; the queue.yml `threads` setting (`AUTODEV_MAX_WORKERS`, default 3) caps global concurrency.
 
+Before dispatching, `perform` checks the row against `DISPATCHED_FROM` — the status the pass that enqueued the action selects on — and logs a skip if it no longer matches (Autodev #61). Every pass enqueues its whole population each cycle, so a job that outlives the poll interval leaves duplicates behind it, and `whiny_transitions: false` means the state machine answers those duplicates with a silent no-op instead of a stop: the side effects that follow the event (GitLab comment, `label_done`, reassignment) run anyway. This is the *staleness* guard and is orthogonal to `limits_concurrency`, which is the *concurrency* guard.
+
 `app/jobs/autodev_poll_job.rb` is the recurring entry (`config/recurring.yml`, default `*/5 * * * *`). Gates on `UsageChecker#available?` so a Claude usage exhaustion pauses the polling instead of burning retries.
 
 Both jobs wrap the ActiveJob `logger` in `Autodev::JobLogger` (`app/services/autodev/job_logger.rb`) before handing it to workflow classes — the legacy `AppLogger` accepted `info/warn/error(msg, project: path)` kwargs that Rails' `Logger` rejects.

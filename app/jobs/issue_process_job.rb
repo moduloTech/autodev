@@ -17,7 +17,10 @@
 # Concurrency: at most one execution per (project_path, issue_iid) at a
 # time. The N=3 global cap comes from queue.yml's worker `threads` setting,
 # not from per-key concurrency.
-class IssueProcessJob < ApplicationJob
+# ClassLength: the seven `perform_*` bodies and the two tables that describe
+# them (ACTIONS + DISPATCHED_FROM) are one dispatch table; splitting it would
+# put the declaration of an action away from its precondition.
+class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   queue_as :default
 
   limits_concurrency to: 1,
@@ -35,6 +38,40 @@ class IssueProcessJob < ApplicationJob
   # `pending` + `next_retry_at`), so returning early loses no work.
   CLAUDE_CONSUMING_ACTIONS = %i[process fix_discussions retry_stuck].freeze
 
+  # The row state each action was dispatched from, mirroring the `where` of the
+  # `Autodev::PollDispatcher` pass that enqueues it (Autodev #61).
+  #
+  # The queue is not a snapshot. `dispatch_pipelines` enqueues the whole
+  # `checking_pipeline` population every cycle, so any job that outlives the
+  # poll interval leaves duplicates behind it — and once Autodev #51 turned a
+  # `manual` pipeline from a millisecond no-op into a full mr-review run, that
+  # became the normal case rather than the exception.
+  #
+  # The state machine does not stop those duplicates. `whiny_transitions:
+  # false` makes an impossible transition a silent no-op rather than a raise,
+  # and the callers treat the event as a command that always succeeds:
+  # `green_first_review` calls `launch_review` after a `pipeline_green!` that
+  # did nothing, and `give_up_reviewing` re-applies `label_done`, reassigns the
+  # author and posts a GitLab comment after a `review_giveup!` that did
+  # nothing. On 11/08/2026 that put 486 comments on 28 powerpanne tickets in
+  # two hours — issue #15839 alone took 26 identical ones, one every 105
+  # seconds, every one of them after its last real transition.
+  #
+  # Guarding here rather than at each call site is deliberate: the precondition
+  # is a property of the *action*, one declaration covers all seven, and the
+  # row has just been read anyway. It is not a substitute for a per-issue lock
+  # (`limits_concurrency` is that) — it answers the different question of
+  # whether the work this job was queued for still needs doing.
+  DISPATCHED_FROM = {
+    process: %w[pending needs_clarification].freeze,
+    check_pipeline: %w[checking_pipeline].freeze,
+    fix_discussions: %w[fixing_discussions].freeze,
+    post_completion: %w[done].freeze,
+    retry_errored: %w[error].freeze,
+    retry_stuck: %w[pending].freeze,
+    recheck_infra: %w[done].freeze
+  }.freeze
+
   def perform(project_path, issue_iid, action)
     action = action.to_sym
     raise ArgumentError, "unknown action #{action.inspect}" unless ACTIONS.include?(action)
@@ -46,11 +83,24 @@ class IssueProcessJob < ApplicationJob
 
     issue = ::Issue.where(project_path: project_path, issue_iid: issue_iid).first
     return unless issue
+    return log_stale_skip(project_path, issue, action) unless dispatchable?(issue, action)
 
     public_send("perform_#{action}", issue, config, project_config)
   end
 
   private
+
+  def dispatchable?(issue, action)
+    DISPATCHED_FROM.fetch(action).include?(issue.status.to_s)
+  end
+
+  # INFO, not WARN: on a healthy instance this fires whenever a row resolves
+  # faster than the cycle that queued it again, which is normal. It becoming
+  # *frequent* is the signal — that the queue is running behind the poller.
+  def log_stale_skip(project_path, issue, action)
+    logger.info("[issue_process] skipping #{action} for #{project_path}##{issue.issue_iid}: " \
+                "row is #{issue.status}, expected #{DISPATCHED_FROM.fetch(action).join(' or ')}")
+  end
 
   def usage_blocked?(action)
     CLAUDE_CONSUMING_ACTIONS.include?(action) && !::Autodev::UsageGate.available?
