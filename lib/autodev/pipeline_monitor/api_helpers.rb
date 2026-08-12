@@ -20,7 +20,7 @@ class PipelineMonitor
     def fetch_pipeline_jobs(pipeline)
       @client.pipeline_jobs(@project_path, pipeline_id(pipeline), per_page: 100)
     rescue Gitlab::Error::ResponseError => e
-      log_error "Failed to fetch pipeline jobs: #{e.message}"
+      job_fetch_failed(e)
       nil
     end
 
@@ -29,8 +29,18 @@ class PipelineMonitor
       jobs = @client.pipeline_jobs(@project_path, pid, per_page: 100)
       jobs.select { |j| failed_not_allowed?(j) }
     rescue Gitlab::Error::ResponseError => e
-      log_error "Failed to fetch pipeline jobs: #{e.message}"
+      job_fetch_failed(e)
       []
+    end
+
+    # Both fetchers answer an API error with a value their callers cannot tell
+    # apart from a real answer — nil is explicit, `[]` is read as "nothing
+    # failed". Either way the poll then ends without concluding anything, so it
+    # also raises the flag the age bound reads (Autodev #56): a transient GitLab
+    # error must never be the reason a 14-day-old ticket is given up.
+    def job_fetch_failed(error)
+      log_error "Failed to fetch pipeline jobs: #{error.message}"
+      poll_inconclusive!(:pipeline_jobs_unavailable)
     end
 
     def failed_not_allowed?(job)

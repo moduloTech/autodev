@@ -37,6 +37,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
 
   def check(issue)
     @dc_issue = issue
+    clear_poll_verdict
     log "Checking pipeline for MR !#{issue.mr_iid} (issue ##{issue.issue_iid})..."
     log_pipeline_poll(issue)
     poll_open_mr(issue)
@@ -121,12 +122,20 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   # Both quota deferrals live here rather than in their own modules: they say
   # the same thing (the ticket stays in checking_pipeline, untouched, for the
   # next cycle) and belong next to the gate that triggers them.
+  #
+  # Each also marks the poll inconclusive (Autodev #56): the row is deliberately
+  # left where it is because we could not act, not because the pipeline went
+  # nowhere, so the age bound must not read it as a frozen watch. Without this a
+  # pipeline that turned green on day 15 during a quota outage was abandoned with
+  # a comment saying it had not moved for a fortnight.
   def defer_review_for_usage(issue)
+    poll_inconclusive!(:claude_usage_exhausted)
     log "Issue ##{issue.issue_iid}: pipeline green but Claude usage exhausted, " \
         'deferring mr-review, staying in checking_pipeline'
   end
 
   def defer_fix_for_usage(issue)
+    poll_inconclusive!(:claude_usage_exhausted)
     log "Issue ##{issue.issue_iid}: pipeline red but Claude usage exhausted, " \
         'deferring the fix, staying in checking_pipeline'
   end

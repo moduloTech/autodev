@@ -342,6 +342,19 @@ rewriting.
 This also means a GitLab outage cannot abandon a ticket: `check` raises before
 reaching the call, and the rescue logs and returns.
 
+> **Correction (Autodev #56).** That last paragraph was true when it was written
+> and false by the time it shipped. Autodev #51, developed in parallel and merged
+> just before, rescues `Gitlab::Error::ResponseError` *inside*
+> `fetch_pipeline_jobs` and returns `nil`, so `dispatch_blocked` logs "jobs
+> unavailable, rechecking next poll" and returns **normally** — control reaches
+> `abandon_expired_watch` and a 14-day-old ticket was abandoned over a transient
+> API error. The same shape already existed on the red path (`fetch_failed_jobs`
+> answers an error with `[]` → `handle_no_failed_jobs`), and the two Claude-quota
+> deferrals are a third: the row is left in place because we could not act, not
+> because the pipeline froze. "The poll ended without a transition" is therefore
+> necessary but not sufficient; the bound also requires that the poll read a
+> pipeline status. See `PipelineMonitor::WatchBound#poll_inconclusive!`.
+
 **The outcome** mirrors `handle_stagnation`, the existing "delivered, needs a
 check" give-up:
 
