@@ -42,6 +42,14 @@ require 'autodev/gitlab_helpers'
 # controller test to render a fully authenticated issue#show page run in
 # isolation raises `NameError: uninitialized constant Web::Helpers::ScreenshotUploader`.
 require 'autodev/screenshot_uploader'
+# `IssueShow` scrubs the two captured streams and the raw-data JSON through
+# top-level `Redactor` before rendering them (Autodev #59) — third instance of
+# the same gap. In production `config/initializers/load_autodev_config.rb`
+# requires `lib/autodev` at boot, which pulls it in; under AUTODEV_SKIP_LEGACY=1
+# that initializer returns early, so a controller test rendering issue#show in
+# isolation raised `NameError: uninitialized constant Web::Views::IssueShow::Redactor`
+# (it only passed under `rake test` because another file's helper had loaded it).
+require 'autodev/redactor'
 
 require 'minitest/autorun'
 require 'active_support/test_case'
