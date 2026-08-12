@@ -108,7 +108,8 @@ class HealthReportTest < ActiveSupport::TestCase # rubocop:disable Metrics/Class
     end
 
     assert_equal :down, result[:status]
-    assert_equal %i[poller workers queue claude_usage issues_error stuck_issues database migrations],
+    assert_equal %i[poller workers queue claude_usage issues_error mr_review
+                    stuck_issues database migrations],
                  result[:checks].keys
   end
 

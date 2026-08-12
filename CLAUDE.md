@@ -322,6 +322,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | Interrupted running_post_completion | Reset to `done` on startup (non-fatal, not re-executed) |
 | Row dormant (`pending` with no `next_retry_at`, `error` with a spent budget, active state frozen 2h) | `dispatch_dormant_audit` gives it a bounded second look: closed on GitLab → `closed`, unassigned → `closed`, handed over by label → `closed`, still ours → re-armed. After `dormant_audit_max` fruitless rounds: `needs_attention` (`dormant_exhausted`) |
 | Interrupted `fixing_discussions` / `answering_question` | Revived by `Issue.revive_stalled!` — at startup and, if the service does not restart, by the dormant audit |
+| mr-review failing on several tickets at once | `HealthReport`'s `mr_review` check raises a `warn` on `/admin/health` + `/healthz` (200, not 503 — a broken review does not stop delivery) once **≥ `monitoring.review_failure_threshold` distinct issues** (default 3) recorded a review failure inside **`monitoring.review_failure_window_seconds`** (default 21 600 = 6h). Per-ticket `review_failure_count` and `review_failures_exhausted` cannot see this: a tool-wide outage looks like N unrelated tickets (Autodev #60). Both defaults are calibrated on production data — isolated incidents peak at 1 distinct issue per 6h window, the 11/08/2026 outage reached 25 |
 
 ## Key Design Decisions
 
