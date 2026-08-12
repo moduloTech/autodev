@@ -65,10 +65,25 @@ class PollRouter
   # ticket before the click: comparing against `finished_at` tells the two apart,
   # so the button keeps working as an off-switch and only a fresh request wins.
   #
-  # Costs one `issue_label_events` call per closed-but-still-todo-labelled row
-  # per cycle. That population empties itself — a reentry leaves `closed`, and a
-  # merged-MR reentry strips the todo label — except for a row an operator closed
-  # while leaving the label on GitLab, which is the case to remove the label for.
+  # Costs one `issue_label_events` call per cycle, for every row that is
+  # `closed` in the DB while its GitLab issue is still open, still assigned to
+  # autodev and still carrying a todo label — the population
+  # `dispatch_new_issues` hands to `route`.
+  #
+  # That cost is recurring, not transient (Autodev #60 corrected this comment,
+  # which used to claim the population "empties itself"). It does for a row that
+  # reenters, because reentry leaves `closed`. It does **not** for the case the
+  # gate exists to reject: a ticket closed from the dashboard with the todo label
+  # left in place. There the label event predates `finished_at` for good, so
+  # `todo_reapplied_after?` answers false on every cycle, nothing about the row
+  # changes, and it pays one API call every poll interval indefinitely. Removing
+  # the label on GitLab is the only thing that ends it.
+  #
+  # Measured on the 12/08/2026 production copy: 60 `closed` rows, **none** of
+  # them still open + todo-labelled on GitLab, so the recurring cost is zero
+  # calls today. That is why the cost is documented rather than bounded — a cache
+  # or an `issue_label_events`-free short-circuit would be paying complexity for
+  # an empty set. Re-measure before adding one.
   def reenterable?(existing)
     return true if existing.status == 'done'
     return false unless existing.status == 'closed'
