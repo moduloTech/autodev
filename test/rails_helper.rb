@@ -55,6 +55,14 @@ require 'autodev/screenshot_uploader'
 # (it only passed under `rake test` because another file's helper had loaded it).
 require 'autodev/redactor'
 
+# `ConfigValidator` and the error it raises — fourth instance of the same gap. It
+# is the boot-time refusal for a bad numeric global, including the `monitoring:`
+# block, so a test that exercises that refusal has to be able to name both under
+# AUTODEV_SKIP_LEGACY=1.
+require 'autodev/errors'
+require 'autodev/errors/config_error'
+require 'autodev/config_validator'
+
 require 'minitest/autorun'
 require 'active_support/test_case'
 

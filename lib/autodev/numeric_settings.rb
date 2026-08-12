@@ -30,6 +30,12 @@ require_relative 'locales'
 # `ProjectValidator` (a YAML `projects:` entry), `Project` (the DB columns and
 # therefore the dashboard's config form), and `bin/autodev` (the boot warning
 # over the configs the poller will actually run with).
+#
+# rubocop:disable Metrics/ModuleLength -- most of the body is the two declaration
+# tables, and their length is data: this module exists so that every numeric
+# setting is visible in one place, so splitting the registry across files to
+# satisfy a line count would cost exactly the property it is for. Same call as
+# `Config`, the sibling table module.
 module NumericSettings
   # A closed, inclusive range for one field. `cover?` is only ever asked about
   # a value that already answered the type question.
@@ -100,6 +106,37 @@ module NumericSettings
     'error_recheck_backoff' => [1, DAY]
   }.to_h { |field, (min, max)| [field, Spec.new(field: field, min: min, max: max)] }.freeze
 
+  # The `monitoring:` block, one level down from the flat globals above.
+  #
+  # It needs its own table because its keys are nested, not because it deserves
+  # different treatment — the point is that it gets the *same* treatment. All five
+  # of these were read as `(value || DEFAULT).to_i`, and `.to_i` on a non-number is
+  # 0, which is a meaningful value for every one of them. So a typo did not fail,
+  # it reconfigured the setting in silence:
+  #
+  #   * `review_failure_window_seconds` → 0 s: the rolling window asks for events
+  #     newer than "now", counts none, and Autodev #60's mr-review alert answers
+  #     `:ok` forever;
+  #   * `review_failure_threshold` → 0: `count >= 0` is always true, so the same
+  #     check answers `:warn` permanently;
+  #   * the other three are saved only by their floor semantics (`max(configured,
+  #     derived)`), which is luck rather than design.
+  #
+  # Ranges: a window under a minute or over a day is a typo either way. The
+  # threshold accepts 1 ("warn on the first failing ticket" is a deliberate
+  # setting) but not 0. `activity_event_retention_seconds` keeps a wide ceiling —
+  # a long retention is a legitimate forensic choice, and a value *under* the
+  # safety window is ignored rather than rejected (see ActivityEventJanitor).
+  MONITORING_SPECS = {
+    'review_failure_window_seconds' => [60, DAY],
+    'review_failure_threshold' => [1, ROUNDS_MAX],
+    'poll_stale_factor' => [1, ROUNDS_MAX],
+    'stuck_active_after_seconds' => [60, DAY],
+    'activity_event_retention_seconds' => [60, 365 * DAY]
+  }.to_h { |field, (min, max)| [field, Spec.new(field: field, min: min, max: max)] }.freeze
+
+  MONITORING_FIELDS = MONITORING_SPECS.keys.freeze
+
   MESSAGE_KEYS = { not_an_integer: :cli_numeric_setting_not_a_number,
                    out_of_range: :cli_numeric_setting_out_of_range }.freeze
   private_constant :MESSAGE_KEYS
@@ -107,6 +144,8 @@ module NumericSettings
   def self.fields = SPECS.keys
 
   def self.spec(field) = SPECS[field.to_s]
+
+  def self.monitoring_spec(field) = MONITORING_SPECS[field.to_s]
 
   # The type question, and nothing else. Returns an Integer or nil — never 0
   # for a value that is not a number, which is the bug this module exists to
@@ -126,13 +165,42 @@ module NumericSettings
   # :not_an_integer — callers that treat an *absent* setting as legitimate skip
   # it before asking.
   def self.violation(field, raw)
-    declared = spec(field)
+    check(spec(field), raw)
+  end
+
+  # Same question, against the `monitoring:` table. An absent setting is
+  # legitimate — it means "use the default" — so nil is not a violation here,
+  # unlike in `violation`, where the caller has already decided the key is set.
+  def self.monitoring_violation(field, raw)
+    return nil if raw.nil?
+
+    check(monitoring_spec(field), raw)
+  end
+
+  def self.check(declared, raw)
     return nil if declared.nil?
 
     value = integer(raw)
     return :not_an_integer if value.nil?
 
     :out_of_range unless declared.cover?(value)
+  end
+  private_class_method :check
+
+  # The read-side companion to the boot validation: coerce a `monitoring:` value
+  # and fall back to `default` unless it is both a number and in range.
+  #
+  # Belt and braces, deliberately. `ConfigValidator` already refuses to boot the
+  # supervisor on a bad value, but `HealthReport` and `ActivityEventJanitor` are
+  # also built from hand-made hashes by `bin/rails runner`, by the test suite and
+  # by anything that never calls `validate_globals!`. There the fallback must be
+  # the documented default — which is protective — and never 0, which for these
+  # five settings is a silently different configuration rather than an error.
+  def self.monitoring_integer(config, field, default:)
+    raw = config.is_a?(Hash) ? config.dig('monitoring', field) : nil
+    return default if monitoring_violation(field, raw) || raw.nil?
+
+    integer(raw)
   end
 
   # Walks a list of YAML-shaped per-project configs (`Project.runtime_configs`
@@ -173,10 +241,20 @@ module NumericSettings
   # other ConfigError in the codebase — it is read in a terminal by whoever is
   # editing the file, and `bin/autodev` prints it as "Config error: …".
   def self.config_error_message(field, raw, scope: nil)
-    declared = spec(field)
-    "#{"#{scope}: " if scope}'#{field}' must be an integer between " \
+    range_error_message(spec(field), field, raw, scope: scope)
+  end
+
+  # Same sentence for a `monitoring:` key, qualified so the operator knows which
+  # block to open — the field names are only unique within it.
+  def self.monitoring_error_message(field, raw)
+    range_error_message(monitoring_spec(field), "monitoring.#{field}", raw)
+  end
+
+  def self.range_error_message(declared, label, raw, scope: nil)
+    "#{"#{scope}: " if scope}'#{label}' must be an integer between " \
       "#{declared.min} and #{declared.max}, got: #{raw.inspect}"
   end
+  private_class_method :range_error_message
 
   # ActiveModel error message for a column whose value is out of range. The
   # dashboard re-renders it through `t_web` (Web::Views::ProjectEdit keys off
@@ -187,3 +265,4 @@ module NumericSettings
     "must be an integer between #{declared.min} and #{declared.max}"
   end
 end
+# rubocop:enable Metrics/ModuleLength

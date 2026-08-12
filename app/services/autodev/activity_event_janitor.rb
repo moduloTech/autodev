@@ -85,9 +85,14 @@ module Autodev
       @safety_window ||= HealthReport.new(config: @config, now: @now).stuck_active_after
     end
 
-    # No independent default: absent config, the derived floor *is* the window.
+    # No independent default: absent config, the derived floor *is* the window,
+    # which is why `default: 0` is the right fallback here rather than a number of
+    # its own. A garbage value lands on the same 0 and is therefore ignored the
+    # same way a too-narrow setting is — but it goes through
+    # `NumericSettings.monitoring_integer` rather than `.to_i` so it is refused at
+    # boot and cannot pass for a deliberate choice.
     def configured_retention
-      @config.dig('monitoring', 'activity_event_retention_seconds').to_i
+      NumericSettings.monitoring_integer(@config, 'activity_event_retention_seconds', default: 0)
     end
   end
 end

@@ -54,8 +54,10 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
     attr_reader :attrs, :issue_iid, :mr_iid, :mr_url, :review_count,
                 :checking_pipeline_since, :pipeline_poll_since, :pipeline_retrigger_count,
                 :stagnation_signatures, :issue_author_id
-    attr_accessor :_review_count_zero, :_review_count_over_zero,
-                  :_max_review_rounds_reached, :_unresolved_discussions_empty
+    # No `_max_review_rounds_reached`: Autodev #60 removed both the production
+    # attr_writer and the `max_review_rounds_reached?` guard that read it, so a fake
+    # still advertising it would describe a contract the real Issue no longer has.
+    attr_accessor :_review_count_zero, :_review_count_over_zero, :_unresolved_discussions_empty
 
     def initialize(status: 'checking_pipeline', since: 20.days.ago, review_count: 0)
       @attrs = { status: status }

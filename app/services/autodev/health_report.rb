@@ -286,12 +286,20 @@ module Autodev
 
     def like_escape(text) = text.gsub(/[\\%_]/) { |char| "\\#{char}" }
 
+    # Through `NumericSettings.monitoring_integer`, not `.to_i`: a window that
+    # read as 0 s made this check answer `:ok` for ever (the query asks for events
+    # newer than "now"), and a threshold that read as 0 made it answer `:warn` for
+    # ever. Both are the failure mode Autodev #58 exists to end — a typo that
+    # silently switches a protection off — so both fall back to the default here
+    # and are refused outright at boot by `ConfigValidator`.
     def review_failure_window
-      (@config.dig('monitoring', 'review_failure_window_seconds') || DEFAULT_REVIEW_FAILURE_WINDOW).to_i
+      NumericSettings.monitoring_integer(@config, 'review_failure_window_seconds',
+                                         default: DEFAULT_REVIEW_FAILURE_WINDOW)
     end
 
     def review_failure_threshold
-      (@config.dig('monitoring', 'review_failure_threshold') || DEFAULT_REVIEW_FAILURE_THRESHOLD).to_i
+      NumericSettings.monitoring_integer(@config, 'review_failure_threshold',
+                                         default: DEFAULT_REVIEW_FAILURE_THRESHOLD)
     end
 
     def last_poller_event
@@ -306,11 +314,11 @@ module Autodev
     end
 
     def poll_stale_factor
-      (@config.dig('monitoring', 'poll_stale_factor') || DEFAULT_POLL_STALE_FACTOR).to_i
+      NumericSettings.monitoring_integer(@config, 'poll_stale_factor', default: DEFAULT_POLL_STALE_FACTOR)
     end
 
     def configured_stuck_active_after
-      (@config.dig('monitoring', 'stuck_active_after_seconds') || STUCK_ACTIVE_AFTER).to_i
+      NumericSettings.monitoring_integer(@config, 'stuck_active_after_seconds', default: STUCK_ACTIVE_AFTER)
     end
 
     # The longest a worker can legitimately go quiet: one danger-claude call

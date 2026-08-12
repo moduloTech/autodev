@@ -38,8 +38,27 @@ module ConfigValidator
       reason = NumericSettings.violation(field, config[field])
       raise ConfigError, NumericSettings.config_error_message(field, config[field]) if reason
     end
+    validate_monitoring_settings!(config)
   end
   private_class_method :validate_numeric_settings!
+
+  # The `monitoring:` block gets the same refusal as the flat globals. It was the
+  # gap #58 left: nested keys were outside the registry, and two settings landed
+  # in it in the same release reading `(value || DEFAULT).to_i`, where a typo
+  # switched a protection off instead of failing.
+  def self.validate_monitoring_settings!(config)
+    block = config['monitoring']
+    return unless block.is_a?(Hash)
+
+    NumericSettings::MONITORING_FIELDS.each do |field|
+      raw = block[field]
+      next if raw.nil?
+
+      reason = NumericSettings.monitoring_violation(field, raw)
+      raise ConfigError, NumericSettings.monitoring_error_message(field, raw) if reason
+    end
+  end
+  private_class_method :validate_monitoring_settings!
 
   def self.validate_log_level!(config)
     level = config['log_level'].to_s.upcase

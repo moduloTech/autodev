@@ -295,6 +295,17 @@ end
 def warn_rejected_numeric_settings(config, logger, pastel)
   violations = NumericSettings.audit(Project.runtime_configs(config['projects']))
   warn_numeric_violations(violations, config, logger, pastel)
+rescue StandardError => e
+  # This is the only `warn_*` helper in `bootstrap` that touches the database —
+  # the others read the already-parsed config hash and cannot fail. An advisory
+  # warning must never be the thing that stops the supervisor: #55 made
+  # `bin/autodev` refuse to start on a condition it can *name* (an unapplied
+  # migration → ConfigError → exit 1), and an unhandled exception out of a warning
+  # would be a second, unnamed refusal with no diagnosis. `setup_database` and its
+  # migration gate already ran on the line above, so what is left here is the
+  # residue — a locked or corrupt SQLite file, a half-written row — and for that
+  # the right outcome is to lose the warning, not the service.
+  logger.warn("Could not audit the per-project numeric settings: #{e.message}")
 end
 
 def warn_numeric_violations(violations, config, logger, pastel)
