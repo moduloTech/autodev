@@ -126,6 +126,46 @@ class MigrationStatusTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
     ActiveRecord::Base.connection.execute("DELETE FROM schema_migrations WHERE version = '29999999999999'")
   end
 
+  # --- Q2: the file scan is paid once per process (Autodev #60) -------------
+  #
+  # `pending` backs HealthReport#check_migrations, i.e. every single /healthz
+  # hit. The `schema_migrations` half has to be re-read each time — that is the
+  # answer that changes — but the migration *files* cannot appear or disappear
+  # during the life of the process, and walking `db/migrate` + `db/queue_migrate`
+  # per request is a directory traversal an aggressive external probe should not
+  # be able to buy.
+
+  test 'the migration files are scanned once, not on every pending call' do
+    Autodev::MigrationStatus.pending # warm the per-process cache
+    scans = 0
+    real = ActiveRecord::MigrationContext.method(:new)
+    counting = lambda do |paths|
+      scans += 1
+      real.call(paths)
+    end
+
+    ActiveRecord::MigrationContext.stub(:new, counting) do
+      Autodev::MigrationStatus.pending
+      Autodev::MigrationStatus.pending
+    end
+
+    assert_equal 0, scans
+  end
+
+  # Memoising the file list must not memoise the answer: `schema_migrations` is
+  # exactly what changes while the process runs (the initializer's pass, a hand
+  # `bin/rails db:migrate`), and a cached verdict would keep /healthz red — or,
+  # worse, green — after the fact.
+  test 'a version deleted from schema_migrations is still seen after the cache is warm' do
+    Autodev::MigrationStatus.pending
+    version = applied_versions.max
+    ActiveRecord::Base.connection.execute("DELETE FROM schema_migrations WHERE version = '#{version}'")
+
+    assert_equal [version], Autodev::MigrationStatus.pending_versions(primary_config)
+  ensure
+    ActiveRecord::Base.connection.execute("INSERT INTO schema_migrations (version) VALUES ('#{version}')")
+  end
+
   # --- The log line the initializer prints ---------------------------------
   #
   # config/initializers/auto_migrate.rb is the one file in this change no test can

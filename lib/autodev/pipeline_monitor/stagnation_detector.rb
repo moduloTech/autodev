@@ -78,18 +78,15 @@ class PipelineMonitor
     # `stagnation_pipeline` notification/activity so the operator sees *what* to
     # fix without opening the pipeline. It stays empty on the discussions path
     # (whose templates don't reference %{detail}, so the extra var is ignored).
+    #
+    # The status write, the `checking_pipeline_since` clear, the label, the
+    # reassignment and both user-facing sinks all live in
+    # `IssueAbandonment#abandon_issue` since Autodev #60 — this used to write
+    # `status: 'done'` itself, which emitted no transition row and skipped the AASM
+    # callback that owns the watch clock.
     def handle_stagnation(issue, type, detail: nil)
       log "Issue ##{issue.issue_iid}: #{type} stagnation detected → done"
-      # `checking_pipeline_since: nil` for the same reason `give_up_on_watch`
-      # clears it (Autodev #53): this writes the status directly, so the AASM
-      # callback that owns the column never runs, and a stale clock left behind
-      # is picked back up by any later `reset_for_retry!`.
-      issue.update(status: 'done', finished_at: Time.current, checking_pipeline_since: nil,
-                   needs_attention: true, attention_reason: "stagnation_#{type}",
-                   attention_detail: detail)
-      apply_label_done(issue.issue_iid)
-      notify_localized(issue.issue_iid, :"stagnation_#{type}", mr_url: issue.mr_url, detail: detail.to_s)
-      log_activity(issue, :"stagnation_#{type}", detail: detail.to_s)
+      abandon_issue(issue, :"stagnation_#{type}", detail: detail)
     end
   end
 end

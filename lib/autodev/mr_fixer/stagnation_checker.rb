@@ -34,13 +34,13 @@ class MrFixer
       entry
     end
 
+    # The discussions twin of `PipelineMonitor`'s pipeline stagnation, and the
+    # fourth give-up path routed through `IssueAbandonment#abandon_issue` by
+    # Autodev #60: it used to write `status: 'done'` from `fixing_discussions`
+    # itself, so it emitted no transition row and left the ticket on autodev.
     def transition_to_done_stagnation!(issue)
       log "Issue ##{issue.issue_iid}: discussion stagnation detected → done"
-      issue.update(status: 'done', finished_at: Time.current,
-                   needs_attention: true, attention_reason: 'stagnation_discussions')
-      apply_label_done(issue.issue_iid)
-      notify_localized(issue.issue_iid, :stagnation_discussions, mr_url: issue.mr_url)
-      log_activity(issue, :stagnation_discussions)
+      abandon_issue(issue, :stagnation_discussions)
     end
   end
 end

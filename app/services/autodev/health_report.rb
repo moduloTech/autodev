@@ -14,13 +14,46 @@ module Autodev
   #     checks: { <name> => { status:, detail:, meta: {} }, ... } }
   # where the top-level status is the worst severity across checks.
   class HealthReport # rubocop:disable Metrics/ClassLength
-    CHECKS = %i[poller workers queue claude_usage issues_error stuck_issues database migrations].freeze
+    CHECKS = %i[poller workers queue claude_usage issues_error mr_review
+                stuck_issues database migrations].freeze
     SEVERITY = { ok: 0, warn: 1, down: 2 }.freeze
 
     DEFAULT_POLL_INTERVAL = 300
     DEFAULT_POLL_STALE_FACTOR = 3
     POLL_STALE_FLOOR = 900 # never flag stale before 15 min, even on a tight interval
     BACKLOG_WARN = 100
+
+    # "mr-review is broken for everybody" detection (Autodev #60, item 1) — the
+    # alert missing behind Autodev #49. `review_failure_count` is per ticket and
+    # `review_failures_exhausted` raises a per-ticket `needs_attention` flag, so a
+    # tool-wide outage produced N unrelated flags and nothing saying the tool was
+    # dead. Nobody correlates three isolated tickets: the real incident ran for
+    # weeks and three MRs shipped unreviewed.
+    #
+    # The two activity keys every mr-review failure is recorded under —
+    # `review_failed` per attempt (Reviewer#finalize_review_failure) and
+    # `review_failures_exhausted` on the last one (Reviewer#give_up_reviewing).
+    REVIEW_FAILURE_KEYS = %w[review_failed review_failures_exhausted].freeze
+
+    # Calibrated on the 12/08/2026 production copy, not guessed. Rolling 6h
+    # windows over 4.5 months of activity_events (142 issues, 882k rows):
+    #
+    #   * six isolated single-ticket incidents (01/07, 02/07, 30/07, 06/08,
+    #     07/08, 12/08). Each is one ticket burning its five attempts inside ten
+    #     minutes: **max 1 distinct issue** in any 6h window, max 6 events;
+    #   * the tool-wide outage of 11/08 between 14:00 and 23:59: **25 distinct
+    #     issues** in a 6h window, 489 events.
+    #
+    # So the populations do not overlap at all, and 3 distinct issues sits with
+    # margin above the observed noise floor of 1. Replaying the outage against
+    # this threshold fires at 14:05:28 — five minutes after the first failure,
+    # against the weeks it actually took.
+    #
+    # Counted in *distinct issues*, deliberately, not events: Autodev #61's replay
+    # bug put 26 identical give-up comments on a single ticket, and an event count
+    # would have been inflated by something that says nothing about mr-review.
+    DEFAULT_REVIEW_FAILURE_WINDOW = 21_600 # 6h
+    DEFAULT_REVIEW_FAILURE_THRESHOLD = 3   # distinct issues inside the window
 
     # "Stuck" detection — the invariant that a green dashboard must not hide:
     # every issue in a non-terminal, non-human-wait state has *some* dispatcher
@@ -167,6 +200,21 @@ module Autodev
       build(:ok, 'no issues in error', meta)
     end
 
+    # `warn`, not `down`: a broken mr-review does not stop delivery, so the uptime
+    # probe must keep seeing 200 while the JSON body carries the warn for a
+    # secondary alert. Same tier as "issues in error".
+    def check_mr_review
+      count = review_failure_issue_count
+      meta = { issues: count, window_seconds: review_failure_window,
+               threshold: review_failure_threshold }
+      if count >= review_failure_threshold
+        return build(:warn, "mr-review failed on #{count} issue(s) in the last " \
+                            "#{review_failure_window}s — the tool may be broken for everybody", meta)
+      end
+
+      build(:ok, "mr-review failures on #{count} issue(s)", meta)
+    end
+
     def check_database
       ActiveRecord::Base.connection.execute('SELECT 1')
       SolidQueue::Job.connection.execute('SELECT 1')
@@ -209,6 +257,41 @@ module Autodev
     def stuck_issues
       Issue.where(status: PENDING_STUCK_STATES).without_activity_since(@now - poll_stale_after).to_a +
         Issue.where(status: ACTIVE_STUCK_STATES).without_activity_since(@now - stuck_active_after).to_a
+    end
+
+    # All projects, one query. Bounded by `(kind, created_at)` — the leading
+    # columns of `idx_ae_kind` — before the payload is looked at, so the LIKE only
+    # ever runs over the window's rows (~1 700 at production's write rate) rather
+    # than over the 882k-row table. Do not reorder those clauses away.
+    def review_failure_issue_count
+      ActivityEvent.where(kind: 'danger_claude')
+                   .where.not(issue_id: nil)
+                   .where(created_at: (@now - review_failure_window)..)
+                   .where(*review_failure_key_clause)
+                   .distinct
+                   .count(:issue_id)
+    end
+
+    # `payload_json` is always produced by `ActivityLogger.payload_for` as
+    # `{"key":"<key>",...}`, so a literal JSON prefix is an exact match on the key
+    # — no JSON parsing in SQL. The keys are snake_case and `_` is a LIKE
+    # wildcard, hence the ESCAPE: without it `review_failed` would also match
+    # `reviewXfailed`, and the trailing `",` is what keeps `review_failed` from
+    # matching `review_failures_exhausted`.
+    def review_failure_key_clause
+      sql = Array.new(REVIEW_FAILURE_KEYS.size, 'payload_json LIKE ? ESCAPE ?').join(' OR ')
+      args = REVIEW_FAILURE_KEYS.flat_map { |key| ["#{like_escape(%({"key":"#{key}",))}%", '\\'] }
+      [sql, *args]
+    end
+
+    def like_escape(text) = text.gsub(/[\\%_]/) { |char| "\\#{char}" }
+
+    def review_failure_window
+      (@config.dig('monitoring', 'review_failure_window_seconds') || DEFAULT_REVIEW_FAILURE_WINDOW).to_i
+    end
+
+    def review_failure_threshold
+      (@config.dig('monitoring', 'review_failure_threshold') || DEFAULT_REVIEW_FAILURE_THRESHOLD).to_i
     end
 
     def last_poller_event

@@ -14,11 +14,17 @@ require 'autodev/activity_logger'
 # no longer sees it — deliberately: the hook is a delivery hook.
 #
 # The population it exists for is untouched, and that is the half of this file
-# that matters most. Every nominal completion path (`finalize_green_done`,
-# `green_done_max_reviews`, `give_up_reviewing`, `handle_stagnation`) reaches
-# `done` first and *then* calls `reassign_to_author`, and `dispatch_unassignment`
-# only ever sweeps active rows — so a delivered ticket is still `done` and still
-# unassigned when the next cycle looks at it.
+# that matters most. `finalize_green_done` reaches `done` first and *then* calls
+# `reassign_to_author`, and `dispatch_unassignment` only ever sweeps active rows —
+# so a delivered ticket is still `done` and still unassigned when the next cycle
+# looks at it.
+#
+# Since Autodev #60 every *give-up* path does the same (one `abandon` event, one
+# reassignment policy), which would have walked all of them into this pass — three
+# of them for the first time, since they used to stay assigned to autodev and be
+# excluded by accident. So the pass now also filters on `needs_attention: false`:
+# no nominal completion sets the flag, every give-up does, and the hook is a
+# delivery hook.
 class PostCompletionAfterUnassignmentTest < Minitest::Test
   include DatabaseTestHelper
 
@@ -112,5 +118,20 @@ class PostCompletionAfterUnassignmentTest < Minitest::Test
     sweep_then_hook(StubClient.new(assignee_ids: [HUMAN_ID]))
 
     assert_equal 'done', issue.reload.status
+  end
+
+  # An abandoned row is `done` but not delivered, and since Autodev #60 it is also
+  # handed back to its author — so it enters this pass's population, where it used
+  # to be excluded only by the accident of still being assigned to autodev. The
+  # hook is a *delivery* hook (the whole point of #52's `closed`), so an abandoned
+  # MR must not be deployed. `needs_attention` is exactly the discriminator: no
+  # nominal completion path sets it, and all five give-up paths do.
+  def test_an_abandoned_row_is_not_sent_to_post_completion
+    %w[stagnation_pipeline stagnation_discussions pipeline_watch_expired
+       review_limit_reached review_failures_exhausted].each do |reason|
+      create_issue(status: 'done', mr_iid: 42, needs_attention: true, attention_reason: reason)
+    end
+
+    assert_empty sweep_then_hook(StubClient.new(assignee_ids: [HUMAN_ID]))
   end
 end

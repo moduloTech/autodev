@@ -17,8 +17,18 @@ require 'autodev/pipeline_monitor'
 class PipelineWatchBoundTest < Minitest::Test
   # Records `update` writes; `status` reflects them so the post-dispatch guard
   # sees what the real AASM object would carry.
+  #
+  # `abandon!` stands in for the AASM event the give-up path fires since Autodev
+  # #60, including the `stamp_pipeline_watch!` callback that clears the watch
+  # clock — the reason the give-up path no longer clears it by hand. The
+  # from-state restriction is reproduced too: the real event only transitions out
+  # of `checking_pipeline` / `fixing_discussions`. That the real machine behaves
+  # this way is pinned in test/database_pipeline_green_test.rb and
+  # test/issue_abandonment_test.rb, against real AR rows.
   class FakeIssue
-    attr_reader :attrs, :issue_iid, :mr_iid, :mr_url, :checking_pipeline_since
+    ABANDONABLE = %w[checking_pipeline fixing_discussions].freeze
+
+    attr_reader :attrs, :issue_iid, :mr_iid, :mr_url, :checking_pipeline_since, :issue_author_id
 
     def initialize(status: 'checking_pipeline', since: nil)
       @attrs = { status: status }
@@ -26,6 +36,7 @@ class PipelineWatchBoundTest < Minitest::Test
       @issue_iid = 15_894
       @mr_iid = 42
       @mr_url = 'http://gitlab/mr/42'
+      @issue_author_id = 7
     end
 
     def update(hash)
@@ -34,6 +45,17 @@ class PipelineWatchBoundTest < Minitest::Test
       self
     end
 
+    # rubocop:disable Naming/PredicateMethod -- mirrors AASM's bang event, which
+    # returns whether the transition happened.
+    def abandon!
+      return false unless ABANDONABLE.include?(status)
+
+      @attrs[:status] = 'done'
+      @checking_pipeline_since = nil
+      true
+    end
+    # rubocop:enable Naming/PredicateMethod
+
     def status = @attrs[:status]
     def needs_attention = @attrs[:needs_attention]
     def attention_reason = @attrs[:attention_reason]
@@ -41,16 +63,22 @@ class PipelineWatchBoundTest < Minitest::Test
   end
 
   def monitor(project_config: {}, config: {})
-    sink = { notify: [], activity: [], labels: [] }
-    mon = PipelineMonitor.allocate.tap do |instance|
-      instance.instance_variable_set(:@project_config, project_config)
-      instance.instance_variable_set(:@config, config)
-      instance.define_singleton_method(:log) { |*| nil }
-      instance.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
-      instance.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
-      instance.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
-    end
+    sink = { notify: [], activity: [], labels: [], reassigned: [] }
+    mon = PipelineMonitor.allocate
+    mon.instance_variable_set(:@project_config, project_config)
+    mon.instance_variable_set(:@config, config)
+    stub_boundaries(mon, sink)
     [mon, sink]
+  end
+
+  # Every point at which the give-up path leaves the process: the GitLab label,
+  # the assignee, the issue comment and the activity log.
+  def stub_boundaries(mon, sink)
+    mon.define_singleton_method(:log) { |*| nil }
+    mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
+    mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
+    mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
+    mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
   end
 
   # Returns the sink; the outcome is read off the issue, which is what the
@@ -91,6 +119,15 @@ class PipelineWatchBoundTest < Minitest::Test
     issue = expired_issue
 
     assert_equal [15_894], abandon(issue)[:labels]
+  end
+
+  # Autodev #60 aligned the three give-up paths onto one reassignment policy: an
+  # abandon hands the ticket back to its author, because a ticket left assigned to
+  # autodev is invisible to everybody. This path used to leave it on autodev.
+  def test_giving_up_hands_the_ticket_back_to_its_author
+    issue = expired_issue
+
+    assert_equal [15_894], abandon(issue)[:reassigned]
   end
 
   def test_giving_up_posts_a_gitlab_note_carrying_the_age

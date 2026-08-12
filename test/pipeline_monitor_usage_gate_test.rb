@@ -19,7 +19,7 @@ class PipelineMonitorUsageGateTest < Minitest::Test
     attr_reader :attrs, :issue_iid, :mr_iid, :mr_url, :review_count
     attr_accessor :stagnation_signatures, :pipeline_poll_since,
                   :_review_count_zero, :_review_count_over_zero,
-                  :_max_review_rounds_reached, :_unresolved_discussions_empty
+                  :_unresolved_discussions_empty
 
     def initialize(review_count: 0, stagnation_signatures: nil)
       @review_count = review_count

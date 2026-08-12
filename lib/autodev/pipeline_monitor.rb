@@ -159,16 +159,15 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
                                mr_iid: issue.mr_iid, logger: @logger, issue: issue)
   end
 
+  # Green, but `MAX_REVIEW_ROUNDS` rounds of review never resolved the
+  # discussions: a give-up, not a delivery. Routed through the shared abandon
+  # point since Autodev #60, which is also why `pipeline_green` no longer carries a
+  # `max_review_rounds_reached?` transition to `done` — the state machine used to
+  # offer two ways into `done` from `checking_pipeline`, one of them labelled
+  # "green", which is exactly the divergence this ticket unpicked.
   def green_done_max_reviews(issue)
-    set_pipeline_green_guards(issue, max_review_rounds: true)
-    issue.pipeline_green!
-    apply_label_done(issue.issue_iid)
-    reassign_to_author(issue)
-    Issue.where(id: issue.id).update_all(finished_at: Time.current, needs_attention: true,
-                                         attention_reason: 'review_limit_reached')
-    notify_localized(issue.issue_iid, :review_limit_reached, mr_url: issue.mr_url)
-    log_activity(issue, :review_limit_reached)
     log "Issue ##{issue.issue_iid}: max review rounds reached → done"
+    abandon_issue(issue, :review_limit_reached)
   end
 
   def finalize_green(issue, discussions)
@@ -189,10 +188,9 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   end
 
   def set_pipeline_green_guards(issue, review_count_zero: false, review_count_over_zero: false,
-                                max_review_rounds: false, no_discussions: true)
+                                no_discussions: true)
     issue._review_count_zero = review_count_zero
     issue._review_count_over_zero = review_count_over_zero
-    issue._max_review_rounds_reached = max_review_rounds
     issue._unresolved_discussions_empty = no_discussions
   end
 

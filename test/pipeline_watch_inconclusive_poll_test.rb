@@ -41,10 +41,19 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
 
   # Records `update` writes; the readers reflect them so the post-dispatch guard
   # sees what the real AASM object would carry.
+  #
+  # `abandon!` stands in for the AASM event the give-up path fires since Autodev
+  # #60, including the `stamp_pipeline_watch!` callback that clears the watch
+  # clock. The from-state restriction is reproduced too: the real event only
+  # transitions out of `checking_pipeline` / `fixing_discussions`. Same shape as
+  # the fake in test/pipeline_watch_bound_test.rb; the real machine's behaviour is
+  # pinned against real AR rows in test/issue_abandonment_test.rb.
   class FakeIssue
+    ABANDONABLE = %w[checking_pipeline fixing_discussions].freeze
+
     attr_reader :attrs, :issue_iid, :mr_iid, :mr_url, :review_count,
                 :checking_pipeline_since, :pipeline_poll_since, :pipeline_retrigger_count,
-                :stagnation_signatures
+                :stagnation_signatures, :issue_author_id
     attr_accessor :_review_count_zero, :_review_count_over_zero,
                   :_max_review_rounds_reached, :_unresolved_discussions_empty
 
@@ -56,7 +65,19 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
       @issue_iid = 15_894
       @mr_iid = 42
       @mr_url = 'http://gitlab/mr/42'
+      @issue_author_id = 7
     end
+
+    # rubocop:disable Naming/PredicateMethod -- mirrors AASM's bang event, which
+    # returns whether the transition happened.
+    def abandon!
+      return false unless ABANDONABLE.include?(status)
+
+      @attrs[:status] = 'done'
+      @checking_pipeline_since = nil
+      true
+    end
+    # rubocop:enable Naming/PredicateMethod
 
     def update(hash)
       @attrs.merge!(hash)
@@ -69,6 +90,7 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
     def status = @attrs[:status]
     def needs_attention = @attrs[:needs_attention]
     def attention_reason = @attrs[:attention_reason]
+    def finished_at = @attrs[:finished_at]
   end
 
   # One open MR whose head pipeline carries `status`; the jobs endpoint either
@@ -98,7 +120,7 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
   NOOPS = %i[log log_error].freeze
 
   def monitor(client:, claude: true)
-    sink = { notify: [], activity: [], labels: [] }
+    sink = { notify: [], activity: [], labels: [], reassigned: [] }
     mon = PipelineMonitor.allocate
     mon.instance_variable_set(:@client, client)
     mon.instance_variable_set(:@project_path, 'group/project')
@@ -110,10 +132,13 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
     [mon, sink]
   end
 
+  # Every point at which the give-up path leaves the process: the GitLab label,
+  # the assignee (Autodev #60), the issue comment and the activity log.
   def stub_sinks(mon, sink)
     mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
     mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
+    mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
   end
 
   # Runs a whole poll through the real entry point, so the flag's lifetime (set

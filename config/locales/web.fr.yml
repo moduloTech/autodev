@@ -35,6 +35,7 @@ fr:
   web_admin_health_check_queue: File de jobs
   web_admin_health_check_claude_usage: Quota Claude
   web_admin_health_check_issues_error: Issues en erreur
+  web_admin_health_check_mr_review: Revue automatique
   web_admin_health_check_stuck_issues: Issues bloquées
   web_admin_health_check_database: Base de données
   web_admin_health_check_migrations: Migrations

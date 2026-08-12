@@ -16,6 +16,7 @@ en:
   stagnation_pipeline: ":warning: %{tag}: stagnation detected — the same jobs keep failing on %{mr_url}. Failing job(s): %{detail}. Manual intervention required."
   stagnation_discussions: ":warning: %{tag}: stagnation detected — the same discussions remain unresolved on %{mr_url}. Manual intervention required."
   pipeline_watch_expired: ":warning: %{tag}: I have been watching the pipeline on %{mr_url} for more than %{days} days without ever reaching a verdict — I am no longer watching it. The MR stays open; please take it from here."
+  abandon_reassigned: ":arrow_right: I have reassigned the ticket to you: autodev is no longer tracking it. The MR is yours to take over."
   unassigned_stop: |-
     :stop_sign: %{tag}: I was unassigned from this ticket, I'm stopping the work in progress.
 

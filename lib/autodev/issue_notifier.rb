@@ -19,13 +19,18 @@ module IssueNotifier
     log_error "Failed to assign issue ##{iid} to self: #{e.message}"
   end
 
+  # Returns whether the ticket actually changed hands (Autodev #60): the abandon
+  # notification only claims a handback when there was an author to hand it to and
+  # GitLab accepted the edit. Existing callers ignore the value.
   def reassign_to_author(issue)
-    return unless issue.issue_author_id
+    return false unless issue.issue_author_id
 
     @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [issue.issue_author_id])
     log "Reassigned issue ##{issue.issue_iid} to author (user #{issue.issue_author_id})"
+    true
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to reassign issue ##{issue.issue_iid} to author: #{e.message}"
+    false
   end
 
   def autodev_tag
@@ -38,10 +43,16 @@ module IssueNotifier
     log_error "Failed to post comment on ##{iid}: #{e.message}"
   end
 
-  def notify_localized(iid, key, **vars)
+  # `suffix:` appends a second, var-free template after a blank line (Autodev
+  # #60). The four give-up reasons each need their own sentence — collapsing them
+  # into one generic message would lose what actually happened — but they share
+  # the "and I handed the ticket back to its author" clause, and duplicating that
+  # across four templates × two locales is how the next one gets forgotten.
+  def notify_localized(iid, key, suffix: nil, **vars)
     issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
     locale = (issue_record&.locale || 'fr').to_sym
     message = Locales.t(key, locale: locale, tag: autodev_tag, **vars)
+    message = "#{message}\n\n#{Locales.t(suffix, locale: locale)}" if suffix
     notify_issue(iid, message)
   end
 

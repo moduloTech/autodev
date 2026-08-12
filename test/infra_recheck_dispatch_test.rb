@@ -104,6 +104,21 @@ class InfraRecheckDispatchTest < Minitest::Test
     refute_includes candidate_iids, issue.issue_iid
   end
 
+  # The load-bearing half of Autodev #60's item 2. All four give-up paths now
+  # share one AASM event and one reassignment policy, but NOT one
+  # `attention_reason` — this pass selects `stagnation_pipeline` and re-arms the
+  # row, so a give-up that is not a deferral must never carry that value. Collapse
+  # the reasons and autodev restarts tickets it has just abandoned.
+  def test_only_a_pipeline_stagnation_is_ever_re_armed
+    reasons = %w[stagnation_pipeline stagnation_discussions pipeline_watch_expired
+                 review_limit_reached review_failures_exhausted dormant_exhausted]
+    issues = reasons.to_h { |reason| [reason, infra_stagnation_issue(attention_reason: reason)] }
+    selected = candidate_iids
+
+    assert_equal([issues['stagnation_pipeline'].issue_iid],
+                 issues.values.map(&:issue_iid).select { |iid| selected.include?(iid) })
+  end
+
   def test_excludes_when_not_flagged_needs_attention
     issue = infra_stagnation_issue(needs_attention: false)
 

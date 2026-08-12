@@ -122,8 +122,12 @@ class ActivityEventJanitorTest < ActiveSupport::TestCase # rubocop:disable Metri
     assert_equal 12 * STUCK_WINDOW, janitor(config: config).retention_seconds
   end
 
+  # Held at the worst case a project can actually configure. That used to be
+  # written as an arbitrary `86_400`; since Autodev #58 the timeouts are bounded,
+  # so the extreme is the declared ceiling — and reading it off the registry means
+  # this test follows the bound instead of restating a number that can drift.
   test 'the retention window always clears the stuck window' do
-    project(dc_timeout: 86_400)
+    project(dc_timeout: NumericSettings::TIMEOUT_MAX)
     config = CONFIG.merge('monitoring' => { 'activity_event_retention_seconds' => 1 })
     subject = janitor(config: config)
 
