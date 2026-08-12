@@ -44,7 +44,7 @@ en:
   activity_review_limit_reached: ":warning: Review limit reached (3 rounds) → done"
   activity_stagnation_pipeline: ":warning: Pipeline stagnation detected: %{detail} → done"
   activity_stagnation_discussions: ":warning: Discussion stagnation detected → done"
-  activity_pipeline_watch_expired: ":hourglass: Pipeline unchanged for more than %{days} days, watch stopped → done"
+  activity_pipeline_watch_expired: ":hourglass: Pipeline watch stopped after more than %{days} days without a verdict → done"
   activity_unassigned_stop: ":stop_sign: Unassigned, stopping work in progress"
   activity_closed_externally: ":lock: Ticket closed on GitLab, stopping work in progress"
   activity_handover_doing_removed: ":stop_sign: _%{label}_ label removed by someone else, stopping work in progress"
