@@ -1,0 +1,4 @@
+fr:
+  cli_numeric_settings_rejected_header: "%{count} réglage(s) numérique(s) hors bornes — la protection qu'ils pilotent peut être neutralisée."
+  cli_numeric_setting_out_of_range: "%{project} : '%{field}' = %{value} est hors bornes (entier attendu entre %{min} et %{max})."
+  cli_numeric_setting_not_a_number: "%{project} : '%{field}' = %{value} n'est pas un entier (attendu entre %{min} et %{max})."

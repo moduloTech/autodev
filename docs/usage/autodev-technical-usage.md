@@ -170,6 +170,8 @@ Depuis le task #9 (phases 3-4, `v1.0.0-alpha.25`/`.26`), la config par projet vi
 
 ## Champs de config (formulaire `/projects/:slug/edit`)
 
+Tout réglage numérique déclare son **type** et sa **plage** dans `NumericSettings::SPECS` (`lib/autodev/numeric_settings.rb`), et les deux questions sont séparées (Autodev #58) : `NumericSettings.integer` ne transforme jamais une valeur non numérique en `0`, et une plage dont le plancher est `0` (`pipeline_watch_max_days` = borne désactivée, `clone_depth` = clone complet) dit « `0` est une valeur signifiante » sans autoriser pour autant tout ce qui se coerce en `0`. En vigueur : les trois timeouts (`dc_timeout`, `post_completion_timeout`, `mr_review_timeout`) sont bornés à `60`…`21600` s (6 h — ce qui plafonne à 12 h la fenêtre de détection de dormance, cf. `HealthReport#longest_worker_timeout`) ; `pipeline_watch_max_days` à `0`…`365` j ; les compteurs (`max_retries`, `stagnation_threshold`, `infra_recheck_max`, `dormant_audit_max`) à `1`…`100` ; les délais (`retry_backoff`, `infra_recheck_backoff`, `dormant_audit_backoff`) à `1`…`86400` s. Une valeur refusée est **visible** : le formulaire répond 422 avec la plage attendue (une saisie non numérique n'efface plus le champ en silence), une valeur hors bornes dans `config.yml` empêche le démarrage du superviseur, et une valeur déjà présente en base déclenche un warning au démarrage nommant le projet, le champ, la valeur et la plage.
+
 | Section | Champ | Effet |
 |---|---|---|
 | Général | `target_branch` | Branche cible des MRs (défaut : branche par défaut du dépôt). |

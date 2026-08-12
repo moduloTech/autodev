@@ -155,11 +155,20 @@ class ProjectsController < ApplicationController # rubocop:disable Metrics/Class
     value.empty? ? nil : value
   end
 
+  # Blank → nil, i.e. "unset", which falls back to the global default exactly
+  # like an absent YAML key.
+  #
+  # A non-blank entry that is not an integer is handed to the model **as typed**
+  # (Autodev #58). It used to become nil here, which made a typo
+  # indistinguishable from deliberately clearing the field: the form answered
+  # `mr_review_timeout: "36OO"` with a 302 and a silently unset setting. Passing
+  # the raw string through lets the column's `numericality` check reject it and
+  # the form re-render with the reason.
   def integer_or_nil(raw)
     value = raw.to_s.strip
     return nil if value.empty?
 
-    Integer(value, exception: false)
+    NumericSettings.integer(value) || value
   end
 
   # Tri-state: the form's <select> offers "" (default/unset), "true", "false".

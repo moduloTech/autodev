@@ -1,0 +1,4 @@
+en:
+  cli_numeric_settings_rejected_header: "%{count} numeric setting(s) out of bounds: the protection they drive may be neutralised."
+  cli_numeric_setting_out_of_range: "%{project}: '%{field}' = %{value} is out of bounds (expected an integer between %{min} and %{max})."
+  cli_numeric_setting_not_a_number: "%{project}: '%{field}' = %{value} is not an integer (expected between %{min} and %{max})."

@@ -275,6 +275,9 @@ fr:
   web_project_edit_section_execution: Exécution
   web_project_edit_section_advanced: Avancé
   web_project_edit_default: "Défaut : %{value}"
+  web_project_edit_range: "Plage acceptée : %{min} à %{max}."
+  web_project_edit_error_out_of_range: "%{field} : valeur hors bornes (entier attendu entre %{min} et %{max})."
+  web_project_edit_error_not_a_number: "%{field} : ce n'est pas un entier (attendu entre %{min} et %{max})."
   web_project_edit_desc_target_branch: "Branche cible des merge requests. Défaut : branche par défaut du dépôt (généralement master)."
   web_project_edit_desc_labels_todo: Labels GitLab qui déclenchent le traitement par Autodev. Une entrée par ligne ; requis avec label_doing et label_done.
   web_project_edit_desc_label_doing: Label posé sur l'issue pendant tout le traitement. Requis avec labels_todo et label_done.

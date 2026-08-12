@@ -27,6 +27,10 @@ require_relative '../config/environment'
 # the dependency up by hand. Pull in only what the views need — not the full
 # lib/autodev tree (which would drag in Sequel-era modules).
 require 'autodev/locales'
+# `NumericSettings` (lib/autodev) carries the type + range declaration every
+# numeric per-project column is validated against (Autodev #58), so the Project
+# model needs it defined — same AUTODEV_SKIP_LEGACY gap as the requires around it.
+require 'autodev/numeric_settings'
 require 'autodev/config'
 # `Autodev::DeployReview` (app/services) calls `GitlabHelpers.field` /
 # `.build_gitlab_client`, but GitlabHelpers lives in lib/autodev (required at

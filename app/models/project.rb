@@ -32,14 +32,26 @@ class Project < ApplicationRecord
   # These mirror lib/autodev/project_validator.rb so the DB rejects the same
   # shapes the YAML validator did. All fields are optional (a project may
   # configure none of them and fall back to the global defaults).
-  POSITIVE_INT_FIELDS = %i[dc_timeout max_retries retry_backoff stagnation_threshold
-                           post_completion_timeout mr_review_timeout].freeze
+  #
+  # The integer columns are validated in two steps, which is the separation
+  # Autodev #58 is about: `numericality` answers the *type* question (a
+  # non-numeric input is a `:not_a_number` error, never a silent 0), then
+  # #validate_numeric_ranges applies the *range* each field declares in
+  # `NumericSettings`. That is why there is no longer a "positive integer" list
+  # with `clone_depth` bolted on beside it as a special case: a field whose
+  # floor is 0 simply declares `min: 0`.
+  # Also the single source of truth for the dashboard edit form's number inputs
+  # (Web::Views::ProjectEdit) and the controller's param cast
+  # (ProjectsController#project_config_params). Every entry must declare a range
+  # in `NumericSettings` — test/numeric_settings_test.rb pins that.
+  CONFIG_INTEGER_FIELDS = %i[dc_timeout max_retries retry_backoff stagnation_threshold
+                             post_completion_timeout mr_review_timeout clone_depth].freeze
   # "Advanced" keys columnized in phase 2 (were YAML-only in phase 1).
   STRING_CONFIG_FIELDS = %i[model effort implementer_agent test_writer_agent mr_fixer_agent].freeze
   BOOLEAN_CONFIG_FIELDS = %i[parallel_agents split_implementation].freeze
 
-  validates(*POSITIVE_INT_FIELDS, numericality: { only_integer: true, greater_than: 0 }, allow_nil: true)
-  validates :clone_depth, numericality: { only_integer: true, greater_than_or_equal_to: 0 }, allow_nil: true
+  validates(*CONFIG_INTEGER_FIELDS, numericality: { only_integer: true }, allow_nil: true)
+  validate :validate_numeric_ranges
   # `presence: true, allow_nil: true` = "if set, must not be blank" (rejects ""
   # / whitespace but lets an unset field through). The boolean columns are
   # type-cast by AR, so a NULL stays nil and only true/false survive.
@@ -76,10 +88,10 @@ class Project < ApplicationRecord
   # of truth for both the dashboard edit form (Web::Views::ProjectEdit, which
   # renders an input per field) and the controller param normalizer
   # (ProjectsController#project_config_params, which casts each group). The
-  # boolean group is BOOLEAN_CONFIG_FIELDS and the array group LIST_CONFIG_KEYS
-  # (both above). `app:` (project_app_commands) is structured/nested and is
-  # edited separately — it's not part of this set (task #9 phase 3).
-  CONFIG_INTEGER_FIELDS = (POSITIVE_INT_FIELDS + %i[clone_depth]).freeze
+  # integer group is CONFIG_INTEGER_FIELDS, the boolean group
+  # BOOLEAN_CONFIG_FIELDS and the array group LIST_CONFIG_KEYS (all above).
+  # `app:` (project_app_commands) is structured/nested and is edited separately
+  # — it's not part of this set (task #9 phase 3).
   CONFIG_STRING_FIELDS = (SCALAR_CONFIG_KEYS - CONFIG_INTEGER_FIELDS - BOOLEAN_CONFIG_FIELDS).freeze
 
   # The per-project runtime configs to discover and operate on (task #9
@@ -138,6 +150,24 @@ class Project < ApplicationRecord
       next if v.is_a?(Array) && v.any? && v.all?(String)
 
       errors.add(f, 'must be a non-empty array of strings')
+    end
+  end
+
+  # The range half of the two-step numeric validation (Autodev #58). Runs after
+  # the `numericality` type check and skips any column that already failed it,
+  # so a non-numeric input is reported once, as the type error it is, and not
+  # also as "out of range" because AR cast it to 0.
+  #
+  # The error carries the `:out_of_range` type so the dashboard can re-render it
+  # through `t_web` (Web::Views::ProjectEdit#error_line); the `message:` is the
+  # English fallback every other reader of `errors.full_messages` gets.
+  def validate_numeric_ranges
+    CONFIG_INTEGER_FIELDS.each do |field|
+      value = public_send(field)
+      next if value.nil? || errors.where(field).any?
+      next unless ::NumericSettings.violation(field.to_s, value)
+
+      errors.add(field, :out_of_range, message: ::NumericSettings.range_message(field.to_s))
     end
   end
 

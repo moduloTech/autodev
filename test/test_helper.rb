@@ -46,6 +46,7 @@ ActiveRecord::Base.establish_connection(primary)
 
 require 'autodev/errors'
 require 'autodev/logger'
+require 'autodev/numeric_settings'
 require 'autodev/config_validator'
 require 'autodev/project_validator'
 require 'autodev/app_validator'

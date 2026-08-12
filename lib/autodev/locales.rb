@@ -4,7 +4,7 @@ require 'i18n'
 require 'i18n/backend/fallbacks'
 
 # Locale-aware message templates for GitLab issue comments, activity log
-# entries and the embedded web UI.
+# entries, the embedded web UI and the CLI's boot diagnostics.
 #
 # Step 7 of the railsification (cf. autodev/docs/autospec.md §C item 7)
 # moved the source of truth from three Ruby hashes (NOTIFICATION_TEMPLATES,
@@ -27,7 +27,7 @@ require 'i18n/backend/fallbacks'
 # files here covers both code paths and is idempotent (Rails appending the
 # same glob a second time is a no-op).
 module Locales
-  LOCALE_FILES_GLOB = File.expand_path('../../config/locales/{notifications,activity,web}.*.yml', __dir__)
+  LOCALE_FILES_GLOB = File.expand_path('../../config/locales/{notifications,activity,web,cli}.*.yml', __dir__)
 
   # Eagerly extend I18n's load path + fallbacks the first time the module
   # is required. Idempotent: the glob is the same every time, and the
@@ -66,7 +66,7 @@ module Locales
   end
 
   # Flat hash of every key available for the given locale across our
-  # three YAML tables. Used by test parity checks (every FR key has an
+  # thematic YAML tables. Used by test parity checks (every FR key has an
   # EN counterpart and vice versa). Walks the YAML files directly rather
   # than the I18n backend — when the Rails railtie loads `rails-i18n` /
   # ActiveSupport's built-in `date` / `time` / `support` / `number`

@@ -100,12 +100,17 @@ module Config # rubocop:disable Metrics/ModuleLength
   IGNORED_GLOBAL_FIELDS = %w[dc_timeout max_retries retry_backoff
                              stagnation_threshold pickup_delay database_url].freeze
 
-  # Doubles as ConfigValidator's "must be a positive integer" list, which is why
-  # `pipeline_watch_max_days` is absent from it: 0 is a meaningful value there
-  # (it disables the bound), and `PipelineMonitor::WatchBound` coerces at read
-  # time anyway.
-  INTEGER_FIELDS = %w[poll_interval max_workers dc_timeout max_retries retry_backoff pickup_delay
-                      stagnation_threshold].freeze
+  # The numeric globals DEFAULTS always supplies, so an absent or nil value is
+  # itself a fault rather than "not configured". Everything about *what* an
+  # acceptable value is — the type and the range — lives in `NumericSettings`
+  # (Autodev #58); this list only answers "must this key be present?".
+  #
+  # `pipeline_watch_max_days` is deliberately not here even though DEFAULTS
+  # carries it: hand-built config hashes (the CLI's own tests, and any caller
+  # that validates a partial hash) predate it, and its declared range already
+  # covers it whenever it *is* set.
+  REQUIRED_NUMERIC_GLOBALS = %w[poll_interval max_workers dc_timeout max_retries retry_backoff
+                                pickup_delay stagnation_threshold].freeze
 
   # Per-project config keys that now live in the DB (task #9 phase 2) and are
   # read from there at runtime (IssueProcessJob#lookup_project_config). Setting
@@ -151,7 +156,7 @@ module Config # rubocop:disable Metrics/ModuleLength
     merge_env!(config)
     cli_overrides.each { |k, v| config[k] = v unless v.nil? }
     config['_config_path'] = config_path
-    coerce_integers!(config)
+    coerce_numeric_settings!(config)
     warn_ignored!(yaml)
     config
   end
@@ -235,10 +240,25 @@ module Config # rubocop:disable Metrics/ModuleLength
   end
   private_class_method :merge_env!
 
-  def self.coerce_integers!(config)
-    INTEGER_FIELDS.each { |f| config[f] = config[f].to_i }
+  # Coerce every declared numeric global that reads as a number — a YAML
+  # `poll_interval: '120'` still lands as the Integer 120.
+  #
+  # What changed with Autodev #58 is what happens to a value that is *not* a
+  # number: it is left exactly as the operator wrote it instead of being run
+  # through `.to_i`. `'quatorze'.to_i` is 0, and 0 is a meaningful value for
+  # `pipeline_watch_max_days` (it disables the age bound) and for `clone_depth`,
+  # so coercing first destroyed the evidence and turned a typo into a silently
+  # switched-off safety net. Keeping the raw value is what lets
+  # `ConfigValidator` refuse it and name it.
+  def self.coerce_numeric_settings!(config)
+    NumericSettings.fields.each do |field|
+      next unless config.key?(field)
+
+      coerced = NumericSettings.integer(config[field])
+      config[field] = coerced unless coerced.nil?
+    end
   end
-  private_class_method :coerce_integers!
+  private_class_method :coerce_numeric_settings!
 
   # Warn when a now-ignored key is still present in the YAML, so operators
   # know to remove it. The value has no effect (DEFAULTS / per-project config
