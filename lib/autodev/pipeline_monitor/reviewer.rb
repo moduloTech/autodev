@@ -57,8 +57,10 @@ class PipelineMonitor
       apply_label_done(issue.issue_iid)
       reassign_to_author(issue)
       # The diagnostic outlives log rotation, in the same columns every other
-      # failure in the product uses (Autodev #49). No view renders them for a
-      # `done` row yet — surfacing them is a follow-up; losing them is not.
+      # failure in the product uses (Autodev #49), and the issue detail page
+      # renders them for exactly this shape of row — `done` + `needs_attention`
+      # (Autodev #59). Scrubbed on the way into the buffers by
+      # ProcessRunner#record_output, not here: fourteen sites persist them.
       Issue.where(id: issue.id).update_all(finished_at: Time.current, needs_attention: true,
                                            attention_reason: 'review_failures_exhausted',
                                            dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)

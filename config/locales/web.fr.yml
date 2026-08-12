@@ -210,6 +210,10 @@ fr:
   web_activity_col_detail: Détail
   web_issue_screenshots: Screenshots (%{count})
   web_issue_screenshots_dir: Stockés dans
+  web_issue_diagnostic: Diagnostic technique
+  web_issue_diagnostic_hint: Dernière sortie de l'outil qui a échoué, conservée sur la demande pour le diagnostic. Les identifiants sont masqués.
+  web_issue_diagnostic_stdout: Afficher la sortie standard (stdout)
+  web_issue_diagnostic_stderr: Afficher la sortie d'erreur (stderr)
   web_issue_raw_data: Données brutes
   web_errors_confirm_reset: 'Relancer la demande #%{iid} depuis le début ?'
   web_errors_confirm_close: 'Clôturer la demande #%{iid} ?'

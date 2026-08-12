@@ -210,6 +210,10 @@ en:
   web_activity_col_detail: Detail
   web_issue_screenshots: Screenshots (%{count})
   web_issue_screenshots_dir: Stored in
+  web_issue_diagnostic: Technical diagnostic
+  web_issue_diagnostic_hint: Last output of the tool that failed, kept on the request for diagnosis. Credentials are masked.
+  web_issue_diagnostic_stdout: Show standard output (stdout)
+  web_issue_diagnostic_stderr: Show error output (stderr)
   web_issue_raw_data: Raw data
   web_errors_confirm_reset: 'Restart request #%{iid} from the beginning?'
   web_errors_confirm_close: 'Close request #%{iid}?'
