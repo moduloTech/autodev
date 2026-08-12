@@ -101,16 +101,16 @@ module ProcessRunner
     [out, err, status.success?, status]
   end
 
-  # The two buffers are a durable, human-facing sink: eleven error/give-up paths
-  # across the four workers copy them into `issues.dc_stdout` /
-  # `issues.dc_stderr`, the CLI `--errors` prints stderr back, and the issue
-  # detail page renders both. So they get the same treatment as every other such
-  # sink and are scrubbed on the way in (Autodev #59).
+  # The two buffers are a durable, human-facing sink: fourteen sites across the
+  # four workers copy them into `issues.dc_stdout` / `issues.dc_stderr`, the CLI
+  # `--errors` prints stderr back, and the issue detail page renders both. So they
+  # get the same treatment as every other such sink and are scrubbed on the way in
+  # (Autodev #59).
   #
   # Here rather than at the persistence sites: this is the only writer of the two
   # ivars, so one scrub covers every current site and every future one — #49
   # scrubbed the log message it built from these streams but persisted the
-  # columns raw, and the eleven older sites never scrubbed at all.
+  # columns raw, and the thirteen other sites never scrubbed at all.
   #
   # The caller's copy is deliberately left alone: `capture_session_and_text`
   # JSON-parses stdout and RateLimitDetector / AuthFailureDetector match fatal
