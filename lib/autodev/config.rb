@@ -119,7 +119,7 @@ module Config # rubocop:disable Metrics/ModuleLength
   # project with no DB row yet — but it's deprecated and will stop being read
   # once the YAML `projects:` block is removed (task #9 phase 4). `path` is the
   # project identity, not config, so it's excluded.
-  DB_BACKED_PROJECT_FIELDS = %w[target_branch labels_todo label_doing label_done extra_prompt
+  DB_BACKED_PROJECT_FIELDS = %w[target_branch labels_todo label_doing label_done label_attention extra_prompt
                                 dc_timeout max_retries retry_backoff stagnation_threshold clone_depth
                                 sparse_checkout post_completion post_completion_timeout mr_review_timeout
                                 model effort parallel_agents split_implementation implementer_agent

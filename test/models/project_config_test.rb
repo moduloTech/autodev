@@ -34,6 +34,9 @@ class ProjectConfigTest < ActiveSupport::TestCase
     assert_predicate project(labels_todo: ['todo'], label_doing: 'doing', label_done: 'done'), :valid?
   end
 
+  # The optional fourth label (Autodev #63) is validated in
+  # test/models/project_label_attention_test.rb.
+
   def test_labels_todo_must_be_a_non_empty_string_array
     refute_predicate project(labels_todo: [], label_doing: 'd', label_done: 'D'), :valid?
     refute_predicate project(sparse_checkout: [123]), :valid?

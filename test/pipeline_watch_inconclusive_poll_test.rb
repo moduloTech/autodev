@@ -148,9 +148,16 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
   # the assignee (Autodev #60), the issue comment and the activity log.
   def stub_sinks(mon, sink)
     mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
-    mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
+    stub_label_writers(mon, sink)
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
     mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
+  end
+
+  # `label_attention` since Autodev #63; both land in the same sink because what
+  # this file asserts is that an inconclusive poll writes *no* end label at all.
+  def stub_label_writers(mon, sink)
+    mon.define_singleton_method(:apply_label_attention) { |iid| sink[:labels] << iid }
+    mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
   end
 
   # Runs a whole poll through the real entry point, so the flag's lifetime (set
@@ -172,7 +179,7 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
   def assert_watch_kept(issue, sink)
     assert_equal 'checking_pipeline', issue.status, 'an inconclusive poll must leave the row alone'
     assert_empty sink[:notify], 'no give-up comment may be posted'
-    assert_empty sink[:labels], 'label_done must not be applied'
+    assert_empty sink[:labels], 'no end label must be applied'
   end
 
   # --- 1. the jobs endpoint is unreachable on a manual pipeline ------------

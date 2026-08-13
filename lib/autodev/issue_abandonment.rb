@@ -17,7 +17,12 @@
 #     abandoned ticket on autodev is what made it invisible to everybody.
 #
 # So: one AASM event (`Issue#abandon`), one reassignment policy (always hand the
-# ticket back to its author — an abandon means a human has to pick the work up).
+# ticket back to its author — an abandon means a human has to pick the work up),
+# and since Autodev #63 one end label: `label_attention`, never `label_done`. On
+# powerpanne `label_done` is `Development::Awaiting Feature Review`, so posing it
+# on a give-up announced work as reviewed that nobody had reviewed — 28 such
+# tickets landed on the review board during the 11/08/2026 incident. A project
+# with no `label_attention` gets no end label at all and keeps `label_doing`.
 #
 # What is deliberately NOT unified is the *reason*. `attention_reason` stays
 # per-site because `PollDispatcher#dispatch_infra_recheck` selects exactly
@@ -56,7 +61,7 @@ module IssueAbandonment
 
     issue.update(finished_at: Time.current, needs_attention: true,
                  attention_reason: reason.to_s, attention_detail: detail)
-    apply_label_done(issue.issue_iid)
+    apply_label_attention(issue.issue_iid)
     announce_abandonment(issue, reason, vars.merge(detail: detail.to_s))
     true
   end

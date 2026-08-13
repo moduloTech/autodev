@@ -167,6 +167,38 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
                                 'Backlog', 'Client Machin'])
   end
 
+  # `label_attention` is a label autodev owns and writes (Autodev #63), so it sits
+  # in the workflow scope by design and must be subtracted from the free-label set
+  # exactly like the other three. Without that, an abandoned-then-re-armed row
+  # (`dispatch_infra_recheck` → `resume_recovered_infra`) would arrive here
+  # carrying the very label autodev posed and get closed as a human handover,
+  # blaming autodev's own edit on somebody who did nothing.
+  # The shape a re-armed row has: `dispatch_infra_recheck` sends a
+  # `stagnation_pipeline` row back to `checking_pipeline` via `apply_label_doing`,
+  # and until that edit lands the ticket carries both the attention label autodev
+  # posed on the give-up and the doing label. Without the exemption that reads as
+  # `workflow_moved` and closes a live ticket, blaming autodev's own edit on a
+  # human. Asserted on the API budget too, because stage 2 would only save it by
+  # winning the authorship race this class exists not to depend on.
+  def test_the_attention_label_autodev_poses_is_not_a_handover_candidate
+    config = POWERPANNE.merge('label_attention' => 'Development::StandBy')
+
+    assert_nil verdict(labels: ['Development::Doing', 'Development::StandBy'], config: config,
+                       events: [ev('add', 'Development::StandBy', AUTODEV_ID)])
+    assert_equal 0, @client.event_calls
+  end
+
+  # But moving *off* it is still a handover: the value is only exempt as a label,
+  # not as a destination.
+  def test_moving_away_from_the_attention_label_is_still_a_stop
+    config = POWERPANNE.merge('label_attention' => 'Development::StandBy')
+    v = verdict(labels: ['Development::Awaiting CR'], config: config,
+                events: [ev('add', 'Development::StandBy', AUTODEV_ID),
+                         ev('add', 'Development::Awaiting CR', HUMAN_ID)])
+
+    assert_equal :workflow_moved, v.reason
+  end
+
   # Re-adding the todo label on an active row is a reentry signal PollRouter
   # owns, never a stop.
   def test_re_adding_the_todo_label_is_not_a_stop
