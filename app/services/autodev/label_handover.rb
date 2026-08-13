@@ -137,7 +137,15 @@ module Autodev
       labels.select { |label| scope_of(label) == scope } - configured_labels
     end
 
-    def configured_labels = (labels_todo + [label_doing, label_done]).compact
+    # `label_attention` is in here for the same reason the other three are: it is
+    # a label autodev writes (Autodev #63 — the end label of a give-up), it sits
+    # in the derived scope by design, and a re-armed row can still be carrying it
+    # when this runs. Leaving it out would send every abandoned-then-recovered
+    # ticket into stage 2, where the only thing standing between it and a false
+    # close is winning the authorship race this class was written not to depend
+    # on. It is excluded from the scope *derivation* though: a project that
+    # spells it outside the workflow scope must not disable the rule.
+    def configured_labels = (labels_todo + [label_doing, label_done, label_attention]).compact
 
     def scope
       return @scope if defined?(@scope)
@@ -155,6 +163,7 @@ module Autodev
 
     def label_doing = presence(@project_config['label_doing'])
     def label_done = presence(@project_config['label_done'])
+    def label_attention = presence(@project_config['label_attention'])
     def labels_todo = Array(@project_config['labels_todo']).filter_map { |l| presence(l) }
 
     def presence(value) = value.to_s.strip.empty? ? nil : value.to_s

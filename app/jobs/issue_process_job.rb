@@ -51,7 +51,7 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # false` makes an impossible transition a silent no-op rather than a raise,
   # and the callers treat the event as a command that always succeeds:
   # `green_first_review` calls `launch_review` after a `pipeline_green!` that
-  # did nothing, and `give_up_reviewing` re-applies `label_done`, reassigns the
+  # did nothing, and `give_up_reviewing` re-applies the end label, reassigns the
   # author and posts a GitLab comment after a `review_giveup!` that did
   # nothing. On 11/08/2026 that put 486 comments on 28 powerpanne tickets in
   # two hours — issue #15839 alone took 26 identical ones, one every 105

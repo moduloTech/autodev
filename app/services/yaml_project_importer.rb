@@ -52,7 +52,7 @@ class YamlProjectImporter
   # gitlab_path/name. Phase 1 columnized the documented keys; phase 2 added the
   # "advanced" ones (model, effort, parallel_agents, split_implementation,
   # *_agent) — every per-project key now has a column.
-  CONFIG_KEYS = %w[target_branch labels_todo label_doing label_done extra_prompt
+  CONFIG_KEYS = %w[target_branch labels_todo label_doing label_done label_attention extra_prompt
                    dc_timeout max_retries retry_backoff stagnation_threshold
                    clone_depth sparse_checkout post_completion post_completion_timeout
                    mr_review_timeout model effort parallel_agents split_implementation

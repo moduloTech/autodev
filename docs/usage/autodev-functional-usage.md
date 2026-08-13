@@ -54,6 +54,8 @@ C'est tout. Autodev change le label en **{{label_doing|en cours}}** dès qu'il c
 6. **Relecture.** Une relecture automatique est faite ; Autodev applique les retours.
 7. **Livraison.** Quand tout est vert, le label passe à **{{label_done|livré}}** et la MR est prête à merger.
 
+Le label **{{label_done|livré}}** ne sert qu'à ça. Quand Autodev **renonce** — une pipeline qui échoue en boucle, une relecture automatique qui plante, une surveillance qui traîne depuis deux semaines — il ne pose **pas** ce label : il vous rend le ticket, explique pourquoi en commentaire, et pose le label d'attention configuré sur le projet (ou, si le projet n'en a pas, laisse le ticket sur **{{label_doing|en cours}}**). Un ticket abandonné n'arrive donc jamais sur le tableau de relecture en se faisant passer pour relu.
+
 Pendant tout ce temps, vous pouvez suivre l'avancement sur le dashboard.
 
 \newpage

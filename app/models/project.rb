@@ -49,6 +49,10 @@ class Project < ApplicationRecord
   # "Advanced" keys columnized in phase 2 (were YAML-only in phase 1).
   STRING_CONFIG_FIELDS = %i[model effort implementer_agent test_writer_agent mr_fixer_agent].freeze
   BOOLEAN_CONFIG_FIELDS = %i[parallel_agents split_implementation].freeze
+  # The label an abandon poses instead of `label_done` (Autodev #63). Optional, so
+  # it is not part of the all-or-nothing LABEL_FIELDS set below — but it only
+  # means anything alongside them, and blank is a typo rather than "unset".
+  OPTIONAL_LABEL_FIELDS = %i[label_attention].freeze
 
   validates(*CONFIG_INTEGER_FIELDS, numericality: { only_integer: true }, allow_nil: true)
   validate :validate_numeric_ranges
@@ -56,6 +60,9 @@ class Project < ApplicationRecord
   # / whitespace but lets an unset field through). The boolean columns are
   # type-cast by AR, so a NULL stays nil and only true/false survive.
   validates(*STRING_CONFIG_FIELDS, presence: true, allow_nil: true)
+  # Same "if set, must not be blank" rule: a blank `label_attention` would read as
+  # "not configured" and silently take the no-end-label fallback (Autodev #63).
+  validates(*OPTIONAL_LABEL_FIELDS, presence: true, allow_nil: true)
   validates(*BOOLEAN_CONFIG_FIELDS, inclusion: { in: [true, false] }, allow_nil: true)
   validate :validate_label_workflow
   validate :validate_string_arrays
@@ -76,7 +83,7 @@ class Project < ApplicationRecord
     cfg
   end
 
-  SCALAR_CONFIG_KEYS = %i[target_branch label_doing label_done extra_prompt dc_timeout
+  SCALAR_CONFIG_KEYS = %i[target_branch label_doing label_done label_attention extra_prompt dc_timeout
                           max_retries retry_backoff stagnation_threshold clone_depth
                           post_completion_timeout mr_review_timeout model effort parallel_agents
                           split_implementation implementer_agent test_writer_agent
@@ -133,11 +140,24 @@ class Project < ApplicationRecord
 
   def validate_label_workflow
     present = LABEL_FIELDS.reject { |f| blank_config?(public_send(f)) }
-    return if present.empty?
+    return if present.empty? && no_optional_labels?
 
     missing = LABEL_FIELDS - present
     errors.add(:base, "incomplete label workflow, missing: #{missing.join(', ')}") if missing.any?
-    errors.add(:labels_todo, 'must be a non-empty array') unless labels_todo.is_a?(Array) && labels_todo.any?
+    validate_labels_todo_shape
+  end
+
+  def validate_labels_todo_shape
+    return if labels_todo.is_a?(Array) && labels_todo.any?
+
+    errors.add(:labels_todo, 'must be a non-empty array')
+  end
+
+  # `nil`, not `blank_config?`: a blank `label_attention` is already rejected by
+  # its own `presence` validation, and reading it as "unset" here would let the
+  # typo through the workflow-completeness check as well (Autodev #63).
+  def no_optional_labels?
+    OPTIONAL_LABEL_FIELDS.all? { |f| public_send(f).nil? }
   end
 
   def blank_config?(value)

@@ -3,6 +3,13 @@
 # Validation helpers for Config. Extracted to keep Config module focused on loading.
 module ConfigValidator
   LABEL_FIELDS = %w[labels_todo label_doing label_done].freeze
+  # The label a give-up poses instead of `label_done` (Autodev #63). Optional
+  # because the scope autodev derives from `label_doing` + `label_done` names a
+  # scope, not its values: powerpanne/core has `Development::StandBy` /
+  # `Awaiting CR` / `Awaiting Merge` to choose from, ff/fast/core only
+  # `NeedEstimation` — there is no third value autodev can derive. Unset means no
+  # end label at all on a give-up, so the row keeps `label_doing`.
+  OPTIONAL_LABEL_FIELDS = %w[label_attention].freeze
 
   def self.validate_globals!(config)
     validate_gitlab_token!(config)

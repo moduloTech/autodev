@@ -52,9 +52,16 @@ class PipelineMonitor
       log_activity(issue, :review_failed, count: new_failures)
     end
 
+    # The fifth give-up path. It keeps its own AASM event (`review_giveup` — it is
+    # the only one that starts from `reviewing`), but it poses the same end label
+    # as the four that go through `IssueAbandonment#abandon_issue`:
+    # `label_attention`, never `label_done` (Autodev #63). This is the path the
+    # ticket was filed against — `label_done` reads "ready for feature review" on
+    # the projects concerned, and autodev had just failed to review the MR five
+    # times in a row.
     def give_up_reviewing(issue)
       issue.review_giveup!
-      apply_label_done(issue.issue_iid)
+      apply_label_attention(issue.issue_iid)
       reassign_to_author(issue)
       # The diagnostic outlives log rotation, in the same columns every other
       # failure in the product uses (Autodev #49), and the issue detail page
