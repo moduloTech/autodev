@@ -40,7 +40,7 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
 
     respond_to do |format|
       format.html { render html: render_issue_show(issue_model).html_safe, layout: false }
-      format.json { render json: issue_model.attributes }
+      format.json { render json: scrubbed_attributes_json(issue_model) }
     end
   end
 
@@ -175,6 +175,25 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
     { filters: { q: params[:q], from: params[:from], to: params[:to] },
       tab: tab_param(params), tab_counts: tab_counts,
       kpis: dashboard_kpis }
+  end
+
+  # The JSON variant of `#show` serves the whole attribute hash, so it is a sink
+  # for the same secrets the HTML view already redacts (Autodev #59 scrubbed both
+  # of its renderers and left this one out). Same session, same cookie, same
+  # authorisation — only the `Accept` header differs — so it gets the same rule.
+  #
+  # Scrubbed on the serialised blob rather than column by column, exactly as
+  # `IssueShow#render_raw_card` does it, so the two renderers share one rule
+  # instead of two lists that can drift. It also covers `error_message`, which
+  # `Redactor`'s own comment names as a place the PAT lands: the clone/fetch/push
+  # URL carries `oauth2:<token>@` and `ShellHelpers.run_cmd` puts the full command
+  # into the `GitError` message. Both of the redactor's substitutions are plain
+  # text (`***`, `\1***@`), so scrubbing after serialisation cannot produce
+  # invalid JSON.
+  #
+  # `render json:` passes a String through verbatim rather than re-encoding it.
+  def scrubbed_attributes_json(issue_model)
+    Redactor.scrub(issue_model.attributes.to_json)
   end
 
   def render_issue_show(issue_model)
