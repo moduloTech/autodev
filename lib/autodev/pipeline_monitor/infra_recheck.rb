@@ -32,7 +32,12 @@ class PipelineMonitor
 
       record_recheck_attempt(issue)
       false
-    rescue Gitlab::Error::ResponseError => e
+    # The boundary of one recheck. `ApiUnavailableError` joins the MR-fetch error
+    # that was already handled here (Autodev #62): a cycle that could not read
+    # anything must not re-arm the row, and — like `check_stagnation_and_fix` —
+    # must not spend one of the bounded attempts either, or an outage burns the
+    # whole budget without ever having looked at a pipeline.
+    rescue Gitlab::Error::ResponseError, ApiUnavailableError => e
       log_error "Failed to recheck infra recovery for MR !#{issue.mr_iid}: #{e.message}"
       false
     end
@@ -47,6 +52,11 @@ class PipelineMonitor
     # or absent (nothing failing anymore); otherwise the fresh `pre_triage`
     # verdict on the currently-failing jobs (`:infra` / `:code` / `:uncertain`),
     # or `:running` / `:other` for a non-terminal pipeline status.
+    #
+    # `failed_jobs.empty? → :recovered` is only sound because `fetch_failed_jobs`
+    # raises on an unreadable job list (Autodev #62). It used to answer `[]`, so a
+    # GitLab outage during a recheck read as "nothing fails anymore" and re-armed a
+    # row whose pipeline may well have still been red.
     def current_pipeline_verdict(merge_req)
       pipeline = GitlabHelpers.field(merge_req, :head_pipeline)
       return :recovered if pipeline.nil?

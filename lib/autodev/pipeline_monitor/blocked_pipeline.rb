@@ -21,12 +21,14 @@ class PipelineMonitor
   module BlockedPipeline
     private
 
+    # No "jobs unavailable" branch since Autodev #62: `fetch_pipeline_jobs` raises
+    # rather than answering nil, so an empty list here means the pipeline really
+    # has no job — which is the same absence of verification `dispatch_pipeline`
+    # already treats as green when there is no pipeline at all. The nil check this
+    # replaces was the right instinct at one call site; the fix is that no call
+    # site is handed a substitute to check for.
     def dispatch_blocked(issue, pipeline, status)
       jobs = fetch_pipeline_jobs(pipeline)
-      # nil = GitLab unreachable. Never read that as "nothing failed": an API
-      # error must not be the reason a ticket ships. Retried next cycle.
-      return log("Pipeline #{status} for MR !#{issue.mr_iid}: jobs unavailable, rechecking next poll") if jobs.nil?
-
       failed = failed_blocking_jobs(jobs)
       return blocked_red(issue, pipeline, status, failed) if failed.any?
 

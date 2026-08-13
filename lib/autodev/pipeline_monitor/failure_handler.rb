@@ -15,15 +15,30 @@ class PipelineMonitor
     # past GitLab's 1M-char note cap after ~25 days at the default 5min interval.
     PIPELINE_RED_PATTERN = /— :x: Pipeline (en echec|failed)/
     PIPELINE_INFRA_PATTERN = /— :warning: (Echec infrastructure|Infrastructure failure)/
-    PIPELINE_EVAL_PATTERN = /— :mag: Evaluat/i
+    # The third one, PIPELINE_EVAL_PATTERN, lives in `Evaluator` with the call
+    # that uses it (Autodev #62).
 
     private
 
+    # The job fetch sits outside `attempt_fix`'s rescues on purpose (Autodev #62):
+    # an unreadable job list is not a fix failure. It raises `ApiUnavailableError`,
+    # which must travel to `check` and end the poll with the row untouched, whereas
+    # `handle_failure_error` would mark the ticket `error` and post a comment
+    # blaming the fix for a GitLab blip. `failed_jobs.empty?` therefore now means
+    # what it says — nothing blocking failed — instead of doubling as "we could not
+    # find out".
     def handle_red(issue, pipeline)
       clear_pipeline_poll_since(issue)
       failed_jobs = fetch_failed_jobs(pipeline)
       return handle_no_failed_jobs(issue, pipeline) if failed_jobs.empty?
 
+      attempt_fix(issue, pipeline, failed_jobs)
+    end
+
+    # Everything from the triage onwards: this is the part that clones, calls
+    # danger-claude and pushes, so a failure here really is a fix failure and the
+    # ticket goes to `error` with a diagnostic.
+    def attempt_fix(issue, pipeline, failed_jobs)
       triage_and_fix(issue, pipeline, failed_jobs)
     rescue RateLimitError => e
       handle_rate_limit(issue, e)
@@ -128,27 +143,6 @@ class PipelineMonitor
       end
 
       evaluate_with_claude(issue, work_dir, job_entries)
-    end
-
-    def evaluate_with_claude(issue, work_dir, job_entries)
-      log "Issue ##{issue.issue_iid}: pre-triage uncertain, evaluating with Claude..."
-      log_activity(issue, :pipeline_evaluating, replace_pattern: PIPELINE_EVAL_PATTERN)
-      eval_result = evaluate_code_related(work_dir, build_eval_context(job_entries))
-      interpret_eval_result(issue, eval_result)
-    end
-
-    def interpret_eval_result(issue, eval_result)
-      unless eval_result
-        log "Issue ##{issue.issue_iid}: evaluation failed, staying in checking_pipeline"
-        return nil
-      end
-
-      unless eval_result['code_related']
-        log "Issue ##{issue.issue_iid}: non-code failure, staying in checking_pipeline"
-        return nil
-      end
-
-      eval_result['explanation'] || 'Aucune explication fournie'
     end
   end
 end

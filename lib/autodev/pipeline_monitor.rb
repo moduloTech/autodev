@@ -19,6 +19,7 @@ require_relative 'pipeline_monitor/watch_bound'
 class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include DangerClaudeRunner
   include ApiHelpers
+  include MrDiscussions
   include JobClassifier
   include BlockedPipeline
   include Evaluator
@@ -41,8 +42,20 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     log "Checking pipeline for MR !#{issue.mr_iid} (issue ##{issue.issue_iid})..."
     log_pipeline_poll(issue)
     poll_open_mr(issue)
-  rescue Gitlab::Error::ResponseError => e
-    log_error "Failed to check pipeline for MR !#{issue.mr_iid}: #{e.message}"
+  # The boundary of one poll (Autodev #62). A read GitLab could not answer aborts
+  # here with the row exactly as the previous cycle left it, and
+  # `dispatch_pipelines` re-enqueues it next cycle. Note what the abort skips:
+  # `abandon_expired_watch` is the last statement of `poll_open_mr`, so an API
+  # error can no longer reach the age bound at all — which is the property
+  # Autodev #56's spec claimed and Autodev #51 had quietly broken by rescuing the
+  # error inside the fetch and returning a value.
+  #
+  # One clause for both errors because they are the same event: `ApiUnavailableError`
+  # is a read whose failure was named at the call site, the bare
+  # `Gitlab::Error::ResponseError` is one that was not (the `merge_request` read in
+  # `poll_open_mr`). Neither concluded anything.
+  rescue ApiUnavailableError, Gitlab::Error::ResponseError => e
+    log_error "Pipeline check for MR !#{issue.mr_iid} could not conclude: #{e.message}"
   rescue StandardError => e
     log_check_error(issue, e)
   end
@@ -104,18 +117,33 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     review_count = issue.review_count || 0
     return defer_review_for_usage(issue) if review_count.zero? && !claude_available?
 
+    branch = green_branch(review_count)
+    # Read before the two side effects below (Autodev #62). The post-review branch
+    # needs the unresolved-thread list, and an unreadable one aborts the poll —
+    # doing it first leaves the row exactly as the previous cycle left it, activity
+    # note included, instead of appending one "pipeline green" line per cycle for
+    # as long as the outage lasts (the growth Autodev #53 went to some trouble to
+    # bound).
+    discussions = branch == :post_review ? fetch_unresolved_discussions(issue.mr_iid) : nil
     clear_pipeline_poll_since(issue)
     log_activity(issue, :pipeline_green)
-    dispatch_green(issue, review_count)
+    dispatch_green(issue, branch, discussions)
   end
 
-  def dispatch_green(issue, review_count)
-    if review_count >= Reviewer::MAX_REVIEW_ROUNDS
-      green_done_max_reviews(issue)
-    elsif review_count.zero?
-      green_first_review(issue)
-    else
-      green_post_review(issue)
+  # Named once so the read above and the dispatch below cannot disagree about
+  # which branch this green pipeline is taking.
+  def green_branch(review_count)
+    return :review_limit if review_count >= Reviewer::MAX_REVIEW_ROUNDS
+    return :first_review if review_count.zero?
+
+    :post_review
+  end
+
+  def dispatch_green(issue, branch, discussions)
+    case branch
+    when :review_limit then green_done_max_reviews(issue)
+    when :first_review then green_first_review(issue)
+    else green_post_review(issue, discussions)
     end
   end
 
@@ -146,8 +174,10 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     launch_review(issue)
   end
 
-  def green_post_review(issue)
-    discussions = fetch_unresolved_discussions(issue.mr_iid)
+  # `discussions` is the list `handle_green` read from GitLab — never a substitute
+  # for a failed read, which is what made `no_discussions` below a delivery
+  # verdict taken on an outage (Autodev #62).
+  def green_post_review(issue, discussions)
     snapshot(issue, :pre_fix_dispatch)
     set_pipeline_green_guards(issue, review_count_over_zero: true, no_discussions: discussions.empty?)
     issue.pipeline_green!

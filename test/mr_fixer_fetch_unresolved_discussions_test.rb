@@ -4,9 +4,13 @@ require_relative 'test_helper'
 require 'autodev/danger_claude_runner'
 require 'autodev/mr_fixer'
 
-# Companion to pipeline_monitor_fetch_unresolved_discussions_test.rb — same bug, second call site.
-# MrFixer's fetch_unresolved_discussions also has to walk every page or it stops fixing trailing
-# threads on busy MRs.
+# Companion to pipeline_monitor_fetch_unresolved_discussions_test.rb. The fetch itself is one
+# method shared by both callers since Autodev #62 (`MrDiscussions`) — there used to be two
+# byte-for-byte copies, which is how one of them ended up answering a GitLab error with `[]` on the
+# delivery path. What is MrFixer's own is the *shape*: the title and notes it builds a prompt from,
+# mapped over the shared list. Both halves are pinned here, from MrFixer's side: every page is
+# walked (MR 10699 had three unresolved threads at positions #21-#23 that stayed open forever), and
+# each surviving thread arrives as the hash `fix_each_discussion` expects.
 class MrFixerFetchUnresolvedDiscussionsTest < Minitest::Test
   FakeNote = Struct.new(:resolvable, :resolved, :body)
   FakeDiscussion = Struct.new(:id, :notes)
@@ -57,13 +61,28 @@ class MrFixerFetchUnresolvedDiscussionsTest < Minitest::Test
     paginated = two_page_fixture
     @fixer.instance_variable_set(:@client, StubClient.new(paginated: paginated))
 
-    result = @fixer.send(:fetch_unresolved_discussions, 42)
+    result = unresolved_as_mr_fixer_sees_them
 
     assert paginated.auto_paginate_called, 'fetch_unresolved_discussions must call auto_paginate'
     assert_equal(['trailing-unresolved'], result.map { |d| d[:id] })
   end
 
+  def test_each_thread_arrives_in_the_shape_the_fix_cycle_expects
+    @fixer.instance_variable_set(:@client, StubClient.new(paginated: two_page_fixture))
+
+    thread = unresolved_as_mr_fixer_sees_them.first
+
+    assert_equal 'trailing-unresolved', thread[:id]
+    assert_equal 'please fix the trailing thread', thread[:title]
+    refute_empty thread[:notes]
+  end
+
   private
+
+  # `MrFixer#fix` reads the shared list and maps its own shape over it.
+  def unresolved_as_mr_fixer_sees_them
+    @fixer.send(:fetch_unresolved_discussions, 42).map { |d| @fixer.send(:build_discussion, d) }
+  end
 
   def two_page_fixture
     page_one = Array.new(20) { |i| FakeDiscussion.new("p1-#{i}", [FakeNote.new(true, true, 'done')]) }

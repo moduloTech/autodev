@@ -20,6 +20,27 @@ module GitlabHelpers
     obj[name.to_sym]
   end
 
+  # The single conversion point from "GitLab did not answer" to "this unit of
+  # work cannot conclude" (Autodev #62). Wrap a read whose value a caller will
+  # act on:
+  #
+  #   GitlabHelpers.answer(:pipeline_jobs) { @client.pipeline_jobs(path, id) }
+  #
+  # There is deliberately no variant that returns a fallback. The rule this
+  # encodes is that a failed read has no representation as data — see
+  # `ApiUnavailableError` for why the neutral values it replaces were worse than
+  # the outage they hid. A *write* whose failure is not a verdict (retrigger a
+  # pipeline, resolve a thread) is a different case and does not belong here.
+  #
+  # A read left bare, with no rescue at all, already behaves correctly: the
+  # `Gitlab::Error::ResponseError` reaches the same boundary rescue. This wrapper
+  # only adds the name of the endpoint to the log line.
+  def answer(what)
+    yield
+  rescue Gitlab::Error::ResponseError => e
+    raise ApiUnavailableError.new(what, e)
+  end
+
   def build_gitlab_client(gitlab_url, token)
     unless token
       raise ConfigError,
