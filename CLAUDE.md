@@ -414,6 +414,8 @@ Templates are loaded by Rails' i18n railtie. `Locales.t(key, locale:, **vars)` i
 
 `test/database_test_helper.rb` re-runs the migrations idempotently and wipes `issues` + `activity_events` between tests (`:memory:` SQLite drops the schema on every reconnect; the migration's `if_not_exists: true` makes the re-run a no-op once tables exist).
 
+**Every test file must pass run on its own** (`bundle exec ruby -Itest test/…_test.rb`), not only under `rake test`. A file that passes in the suite and fails alone is the signature of a constant that some *other* file loaded first, and it is a failure mode the full suite cannot see — which is why `lib/autodev` is now required unconditionally by `config/initializers/load_autodev_config.rb`, above the `AUTODEV_SKIP_LEGACY` guard (Autodev #64). That flag gates one thing only: the `Web.config = Config.load({})` disk read of `~/.autodev/config.yml`. **Never add a `require 'autodev/…'` to `test/rails_helper.rb`** — the whole tree is already loaded, and nine such requires were what #64 removed. `test/rails_lib_loading_test.rb` asserts the constant set (derived from `lib/autodev.rb`'s require graph, not listed) and `test/module_load_test.rb` asserts each file loads without raising.
+
 Job tests under `test/jobs/` use `Autodev::JobLogger` mocks; they don't require the full legacy stack.
 
 ## Phase D (AutoSpec) — next major scope
