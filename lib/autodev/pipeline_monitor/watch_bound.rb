@@ -91,7 +91,7 @@ class PipelineMonitor
           "could not conclude (#{@poll_inconclusive}), not giving up"
     end
 
-    # One of the four give-up paths, all of which now share
+    # One of the give-up paths, all of which now share
     # `IssueAbandonment#abandon_issue`: one AASM `abandon` event (so a transition
     # row, an activity-journal entry, an audit entry and the callback that clears
     # `checking_pipeline_since`) and one reassignment policy — the ticket goes back

@@ -29,7 +29,7 @@
 # `stagnation_pipeline` and re-arms the row: giving an expired watch or an
 # exhausted review budget that reason would restart tickets autodev had just given
 # up on. The GitLab comment and the activity line are keyed off the same reason
-# for the same argument — three causes that need three different sentences.
+# for the same argument — distinct causes that need distinct sentences.
 #
 # Including classes must have @client, @project_config, @project_path and @logger
 # (i.e. anything that includes DangerClaudeRunner).

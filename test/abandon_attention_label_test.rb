@@ -21,7 +21,8 @@ require 'autodev/mr_fixer'
 # still-in-progress is less wrong than a ticket that looks reviewed.
 #
 # The comment and the `attention_reason` stay per-reason (Autodev #60) — only the
-# label is uniform, across all five give-up paths.
+# label is uniform, across all six give-up paths (five at #63, plus the MR closed
+# without merging that Autodev #66 routed here).
 class AbandonAttentionLabelTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
@@ -100,7 +101,7 @@ class AbandonAttentionLabelTest < Minitest::Test # rubocop:disable Metrics/Class
     @client.edits.filter_map { |(_, attrs)| attrs[:labels]&.split(',') }
   end
 
-  # --- the five give-up paths, one per test ---------------------------------
+  # --- the six give-up paths, one per test ----------------------------------
   #
   # Each fires the real entry point of its path, not `abandon_issue` directly, so
   # the test would still fail if a path stopped routing through the shared point.
@@ -145,8 +146,20 @@ class AbandonAttentionLabelTest < Minitest::Test # rubocop:disable Metrics/Class
     issue
   end
 
+  # The sixth path, added by Autodev #66: a human closed the MR without merging
+  # it. Not autodev's own verdict, but the same ending — nothing was delivered, so
+  # the end label must not read "ready for feature review" here either. The
+  # merged-vs-closed split itself lives in `test/mr_closed_without_merge_test.rb`.
+  CLOSED_MR = Struct.new(:state).new('closed')
+
+  def mr_closed_unmerged(project_config)
+    issue = watched
+    worker(project_config: project_config).send(:handle_mr_closed, issue, CLOSED_MR)
+    issue
+  end
+
   PATHS = %i[stagnation_pipeline stagnation_discussions pipeline_watch_expired
-             review_limit_reached review_failures_exhausted].freeze
+             review_limit_reached review_failures_exhausted mr_closed_unmerged].freeze
 
   # --- with a `label_attention` configured ----------------------------------
 

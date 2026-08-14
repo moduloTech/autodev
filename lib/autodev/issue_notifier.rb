@@ -44,10 +44,10 @@ module IssueNotifier
   end
 
   # `suffix:` appends a second, var-free template after a blank line (Autodev
-  # #60). The four give-up reasons each need their own sentence — collapsing them
-  # into one generic message would lose what actually happened — but they share
-  # the "and I handed the ticket back to its author" clause, and duplicating that
-  # across four templates × two locales is how the next one gets forgotten.
+  # #60). Each give-up reason needs its own sentence — collapsing them into one
+  # generic message would lose what actually happened — but they share the "and I
+  # handed the ticket back to its author" clause, and duplicating that across one
+  # template per reason × two locales is how the next one gets forgotten.
   def notify_localized(iid, key, suffix: nil, **vars)
     issue_record = Issue.where(project_path: @project_path, issue_iid: iid).first
     locale = (issue_record&.locale || 'fr').to_sym

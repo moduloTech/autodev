@@ -218,7 +218,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # than leave it alone because an untouched column can still be carrying the
   # clock of a watch that ended months ago, which the lazy seed would then keep
   # (it only fills NULL). Every *workflow* exit from `checking_pipeline` does go
-  # through AASM since Autodev #60 — the four give-up paths that used to write
+  # through AASM since Autodev #60 — the give-up paths that used to write
   # `status: 'done'` themselves now fire the `abandon` event — so this callback is
   # the single owner of the column and those two `update_all` writers are the only
   # remaining bypass.
