@@ -150,6 +150,7 @@ en:
   web_locale_en: English
   web_event_kind_transition: Transition
   web_event_kind_danger_claude: Activity
+  web_event_kind_discussions_snapshot: Review snapshot
   web_issue_post_completion_error: Post-completion error
   web_issue_actions: Actions
   web_issue_reset: Reset

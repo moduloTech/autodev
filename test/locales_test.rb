@@ -35,6 +35,10 @@ class LocalesTest < Minitest::Test
     assert_equal 'nonexistent_key', msg
   end
 
+  # Parity is half of the project rule: the two tables must agree with each
+  # other. The other half — that the keys the *code* asks for exist at all — is
+  # `test/i18n_derived_keys_test.rb` (Autodev #68). A key present in neither
+  # language passes both tests below, and `Locales.t` then renders its own name.
   def test_all_fr_keys_have_en_counterparts
     fr_keys = Locales.merged_for(:fr).keys
     en_keys = Locales.merged_for(:en).keys

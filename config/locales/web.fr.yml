@@ -150,6 +150,7 @@ fr:
   web_locale_en: Anglais
   web_event_kind_transition: Transition
   web_event_kind_danger_claude: Activité
+  web_event_kind_discussions_snapshot: Relevé des retours
   web_issue_post_completion_error: Erreur post-completion
   web_issue_actions: Actions
   web_issue_reset: Réinitialiser
