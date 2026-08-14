@@ -539,11 +539,15 @@ class DegradedApiValueShapeTest < Minitest::Test
       'resolve_discussion' => 'write, not a read'
     },
     'lib/autodev/mr_fixer/fix_cycle.rb' => {
-      # Clone, rebase, danger-claude, push. The one read that raises is
-      # `fetch_unresolved_discussions`, and `MrFixer#fix` performs it *before*
-      # calling in here, on purpose — so a failure caught at this level really is
-      # a fix failure and the ticket goes to `error` with a diagnostic.
-      'execute_fix_cycle' => 'no read inside; failures here really are fix failures'
+      # Clone, rebase, danger-claude, push. `fetch_unresolved_discussions` is
+      # performed by `MrFixer#fix` *before* calling in here, on purpose.
+      #
+      # Same remaining gap as `attempt_fix` above, reached by the sibling route:
+      # `prepare_fix_environment` calls `GitlabHelpers.fetch_full_context`, and its
+      # `client.issue(...)` has no rescue, so a GitLab failure on the prompt-context
+      # read is caught here and imputed to the fix. Declared with its real shape
+      # rather than as "no read inside"; the hoist that closes it has its own ticket.
+      'execute_fix_cycle' => 'prompt-context read still underneath, imputed to the fix (known gap)'
     },
     'lib/autodev/mr_fixer/discussion_formatter.rb' => {
       # `git diff` in a work directory, for the prompt. No GitLab call, and the
@@ -561,10 +565,17 @@ class DegradedApiValueShapeTest < Minitest::Test
       # what happened; the caller falls through to the triage it would have run.
       'retrigger_if_needed' => 'write, not a read',
       # Everything from the triage onwards: clone, danger-claude, push. `handle_red`
-      # reads the failed jobs *before* calling in here — that hoist is Autodev #62's
-      # — so nothing under this clause can be a failed read, and a failure here
-      # really is a fix failure worth sending the ticket to `error`.
-      'attempt_fix' => 'no read inside; failures here really are fix failures'
+      # reads the failed jobs *before* calling in here — that hoist is Autodev #62's.
+      #
+      # But one read remains underneath, and it is NOT hoisted: `build_fix_context_hash`
+      # calls `GitlabHelpers.fetch_full_context`, whose `fetch_issue_context` does a
+      # bare `client.issue(...)` with no rescue of its own. A GitLab failure on that
+      # read therefore lands here and is imputed to the fix — `error` + a comment
+      # blaming the correction + a retry spent — which is precisely what the hoist
+      # above exists to prevent, one call deeper. Declared, not excused: closing it
+      # is the same hoist on a path #62 did not cover, and it is a behaviour change
+      # with its own tests, so it has its own ticket.
+      'attempt_fix' => 'prompt-context read still underneath, imputed to the fix (known gap)'
     },
     'lib/autodev/pipeline_monitor/reviewer.rb' => {
       # mr-review is a subprocess, not a GitLab call. A crash is already non-fatal
