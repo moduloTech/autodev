@@ -2,11 +2,10 @@
 
 require_relative '../../rails_helper'
 
-# `UsageChecker` lives in lib/autodev, which AUTODEV_SKIP_LEGACY=1 keeps out of
-# the AR test world (same reason as test/jobs/autodev_poll_job_test.rb). The
-# gate only ever calls `.new(logger:).available?`, so a bare stand-in is enough
-# for `UsageChecker.stub` to resolve.
-Object.const_set(:UsageChecker, Class.new { def self.new(**); end }) unless defined?(UsageChecker)
+# `UsageChecker` used to be stubbed here, guarded by `unless defined?`, because
+# AUTODEV_SKIP_LEGACY kept `lib/autodev` out of the AR test world. Since Autodev
+# #64 the tree is required at boot, so the guard was false and the stand-in never
+# installed; the gate's only call (`.new(logger:).available?`) is stubbed below.
 
 # Autodev::UsageGate — the shared Claude-quota state (Autodev #46).
 #

@@ -19,7 +19,7 @@ class PipelineMonitor
   #
   # It is not blind to whether the poll read anything at all (Autodev #56). An
   # infrastructure failure must never be the reason a ticket is given up:
-  # abandoning is terminal (status, `needs_attention`, `label_done`, a public
+  # abandoning is terminal (status, `needs_attention`, the end label, a public
   # comment) and `pipeline_watch_expired` is excluded from
   # `dispatch_infra_recheck`, so nothing re-arms the row.
   #

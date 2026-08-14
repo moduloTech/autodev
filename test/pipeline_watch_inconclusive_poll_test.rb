@@ -31,8 +31,8 @@ require 'autodev/pipeline_monitor'
 # The assertions below are the same either way: the row is left alone. They are
 # deliberately written against the outcome, not the mechanism.
 #
-# Giving a 14-day-old ticket up costs a terminal status, `needs_attention`, the
-# `label_done` on GitLab and a public comment — and `pipeline_watch_expired` is
+# Giving a 14-day-old ticket up costs a terminal status, `needs_attention`, an
+# end label on GitLab and a public comment — and `pipeline_watch_expired` is
 # excluded from `dispatch_infra_recheck`, so nothing re-arms the row. An
 # infrastructure failure must never be the reason.
 #

@@ -538,6 +538,19 @@ class DegradedApiValueShapeTest < Minitest::Test
       # next round re-reads. No verdict is inferred from the failure.
       'resolve_discussion' => 'write, not a read'
     },
+    'lib/autodev/mr_fixer/fix_cycle.rb' => {
+      # Clone, rebase, danger-claude, push. The one read that raises is
+      # `fetch_unresolved_discussions`, and `MrFixer#fix` performs it *before*
+      # calling in here, on purpose — so a failure caught at this level really is
+      # a fix failure and the ticket goes to `error` with a diagnostic.
+      'execute_fix_cycle' => 'no read inside; failures here really are fix failures'
+    },
+    'lib/autodev/mr_fixer/discussion_formatter.rb' => {
+      # `git diff` in a work directory, for the prompt. No GitLab call, and the
+      # substitute (`nil` = no diff hunk to quote) removes context from a prompt
+      # rather than answering a question.
+      'extract_diff_hunk' => 'local git, not a read'
+    },
     'lib/autodev/pipeline_monitor/infra_recheck.rb' => {
       # The boundary of one recheck. `false` means "do not re-enter", which is the
       # conservative answer and the one the caller wants when nothing was read.
@@ -546,7 +559,18 @@ class DegradedApiValueShapeTest < Minitest::Test
     'lib/autodev/pipeline_monitor/failure_handler.rb' => {
       # A write. `false` means "the pipeline was not retriggered", which is exactly
       # what happened; the caller falls through to the triage it would have run.
-      'retrigger_if_needed' => 'write, not a read'
+      'retrigger_if_needed' => 'write, not a read',
+      # Everything from the triage onwards: clone, danger-claude, push. `handle_red`
+      # reads the failed jobs *before* calling in here — that hoist is Autodev #62's
+      # — so nothing under this clause can be a failed read, and a failure here
+      # really is a fix failure worth sending the ticket to `error`.
+      'attempt_fix' => 'no read inside; failures here really are fix failures'
+    },
+    'lib/autodev/pipeline_monitor/reviewer.rb' => {
+      # mr-review is a subprocess, not a GitLab call. A crash is already non-fatal
+      # by design (`false` = review not performed, the round is not counted), and
+      # Autodev #49 made the diagnostic survive it.
+      'execute_mr_review' => 'subprocess, not a read'
     },
     'lib/autodev/pipeline_monitor/api_helpers.rb' => {
       # The one read still allowed to substitute. The substitute names itself in the
@@ -581,9 +605,21 @@ class DegradedApiValueShapeTest < Minitest::Test
   # checks is a property of the source a reader sees, and the point is to make the
   # list above the only place the exceptions live.
   class SwallowScanner
-    RESCUE_LINE = /^\s*rescue\s+.*(Gitlab::Error|ApiUnavailableError)/
+    # A clause counts when it *can catch* a failed read, not when it happens to
+    # name one. `ApiUnavailableError < AutodevError < StandardError`, so a
+    # `rescue StandardError` swallows it just as thoroughly as a clause naming it
+    # — and it is the more likely way to reintroduce Autodev #62, because it does
+    # not look like it has anything to do with GitLab. A bare `rescue` and
+    # `rescue => e` are StandardError spelled shorter. Clauses that name an
+    # unrelated class (`RateLimitError`, `JSON::ParserError`) cannot catch a
+    # failed read and are ignored.
+    NAMED = /^\s*rescue\s+.*(Gitlab::Error|ApiUnavailableError|AutodevError|StandardError)/
+    CATCH_ALL = /^\s*rescue\s*(=>|$|#)/
     CLAUSE_END = /^\s*(end|def|rescue|ensure)\b/
+    # Read on the code, never on a comment: a rescue body whose comment merely
+    # contains the word "raise" swallows exactly as much as one that does not.
     RERAISE = /\braise\b/
+    COMMENT = /#.*/
     METHOD_DEF = /^\s*def\s+([a-z_][\w?!]*)/
 
     def initialize(lines)
@@ -603,12 +639,16 @@ class DegradedApiValueShapeTest < Minitest::Test
 
     def step(line)
       close_clause if @clause && line.match?(CLAUSE_END)
-      if line.match?(RESCUE_LINE)
+      if catches_failed_read?(line)
         @clause = { method: @method, reraises: false }
         return
       end
       @method = ::Regexp.last_match(1) if line =~ METHOD_DEF
-      @clause[:reraises] = true if @clause && line.match?(RERAISE)
+      @clause[:reraises] = true if @clause && line.sub(COMMENT, '').match?(RERAISE)
+    end
+
+    def catches_failed_read?(line)
+      line.match?(NAMED) || line.match?(CATCH_ALL)
     end
 
     def close_clause
