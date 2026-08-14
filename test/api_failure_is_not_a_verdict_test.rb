@@ -552,6 +552,26 @@ class DegradedApiValueShapeTest < Minitest::Test
       # a verdict either.
       'execute_fix_cycle' => 'fix-round boundary: clone, rebase, danger-claude, push'
     },
+    'lib/autodev/mr_fixer/stagnation_checker.rb' => {
+      # `JSON.parse(issue.stagnation_signatures || '{}') rescue {}` — the rescue
+      # *modifier*, which the scanner could not see until Autodev #67. Honest and
+      # trivial: the input is a column this same method wrote, the call is local,
+      # there is no GitLab read anywhere underneath, and `{}` means "start the
+      # signature history over", which costs one extra fix round at worst.
+      #
+      # Declared rather than deleted because the form is the hazard, not this
+      # instance: it is the shape a reader reproduces by imitating the line above,
+      # and it sat one directory from the delivery path with its own
+      # `rubocop:disable` comment ready to copy.
+      'discussion_stagnated?' => 'local JSON.parse of a column we wrote, not a read'
+    },
+    'lib/autodev/pipeline_monitor/post_completion.rb' => {
+      # Two more rescue modifiers the scanner was blind to. `Process.kill('KILL', -pid)`
+      # and `Process.wait(pid)` on a process group that already died raise
+      # `Errno::ESRCH` / `Errno::ECHILD`, and "it is already gone" is the outcome
+      # this method wants. No GitLab call, no verdict.
+      'kill_process' => 'local process signalling, not a read'
+    },
     'lib/autodev/mr_fixer/discussion_formatter.rb' => {
       # `git diff` in a work directory, for the prompt. No GitLab call, and the
       # substitute (`nil` = no diff hunk to quote) removes context from a prompt
@@ -618,6 +638,32 @@ class DegradedApiValueShapeTest < Minitest::Test
     MSG
   end
 
+  # (c) The same rule again, without a regex, and complete rather than
+  # heuristic: `Style/RescueModifier` is enabled for this project, so RuboCop
+  # itself guarantees that *every* `expr rescue fallback` in the tree carries a
+  # `` on its line. Grepping the directive
+  # therefore enumerates the modifier forms exhaustively, and each one has to
+  # belong to a declared method.
+  #
+  # It exists because the modifier form is the one shape a reader is most likely
+  # to reproduce by imitation — `StagnationChecker` already has one, comment
+  # included, one file away from the delivery path — and because it says the rule
+  # in a sentence instead of in `SwallowScanner`'s regexes. The scanner catches it
+  # too; two independent statements of one rule is the point, not redundancy.
+  RESCUE_MODIFIER_DIRECTIVE = %r{rubocop:disable\s+.*Style/RescueModifier}
+  def test_every_inline_rescue_in_the_delivery_path_is_declared
+    undeclared = scanned_files.flat_map { |rel, abs| undeclared_modifiers(rel, abs) }
+
+    assert_empty undeclared, <<~MSG
+      An `expr rescue fallback` sits in a method that is not declared in
+      ALLOWED_SWALLOWS: #{undeclared.join(', ')}.
+
+      The modifier form catches StandardError, so it catches a failed read, and it
+      is the easiest one to write by imitating the line above it. Declare the
+      method with the reason its substitute is safe, or take the rescue out.
+    MSG
+  end
+
   # Line-by-line walk of one file, collecting the names of the methods whose
   # `rescue` of a GitLab error does not re-raise. Deliberately textual: what it
   # checks is a property of the source a reader sees, and the point is to make the
@@ -632,13 +678,26 @@ class DegradedApiValueShapeTest < Minitest::Test
     # unrelated class (`RateLimitError`, `JSON::ParserError`) cannot catch a
     # failed read and are ignored.
     NAMED = /^\s*rescue\s+.*(Gitlab::Error|ApiUnavailableError|AutodevError|StandardError)/
-    CATCH_ALL = /^\s*rescue\s*(=>|$|#)/
+    CATCH_ALL = /^\s*rescue\s*(=>|$|#|\z)/
+    # `expr rescue fallback` — the modifier form, and the second blind spot
+    # Autodev #67 closed. It is `rescue StandardError` spelled with no `rescue`
+    # *line* at all, so the two anchored patterns above cannot see it: something
+    # precedes it on the line. It is also a whole clause on one line — the
+    # substitute is right there — hence its own branch in `step`.
+    MODIFIER = /\S\s+rescue\s+\S/
     CLAUSE_END = /^\s*(end|def|rescue|ensure)\b/
-    # Read on the code, never on a comment: a rescue body whose comment merely
-    # contains the word "raise" swallows exactly as much as one that does not.
     RERAISE = /\braise\b/
-    COMMENT = /#.*/
     METHOD_DEF = /^\s*def\s+([a-z_][\w?!]*)/
+    # What the scanner reads is *code*. Strings go first (so removing comments
+    # cannot cut a `#` out of the middle of a literal), comments second. Both
+    # blind spots this handles are the same mistake in two directions: a log
+    # message containing the word "raise" made a clause look like a re-raise —
+    # `RERAISE` was applied after stripping comments but not strings — and the
+    # same text could equally invent a `rescue` where the code has none.
+    STRING = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/
+    COMMENT = /#.*/
+
+    def self.code_of(line) = line.gsub(STRING, '""').sub(COMMENT, '')
 
     def initialize(lines)
       @lines = lines
@@ -648,25 +707,36 @@ class DegradedApiValueShapeTest < Minitest::Test
     end
 
     def swallowing_methods
-      @lines.each { |line| step(line) }
+      @lines.each { |line| step(self.class.code_of(line)) }
       close_clause
       @found
     end
 
     private
 
-    def step(line)
-      close_clause if @clause && line.match?(CLAUSE_END)
-      if catches_failed_read?(line)
-        @clause = { method: @method, reraises: false }
-        return
-      end
-      @method = ::Regexp.last_match(1) if line =~ METHOD_DEF
-      @clause[:reraises] = true if @clause && line.sub(COMMENT, '').match?(RERAISE)
+    def step(code)
+      close_clause if @clause && code.match?(CLAUSE_END)
+      @method = ::Regexp.last_match(1) if code =~ METHOD_DEF
+      return record_modifier(code) if code.match?(MODIFIER)
+      return open_clause if catches_failed_read?(code)
+
+      note_reraise(code)
     end
 
-    def catches_failed_read?(line)
-      line.match?(NAMED) || line.match?(CATCH_ALL)
+    def open_clause = @clause = { method: @method, reraises: false }
+
+    def note_reraise(code)
+      @clause[:reraises] = true if @clause && code.match?(RERAISE)
+    end
+
+    # One line, one whole clause. `x = f rescue raise Foo` re-raises; anything
+    # else substitutes.
+    def record_modifier(code)
+      @found << @method unless code.sub(MODIFIER, ' rescue ').match?(RERAISE)
+    end
+
+    def catches_failed_read?(code)
+      code.match?(NAMED) || code.match?(CATCH_ALL)
     end
 
     def close_clause
@@ -680,9 +750,29 @@ class DegradedApiValueShapeTest < Minitest::Test
   private
 
   def undeclared_swallows(rel, abs)
-    SwallowScanner.new(File.readlines(abs)).swallowing_methods
-                  .reject { |method| ALLOWED_SWALLOWS.fetch(rel, {}).key?(method) }
-                  .map { |method| "#{rel}##{method}" }
+    reject_declared(rel, SwallowScanner.new(File.readlines(abs)).swallowing_methods)
+  end
+
+  # The directive-based half of the modifier rule (see the test above). The
+  # method a directive belongs to is the last `def` at or above its line.
+  def undeclared_modifiers(rel, abs)
+    lines = File.readlines(abs)
+    owners = lines.each_index
+                  .select { |i| lines[i].match?(RESCUE_MODIFIER_DIRECTIVE) }
+                  .map { |i| enclosing_method(lines, i) }
+    reject_declared(rel, owners.compact)
+  end
+
+  def enclosing_method(lines, idx)
+    lines[0..idx].reverse_each do |line|
+      return ::Regexp.last_match(1) if line =~ SwallowScanner::METHOD_DEF
+    end
+    nil
+  end
+
+  def reject_declared(rel, methods)
+    methods.reject { |method| ALLOWED_SWALLOWS.fetch(rel, {}).key?(method) }
+           .map { |method| "#{rel}##{method}" }
   end
 
   def scanned_files
