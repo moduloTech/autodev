@@ -349,7 +349,7 @@ pending → cloning → checking_spec → implementing → committing → pushin
 Le dialogue Autodev ↔ GitLab repose sur :
 
 - **L'assignation** : Autodev s'occupe d'un ticket s'il lui est assigné.
-- **3 labels** : `label_todo` (*à traiter*), `label_doing` (*en cours*), `label_done` (*livré*), plus un quatrième optionnel `label_attention` (*abandonné, intervention requise*) posé à la place de `label_done` sur les cinq chemins d'abandon (Autodev #63). Noms configurables par projet.
+- **3 labels** : `label_todo` (*à traiter*), `label_doing` (*en cours*), `label_done` (*livré*), plus un quatrième optionnel `label_attention` (*abandonné, intervention requise*) posé à la place de `label_done` sur tous les chemins d'abandon (Autodev #63, étendu à la MR fermée sans fusion par #66). Noms configurables par projet.
 
 Pas de webhook GitLab — Autodev poll régulièrement (`AutodevPollJob` toutes les 5 min par défaut) et choisit ses actions selon l'état.
 
@@ -545,6 +545,8 @@ DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`
 | Même cas, mais le cycle n'a rien pu conclure (erreur GitLab sur la liste des jobs, quota Claude épuisé) | La borne ne tire pas : la ligne reste en `checking_pipeline` pour le cycle suivant, avec une ligne de log expliquant pourquoi (#56). Une panne d'infrastructure ne doit jamais provoquer un abandon — l'abandon est terminal et `pipeline_watch_expired` est exclu de la passe de recheck infra, donc rien ne ré-arme la ligne |
 | Stagnation discussions | `done` avec commentaire d'alerte |
 | Limite de review atteinte (3 passes) | `done` avec commentaire d'alerte |
+| MR fusionnée | `done` + `label_done` : la fin nominale de la surveillance, la pipeline n'est plus consultée |
+| MR fermée sans être fusionnée (ou tout autre état non `opened`) | `done` + `needs_attention` (`mr_closed_unmerged`) + `label_attention` + ticket rendu à son auteur + commentaire (Autodev #66). Rien n'a été livré, donc le label de fin serait un mensonge — sur powerpanne/core il vaut `Development::Awaiting Feature Review` — et la ligne ne doit pas rester dans la population de `dispatch_done_unassigned`, où le garde-fou `post_completion` de #60 ne s'appliquait pas. Le tri porte sur « est-ce livré », pas sur le vocabulaire d'états de GitLab : `locked` (état transitoire de fusion) et tout état futur suivent le même chemin |
 | Désassigné en cours d'implémentation | `closed` au poll suivant (était `done` avant #52) + commentaire GitLab explicite. Sort de la population de `dispatch_done_unassigned` : plus de `post_completion` sur un travail interrompu |
 | `label_doing` retiré / `label_done` posé par un tiers | `closed` au poll suivant + commentaire GitLab nommant le label (`Autodev::LabelHandover`) |
 | Label de workflow déplacé vers une autre valeur du scope d'autodev | Idem. Le scope est déduit de `label_doing` + `label_done` (`label_attention`, qu'Autodev écrit lui aussi, est retiré de l'ensemble des labels « libres » mais reste hors de la dérivation) ; les labels hors scope (`PM::Evolution`, `Backlog`, noms de clients…) sont ignorés, et la règle se désactive d'elle-même si ces deux labels ne partagent aucun scope. L'auteur de l'édition est lu dans les *resource label events* GitLab, et seulement quand la lecture gratuite des labels a déjà un candidat — un ticket sain ne coûte aucun appel API supplémentaire |

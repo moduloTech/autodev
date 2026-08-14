@@ -111,7 +111,8 @@ class InfraRecheckDispatchTest < Minitest::Test
   # the reasons and autodev restarts tickets it has just abandoned.
   def test_only_a_pipeline_stagnation_is_ever_re_armed
     reasons = %w[stagnation_pipeline stagnation_discussions pipeline_watch_expired
-                 review_limit_reached review_failures_exhausted dormant_exhausted]
+                 review_limit_reached review_failures_exhausted dormant_exhausted
+                 mr_closed_unmerged]
     issues = reasons.to_h { |reason| [reason, infra_stagnation_issue(attention_reason: reason)] }
     selected = candidate_iids
 
