@@ -17,15 +17,67 @@ class PipelineMonitor
   # in the `post_completion` population — the one guard Autodev #60 put there so a
   # deploy never runs on work autodev did not deliver. No project configures
   # `post_completion` today, so that was a latent deploy of rejected work.
+  #
+  # Autodev #69 took one state back out of that sort: `locked`. The predicate
+  # stayed "was this delivered" and the default stayed the abandon point — the
+  # change is that a state GitLab documents as *transitional* is no longer read as
+  # a conclusion at all.
   module MrStateChecker
+    # GitLab's merge request state machine declares exactly four states —
+    # `opened`, `closed`, `merged`, `locked` (`app/models/merge_request.rb`,
+    # `state_machine :state_id`, states + `lock_mr` / `unlock_mr` /
+    # `mark_as_merged` events). The GraphQL `MergeRequestState` enum adds only
+    # `all`, which is a filter value the API never returns for a single MR.
+    #
+    # `locked` is the only one of the four that carries no verdict.
+    # `MergeRequests::MergeService#execute` wraps the whole merge in
+    # `merge_request.in_locked_state`, so the state is entered from `opened` and
+    # left either for `merged` (the merge went through) or back for `opened` (it
+    # did not). GitLab's own REST reference says as much: "Searching by `locked`
+    # generally returns no results as that state is short-lived and transitional."
+    #
+    # It therefore belongs with `RUNNING_STATUSES`, not with `closed`: a poll that
+    # lands in that window has to come back later. Read as a conclusion, it
+    # abandoned an MR in the middle of being delivered — a public comment saying it
+    # had been closed without being merged, which was false, the ticket handed back
+    # to its author, `needs_attention`, and no end label. Recoverable by hand
+    # (reposing the todo label and reassigning autodev re-enters through
+    # `PollRouter::ResumeHandler#reenter_destination`), but only once somebody has
+    # worked out that the comment lies.
+    #
+    # An allow-list on purpose. Anything GitLab adds tomorrow is *unknown*, not
+    # transitional, and keeps going to the abandon point (Autodev #66): erring
+    # towards "a human should look" is recoverable, erring towards "ready for
+    # feature review" is not.
+    TRANSIENT_MR_STATES = %w[locked].freeze
+
     private
 
-    # The split is on "was this delivered", not on GitLab's state vocabulary.
-    # Only `merged` is a delivery; `closed`, `locked` (the transient mid-merge
-    # state) and anything GitLab adds later are not. A poll that catches a
-    # sub-second `locked` window therefore errs towards "a human should look",
-    # which a reposed todo label undoes, rather than towards "ready for feature
-    # review", which nothing undoes.
+    # `opened` and the transient states are the two ways a poll keeps the watch;
+    # every other state is an ending, including one nobody has seen yet.
+    def mr_state_concluded?(state)
+      state != 'opened' && !TRANSIENT_MR_STATES.include?(state)
+    end
+
+    # Nothing to conclude, and nothing to read either: the head pipeline of an MR
+    # GitLab is merging is not the question. The row stays in `checking_pipeline`
+    # and `dispatch_pipelines` re-enqueues it next cycle.
+    #
+    # Deliberately **not** `poll_inconclusive!`. That flag means "this poll could
+    # not read a verdict" and stands the age bound down (Autodev #56) — here GitLab
+    # answered perfectly well, it answered "wait", which is exactly what a
+    # `running` pipeline does, and that path falls through to the bound. Raising it
+    # would leave an MR wedged in `locked` polling forever, the unbounded tail
+    # Autodev #53 exists to close.
+    def await_transient_mr_state(issue, state)
+      log "MR !#{issue.mr_iid} is #{state} (GitLab is processing the merge), " \
+          'nothing to conclude, staying in checking_pipeline'
+    end
+
+    # The split is on "was this delivered", not on GitLab's state vocabulary. Only
+    # `merged` is a delivery; `closed` and anything GitLab adds later are not — and
+    # `locked` never reaches here since Autodev #69, because it is not an outcome
+    # to sort.
     def handle_mr_closed(issue, merge_request)
       state = merge_request.state
       log "MR !#{issue.mr_iid} is no longer open (#{state}), skipping pipeline check"

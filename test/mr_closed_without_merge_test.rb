@@ -219,12 +219,19 @@ class MrClosedWithoutMergeTest < Minitest::Test
            'the ticket changed hands without the comment saying so')
   end
 
-  # `locked` is GitLab's transient mid-merge state, and any state GitLab adds
-  # later lands here too. The predicate that matters is "was this delivered",
-  # not an enumeration of GitLab's vocabulary: erring towards "a human should
-  # look" is recoverable, erring towards "ready for feature review" is not.
+  # Any state GitLab adds later lands here too. The predicate that matters is
+  # "was this delivered", not an enumeration of GitLab's vocabulary: erring
+  # towards "a human should look" is recoverable, erring towards "ready for
+  # feature review" is not.
+  #
+  # This used to be asserted on `locked`, which was wrong for a different reason
+  # (Autodev #69): `locked` is not an unknown state, it is GitLab's documented
+  # transitional one, and a poll landing in that window abandoned an MR being
+  # delivered. It no longer reaches `handle_mr_closed` at all —
+  # `test/locked_mr_is_not_a_verdict_test.rb` owns that — so the rule is pinned
+  # here on a state that is genuinely unknown, which is what it was always about.
   def test_any_state_that_is_not_merged_is_treated_as_undelivered
-    issue = poll('locked')
+    issue = poll('quantum_superposed')
 
     assert_equal [true, 'mr_closed_unmerged'], [issue.needs_attention, issue.attention_reason]
   end
