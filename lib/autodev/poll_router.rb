@@ -18,12 +18,24 @@ class PollRouter
   end
 
   # Route a single GitLab issue. Returns :next (skip to next issue) or :process (continue to processing).
+  #
+  # The boundary of one issue's routing (Autodev #67). The reentry decision reads
+  # the MR state and, for an open MR, the issue's comment history; a read GitLab
+  # could not answer must decide nothing, and the row is left exactly as it was
+  # for `dispatch_new_issues` to re-ask next cycle. The boundary is per *issue*
+  # rather than per pass: raised any higher it would land in `PollDispatcher#dispatch`'s
+  # own `rescue StandardError`, and one unreadable MR would take the whole
+  # project's cycle down with it — the pipeline checks, the discussion fixes and
+  # the retries included.
   def route(gl_issue, client)
     return :process unless @use_labels
 
     @client = @route_client = client
     existing = Issue.where(project_path: @project_path, issue_iid: gl_issue.iid).first
     route_by_state(gl_issue, existing)
+  rescue ApiUnavailableError => e
+    log_error "Issue ##{gl_issue.iid}: #{e.message} — routing deferred to the next cycle"
+    :next
   end
 
   # Public entry for PollDispatcher's infra-recheck pass. An infra-origin

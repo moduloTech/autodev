@@ -4,14 +4,22 @@ class PollRouter
   # Handles reentry transitions (done → pending OR done → checking_pipeline)
   # when label_todo is detected on a done issue.
   #
-  # Three paths:
+  # Four paths:
   # - MR open → route to `checking_pipeline` so the next pipeline check sends
   #   to `fixing_discussions` (MrFixer addresses unresolved threads instead of
   #   triggering a full re-implementation).
   # - MR already merged → skip: the work is shipped, no point re-implementing.
   #   Clear the todo label and stay in `done`.
-  # - Anything else (closed without merge, no MR, lookup error) → route to
-  #   `pending` for a full implementation cycle.
+  # - MR `locked` → wait: conclude nothing and re-read next cycle (Autodev #67).
+  # - Anything else (closed without merge, no MR, a state GitLab adds later) →
+  #   route to `pending` for a full implementation cycle.
+  #
+  # What is *not* a path any more is "the lookup failed" (Autodev #67). It used to
+  # fall in with the last one, and `:reimplementation` is the most expensive
+  # branch there is — full clone, danger-claude, push, on a ticket whose MR may
+  # already be merged. Same shape as the four readers Autodev #62 unpicked, and
+  # invisible for the same reason: the substitute is a plausible destination. The
+  # read now raises and `PollRouter#route` skips this issue for the cycle.
   module ResumeHandler
     private
 
@@ -23,6 +31,7 @@ class PollRouter
       case reenter_destination(existing)
       when :pipeline_check then reenter_via_pipeline_check(existing)
       when :skip_merged    then skip_reentry_already_merged(existing)
+      when :wait           then defer_reentry(existing)
       else                      reenter_via_reimplementation(gl_issue, existing)
       end
     end
@@ -30,18 +39,33 @@ class PollRouter
     # Inspect the existing MR state to decide the reentry path. A merged MR
     # short-circuits to `:skip_merged` so we don't re-clone, re-implement, and
     # re-push a branch whose content is already in target.
+    #
+    # `locked` is separated from the `else` on purpose: it is GitLab's transient
+    # state while a merge is in flight, so the MR is very likely `merged` a second
+    # later, and the `else` branch would clone and re-implement over work that is
+    # about to land. It is a wait, not a verdict — the same distinction the poll
+    # makes between "the pipeline is still running" and "the pipeline failed".
+    # `:reimplementation` stays the answer for a state that really is unknown.
     def reenter_destination(existing)
       return :reimplementation unless existing.mr_iid
 
-      mr = @route_client.merge_request(@project_path, existing.mr_iid)
+      mr = GitlabHelpers.answer(:merge_request) do
+        @route_client.merge_request(@project_path, existing.mr_iid)
+      end
       case mr.state
       when 'opened' then open_mr_destination(existing)
       when 'merged' then :skip_merged
+      when 'locked' then :wait
       else               :reimplementation
       end
-    rescue Gitlab::Error::ResponseError => e
-      log_error "Failed to check MR !#{existing.mr_iid} state for reentry: #{e.message}"
-      :reimplementation
+    end
+
+    # Nothing at all: no transition, no label change, no comment. The todo label
+    # stays where the human put it, so `dispatch_new_issues` asks again next
+    # cycle and the MR will have settled by then.
+    def defer_reentry(existing)
+      log "Issue ##{existing.issue_iid}: MR !#{existing.mr_iid} is locked (merge in flight) → " \
+          'waiting for the next cycle'
     end
 
     # An open MR normally means "the human wants the review threads addressed" →

@@ -610,6 +610,14 @@ class DegradedApiValueShapeTest < Minitest::Test
       # Autodev #49 made the diagnostic survive it.
       'execute_mr_review' => 'subprocess, not a read'
     },
+    'lib/autodev/poll_router.rb' => {
+      # The boundary of one issue's routing (Autodev #67). Per issue rather than
+      # per pass on purpose: raised any higher the error lands in
+      # `PollDispatcher#dispatch`'s own `rescue StandardError` and one unreadable
+      # MR takes the whole project's cycle down with it — pipeline checks,
+      # discussion fixes and retries included.
+      'route' => 'routing boundary for one issue'
+    },
     'lib/autodev/pipeline_monitor/api_helpers.rb' => {
       # The one read still allowed to substitute. The substitute names itself in the
       # value ("(trace unavailable: …)"), it is written into a log file for a human
@@ -619,11 +627,42 @@ class DegradedApiValueShapeTest < Minitest::Test
     }
   }.freeze
 
+  # The perimeter is **deliberately restricted, and this is the reason** (Autodev
+  # #67 — before it, the restriction was simply where #62's diff happened to
+  # stop). What is scanned is the code that takes a decision *and acts on it from
+  # a read*: the pipeline watch and the MR fix round (a delivery, a give-up, a
+  # re-arm), and since #67 the reentry decision, whose substitute was the most
+  # expensive branch autodev has — a full clone + danger-claude + push on a ticket
+  # whose MR may already be merged.
+  #
+  # It is not "everything that talks to GitLab", and the omissions were checked
+  # one by one rather than assumed:
+  #
+  #   * `IssueNotifier`, `LabelManager`, `ActivityLogger`, `ScreenshotUploader`,
+  #     `ExternalState#notify_stop` — writes. A note that could not be posted or a
+  #     label that could not be set reports what happened; it invents nothing.
+  #     #62 scopes writes out explicitly.
+  #   * `PollDispatcher#check_external_state` / `#check_post_completion_needed`,
+  #     `DormantAudit#audit`, `LabelHandover#events` — the rescue already sits at
+  #     the unit-of-work boundary and its substitute means "do not act on this row
+  #     this cycle", which is what the rule prescribes. `DormantAudit` bumps its
+  #     counter *before* the read, deliberately, so an unreachable project burns
+  #     the cap instead of being retried forever.
+  #   * `IssueProcessor` — an active row mid-flight, where "conclude nothing and
+  #     re-read next cycle" has no mechanism: no pass re-enqueues an active state.
+  #     `error` + `next_retry_at` is the re-arming path there, and it is bounded.
+  #   * `DiscussionSnapshot` — instrumentation, which swallows everything by
+  #     design so it can never break what it is instrumenting.
+  #
+  # Widening the perimeter to those would make the list a catalogue of writes and
+  # drown the four entries that matter. Re-read this paragraph before adding a
+  # file, and add the file if the reason no longer holds.
   SCANNED = %w[
     lib/autodev/pipeline_monitor.rb lib/autodev/mr_fixer.rb lib/autodev/mr_discussions.rb
+    lib/autodev/poll_router.rb
   ].freeze
 
-  SCANNED_DIRS = %w[lib/autodev/pipeline_monitor lib/autodev/mr_fixer].freeze
+  SCANNED_DIRS = %w[lib/autodev/pipeline_monitor lib/autodev/mr_fixer lib/autodev/poll_router].freeze
 
   def test_every_swallowed_gitlab_error_in_the_delivery_path_is_declared
     undeclared = scanned_files.flat_map { |rel, abs| undeclared_swallows(rel, abs) }

@@ -152,18 +152,28 @@ module GitlabHelpers
   # True when a human (not autodev, not a system note) posted a comment on the
   # issue strictly after `since`. Used both to detect a clarification answer and
   # to detect recette-KO feedback left on a delivered ticket (bug #32).
+  #
+  # It used to answer an API error with `false`, i.e. "nobody replied" (Autodev
+  # #67). At one of its two call sites that is a verdict: `open_mr_destination`
+  # turns `false` into `:pipeline_check`, the path that never reads issue
+  # comments, so the identical MR is re-delivered and the human's feedback is
+  # never seen — the exact bug #32 this predicate exists to prevent. `false` is
+  # returned only for a question that was not asked (`since` nil); a question
+  # GitLab did not answer raises, and each caller decides at its own boundary.
   def human_comment_since?(client, project_path, issue_iid, since)
     return false unless since
 
     threshold = since.is_a?(Time) ? since : Time.parse(since.to_s)
-    notes = client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
-    notes.any? do |note|
-      !note.system &&
-        Time.parse(note.created_at.to_s) > threshold &&
-        !note.body.to_s.include?('**autodev**')
+    notes = answer(:issue_notes) do
+      client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
     end
-  rescue Gitlab::Error::ResponseError
-    false
+    notes.any? { |note| human_note_after?(note, threshold) }
+  end
+
+  def human_note_after?(note, threshold)
+    !note.system &&
+      Time.parse(note.created_at.to_s) > threshold &&
+      !note.body.to_s.include?('**autodev**')
   end
 
   # Image downloading helpers.
