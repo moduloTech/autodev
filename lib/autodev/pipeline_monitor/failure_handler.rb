@@ -38,8 +38,18 @@ class PipelineMonitor
     # Everything from the triage onwards: this is the part that clones, calls
     # danger-claude and pushes, so a failure here really is a fix failure and the
     # ticket goes to `error` with a diagnostic.
+    #
+    # With one exception, and it is the whole of Autodev #67: a GitLab read that
+    # could not answer is never a fix failure, wherever underneath it happened.
+    # `handle_red` hoisted the job list out of here; the prompt-context read
+    # cannot be hoisted (it needs the clone's work directory, for the ticket's
+    # images), so it declares itself instead — `GitlabHelpers.answer` types it and
+    # this clause lets it through to `check`. That is the *default* for any read
+    # added below this line: it takes a deliberate `rescue` to stop one.
     def attempt_fix(issue, pipeline, failed_jobs)
       triage_and_fix(issue, pipeline, failed_jobs)
+    rescue ApiUnavailableError
+      raise
     rescue RateLimitError => e
       handle_rate_limit(issue, e)
     rescue StandardError => e

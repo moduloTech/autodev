@@ -9,16 +9,26 @@ class PipelineMonitor
 
     private
 
+    # The prompt context is read *before* `pipeline_failed_code!`, for the same
+    # reason `handle_red` reads the failed jobs before entering `attempt_fix` and
+    # `handle_green` reads the threads before its two side effects (Autodev #62,
+    # extended here by #67): the read can fail, and a failure must leave the row
+    # where the poll found it. Read after the transition, an unreachable GitLab
+    # parked the ticket in `fixing_pipeline` — a state no dispatch pass selects,
+    # so nothing but `dispatch_dormant_audit` would have looked at it again, two
+    # hours later. Read before, the `ApiUnavailableError` travels to `check` with
+    # the row still `checking_pipeline` and `dispatch_pipelines` re-enqueues it
+    # next cycle.
     def dispatch_fix(issue, work_dir, job_entries, explanation)
+      context = fetch_fix_context(work_dir, issue)
       issue.pipeline_failed_code!
       round = issue.fix_round + 1
       log_activity(issue, :pipeline_fixing, count: job_entries.size, round: round)
       log "Issue ##{issue.issue_iid}: fixing #{job_entries.size} job(s)... (#{explanation})"
-      fix_pipeline_failures(work_dir, job_entries, issue)
+      fix_pipeline_failures(work_dir, job_entries, issue, context)
     end
 
-    def fix_pipeline_failures(work_dir, job_entries, issue)
-      context = fetch_fix_context(work_dir, issue)
+    def fix_pipeline_failures(work_dir, job_entries, issue, context)
       fix_each_job(work_dir, job_entries, issue, context)
       push_fixes(work_dir, job_entries, issue)
     end

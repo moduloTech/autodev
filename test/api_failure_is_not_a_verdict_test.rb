@@ -540,14 +540,17 @@ class DegradedApiValueShapeTest < Minitest::Test
     },
     'lib/autodev/mr_fixer/fix_cycle.rb' => {
       # Clone, rebase, danger-claude, push. `fetch_unresolved_discussions` is
-      # performed by `MrFixer#fix` *before* calling in here, on purpose.
+      # performed by `MrFixer#fix` *before* calling in here, on purpose, and the
+      # prompt-context read inside `prepare_fix_environment` now raises
+      # `ApiUnavailableError`, which this method re-raises above its two handlers
+      # (Autodev #67 — it used to be swallowed here and imputed to the fix).
       #
-      # Same remaining gap as `attempt_fix` above, reached by the sibling route:
-      # `prepare_fix_environment` calls `GitlabHelpers.fetch_full_context`, and its
-      # `client.issue(...)` has no rescue, so a GitLab failure on the prompt-context
-      # read is caught here and imputed to the fix. Declared with its real shape
-      # rather than as "no read inside"; the hoist that closes it has its own ticket.
-      'execute_fix_cycle' => 'prompt-context read still underneath, imputed to the fix (known gap)'
+      # Audited, not assumed: the only GitLab traffic left under this method is
+      # `resolve_discussion` (a write, declared below), `ScreenshotUploader.process`
+      # (uploads, own rescues) and `log_activity` / `notify_localized`, which
+      # swallow their own failures because a note that could not be edited is not
+      # a verdict either.
+      'execute_fix_cycle' => 'fix-round boundary: clone, rebase, danger-claude, push'
     },
     'lib/autodev/mr_fixer/discussion_formatter.rb' => {
       # `git diff` in a work directory, for the prompt. No GitLab call, and the
@@ -567,15 +570,19 @@ class DegradedApiValueShapeTest < Minitest::Test
       # Everything from the triage onwards: clone, danger-claude, push. `handle_red`
       # reads the failed jobs *before* calling in here — that hoist is Autodev #62's.
       #
-      # But one read remains underneath, and it is NOT hoisted: `build_fix_context_hash`
-      # calls `GitlabHelpers.fetch_full_context`, whose `fetch_issue_context` does a
-      # bare `client.issue(...)` with no rescue of its own. A GitLab failure on that
-      # read therefore lands here and is imputed to the fix — `error` + a comment
-      # blaming the correction + a retry spent — which is precisely what the hoist
-      # above exists to prevent, one call deeper. Declared, not excused: closing it
-      # is the same hoist on a path #62 did not cover, and it is a behaviour change
-      # with its own tests, so it has its own ticket.
-      'attempt_fix' => 'prompt-context read still underneath, imputed to the fix (known gap)'
+      # The prompt-context read underneath (`build_fix_context_hash` →
+      # `GitlabHelpers.fetch_full_context`) was the gap #62 left and Autodev #67
+      # closed. It could not be hoisted out of here the way the job list was — it
+      # needs the clone's work directory, for the ticket's images — so instead it
+      # raises `ApiUnavailableError` and this method re-raises it above its two
+      # handlers, and `dispatch_fix` performs it *before* `pipeline_failed_code!` so
+      # the abort leaves the row in `checking_pipeline`.
+      #
+      # Audited, not assumed: the GitLab traffic left under this method is
+      # `retry_pipeline` and `fetch_job_trace` (both declared here) plus the label /
+      # assignee / note writes of `abandon_issue`, `log_activity` and
+      # `notify_localized`, each of which swallows its own failure.
+      'attempt_fix' => 'fix boundary: clone, danger-claude, push'
     },
     'lib/autodev/pipeline_monitor/reviewer.rb' => {
       # mr-review is a subprocess, not a GitLab call. A crash is already non-fatal
