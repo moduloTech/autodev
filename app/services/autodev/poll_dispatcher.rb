@@ -281,7 +281,9 @@ module Autodev
 
     def check_post_completion_needed(issue)
       return if still_assigned?(issue)
-      return if mr_closed_or_merged?(issue)
+
+      state = @client.merge_request(@path, issue.mr_iid).state
+      return if mr_state_defers_hook?(issue, state)
 
       IssueProcessJob.perform_later(@path, issue.issue_iid, :post_completion)
       @logger.info("Enqueued post-completion for issue ##{issue.issue_iid}", project: @path)
@@ -294,9 +296,25 @@ module Autodev
       assigned_to_autodev?(@client.issue(@path, issue.issue_iid))
     end
 
-    def mr_closed_or_merged?(issue)
-      mr = @client.merge_request(@path, issue.mr_iid)
-      %w[merged closed].include?(mr.state)
+    # The hook is for a delivered ticket whose MR is still open, so two things
+    # hold it back and they are not the same thing.
+    #
+    # `merged` / `closed` are *verdicts*: the MR is over, and there is nothing
+    # left for a deploy to deploy from a branch that is gone or already in.
+    #
+    # A transient state answers nothing (`MrState`, Autodev #72). This used to be
+    # one `%w[merged closed].include?` test, so a `locked` MR counted as neither
+    # closed nor merged — the opposite of the sort `PipelineMonitor` applies to the
+    # same state — and the hook ran *while GitLab was performing the merge*, which
+    # for `post_completion` means a deploy. Latent only because no project
+    # configures the hook today. The pass re-selects the row every cycle, so
+    # waiting costs one deferral and the next cycle reads the outcome.
+    def mr_state_defers_hook?(issue, state)
+      return true if %w[merged closed].include?(state)
+      return false unless MrState.transient?(state)
+
+      @logger.info("Deferring post-completion for issue ##{issue.issue_iid}: MR is #{state}", project: @path)
+      true
     end
 
     # === poll_retries equivalent ===

@@ -22,16 +22,14 @@ class PipelineMonitor
     # Returns true only when CI has recovered and the caller should re-enter the
     # pipeline-check flow via ResumeHandler#reenter_via_pipeline_check. Any other
     # outcome (MR closed, still infra-failing, now code-failing, running,
-    # uncertain) returns false after recording a bounded, backed-off attempt.
+    # uncertain) returns false after recording a bounded, backed-off attempt —
+    # except the two that read nothing at all: a GitLab error (Autodev #62) and an
+    # MR in a transient state (Autodev #72) return false having spent nothing.
     def recheck_infra_recovery(issue)
       merge_req = @client.merge_request(@project_path, issue.mr_iid)
-      if mr_open?(merge_req) && current_pipeline_verdict(merge_req) == :recovered
-        log "Issue ##{issue.issue_iid}: infra failure recovered (CI green) → re-entering pipeline check"
-        return true
-      end
-
-      record_recheck_attempt(issue)
-      false
+      verdict = recheck_verdict(issue, merge_req)
+      record_recheck_attempt(issue) if verdict == :spend
+      verdict == :reenter
     # The boundary of one recheck. `ApiUnavailableError` joins the MR-fetch error
     # that was already handled here (Autodev #62): a cycle that could not read
     # anything must not re-arm the row, and — like `check_stagnation_and_fix` —
@@ -44,8 +42,35 @@ class PipelineMonitor
 
     private
 
-    def mr_open?(merge_req)
-      GitlabHelpers.field(merge_req, :state) == 'opened'
+    # Three answers, and the third is Autodev #72's: re-arm the row, spend one of
+    # the bounded attempts, or spend nothing because nothing was read.
+    def recheck_verdict(issue, merge_req)
+      state = mr_state(merge_req)
+      return transient_mr_verdict(issue, state) if MrState.transient?(state)
+      return :spend unless state == 'opened' && current_pipeline_verdict(merge_req) == :recovered
+
+      log "Issue ##{issue.issue_iid}: infra failure recovered (CI green) → re-entering pipeline check"
+      :reenter
+    end
+
+    def mr_state(merge_req)
+      GitlabHelpers.field(merge_req, :state)
+    end
+
+    # A transient state is not an answer to "has the CI recovered", so it is not a
+    # `false` this pass may charge for either (Autodev #72). The test used to be
+    # `mr_open?`, i.e. `== 'opened'`, which read a mid-merge MR as "not open" and
+    # spent one of the `infra_recheck_max` attempts — the same mistake as burning
+    # the budget on an unreachable endpoint, which the rescue above exists to stop.
+    #
+    # Not re-arming is still the right answer: the row is `done` +
+    # `stagnation_pipeline`, `dispatch_infra_recheck` selects exactly that and
+    # re-enqueues it next cycle, by which time GitLab has either merged the MR or
+    # put it back to `opened`.
+    def transient_mr_verdict(issue, state)
+      log "Issue ##{issue.issue_iid}: MR !#{issue.mr_iid} is #{state} (GitLab is processing the merge), " \
+          'nothing to recheck, not spending an attempt'
+      :wait
     end
 
     # Re-classify the MR's current head pipeline. `:recovered` when it is green

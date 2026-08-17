@@ -10,7 +10,8 @@ class PollRouter
   #   triggering a full re-implementation).
   # - MR already merged → skip: the work is shipped, no point re-implementing.
   #   Clear the todo label and stay in `done`.
-  # - MR `locked` → wait: conclude nothing and re-read next cycle (Autodev #67).
+  # - MR in a transient state (`MrState::TRANSIENT_STATES` — `locked`) → wait:
+  #   conclude nothing and re-read next cycle (Autodev #67, one definition #72).
   # - Anything else (closed without merge, no MR, a state GitLab adds later) →
   #   route to `pending` for a full implementation cycle.
   #
@@ -40,22 +41,29 @@ class PollRouter
     # short-circuits to `:skip_merged` so we don't re-clone, re-implement, and
     # re-push a branch whose content is already in target.
     #
-    # `locked` is separated from the `else` on purpose: it is GitLab's transient
-    # state while a merge is in flight, so the MR is very likely `merged` a second
-    # later, and the `else` branch would clone and re-implement over work that is
-    # about to land. It is a wait, not a verdict — the same distinction the poll
-    # makes between "the pipeline is still running" and "the pipeline failed".
+    # A transient state is separated from the `else` on purpose: `locked` is
+    # GitLab's state while a merge is in flight, so the MR is very likely `merged`
+    # a second later, and the `else` branch would clone and re-implement over work
+    # that is about to land. It is a wait, not a verdict — the same distinction the
+    # poll makes between "the pipeline is still running" and "the pipeline failed".
     # `:reimplementation` stays the answer for a state that really is unknown.
+    #
+    # Which states are transient is `MrState`'s to say (Autodev #72). This used to
+    # be `when 'locked' then :wait`, written by hand one ticket after Autodev #69
+    # had put that list in one place so widening the door would be a decision:
+    # a second copy, free to diverge, and adding a state to the list would not have
+    # reached the reentry path. What stays this reader's own is the destination.
     def reenter_destination(existing)
       return :reimplementation unless existing.mr_iid
 
       mr = GitlabHelpers.answer(:merge_request) do
         @route_client.merge_request(@project_path, existing.mr_iid)
       end
+      return :wait if MrState.transient?(mr.state)
+
       case mr.state
       when 'opened' then open_mr_destination(existing)
       when 'merged' then :skip_merged
-      when 'locked' then :wait
       else               :reimplementation
       end
     end

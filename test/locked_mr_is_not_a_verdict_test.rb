@@ -252,7 +252,12 @@ class LockedMrIsNotAVerdictTest < Minitest::Test
   # decision. `locked` is the only one of GitLab's four states that carries no
   # verdict; `all` in the GraphQL `MergeRequestState` enum is a filter value the
   # API never returns for a single MR.
+  #
+  # It lives in `MrState` since Autodev #72, not in `PipelineMonitor::MrStateChecker`:
+  # three other readers of `mr.state` could not reach it there and each answered
+  # the question again. `test/mr_state_is_one_definition_test.rb` is the file that
+  # checks all four go through it.
   def test_only_gitlabs_transitional_state_is_treated_as_a_wait
-    assert_equal %w[locked], PipelineMonitor::MrStateChecker::TRANSIENT_MR_STATES
+    assert_equal %w[locked], MrState::TRANSIENT_STATES
   end
 end

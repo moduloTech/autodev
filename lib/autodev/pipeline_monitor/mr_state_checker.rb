@@ -21,42 +21,24 @@ class PipelineMonitor
   # Autodev #69 took one state back out of that sort: `locked`. The predicate
   # stayed "was this delivered" and the default stayed the abandon point — the
   # change is that a state GitLab documents as *transitional* is no longer read as
-  # a conclusion at all.
+  # a conclusion at all. Which states those are is `MrState`'s to say since
+  # Autodev #72; see the comment there for why the list moved out of this module.
   module MrStateChecker
-    # GitLab's merge request state machine declares exactly four states —
-    # `opened`, `closed`, `merged`, `locked` (`app/models/merge_request.rb`,
-    # `state_machine :state_id`, states + `lock_mr` / `unlock_mr` /
-    # `mark_as_merged` events). The GraphQL `MergeRequestState` enum adds only
-    # `all`, which is a filter value the API never returns for a single MR.
-    #
-    # `locked` is the only one of the four that carries no verdict.
-    # `MergeRequests::MergeService#execute` wraps the whole merge in
-    # `merge_request.in_locked_state`, so the state is entered from `opened` and
-    # left either for `merged` (the merge went through) or back for `opened` (it
-    # did not). GitLab's own REST reference says as much: "Searching by `locked`
-    # generally returns no results as that state is short-lived and transitional."
-    #
-    # It therefore belongs with `RUNNING_STATUSES`, not with `closed`: a poll that
-    # lands in that window has to come back later. Read as a conclusion, it
-    # abandoned an MR in the middle of being delivered — a public comment saying it
-    # had been closed without being merged, which was false, the ticket handed back
-    # to its author, `needs_attention`, and no end label. Recoverable by hand
-    # (reposing the todo label and reassigning autodev re-enters through
-    # `PollRouter::ResumeHandler#reenter_destination`), but only once somebody has
-    # worked out that the comment lies.
-    #
-    # An allow-list on purpose. Anything GitLab adds tomorrow is *unknown*, not
-    # transitional, and keeps going to the abandon point (Autodev #66): erring
-    # towards "a human should look" is recoverable, erring towards "ready for
-    # feature review" is not.
-    TRANSIENT_MR_STATES = %w[locked].freeze
-
     private
 
     # `opened` and the transient states are the two ways a poll keeps the watch;
     # every other state is an ending, including one nobody has seen yet.
+    #
+    # The list of transient states is `MrState`'s, not this module's (Autodev
+    # #72). It was declared here by Autodev #69 and three other readers — the
+    # reentry decision, the infra recheck, the post-completion hook — could not
+    # reach it, so each answered the question again and none of them the same way.
+    # For a `locked` MR that meant: no verdict here, a wait on reentry, a spent
+    # recheck attempt, and a deploy. `MrState.transient?` is now the one door;
+    # what this reader still owns is the decision — for the pipeline watch, a
+    # transient state means the row stays where it is.
     def mr_state_concluded?(state)
-      state != 'opened' && !TRANSIENT_MR_STATES.include?(state)
+      state != 'opened' && !MrState.transient?(state)
     end
 
     # Nothing to conclude, and nothing to read either: the head pipeline of an MR
