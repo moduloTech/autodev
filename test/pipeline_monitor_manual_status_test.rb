@@ -20,8 +20,8 @@ class PipelineMonitorManualStatusTest < Minitest::Test
 
   # Gitlab::Error::ResponseError builds its message from the real HTTP response
   # (code, parsed_response, request.base_uri + path); this is the minimum
-  # surface it reads. The rescue in fetch_pipeline_jobs is narrow, so a plain
-  # Gitlab::Error::Error would not exercise it.
+  # surface it reads. The rescue behind the read (`GitlabHelpers.answer`) is
+  # narrow, so a plain Gitlab::Error::Error would not exercise it.
   FakeRequest = Struct.new(:base_uri, :path)
   FakeResponse = Struct.new(:parsed_response, :code, :request)
 
@@ -153,9 +153,18 @@ class PipelineMonitorManualStatusTest < Minitest::Test
 
   # The one that must never regress: an API failure must not read as
   # "nothing failed → deliver".
+  #
+  # Since Autodev #62 the failure is not a return value at all — `fetch_pipeline_jobs`
+  # raises `ApiUnavailableError` and the poll ends at `check`'s boundary rescue.
+  # Asserting on the raise rather than on a nil answer is the point: there is no
+  # substitute left for this or any future caller to forget to check.
   def test_an_unreachable_jobs_endpoint_delivers_nothing
-    sink, = dispatch(client: StubClient.new(raise_error: true))
+    client = StubClient.new(raise_error: true)
+    m, sink = monitor(client: client)
 
+    assert_raises(ApiUnavailableError) do
+      m.send(:dispatch_status, FakeIssue.new(15_894, 11_154), FakePipeline.new(215_229, 'manual'))
+    end
     assert_empty sink[:green]
     assert_empty sink[:red]
   end

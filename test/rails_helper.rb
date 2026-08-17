@@ -7,61 +7,23 @@
 # Rails into those test files would force-load ActiveRecord, AASM-on-AR
 # adapters, etc., for no gain.
 #
-# AUTODEV_SKIP_LEGACY=1 short-circuits config/initializers/legacy_sinatra.rb
-# so `Object.const_set(:Issue, ...)` (the Sequel side) does NOT fire — which
-# means AR tests live in a pure-Rails world with the Issue / ActivityEvent
-# constants undefined. That is fine for step-2 models (User, Project,
-# ProjectAppCommand, ProjectMembership); when Issue moves to AR in phase C,
-# the legacy initializer + this guard come down together.
+# AUTODEV_SKIP_LEGACY=1 keeps config/initializers/load_autodev_config.rb from
+# reading the developer's real `~/.autodev/config.yml` into `Web.config` — a real
+# GitLab token, a real project list, and a `ConfigError` when the file is absent.
+# That is all the flag does. It deliberately no longer skips the initializer's
+# `require_relative '../../lib/autodev'`, which is the only thing that defines
+# the `lib/` constants `app/` reaches for (`Locales`, `GitlabHelpers`, `Redactor`,
+# `NumericSettings`, `Config`, `PipelineMonitor`, …) — `lib/` is off the Zeitwerk
+# autoload path. This file used to carry nine ad-hoc `require`s for that reason,
+# added one at a time as each new test file tripped over the gap; the whole tree
+# now loads once, at boot, for every environment (Autodev #64). Nothing has to be
+# added here when a test needs a `lib/` constant. `test/rails_lib_loading_test.rb`
+# is the guard.
 
 ENV['RAILS_ENV'] ||= 'test'
 ENV['AUTODEV_SKIP_LEGACY'] = '1'
 
 require_relative '../config/environment'
-
-# AUTODEV_SKIP_LEGACY=1 also short-circuits config/initializers/load_autodev_config.rb,
-# which is what normally requires `lib/autodev` (and transitively `autodev/locales`).
-# The web Phlex views call `t_web` → `Locales.t` whenever they render through
-# the shared sidebar/topbar, so they crash with `NameError (uninitialized
-# constant Web::I18nHelpers::Locales)` in the test environment unless we wire
-# the dependency up by hand. Pull in only what the views need — not the full
-# lib/autodev tree (which would drag in Sequel-era modules).
-require 'autodev/locales'
-# `NumericSettings` (lib/autodev) carries the type + range declaration every
-# numeric per-project column is validated against (Autodev #58), so the Project
-# model needs it defined — same AUTODEV_SKIP_LEGACY gap as the requires around it.
-require 'autodev/numeric_settings'
-require 'autodev/config'
-# `Autodev::DeployReview` (app/services) calls `GitlabHelpers.field` /
-# `.build_gitlab_client`, but GitlabHelpers lives in lib/autodev (required at
-# boot via lib/autodev.rb, which AUTODEV_SKIP_LEGACY=1 skips). Without this
-# require its unit test only passed by accident when another file had already
-# loaded the constant — run in isolation every probe degraded to :error
-# (NameError: uninitialized constant …::GitlabHelpers). Light dep (just 'time').
-require 'autodev/gitlab_helpers'
-# `Web::Helpers#screenshot_dir_for` (called by IssueShow's screenshots card)
-# references top-level `ScreenshotUploader`, which lives under lib/autodev and
-# is only pulled in by test_helper.rb's Sequel-side boot, not this one — same
-# class of gap as GitlabHelpers above. Without this require, the first
-# controller test to render a fully authenticated issue#show page run in
-# isolation raises `NameError: uninitialized constant Web::Helpers::ScreenshotUploader`.
-require 'autodev/screenshot_uploader'
-# `IssueShow` scrubs the two captured streams and the raw-data JSON through
-# top-level `Redactor` before rendering them (Autodev #59) — third instance of
-# the same gap. In production `config/initializers/load_autodev_config.rb`
-# requires `lib/autodev` at boot, which pulls it in; under AUTODEV_SKIP_LEGACY=1
-# that initializer returns early, so a controller test rendering issue#show in
-# isolation raised `NameError: uninitialized constant Web::Views::IssueShow::Redactor`
-# (it only passed under `rake test` because another file's helper had loaded it).
-require 'autodev/redactor'
-
-# `ConfigValidator` and the error it raises — fourth instance of the same gap. It
-# is the boot-time refusal for a bad numeric global, including the `monitoring:`
-# block, so a test that exercises that refusal has to be able to name both under
-# AUTODEV_SKIP_LEGACY=1.
-require 'autodev/errors'
-require 'autodev/errors/config_error'
-require 'autodev/config_validator'
 
 require 'minitest/autorun'
 require 'active_support/test_case'

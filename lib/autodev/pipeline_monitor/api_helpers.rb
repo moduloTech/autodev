@@ -5,42 +5,33 @@ class PipelineMonitor
   module ApiHelpers
     private
 
-    # The pipeline's full job list, or nil when GitLab could not be reached.
+    # The pipeline's full job list. There is no return value for "GitLab did not
+    # answer" — the read raises `ApiUnavailableError` and the poll ends at
+    # `check`'s boundary rescue with the row untouched (Autodev #62).
     #
-    # nil, not [] — the distinction is the whole safety of the `manual` path
-    # (Autodev #51): [] means "this pipeline genuinely has no jobs" and reads as
-    # green, so an API error swallowed into [] would deliver a ticket nobody
-    # verified. fetch_failed_jobs below can afford `[]` because its caller
-    # already knows the pipeline is red.
+    # This used to return nil while `fetch_failed_jobs` returned `[]`, and the
+    # comment here had to explain which caller could afford which substitute: nil
+    # because `dispatch_blocked` reads an empty job list as green (Autodev #51),
+    # `[]` because `handle_red`'s caller "already knows the pipeline is red". The
+    # second half was wrong — `handle_red` reads `[]` as `handle_no_failed_jobs`
+    # and `InfraRecheck` reads it as `:recovered` — which is the whole of Autodev
+    # #62's constat 2. Neither substitute exists now, so no caller has to be told
+    # which one it got.
     #
-    # per_page: 100 without auto_paginate, matching fetch_failed_jobs and
-    # DeployReview#find_deploy_review_job: no configured project has a
-    # >100-job pipeline, and the three call sites should move together if one
-    # appears.
+    # per_page: 100 without auto_paginate, matching
+    # DeployReview#find_deploy_review_job: no configured project has a >100-job
+    # pipeline, and the two call sites should move together if one appears.
     def fetch_pipeline_jobs(pipeline)
-      @client.pipeline_jobs(@project_path, pipeline_id(pipeline), per_page: 100)
-    rescue Gitlab::Error::ResponseError => e
-      job_fetch_failed(e)
-      nil
+      GitlabHelpers.answer(:pipeline_jobs) do
+        @client.pipeline_jobs(@project_path, pipeline_id(pipeline), per_page: 100)
+      end
     end
 
+    # A filter over the list above rather than a second read of the same
+    # endpoint: one place fetches a pipeline's jobs, so there is one place where
+    # the failure of that fetch has to be got right.
     def fetch_failed_jobs(pipeline)
-      pid = pipeline_id(pipeline)
-      jobs = @client.pipeline_jobs(@project_path, pid, per_page: 100)
-      jobs.select { |j| failed_not_allowed?(j) }
-    rescue Gitlab::Error::ResponseError => e
-      job_fetch_failed(e)
-      []
-    end
-
-    # Both fetchers answer an API error with a value their callers cannot tell
-    # apart from a real answer — nil is explicit, `[]` is read as "nothing
-    # failed". Either way the poll then ends without concluding anything, so it
-    # also raises the flag the age bound reads (Autodev #56): a transient GitLab
-    # error must never be the reason a 14-day-old ticket is given up.
-    def job_fetch_failed(error)
-      log_error "Failed to fetch pipeline jobs: #{error.message}"
-      poll_inconclusive!(:pipeline_jobs_unavailable)
+      fetch_pipeline_jobs(pipeline).select { |j| failed_not_allowed?(j) }
     end
 
     def failed_not_allowed?(job)
@@ -49,27 +40,19 @@ class PipelineMonitor
       status == 'failed' && !allow
     end
 
+    # The one read on this path that is still allowed to answer with a substitute
+    # (Autodev #62), and the reasons are specific to it: the substitute names
+    # itself in the value ("(trace unavailable: …)"), it is written into a log
+    # file for a human or for Claude to read as prose rather than compared
+    # against anything, and one unreadable trace must not abandon the fix of the
+    # four jobs whose traces did arrive. `test/api_failure_is_not_a_verdict_test.rb`
+    # holds that exemption explicitly, next to the rule.
     def fetch_job_trace(job)
       jid = GitlabHelpers.field(job, :id)
       @client.job_trace(@project_path, jid).to_s
     rescue Gitlab::Error::ResponseError => e
       log_error "Failed to fetch job trace: #{e.message}"
       "(trace unavailable: #{e.message})"
-    end
-
-    def fetch_unresolved_discussions(mr_iid)
-      discussions = @client.merge_request_discussions(@project_path, mr_iid, per_page: 100).auto_paginate
-      discussions.select { |d| d.notes&.any? && !resolved?(d) }
-    rescue Gitlab::Error::ResponseError => e
-      log_error "Failed to fetch MR discussions: #{e.message}"
-      []
-    end
-
-    def resolved?(discussion)
-      resolvable = discussion.notes.select { |n| n.respond_to?(:resolvable) && n.resolvable }
-      return true if resolvable.empty?
-
-      resolvable.all? { |n| n.respond_to?(:resolved) && n.resolved }
     end
 
     def pipeline_id(pipeline)

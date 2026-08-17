@@ -40,6 +40,32 @@ class ConfigValidateLabelsTest < Minitest::Test
     assert_raises(ConfigError) { Config.validate!(config) }
   end
 
+  # The optional fourth label (Autodev #63). Optional, so its absence is not a
+  # partial workflow — but blank is a typo, and setting it without the three
+  # required ones configures nothing.
+  def test_label_attention_is_optional
+    config = base_config([{
+                           'path' => 'g/p', 'labels_todo' => ['todo'],
+                           'label_doing' => 'doing', 'label_done' => 'mr',
+                           'label_attention' => 'attention'
+                         }])
+    Config.validate!(config)
+  end
+
+  def test_label_attention_empty_string_raises
+    config = base_config([{
+                           'path' => 'g/p', 'labels_todo' => ['todo'],
+                           'label_doing' => 'doing', 'label_done' => 'mr',
+                           'label_attention' => '  '
+                         }])
+    assert_raises(ConfigError) { Config.validate!(config) }
+  end
+
+  def test_label_attention_without_the_workflow_raises
+    config = base_config([{ 'path' => 'g/p', 'label_attention' => 'attention' }])
+    assert_raises(ConfigError) { Config.validate!(config) }
+  end
+
   def test_no_label_fields_passes
     config = base_config([{ 'path' => 'g/p' }])
     Config.validate!(config)

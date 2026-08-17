@@ -20,6 +20,27 @@ module GitlabHelpers
     obj[name.to_sym]
   end
 
+  # The single conversion point from "GitLab did not answer" to "this unit of
+  # work cannot conclude" (Autodev #62). Wrap a read whose value a caller will
+  # act on:
+  #
+  #   GitlabHelpers.answer(:pipeline_jobs) { @client.pipeline_jobs(path, id) }
+  #
+  # There is deliberately no variant that returns a fallback. The rule this
+  # encodes is that a failed read has no representation as data — see
+  # `ApiUnavailableError` for why the neutral values it replaces were worse than
+  # the outage they hid. A *write* whose failure is not a verdict (retrigger a
+  # pipeline, resolve a thread) is a different case and does not belong here.
+  #
+  # A read left bare, with no rescue at all, already behaves correctly: the
+  # `Gitlab::Error::ResponseError` reaches the same boundary rescue. This wrapper
+  # only adds the name of the endpoint to the log line.
+  def answer(what)
+    yield
+  rescue Gitlab::Error::ResponseError => e
+    raise ApiUnavailableError.new(what, e)
+  end
+
   def build_gitlab_client(gitlab_url, token)
     unless token
       raise ConfigError,
@@ -51,8 +72,15 @@ module GitlabHelpers
     end
   end
 
+  # The prompt context is a read like any other (Autodev #67). It used to be the
+  # one exception on the #62 rule's own tree: `client.issue` bare, under the
+  # `rescue StandardError` of `attempt_fix` / `execute_fix_cycle`, so a GitLab
+  # blip while assembling a prompt was charged to the correction — `error`, a
+  # comment blaming the fix, a retry spent. Wrapped, it raises and the poll ends
+  # at its own boundary with the row untouched, exactly like the failed-job list
+  # and the unresolved-thread list above it.
   def fetch_issue_context(client, project_path, issue_iid, **opts)
-    issue = client.issue(project_path, issue_iid)
+    issue = answer(:issue) { client.issue(project_path, issue_iid) }
     img_opts = ImageDownloader.download_opts(opts, project_path)
 
     lines = IssueFormatter.build_header(issue, img_opts)
@@ -63,16 +91,22 @@ module GitlabHelpers
   end
 
   # Fetch all MR discussions (resolved and unresolved) formatted as markdown.
+  #
+  # `''` used to stand in for a failed read (Autodev #67 removed it): the review
+  # history is the substance of a fix prompt, and an empty section is
+  # indistinguishable from an MR nobody has commented on. The one caller that
+  # needs this — `fetch_full_context` — is now all-or-nothing: it either produces
+  # the real context or aborts the unit of work.
   def fetch_mr_discussions_context(client, project_path, mr_iid)
-    discussions = client.merge_request_discussions(project_path, mr_iid, per_page: 100).auto_paginate
+    discussions = answer(:mr_discussions_context) do
+      client.merge_request_discussions(project_path, mr_iid, per_page: 100).auto_paginate
+    end
     return '' if discussions.empty?
 
     lines = ['## MR Discussions', '']
     discussions.each { |d| DiscussionFormatter.format(lines, d) }
 
     lines.join("\n")
-  rescue Gitlab::Error::ResponseError
-    ''
   end
 
   # Fetch full context: issue (title, body, comments) + MR discussions (if mr_iid provided).
@@ -118,18 +152,28 @@ module GitlabHelpers
   # True when a human (not autodev, not a system note) posted a comment on the
   # issue strictly after `since`. Used both to detect a clarification answer and
   # to detect recette-KO feedback left on a delivered ticket (bug #32).
+  #
+  # It used to answer an API error with `false`, i.e. "nobody replied" (Autodev
+  # #67). At one of its two call sites that is a verdict: `open_mr_destination`
+  # turns `false` into `:pipeline_check`, the path that never reads issue
+  # comments, so the identical MR is re-delivered and the human's feedback is
+  # never seen — the exact bug #32 this predicate exists to prevent. `false` is
+  # returned only for a question that was not asked (`since` nil); a question
+  # GitLab did not answer raises, and each caller decides at its own boundary.
   def human_comment_since?(client, project_path, issue_iid, since)
     return false unless since
 
     threshold = since.is_a?(Time) ? since : Time.parse(since.to_s)
-    notes = client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
-    notes.any? do |note|
-      !note.system &&
-        Time.parse(note.created_at.to_s) > threshold &&
-        !note.body.to_s.include?('**autodev**')
+    notes = answer(:issue_notes) do
+      client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
     end
-  rescue Gitlab::Error::ResponseError
-    false
+    notes.any? { |note| human_note_after?(note, threshold) }
+  end
+
+  def human_note_after?(note, threshold)
+    !note.system &&
+      Time.parse(note.created_at.to_s) > threshold &&
+      !note.body.to_s.include?('**autodev**')
   end
 
   # Image downloading helpers.
@@ -272,16 +316,22 @@ module GitlabHelpers
     end
 
     # Append user comments to the lines array.
+    #
+    # The rescue that used to make this "non-fatal" went with Autodev #67. A
+    # ticket's comments are not decoration: bug #32 is the case where the whole
+    # instruction ("la recette est KO, il manque X") lives in a comment posted
+    # after the first delivery, and a prompt silently missing them reads as a
+    # ticket nobody commented on. Same endpoint, same rule as `human_comment_since?`.
     def append_comments(lines, client, project_path, issue_iid, img_opts)
-      notes = client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
+      notes = GitlabHelpers.answer(:issue_notes) do
+        client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
+      end
       user_notes = notes.reject { |n| n.system || n.body.to_s.include?('**autodev**') }
       return unless user_notes.any?
 
       lines << '## Comments'
       lines << ''
       user_notes.each { |note| append_single_comment(lines, note, img_opts) }
-    rescue Gitlab::Error::ResponseError
-      # Non-fatal: proceed without comments
     end
 
     # Format and append a single comment note.
@@ -292,6 +342,13 @@ module GitlabHelpers
     end
 
     # Append related issue links to the lines array.
+    #
+    # The one swallow left in `fetch_full_context`'s subtree, and deliberately
+    # (Autodev #67): this rescue exists for a *capability* gap, not an outage —
+    # the endpoint is absent on older GitLab, which is what the `NoMethodError`
+    # clause is about, and there is no way to ask "do you support this" other
+    # than calling it. The substitute removes a list of sibling ticket titles
+    # from a prompt; it answers no question and decides nothing.
     def append_links(lines, client, project_path, issue_iid)
       links = client.issue_links(project_path, issue_iid)
       return unless links.any?

@@ -2,36 +2,14 @@
 
 require_relative '../rails_helper'
 
-# AUTODEV_SKIP_LEGACY=1 (set in rails_helper) prevents the legacy_sinatra
-# initializer from loading lib/autodev — and we deliberately don't load it
-# here either, because that would pull in pastel/sequel/etc. and collide
-# with `test/stub_autodev.rb`'s constants when rake test runs both halves
-# of the suite in one process. Stub the legacy collaborators referenced by
-# the job at the top-level constant so `Klass.stub(...)` resolves.
-unless defined?(Config)
-  config_stub = Module.new
-  config_stub.define_singleton_method(:load) { |*| {} }
-  config_stub.define_singleton_method(:label_workflow?) { |_| false }
-  Object.const_set(:Config, config_stub)
-end
-Object.const_set(:Issue, Class.new { def self.where(**); end }) unless defined?(Issue)
-unless defined?(GitlabHelpers)
-  helper_stub = Module.new
-  helper_stub.define_singleton_method(:build_gitlab_client) { |*| nil }
-  Object.const_set(:GitlabHelpers, helper_stub)
-end
-%i[IssueProcessor PipelineMonitor MrFixer].each do |name|
-  next if Object.const_defined?(name)
-
-  Object.const_set(name, Class.new { def self.new(**); end })
-end
-unless defined?(ActivityLogger)
-  activity_stub = Module.new
-  activity_stub.define_singleton_method(:post) { |*| nil }
-  activity_stub.const_set(:Ctx, Class.new { def initialize(*); end })
-  Object.const_set(:ActivityLogger, activity_stub)
-end
-
+# This file used to define top-level stand-ins for the collaborators the job
+# reaches (`Config`, `Issue`, `GitlabHelpers`, the three workflow classes,
+# `ActivityLogger`), guarded by `unless defined?`, because AUTODEV_SKIP_LEGACY
+# kept `lib/autodev` out of the AR test world. Since Autodev #64 the whole tree
+# is required at boot, so every one of those guards was false and the stubs were
+# never installed: the tests below exercise the real constants and stub the
+# calls they make, one by one, with `.stub`. Nothing here needs to define them.
+#
 # Wiring test for IssueProcessJob — verifies each :action symbol routes to
 # the right legacy worker without going through GitLab or Sequel for real.
 # The job's value is the dispatch table; the per-action workers themselves

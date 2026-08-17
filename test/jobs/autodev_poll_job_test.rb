@@ -2,15 +2,11 @@
 
 require_relative '../rails_helper'
 
-# AUTODEV_SKIP_LEGACY=1 (set in rails_helper) prevents the legacy_sinatra
-# initializer from loading lib/autodev — and we deliberately don't load it
-# here either, because that would pull in pastel/sequel/etc. and collide
-# with `test/stub_autodev.rb`'s constants when rake test runs both halves
-# of the suite in one process. We define the bare minimum stubs the job
-# touches at the top-level so `Config.stub(...)` / `UsageChecker.stub(...)`
-# resolve.
-Object.const_set(:Config, Module.new { def self.load(*) = {} }) unless defined?(Config)
-Object.const_set(:UsageChecker, Class.new { def self.new(**); end }) unless defined?(UsageChecker)
+# `Config` and `UsageChecker` used to be stubbed here, guarded by
+# `unless defined?`, because AUTODEV_SKIP_LEGACY kept `lib/autodev` out of the AR
+# test world. Since Autodev #64 the tree is required at boot, so both guards were
+# false and the stubs never installed — the tests below already ran against the
+# real constants, stubbing the two calls they make.
 
 # Wiring test for AutodevPollJob. The job's contract is intentionally thin
 # (load config → probe the Claude quota → instantiate one PollDispatcher per

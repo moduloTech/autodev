@@ -67,6 +67,7 @@ class PipelineMonitorInfraStagnationTest < Minitest::Test
   def stub_boundaries(mon, sink)
     mon.define_singleton_method(:log) { |*| nil }
     mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
+    mon.define_singleton_method(:apply_label_attention) { |*| nil }
     mon.define_singleton_method(:apply_label_done) { |*| nil }
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
     mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }

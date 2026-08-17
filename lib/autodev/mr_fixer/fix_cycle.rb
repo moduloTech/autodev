@@ -12,17 +12,22 @@ class MrFixer
 
     private
 
+    # Sibling of `FailureHandler#attempt_fix`, and the same exception (Autodev
+    # #67): the clone, the rebase, danger-claude and the push are genuinely this
+    # round's failures, but the prompt-context read underneath
+    # `prepare_fix_environment` is not. It travels to `MrFixer#fix`, which leaves
+    # the row in `fixing_discussions` for `dispatch_discussions` to re-enqueue.
     def execute_fix_cycle(issue, discussions)
       work_dir = "/tmp/autodev_mrfix_#{@project_path.gsub('/', '_')}_#{issue.issue_iid}"
-      begin
-        run_fix_cycle(issue, discussions, work_dir)
-      rescue RateLimitError => e
-        handle_rate_limit(issue, e)
-      rescue StandardError => e
-        handle_fix_error(issue, e)
-      ensure
-        FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
-      end
+      run_fix_cycle(issue, discussions, work_dir)
+    rescue ApiUnavailableError
+      raise
+    rescue RateLimitError => e
+      handle_rate_limit(issue, e)
+    rescue StandardError => e
+      handle_fix_error(issue, e)
+    ensure
+      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
     end
 
     def run_fix_cycle(issue, discussions, work_dir)
@@ -40,12 +45,15 @@ class MrFixer
       finalize_success(issue, discussions)
     end
 
+    # The GitLab read first, the local work after: the read is the only step here
+    # that can abort the round (Autodev #67), so there is no point writing skills
+    # into a clone we are about to delete.
     def prepare_fix_environment(work_dir, iid, mr_iid)
-      skills_result = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
       full_context = GitlabHelpers.fetch_full_context(
         @client, @project_path, iid,
         mr_iid: mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir
       )
+      skills_result = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
       build_fix_env(skills_result, full_context, work_dir, iid)
     end
 

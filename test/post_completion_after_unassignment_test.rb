@@ -125,10 +125,13 @@ class PostCompletionAfterUnassignmentTest < Minitest::Test
   # to be excluded only by the accident of still being assigned to autodev. The
   # hook is a *delivery* hook (the whole point of #52's `closed`), so an abandoned
   # MR must not be deployed. `needs_attention` is exactly the discriminator: no
-  # nominal completion path sets it, and all five give-up paths do.
+  # nominal completion path sets it, and all six give-up paths do — including the
+  # one Autodev #66 added, which is the only one that used to reach this pass for
+  # real: an MR closed without merging was left unflagged, so a rejected MR was in
+  # the deploy population by construction.
   def test_an_abandoned_row_is_not_sent_to_post_completion
     %w[stagnation_pipeline stagnation_discussions pipeline_watch_expired
-       review_limit_reached review_failures_exhausted].each do |reason|
+       review_limit_reached review_failures_exhausted mr_closed_unmerged].each do |reason|
       create_issue(status: 'done', mr_iid: 42, needs_attention: true, attention_reason: reason)
     end
 

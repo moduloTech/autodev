@@ -150,6 +150,7 @@ fr:
   web_locale_en: Anglais
   web_event_kind_transition: Transition
   web_event_kind_danger_claude: Activité
+  web_event_kind_discussions_snapshot: Relevé des retours
   web_issue_post_completion_error: Erreur post-completion
   web_issue_actions: Actions
   web_issue_reset: Réinitialiser
@@ -194,6 +195,7 @@ fr:
   web_event_review_giveup: Abandonner la relecture
   web_event_pipeline_failed_code: Tests en échec (code à corriger)
   web_event_mr_closed: Demande de fusion fermée
+  web_event_abandon: Abandon de la demande
   web_event_discussions_fixed: Retours de relecture appliqués
   web_event_pipeline_fix_done: Tests corrigés
   web_event_clarification_received: Précision reçue
@@ -231,6 +233,7 @@ fr:
   web_errors_explain_attention_stagnation_pipeline: La pipeline a échoué de façon répétée sur les mêmes jobs malgré les corrections. La demande est marquée livrée mais la MR nécessite une intervention manuelle.
   web_errors_explain_attention_stagnation_discussions: Les mêmes discussions sont restées non résolues malgré les corrections. La demande est marquée livrée mais la MR nécessite une intervention manuelle.
   web_errors_explain_attention_pipeline_watch_expired: "Autodev a surveillé la pipeline de cette demande pendant des semaines sans jamais pouvoir conclure (jamais verte, jamais rouge exploitable — attente manuelle, annulation, blocage). Il a arrêté de la surveiller. La MR reste ouverte : vérifiez la pipeline sur GitLab, ou fermez la demande si elle n'est plus d'actualité."
+  web_errors_explain_attention_mr_closed_unmerged: "La merge request a été fermée sans être fusionnée : rien n'a été livré et Autodev a arrêté de suivre la demande. La demande vous est rendue — décidez si le travail doit être repris (remettez le label de départ et réassignez Autodev) ou si la demande n'est plus d'actualité."
   web_errors_explain_attention_dormant_exhausted: La demande ne progresse plus et les vérifications automatiques n'ont pas permis de la relancer. Elle reste en l'état — vérifiez sur GitLab si elle est toujours d'actualité.
   web_errors_attention_detail: "Job(s) en cause : %{detail}"
   web_errors_show_technical: Afficher les détails techniques
@@ -287,6 +290,7 @@ fr:
   web_project_edit_desc_labels_todo: Labels GitLab qui déclenchent le traitement par Autodev. Une entrée par ligne ; requis avec label_doing et label_done.
   web_project_edit_desc_label_doing: Label posé sur l'issue pendant tout le traitement. Requis avec labels_todo et label_done.
   web_project_edit_desc_label_done: Label posé quand l'issue est livrée (état done). Requis avec labels_todo et label_doing.
+  web_project_edit_desc_label_attention: "Label posé quand Autodev abandonne la demande (stagnation, surveillance expirée, limite de review, mr-review en échec) : la demande n'est pas livrée et attend une intervention. Optionnel ; à choisir dans le même scope que label_doing / label_done. Défaut : aucun label de fin n'est posé, la demande reste sur label_doing."
   web_project_edit_desc_extra_prompt: "Instructions supplémentaires injectées dans les prompts danger-claude. Défaut : aucune."
   web_project_edit_desc_dc_timeout: Délai maximum d'un appel danger-claude, en secondes.
   web_project_edit_desc_max_retries: Nombre maximum de tentatives sur une issue en cas d'échec.

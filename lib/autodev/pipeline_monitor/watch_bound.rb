@@ -17,13 +17,22 @@ class PipelineMonitor
   # transition (`issues.checking_pipeline_since`) — and gives the ticket up past
   # `pipeline_watch_max_days`.
   #
-  # It is not blind to whether the poll read anything at all (Autodev #56). Three
-  # paths end a poll normally having concluded nothing — a job fetch that
-  # swallowed a GitLab error, and the two Claude-quota deferrals — and an
+  # It is not blind to whether the poll read anything at all (Autodev #56). An
   # infrastructure failure must never be the reason a ticket is given up:
-  # abandoning is terminal (status, `needs_attention`, `label_done`, a public
+  # abandoning is terminal (status, `needs_attention`, the end label, a public
   # comment) and `pipeline_watch_expired` is excluded from
   # `dispatch_infra_recheck`, so nothing re-arms the row.
+  #
+  # Two mechanisms carry that, for two different shapes of "concluded nothing":
+  #
+  #   * a GitLab read that failed **aborts the poll** with `ApiUnavailableError`
+  #     (Autodev #62). `abandon_expired_watch` is the last statement of
+  #     `poll_open_mr`, so control never reaches it — which is what #56's own spec
+  #     claimed ("check raises before reaching the call") and what Autodev #51 had
+  #     made false by rescuing inside the fetch and returning a value;
+  #   * a poll that read GitLab fine but could not act — the two Claude-quota
+  #     deferrals, and a danger-claude evaluation that never ran (Autodev #62,
+  #     constat 3) — returns normally and raises the flag below.
   module WatchBound
     private
 
@@ -50,10 +59,12 @@ class PipelineMonitor
 
     # The poll cycle's "this cycle could not conclude" flag (Autodev #56).
     #
-    # Raised by the paths that end a poll normally without having read a
-    # pipeline verdict: a GitLab error a job fetch swallowed, a Claude quota
-    # deferral. Cleared by `check` at the top of every cycle — the monitor
-    # instance is per-job, but `check` is the one place that owns a poll.
+    # Raised by the paths that end a poll **normally** without a verdict: either
+    # Claude-quota deferral, and an evaluation that could not be performed
+    # (Autodev #62). A failed GitLab read no longer needs it — it raises instead,
+    # and the abort never reaches the bound. Cleared by `check` at the top of every
+    # cycle — the monitor instance is per-job, but `check` is the one place that
+    # owns a poll.
     #
     # A flag rather than a return value threaded back from `dispatch_pipeline`:
     # that value would have to survive `dispatch_status`'s `case`,
@@ -80,7 +91,7 @@ class PipelineMonitor
           "could not conclude (#{@poll_inconclusive}), not giving up"
     end
 
-    # One of the four give-up paths, all of which now share
+    # One of the give-up paths, all of which now share
     # `IssueAbandonment#abandon_issue`: one AASM `abandon` event (so a transition
     # row, an activity-journal entry, an audit entry and the callback that clears
     # `checking_pipeline_since`) and one reassignment policy — the ticket goes back

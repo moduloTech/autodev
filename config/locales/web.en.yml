@@ -150,6 +150,7 @@ en:
   web_locale_en: English
   web_event_kind_transition: Transition
   web_event_kind_danger_claude: Activity
+  web_event_kind_discussions_snapshot: Review snapshot
   web_issue_post_completion_error: Post-completion error
   web_issue_actions: Actions
   web_issue_reset: Reset
@@ -194,6 +195,7 @@ en:
   web_event_review_giveup: Give up on review
   web_event_pipeline_failed_code: Tests failing (code to fix)
   web_event_mr_closed: Merge request closed
+  web_event_abandon: Request given up
   web_event_discussions_fixed: Review feedback applied
   web_event_pipeline_fix_done: Tests fixed
   web_event_clarification_received: Clarification received
@@ -231,6 +233,7 @@ en:
   web_errors_explain_attention_stagnation_pipeline: The pipeline kept failing on the same jobs despite fixes. The request is marked delivered but the MR needs manual intervention.
   web_errors_explain_attention_stagnation_discussions: The same discussions stayed unresolved despite fixes. The request is marked delivered but the MR needs manual intervention.
   web_errors_explain_attention_pipeline_watch_expired: "Autodev watched this request's pipeline for weeks without ever reaching a verdict (never green, never actionably red — waiting on a manual action, canceled, or blocked). It stopped watching. The MR is still open: check the pipeline on GitLab, or close the request if it is no longer relevant."
+  web_errors_explain_attention_mr_closed_unmerged: "The merge request was closed without being merged: nothing was delivered and Autodev stopped following the request. The request is handed back to you — decide whether the work should be picked up again (put the starting label back and reassign Autodev) or whether the request is no longer relevant."
   web_errors_explain_attention_dormant_exhausted: The request stopped progressing and the automatic checks could not restart it. It is left as is — check on GitLab whether it is still relevant.
   web_errors_attention_detail: "Failing job(s): %{detail}"
   web_errors_show_technical: Show technical details
@@ -287,6 +290,7 @@ en:
   web_project_edit_desc_labels_todo: GitLab labels that trigger processing by Autodev. One entry per line; required with label_doing and label_done.
   web_project_edit_desc_label_doing: Label set on the issue throughout processing. Required with labels_todo and label_done.
   web_project_edit_desc_label_done: Label set when the issue is delivered (done state). Required with labels_todo and label_doing.
+  web_project_edit_desc_label_attention: "Label set when Autodev gives the request up (stagnation, expired watch, review limit, failing mr-review): the request is not delivered and needs a human. Optional; pick a value in the same scope as label_doing / label_done. Default: no end label is set at all, the request stays on label_doing."
   web_project_edit_desc_extra_prompt: "Extra instructions injected into the danger-claude prompts. Default: none."
   web_project_edit_desc_dc_timeout: Maximum time for a single danger-claude call, in seconds.
   web_project_edit_desc_max_retries: Maximum number of attempts on an issue after a failure.

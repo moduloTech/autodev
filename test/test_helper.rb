@@ -14,11 +14,16 @@ I18n.default_locale = :en
 $LOAD_PATH.unshift File.expand_path('../lib', __dir__)
 
 # Step 2 second half: boot the Rails environment so AR `Issue` and
-# `ActivityEvent` are defined for any test that touches the DB. We still
-# want the Sinatra-stack stubs from stub_autodev.rb (Pastel + AppLogger
-# stand-ins for the CLI tests), so we set AUTODEV_SKIP_LEGACY=1 to keep
-# the legacy_sinatra initializer from re-requiring lib/autodev and
-# pulling pastel back in under a different class definition.
+# `ActivityEvent` are defined for any test that touches the DB.
+#
+# Note what this does NOT set: `AUTODEV_SKIP_LEGACY`. The comment here used to
+# claim it did, naming an initializer (`legacy_sinatra`) deleted at step 8. The
+# flag's one remaining job is to skip `Web.config = Config.load({})`, i.e. the
+# read of the developer's real `~/.autodev/config.yml` — so this half of the
+# suite does boot with that file loaded, which is a machine dependency worth
+# removing on its own (it needs an audit of every test that might lean on the
+# config, hence not here). Requiring `lib/autodev` is no longer gated by the flag
+# at all since Autodev #64: it happens at boot in every environment.
 ENV['RAILS_ENV'] ||= 'test'
 ENV['AUTODEV_SKIP_AUTO_MIGRATE'] ||= '1'
 

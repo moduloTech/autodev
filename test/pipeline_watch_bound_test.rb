@@ -63,7 +63,7 @@ class PipelineWatchBoundTest < Minitest::Test
   end
 
   def monitor(project_config: {}, config: {})
-    sink = { notify: [], activity: [], labels: [], reassigned: [] }
+    sink = { notify: [], activity: [], labels: [], done_labels: [], reassigned: [] }
     mon = PipelineMonitor.allocate
     mon.instance_variable_set(:@project_config, project_config)
     mon.instance_variable_set(:@config, config)
@@ -76,9 +76,19 @@ class PipelineWatchBoundTest < Minitest::Test
   def stub_boundaries(mon, sink)
     mon.define_singleton_method(:log) { |*| nil }
     mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
-    mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
+    stub_label_writers(mon, sink)
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
     mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
+  end
+
+  # Both end labels, in separate sinks. The end label of a give-up is
+  # `label_attention`, never `label_done` (Autodev #63): `label_done` reads "ready
+  # for feature review" on the projects concerned, and an expired watch delivered
+  # nothing. Stubbing both is what lets a regression read as a failure rather than
+  # as an empty sink.
+  def stub_label_writers(mon, sink)
+    mon.define_singleton_method(:apply_label_attention) { |iid| sink[:labels] << iid }
+    mon.define_singleton_method(:apply_label_done) { |iid| sink[:done_labels] << iid }
   end
 
   # Returns the sink; the outcome is read off the issue, which is what the
@@ -115,10 +125,14 @@ class PipelineWatchBoundTest < Minitest::Test
     assert_nil issue.checking_pipeline_since
   end
 
-  def test_giving_up_applies_the_done_label
+  # Autodev #63: the attention label, and never the done label — the ticket was
+  # not delivered, and `label_done` is what the board reads as "reviewed".
+  def test_giving_up_applies_the_attention_label_and_not_the_done_label
     issue = expired_issue
+    sink = abandon(issue)
 
-    assert_equal [15_894], abandon(issue)[:labels]
+    assert_equal [15_894], sink[:labels]
+    assert_empty sink[:done_labels]
   end
 
   # Autodev #60 aligned the three give-up paths onto one reassignment policy: an

@@ -17,14 +17,19 @@
 #     abandoned ticket on autodev is what made it invisible to everybody.
 #
 # So: one AASM event (`Issue#abandon`), one reassignment policy (always hand the
-# ticket back to its author — an abandon means a human has to pick the work up).
+# ticket back to its author — an abandon means a human has to pick the work up),
+# and since Autodev #63 one end label: `label_attention`, never `label_done`. On
+# powerpanne `label_done` is `Development::Awaiting Feature Review`, so posing it
+# on a give-up announced work as reviewed that nobody had reviewed — 28 such
+# tickets landed on the review board during the 11/08/2026 incident. A project
+# with no `label_attention` gets no end label at all and keeps `label_doing`.
 #
 # What is deliberately NOT unified is the *reason*. `attention_reason` stays
 # per-site because `PollDispatcher#dispatch_infra_recheck` selects exactly
 # `stagnation_pipeline` and re-arms the row: giving an expired watch or an
 # exhausted review budget that reason would restart tickets autodev had just given
 # up on. The GitLab comment and the activity line are keyed off the same reason
-# for the same argument — three causes that need three different sentences.
+# for the same argument — distinct causes that need distinct sentences.
 #
 # Including classes must have @client, @project_config, @project_path and @logger
 # (i.e. anything that includes DangerClaudeRunner).
@@ -56,7 +61,7 @@ module IssueAbandonment
 
     issue.update(finished_at: Time.current, needs_attention: true,
                  attention_reason: reason.to_s, attention_detail: detail)
-    apply_label_done(issue.issue_iid)
+    apply_label_attention(issue.issue_iid)
     announce_abandonment(issue, reason, vars.merge(detail: detail.to_s))
     true
   end

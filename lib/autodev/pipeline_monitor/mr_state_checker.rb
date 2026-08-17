@@ -1,18 +1,125 @@
 # frozen_string_literal: true
 
 class PipelineMonitor
-  # Detects MRs that are no longer open (merged or closed) and transitions to done.
+  # Ends the pipeline watch when the MR is no longer open — with the ending the
+  # outcome deserves (Autodev #66).
+  #
+  # `poll_open_mr` routes every state that is not `opened` here, which used to
+  # mean one ending for two opposite outcomes: the end label was posed
+  # unconditionally, the row was left unflagged, and that was that. Merged, the
+  # label is earned — the work is in the target branch. Closed without merging,
+  # nothing was delivered, and on powerpanne/core the end label is
+  # `Development::Awaiting Feature Review`: a human who rejected the work by
+  # closing its MR put the ticket on the PM's board announced as ready to review.
+  #
+  # The flag was the worse half. `needs_attention` stayed false, which is exactly
+  # the discriminator `dispatch_done_unassigned` selects on, so a rejected MR sat
+  # in the `post_completion` population — the one guard Autodev #60 put there so a
+  # deploy never runs on work autodev did not deliver. No project configures
+  # `post_completion` today, so that was a latent deploy of rejected work.
+  #
+  # Autodev #69 took one state back out of that sort: `locked`. The predicate
+  # stayed "was this delivered" and the default stayed the abandon point — the
+  # change is that a state GitLab documents as *transitional* is no longer read as
+  # a conclusion at all.
   module MrStateChecker
+    # GitLab's merge request state machine declares exactly four states —
+    # `opened`, `closed`, `merged`, `locked` (`app/models/merge_request.rb`,
+    # `state_machine :state_id`, states + `lock_mr` / `unlock_mr` /
+    # `mark_as_merged` events). The GraphQL `MergeRequestState` enum adds only
+    # `all`, which is a filter value the API never returns for a single MR.
+    #
+    # `locked` is the only one of the four that carries no verdict.
+    # `MergeRequests::MergeService#execute` wraps the whole merge in
+    # `merge_request.in_locked_state`, so the state is entered from `opened` and
+    # left either for `merged` (the merge went through) or back for `opened` (it
+    # did not). GitLab's own REST reference says as much: "Searching by `locked`
+    # generally returns no results as that state is short-lived and transitional."
+    #
+    # It therefore belongs with `RUNNING_STATUSES`, not with `closed`: a poll that
+    # lands in that window has to come back later. Read as a conclusion, it
+    # abandoned an MR in the middle of being delivered — a public comment saying it
+    # had been closed without being merged, which was false, the ticket handed back
+    # to its author, `needs_attention`, and no end label. Recoverable by hand
+    # (reposing the todo label and reassigning autodev re-enters through
+    # `PollRouter::ResumeHandler#reenter_destination`), but only once somebody has
+    # worked out that the comment lies.
+    #
+    # An allow-list on purpose. Anything GitLab adds tomorrow is *unknown*, not
+    # transitional, and keeps going to the abandon point (Autodev #66): erring
+    # towards "a human should look" is recoverable, erring towards "ready for
+    # feature review" is not.
+    TRANSIENT_MR_STATES = %w[locked].freeze
+
     private
 
+    # `opened` and the transient states are the two ways a poll keeps the watch;
+    # every other state is an ending, including one nobody has seen yet.
+    def mr_state_concluded?(state)
+      state != 'opened' && !TRANSIENT_MR_STATES.include?(state)
+    end
+
+    # Nothing to conclude, and nothing to read either: the head pipeline of an MR
+    # GitLab is merging is not the question. The row stays in `checking_pipeline`
+    # and `dispatch_pipelines` re-enqueues it next cycle.
+    #
+    # Deliberately **not** `poll_inconclusive!`. That flag means "this poll could
+    # not read a verdict" and stands the age bound down (Autodev #56) — here GitLab
+    # answered perfectly well, it answered "wait", which is exactly what a
+    # `running` pipeline does, and that path falls through to the bound. Raising it
+    # would leave an MR wedged in `locked` polling forever, the unbounded tail
+    # Autodev #53 exists to close.
+    def await_transient_mr_state(issue, state)
+      log "MR !#{issue.mr_iid} is #{state} (GitLab is processing the merge), " \
+          'nothing to conclude, staying in checking_pipeline'
+    end
+
+    # The split is on "was this delivered", not on GitLab's state vocabulary. Only
+    # `merged` is a delivery; `closed` and anything GitLab adds later are not — and
+    # `locked` never reaches here since Autodev #69, because it is not an outcome
+    # to sort.
     def handle_mr_closed(issue, merge_request)
       state = merge_request.state
       log "MR !#{issue.mr_iid} is no longer open (#{state}), skipping pipeline check"
+      return give_up_on_closed_mr(issue, state) unless state == 'merged'
+
+      finish_merged_mr(issue, state)
+    end
+
+    def finish_merged_mr(issue, state)
       apply_label_done(issue.issue_iid)
       Issue.where(id: issue.id).update_all(finished_at: Time.current)
       issue.mr_closed!
       log_activity(issue, :mr_closed, mr_state: state)
       log "Issue ##{issue.issue_iid}: MR #{state} → done"
+    end
+
+    # The sixth route to the shared abandon point (Autodev #66), and the first one
+    # that is not autodev's own verdict: a human decided. It still ends the same
+    # way every other give-up does — `label_attention` instead of the end label
+    # (and, unconfigured, no end label at all: the row keeps `label_doing`),
+    # `needs_attention` so the row leaves the `post_completion` population and
+    # shows up as needing an intervention, and the ticket handed back to its
+    # author.
+    #
+    # Handing it back although a human just acted: assignment is ownership, not
+    # notification. The person who closed the MR is not necessarily the ticket's
+    # author, and a `done` row is outside `dispatch_unassignment`'s
+    # `ACTIVE_STATUSES` sweep and outside the dormant audit's three arms — left on
+    # autodev the ticket belongs to nobody, which is the invisibility Autodev #60
+    # unified the reassignment to remove. The comment is then what explains a
+    # handback the author did not ask for.
+    #
+    # `attention_reason` is its own value, like every other give-up's:
+    # `dispatch_infra_recheck` selects exactly `stagnation_pipeline` and re-arms
+    # the row, and a closed MR is a decision, not a deferral.
+    #
+    # No `detail:` — it renders through `web_errors_attention_detail` ("Job(s) en
+    # cause : %{detail}"), so it may only carry a technical token, and there is no
+    # failing job here. The state is in the log line above.
+    def give_up_on_closed_mr(issue, state)
+      log "Issue ##{issue.issue_iid}: MR #{state} without being merged → done, needs attention"
+      abandon_issue(issue, :mr_closed_unmerged)
     end
   end
 end

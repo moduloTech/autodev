@@ -11,18 +11,28 @@ require 'autodev/pipeline_monitor'
 # enumeration of the branches that go nowhere. Its design spec then claimed a
 # GitLab outage could never trigger it: "check raises before reaching the call,
 # and the rescue logs and returns". Autodev #51, merged in parallel, made that
-# false — `fetch_pipeline_jobs` rescues the API error *internally* and returns
-# nil, so `dispatch_blocked` returns normally and control reaches the bound.
+# false — `fetch_pipeline_jobs` rescued the API error *internally* and returned
+# nil, so `dispatch_blocked` returned normally and control reached the bound.
 #
-# Three shapes end a poll normally without concluding anything:
+# Three shapes end a poll without concluding anything, and since Autodev #62 they
+# are held by two different mechanisms:
 #
 #   1. `manual` / `skipped`, jobs endpoint unreachable (Autodev #51);
-#   2. `failed`, jobs endpoint unreachable — `fetch_failed_jobs` swallows the
-#      error into `[]`, which reads as `handle_no_failed_jobs` (pre-existing);
-#   3. a Claude quota outage, on either deferral.
+#   2. `failed`, jobs endpoint unreachable — `fetch_failed_jobs` used to swallow
+#      the error into `[]`, which read as `handle_no_failed_jobs` (pre-existing);
 #
-# Giving a 14-day-old ticket up costs a terminal status, `needs_attention`, the
-# `label_done` on GitLab and a public comment — and `pipeline_watch_expired` is
+#      Both of these now **abort** the poll with `ApiUnavailableError`, so control
+#      never reaches the bound at all — #53's spec is true again by construction
+#      rather than by a flag that has to be raised at each swallowing site.
+#
+#   3. a Claude quota outage, on either deferral — the poll read GitLab fine and
+#      returns normally, so this is the case the flag still answers.
+#
+# The assertions below are the same either way: the row is left alone. They are
+# deliberately written against the outcome, not the mechanism.
+#
+# Giving a 14-day-old ticket up costs a terminal status, `needs_attention`, an
+# end label on GitLab and a public comment — and `pipeline_watch_expired` is
 # excluded from `dispatch_infra_recheck`, so nothing re-arms the row. An
 # infrastructure failure must never be the reason.
 #
@@ -138,9 +148,16 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
   # the assignee (Autodev #60), the issue comment and the activity log.
   def stub_sinks(mon, sink)
     mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
-    mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
+    stub_label_writers(mon, sink)
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
     mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
+  end
+
+  # `label_attention` since Autodev #63; both land in the same sink because what
+  # this file asserts is that an inconclusive poll writes *no* end label at all.
+  def stub_label_writers(mon, sink)
+    mon.define_singleton_method(:apply_label_attention) { |iid| sink[:labels] << iid }
+    mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
   end
 
   # Runs a whole poll through the real entry point, so the flag's lifetime (set
@@ -162,7 +179,7 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
   def assert_watch_kept(issue, sink)
     assert_equal 'checking_pipeline', issue.status, 'an inconclusive poll must leave the row alone'
     assert_empty sink[:notify], 'no give-up comment may be posted'
-    assert_empty sink[:labels], 'label_done must not be applied'
+    assert_empty sink[:labels], 'no end label must be applied'
   end
 
   # --- 1. the jobs endpoint is unreachable on a manual pipeline ------------
@@ -181,9 +198,10 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
 
   # --- 2. the jobs endpoint is unreachable on a red pipeline ---------------
 
-  # `fetch_failed_jobs` answers an API error with `[]`, which is indistinguishable
-  # from "nothing blocking failed" at the call site — so the poll logs "staying in
-  # checking_pipeline" and the bound used to fire behind it.
+  # `fetch_failed_jobs` used to answer an API error with `[]`, indistinguishable
+  # from "nothing blocking failed" at the call site — so the poll logged "staying
+  # in checking_pipeline" and the bound fired behind it. Since Autodev #62 the read
+  # raises and `handle_red` never gets a list to misread.
   def test_an_unreachable_jobs_endpoint_on_a_red_pipeline_does_not_abandon
     issue, sink = poll(status: 'failed', raise_jobs: true)
 
