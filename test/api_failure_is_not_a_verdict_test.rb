@@ -596,7 +596,12 @@ class DegradedApiValueShapeTest < Minitest::Test
       # needs the clone's work directory, for the ticket's images — so instead it
       # raises `ApiUnavailableError` and this method re-raises it above its two
       # handlers, and `dispatch_fix` performs it *before* `pipeline_failed_code!` so
-      # the abort leaves the row in `checking_pipeline`.
+      # the abort leaves the row in `checking_pipeline` — with one exception that
+      # is NOT closed: `check_stagnation_and_fix` writes the stagnation signature
+      # before `clone_and_fix`, so a selective outage on the issue endpoint still
+      # advances the counter and gives the ticket up after `stagnation_threshold`
+      # cycles. The row is therefore not untouched, and the fix is to refund or to
+      # move the count below the attempt — a behaviour change with its own ticket.
       #
       # Audited, not assumed: the GitLab traffic left under this method is
       # `retry_pipeline` and `fetch_job_trace` (both declared here) plus the label /
@@ -649,7 +654,10 @@ class DegradedApiValueShapeTest < Minitest::Test
   #     counter *before* the read, deliberately, so an unreachable project burns
   #     the cap instead of being retried forever.
   #   * `IssueProcessor` — an active row mid-flight, where "conclude nothing and
-  #     re-read next cycle" has no mechanism: no pass re-enqueues an active state.
+  #     re-read next cycle" has no mechanism: no pass selects the pre-MR states
+  #     (`cloning` … `creating_mr`). `dispatch_pipelines` and `dispatch_discussions`
+  #     do re-enqueue their own active states, which is why the two fix boundaries
+  #     above can afford to conclude nothing.
   #     `error` + `next_retry_at` is the re-arming path there, and it is bounded.
   #   * `DiscussionSnapshot` — instrumentation, which swallows everything by
   #     design so it can never break what it is instrumenting.
@@ -677,19 +685,21 @@ class DegradedApiValueShapeTest < Minitest::Test
     MSG
   end
 
-  # (c) The same rule again, without a regex, and complete rather than
-  # heuristic: `Style/RescueModifier` is enabled for this project, so RuboCop
-  # itself guarantees that *every* `expr rescue fallback` in the tree carries a
-  # `` on its line. Grepping the directive
-  # therefore enumerates the modifier forms exhaustively, and each one has to
-  # belong to a declared method.
+  # (c) The same rule again, stated without a regex: `Style/RescueModifier` is
+  # enabled for this project, so RuboCop makes every `expr rescue fallback` carry
+  # a disable comment naming that cop on its line, and grepping for it lands each
+  # modifier in a declared method. Read as a second opinion, not as a complete
+  # one: a `todo` spelling is matched below, but a *file-level* disable block has
+  # no enclosing method and slips past this assertion. The scanner above catches
+  # both forms, which is why the two live side by side.
   #
   # It exists because the modifier form is the one shape a reader is most likely
   # to reproduce by imitation — `StagnationChecker` already has one, comment
   # included, one file away from the delivery path — and because it says the rule
   # in a sentence instead of in `SwallowScanner`'s regexes. The scanner catches it
   # too; two independent statements of one rule is the point, not redundancy.
-  RESCUE_MODIFIER_DIRECTIVE = %r{rubocop:disable\s+.*Style/RescueModifier}
+  # `todo` is the same directive under another name; RuboCop honours both.
+  RESCUE_MODIFIER_DIRECTIVE = %r{rubocop:(?:disable|todo)\s+.*Style/RescueModifier}
   def test_every_inline_rescue_in_the_delivery_path_is_declared
     undeclared = scanned_files.flat_map { |rel, abs| undeclared_modifiers(rel, abs) }
 
