@@ -171,17 +171,31 @@ module Autodev
       @logger.info("[dry-run] Would process issue ##{gl_issue.iid}: #{gl_issue.title}", project: @path)
     end
 
+    # The second caller of `human_comment_since?`, and the one where the
+    # conservative answer really is "no" (Autodev #67). `false` here means the row
+    # stays in `needs_clarification`, and `dispatch_new_issues` re-reads the same
+    # question from GitLab every cycle — nothing is concluded and nothing acts, so
+    # the substitute cannot be mistaken for a verdict the way
+    # `open_mr_destination`'s could. Declared at the caller rather than hidden in
+    # the helper, so the helper has one behaviour and each boundary owns its own.
     def clarification_received?(existing, gl_issue)
       return false unless ::GitlabHelpers.clarification_answered?(
         @client, @path, gl_issue.iid, existing.clarification_requested_at
       )
 
+      requeue_after_clarification(existing, gl_issue)
+      true
+    rescue ::ApiUnavailableError => e
+      @logger.error("Issue ##{gl_issue.iid}: #{e.message} — clarification check deferred", project: @path)
+      false
+    end
+
+    def requeue_after_clarification(existing, gl_issue)
       @logger.info("Issue ##{gl_issue.iid}: clarification received, re-queuing", project: @path)
       existing.clarification_received!
       existing.update(clarification_requested_at: nil, error_message: nil)
       ::ActivityLogger.post(::ActivityLogger::Ctx.new(@client, @path, @logger),
                             existing, :clarification_received)
-      true
     end
 
     def find_or_create_issue(gl_issue)

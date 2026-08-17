@@ -43,13 +43,26 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
     end
   end
 
+  # `Gitlab::Error::ResponseError` builds its message from the real HTTP
+  # response; this is the minimum surface it reads.
+  FakeRequest = Struct.new(:base_uri, :path)
+  FakeResponse = Struct.new(:parsed_response, :code, :request)
+
+  def api_error
+    Gitlab::Error::ResponseError.new(
+      FakeResponse.new('boom', 500, FakeRequest.new('https://gitlab.example', '/api/v4/x'))
+    )
+  end
+
   class StubClient
     attr_reader :merge_request_calls, :label_calls, :label_event_calls
 
-    def initialize(mr_state:, issue_notes: [], label_events: [])
+    def initialize(mr_state:, issue_notes: [], label_events: [], mr_error: nil, notes_error: nil)
       @mr_state = mr_state
       @issue_notes = issue_notes
       @label_events = label_events
+      @mr_error = mr_error
+      @notes_error = notes_error
       @merge_request_calls = []
       @label_calls = []
       @label_event_calls = 0
@@ -62,10 +75,14 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
 
     def merge_request(project_path, mr_iid)
       @merge_request_calls << [project_path, mr_iid]
+      raise @mr_error if @mr_error
+
       FakeMr.new(@mr_state)
     end
 
     def issue_notes(_project_path, _iid, **_opts)
+      raise @notes_error if @notes_error
+
       Paginated.new(@issue_notes)
     end
 
@@ -220,6 +237,69 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
     refute_empty client.label_calls
   end
 
+  # --- the reentry decision is a read, not a guess (Autodev #67) -----------
+  #
+  # `reenter_destination` used to answer an unreadable MR state with
+  # `:reimplementation` — and that is the most expensive branch there is: full
+  # clone, danger-claude, push, on a ticket whose MR may already be merged. Same
+  # shape as the four readers #62 unpicked, and the same reason it was invisible:
+  # `:reimplementation` is a perfectly plausible destination.
+  #
+  # `route` is the boundary. One issue's routing is the unit of work, so a read
+  # that failed skips *that* issue for this cycle and `dispatch_new_issues` keeps
+  # going through the rest of the population.
+
+  def test_an_unreadable_mr_state_does_not_trigger_a_reimplementation
+    issue = done_issue_with_mr(mr_iid: 42)
+    client = StubClient.new(mr_state: 'opened', mr_error: api_error)
+
+    verdict = build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal :next, verdict
+    assert_equal 'done', issue.reload.status, 'an unread MR state must not decide the reentry path'
+    assert_empty client.label_calls, 'nothing may be announced about a reentry that did not happen'
+  end
+
+  # The recette-KO question (bug #32) is answered by an `issue_notes` read whose
+  # `false` used to mean "nobody replied". That is a verdict: it routes to
+  # `:pipeline_check`, which never reads issue comments, so the identical MR is
+  # re-delivered and the human's feedback is never seen.
+  def test_an_unreadable_issue_comment_history_does_not_decide_the_reentry_path
+    issue = done_issue_with_mr(mr_iid: 42)
+    issue.update(finished_at: Time.parse('2026-07-01T10:00:00Z'))
+    client = StubClient.new(mr_state: 'opened', notes_error: api_error)
+
+    verdict = build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal :next, verdict
+    assert_equal 'done', issue.reload.status
+  end
+
+  # `locked` is GitLab's transient state while a merge is in flight: the MR may
+  # well be `merged` a second later. Routing it to `:reimplementation` — which the
+  # `else` branch did — clones, re-implements and pushes over work that is about
+  # to land in the target branch. Nothing is concluded; the next cycle re-reads.
+  def test_a_locked_mr_waits_for_the_next_cycle
+    issue = done_issue_with_mr(mr_iid: 42)
+    client = StubClient.new(mr_state: 'locked')
+
+    verdict = build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal :next, verdict
+    assert_equal 'done', issue.reload.status
+    assert_empty client.label_calls, 'the todo label must stay on, so the next cycle re-asks'
+  end
+
+  # Control: `:reimplementation` is kept for a state that really is unknown.
+  def test_an_unknown_mr_state_still_reimplements
+    issue = done_issue_with_mr(mr_iid: 42)
+    client = StubClient.new(mr_state: 'something_gitlab_added_later')
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal 'pending', issue.reload.status
+  end
+
   # --- reentry from `closed` (Autodev #52) ---------------------------
   #
   # A stop decided by a human now ends in `closed` rather than `done`, so the
@@ -303,5 +383,45 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
 
     assert_equal 'done', issue.status
     issue
+  end
+end
+
+# The *other* caller of the read the reentry decision above depends on, tested
+# here so the two answers to "GitLab did not answer the issue_notes read" sit
+# next to each other (Autodev #67).
+#
+# `human_comment_since?` no longer answers `false` for an outage, so this caller
+# declares its own boundary — and the answer is different from the router's, on
+# purpose. `false` here means the row stays in `needs_clarification` and
+# `dispatch_new_issues` re-asks GitLab the same question next cycle: nothing is
+# concluded and nothing acts. In `open_mr_destination` the same `false` chose a
+# route and re-delivered an MR.
+class ClarificationCheckBoundaryTest < Minitest::Test
+  include DatabaseTestHelper
+
+  PROJECT_CONFIG = { 'path' => 'group/project', 'labels_todo' => ['To do'] }.freeze
+  FakeGlIssue = Struct.new(:iid)
+  FakeRequest = Struct.new(:base_uri, :path)
+  FakeResponse = Struct.new(:parsed_response, :code, :request)
+
+  class StubClient
+    def issue_notes(_path, _iid, **_opts)
+      response = FakeResponse.new('boom', 500, FakeRequest.new('https://gitlab.example', '/api/v4/x'))
+      raise Gitlab::Error::ResponseError, response
+    end
+  end
+
+  def setup = setup_database
+
+  def test_an_unreadable_comment_history_leaves_the_row_waiting_for_clarification
+    issue = create_issue(status: 'needs_clarification',
+                         clarification_requested_at: Time.parse('2026-07-01T10:00:00Z'))
+    dispatcher = Autodev::PollDispatcher.allocate
+    { path: PROJECT_CONFIG['path'], project_config: PROJECT_CONFIG, config: {},
+      logger: StubLogger.new, client: StubClient.new }
+      .each { |name, value| dispatcher.instance_variable_set(:"@#{name}", value) }
+
+    refute dispatcher.send(:clarification_received?, issue, FakeGlIssue.new(issue.issue_iid))
+    assert_equal 'needs_clarification', issue.reload.status
   end
 end
