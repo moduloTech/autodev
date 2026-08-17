@@ -104,19 +104,65 @@ class PipelineMonitor
 
     # The fix path always ends in danger-claude (either the Claude evaluation of
     # an uncertain verdict, or the per-job fix itself), so it is gated on the
-    # Claude quota (Autodev #46). Returning *before* `update_stagnation_signature`
-    # matters: a cycle that never looked at the failure must not count towards
-    # stagnation, or an outage would burn the whole budget and give the ticket up.
+    # Claude quota (Autodev #46). Returning *before* the counter matters: a cycle
+    # that never looked at the failure must not count towards stagnation, or an
+    # outage would burn the whole budget and give the ticket up.
     # `retrigger_if_needed` and `infra_skip?` ran earlier and are unaffected —
     # neither calls Claude.
+    #
+    # The signature is written **after** the attempt, which is Autodev #71. It
+    # used to be written before, and the quota return above was then the only
+    # cause of interruption the ordering protected against — while the whole of
+    # the correction sat below the write. Since Autodev #67 the prompt-context
+    # read raises from inside it (`clone_and_fix` → `dispatch_fix` →
+    # `fetch_fix_context` → `GitlabHelpers.fetch_full_context`, whose `client.issue`
+    # read is the one that goes dark), so a **selective** GitLab outage — that one
+    # endpoint erroring while the merge-request and pipeline-jobs endpoints answer
+    # normally — advanced the counter once per poll with no correction ever
+    # attempted, and gave the ticket up after `stagnation_threshold` cycles with a
+    # public comment announcing a pipeline stagnation that had not happened.
+    #
+    # Written after, the invariant is structural rather than a list of causes to
+    # remember: *every* way out of `clone_and_fix` that is not a completed attempt
+    # skips the write, because it is an exception and the write is the next
+    # statement. That is also the ordering the discussions side has always had —
+    # `discussion_stagnated?` is called from `MrFixer`'s `finalize_success`, after
+    # the push.
+    #
+    # The two other interruptions this now covers were already handled elsewhere,
+    # so nothing needs a second bound: `RateLimitError` and a `StandardError` from
+    # the fix both end at `attempt_fix`'s handlers, which park the row in `error`
+    # with `next_retry_at` — bounded by `max_retries`, and a row that has left
+    # `checking_pipeline` is no longer the "same failure, poll after poll" chain
+    # stagnation measures.
     def check_stagnation_and_fix(issue, failed_jobs, triage)
       return defer_fix_for_usage(issue) unless claude_available?
 
       signature = compute_pipeline_signature(failed_jobs)
       return if bail_on_stagnation?(issue, :pipeline, signature, detail: format_failure_detail(failed_jobs))
 
-      update_stagnation_signature(issue, :pipeline, signature)
       clone_and_fix(issue, failed_jobs, triage)
+      count_fix_attempt(issue, signature)
+    end
+
+    # One cycle of the stagnation budget, spent only by a cycle that reached a
+    # conclusion about the failure.
+    #
+    # `@poll_inconclusive` is the flag the age bound reads (Autodev #56), and on
+    # this path exactly one thing raises it: an evaluation that could not be
+    # performed at all (`interpret_eval_result` — danger-claude crashed, timed out,
+    # or answered something unparseable). That cycle read the failure and got no
+    # answer, so it is the same kind of non-event as an unreachable endpoint;
+    # counting it gave a Docker outage the power to announce a pipeline stagnation
+    # too. One flag, two bounds — the quota deferrals never reach here, and
+    # "Claude said the failure is not code-related" is a verdict and does count.
+    def count_fix_attempt(issue, signature)
+      if @poll_inconclusive
+        return log "Issue ##{issue.issue_iid}: this poll could not conclude (#{@poll_inconclusive}), " \
+                   'not counting it towards pipeline stagnation'
+      end
+
+      update_stagnation_signature(issue, :pipeline, signature)
     end
 
     # -- Clone and fix --

@@ -596,12 +596,11 @@ class DegradedApiValueShapeTest < Minitest::Test
       # needs the clone's work directory, for the ticket's images — so instead it
       # raises `ApiUnavailableError` and this method re-raises it above its two
       # handlers, and `dispatch_fix` performs it *before* `pipeline_failed_code!` so
-      # the abort leaves the row in `checking_pipeline` — with one exception that
-      # is NOT closed: `check_stagnation_and_fix` writes the stagnation signature
-      # before `clone_and_fix`, so a selective outage on the issue endpoint still
-      # advances the counter and gives the ticket up after `stagnation_threshold`
-      # cycles. The row is therefore not untouched, and the fix is to refund or to
-      # move the count below the attempt — a behaviour change with its own ticket.
+      # the abort leaves the row in `checking_pipeline`. The stagnation counter is
+      # written *after* `clone_and_fix` returns (Autodev #71), so the abort leaves
+      # that column untouched too — it used to be written before, which let a
+      # selective outage on the issue endpoint spend the whole stagnation budget
+      # without a single correction being attempted.
       #
       # Audited, not assumed: the GitLab traffic left under this method is
       # `retry_pipeline` and `fetch_job_trace` (both declared here) plus the label /
