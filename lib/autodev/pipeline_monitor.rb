@@ -64,14 +64,33 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
 
   def poll_open_mr(issue)
     mr = @client.merge_request(@project_path, issue.mr_iid)
-    return handle_mr_closed(issue, mr) if mr.state != 'opened'
+    return handle_mr_closed(issue, mr) if mr_state_concluded?(mr.state)
 
-    dispatch_pipeline(issue, mr.head_pipeline)
+    continue_watch(issue, mr)
     # Last, and only if the poll left the row where it was: the absolute age
     # bound (Autodev #53) must never pre-empt a poll that resolved, and it must
     # cover every branch that goes nowhere without enumerating any of them —
     # including the ones Autodev #51 is currently rewriting.
     abandon_expired_watch(issue)
+  end
+
+  # The two MR states that keep the watch open, and the one thing they have in
+  # common: the row is still `checking_pipeline` when this returns, so the age
+  # bound above applies to both.
+  #
+  # That the transient states go through here rather than through an early return
+  # is the whole point of Autodev #69's second half. Sorting `locked` as an
+  # outcome was wrong, but sorting it as "come back later" and returning would have
+  # traded a false abandon for an unbounded poll: `dispatch_pipelines` re-enqueues
+  # every `checking_pipeline` row every cycle, and `abandon_expired_watch` is the
+  # only thing standing at the end of that. An MR wedged in `locked` — GitLab's
+  # `UnstickLockedMergeRequestsWorker` exists precisely because that happens — is
+  # now given up at `pipeline_watch_max_days` like every other frozen watch.
+  def continue_watch(issue, merge_request)
+    state = merge_request.state
+    return await_transient_mr_state(issue, state) unless state == 'opened'
+
+    dispatch_pipeline(issue, merge_request.head_pipeline)
   end
 
   def dispatch_pipeline(issue, pipeline)
