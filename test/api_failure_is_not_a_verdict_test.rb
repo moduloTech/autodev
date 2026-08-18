@@ -42,6 +42,11 @@ require 'autodev/pipeline_monitor'
 #
 # Each section below has its control: the same code path with GitLab answering
 # must still reach the verdict it always reached.
+#
+# Section 5 is the source guard, and what it can and cannot prove is written out
+# above `ALLOWED_SWALLOWS` (Autodev #73) rather than left for a reader to infer
+# from a green run — which is how two declarations that were plainly false
+# survived one.
 
 # --- shared fixtures -------------------------------------------------------
 
@@ -499,6 +504,270 @@ end
 
 # --- 5. the shape itself -------------------------------------------------
 
+# (b) In the pipeline-monitor / MR-fixer tree, every place a GitLab error stops
+# travelling is declared below with the reason its substitute cannot be mistaken
+# for an answer. Everywhere else the error must reach a boundary — which is what
+# `GitlabHelpers.answer` guarantees for a wrapped read, and what a bare
+# `@client.…` call with no rescue at all already does for free.
+#
+# That is the whole of the ticket's criterion. The failure mode of Autodev #62 was
+# not that somebody wrote a bad rescue; it was that the rescue looked exactly like
+# every other line around it, in four places, and nothing made a reviewer ask what
+# the substitute would be read as. Adding one now means editing this list, in the
+# same commit, with a sentence.
+#
+# ## What this list proves, and what it does not (Autodev #73)
+#
+# What is checked mechanically: that a clause catching a failed read exists, that
+# the method holding it is named here, and — since #73 — that the clause does not
+# get credit for a `raise` of some *other* class. That is all.
+#
+# The value in the hash is an **English sentence, and nothing verifies it**. It is
+# a declaration of intent by whoever added the entry, not a proof, and the
+# difference is not academic: two entries in this very list said "no read inside"
+# while an unprotected `client.issue` sat underneath them (`attempt_fix` and
+# `execute_fix_cycle`, the whole of Autodev #67), and this file was green
+# throughout — through a review, and through the ticket that wrote the sentence.
+# Both now say "audited, not assumed" and enumerate what they audited, which is
+# the strongest form available here: an inventory a reader can re-walk, not a
+# claim a test can re-check.
+#
+# So read a green run as "every swallow is declared", never as "every declaration
+# is true". When you touch a method named here, re-read its sentence against the
+# code and correct it in the same commit — that re-reading is the only mechanism
+# this half of the guard has.
+#
+# Two forms are out of reach and are stated rather than hidden:
+#
+#   * a `rescue Exception` — `Exception` is not in `NAMED`, so a clause naming it
+#     would look like it catches nothing relevant. Theoretical: RuboCop's
+#     `Lint/RescueException` is enabled for this project and refuses the form, so
+#     it cannot reach master without a disable comment naming the cop.
+#   * a *file-level* `rubocop:disable Style/RescueModifier` block, which has no
+#     enclosing method for the directive half of the modifier rule below to
+#     attribute. `SwallowScanner` still sees the modifier itself, which is why the
+#     two live side by side.
+ALLOWED_SWALLOWS = {
+  'lib/autodev/pipeline_monitor.rb' => {
+    # The boundary of one poll: the whole point is that the failure stops here,
+    # with the row untouched and `abandon_expired_watch` unreached.
+    'check' => 'poll boundary'
+  },
+  'lib/autodev/mr_fixer.rb' => {
+    # The boundary of one fix round, for the same reason — and so the exception
+    # does not reach ActiveJob and park the row in Solid Queue's failed
+    # executions, which needs a human for something the next cycle retries.
+    'fix' => 'fix-round boundary',
+    # A write. Failing to mark a thread resolved leaves it unresolved, which the
+    # next round re-reads. No verdict is inferred from the failure.
+    'resolve_discussion' => 'write, not a read'
+  },
+  'lib/autodev/mr_fixer/fix_cycle.rb' => {
+    # Clone, rebase, danger-claude, push. `fetch_unresolved_discussions` is
+    # performed by `MrFixer#fix` *before* calling in here, on purpose, and the
+    # prompt-context read inside `prepare_fix_environment` now raises
+    # `ApiUnavailableError`, which this method re-raises above its two handlers
+    # (Autodev #67 — it used to be swallowed here and imputed to the fix).
+    #
+    # Audited, not assumed: the only GitLab traffic left under this method is
+    # `resolve_discussion` (a write, declared below), `ScreenshotUploader.process`
+    # (uploads, own rescues) and `log_activity` / `notify_localized`, which
+    # swallow their own failures because a note that could not be edited is not
+    # a verdict either.
+    'execute_fix_cycle' => 'fix-round boundary: clone, rebase, danger-claude, push'
+  },
+  'lib/autodev/mr_fixer/stagnation_checker.rb' => {
+    # `JSON.parse(issue.stagnation_signatures || '{}') rescue {}` — the rescue
+    # *modifier*, which the scanner could not see until Autodev #67. Honest and
+    # trivial: the input is a column this same method wrote, the call is local,
+    # there is no GitLab read anywhere underneath, and `{}` means "start the
+    # signature history over", which costs one extra fix round at worst.
+    #
+    # Declared rather than deleted because the form is the hazard, not this
+    # instance: it is the shape a reader reproduces by imitating the line above,
+    # and it sat one directory from the delivery path with its own
+    # `rubocop:disable` comment ready to copy.
+    'discussion_stagnated?' => 'local JSON.parse of a column we wrote, not a read'
+  },
+  'lib/autodev/pipeline_monitor/post_completion.rb' => {
+    # Two more rescue modifiers the scanner was blind to. `Process.kill('KILL', -pid)`
+    # and `Process.wait(pid)` on a process group that already died raise
+    # `Errno::ESRCH` / `Errno::ECHILD`, and "it is already gone" is the outcome
+    # this method wants. No GitLab call, no verdict.
+    'kill_process' => 'local process signalling, not a read'
+  },
+  'lib/autodev/mr_fixer/discussion_formatter.rb' => {
+    # `git diff` in a work directory, for the prompt. No GitLab call, and the
+    # substitute (`nil` = no diff hunk to quote) removes context from a prompt
+    # rather than answering a question.
+    'extract_diff_hunk' => 'local git, not a read'
+  },
+  'lib/autodev/pipeline_monitor/infra_recheck.rb' => {
+    # The boundary of one recheck. `false` means "do not re-enter", which is the
+    # conservative answer and the one the caller wants when nothing was read.
+    'recheck_infra_recovery' => 'recheck boundary'
+  },
+  'lib/autodev/pipeline_monitor/failure_handler.rb' => {
+    # A write. `false` means "the pipeline was not retriggered", which is exactly
+    # what happened; the caller falls through to the triage it would have run.
+    'retrigger_if_needed' => 'write, not a read',
+    # Everything from the triage onwards: clone, danger-claude, push. `handle_red`
+    # reads the failed jobs *before* calling in here — that hoist is Autodev #62's.
+    #
+    # The prompt-context read underneath (`build_fix_context_hash` →
+    # `GitlabHelpers.fetch_full_context`) was the gap #62 left and Autodev #67
+    # closed. It could not be hoisted out of here the way the job list was — it
+    # needs the clone's work directory, for the ticket's images — so instead it
+    # raises `ApiUnavailableError` and this method re-raises it above its two
+    # handlers, and `dispatch_fix` performs it *before* `pipeline_failed_code!` so
+    # the abort leaves the row in `checking_pipeline`. The stagnation counter is
+    # written *after* `clone_and_fix` returns (Autodev #71), so the abort leaves
+    # that column untouched too — it used to be written before, which let a
+    # selective outage on the issue endpoint spend the whole stagnation budget
+    # without a single correction being attempted.
+    #
+    # Audited, not assumed: the GitLab traffic left under this method is
+    # `retry_pipeline` and `fetch_job_trace` (both declared here) plus the label /
+    # assignee / note writes of `abandon_issue`, `log_activity` and
+    # `notify_localized`, each of which swallows its own failure.
+    'attempt_fix' => 'fix boundary: clone, danger-claude, push'
+  },
+  'lib/autodev/pipeline_monitor/reviewer.rb' => {
+    # mr-review is a subprocess, not a GitLab call. A crash is already non-fatal
+    # by design (`false` = review not performed, the round is not counted), and
+    # Autodev #49 made the diagnostic survive it.
+    'execute_mr_review' => 'subprocess, not a read'
+  },
+  'lib/autodev/poll_router.rb' => {
+    # The boundary of one issue's routing (Autodev #67). Per issue rather than
+    # per pass on purpose: raised any higher the error lands in
+    # `PollDispatcher#dispatch`'s own `rescue StandardError` and one unreadable
+    # MR takes the whole project's cycle down with it — pipeline checks,
+    # discussion fixes and retries included.
+    'route' => 'routing boundary for one issue'
+  },
+  'lib/autodev/pipeline_monitor/api_helpers.rb' => {
+    # The one read still allowed to substitute. The substitute names itself in the
+    # value ("(trace unavailable: …)"), it is written into a log file for a human
+    # or for Claude to read as prose rather than compared against anything, and one
+    # unreadable trace must not abandon the fix of the jobs whose traces arrived.
+    'fetch_job_trace' => 'self-describing prose, not a verdict'
+  }
+}.freeze
+
+# Line-by-line walk of one file, collecting the names of the methods whose
+# `rescue` of a GitLab error does not re-raise. Deliberately textual: what it
+# checks is a property of the source a reader sees, and the point is to make the
+# list above the only place the exceptions live.
+class SwallowScanner
+  # A clause counts when it *can catch* a failed read, not when it happens to
+  # name one. `ApiUnavailableError < AutodevError < StandardError`, so a
+  # `rescue StandardError` swallows it just as thoroughly as a clause naming it
+  # — and it is the more likely way to reintroduce Autodev #62, because it does
+  # not look like it has anything to do with GitLab. A bare `rescue` and
+  # `rescue => e` are StandardError spelled shorter. Clauses that name an
+  # unrelated class (`RateLimitError`, `JSON::ParserError`) cannot catch a
+  # failed read and are ignored.
+  NAMED = /^\s*rescue\s+.*(Gitlab::Error|ApiUnavailableError|AutodevError|StandardError)/
+  CATCH_ALL = /^\s*rescue\s*(=>|$|#|\z)/
+  # `expr rescue fallback` — the modifier form, and the second blind spot
+  # Autodev #67 closed. It is `rescue StandardError` spelled with no `rescue`
+  # *line* at all, so the two anchored patterns above cannot see it: something
+  # precedes it on the line. It is also a whole clause on one line — the
+  # substitute is right there — hence its own branch in `step`.
+  MODIFIER = /\S\s+rescue\s+\S/
+  CLAUSE_END = /^\s*(end|def|rescue|ensure)\b/
+  # A clause re-raises when it puts *the same* exception back on its way to the
+  # boundary: bare `raise` (which re-raises `$!` untouched) or `raise <local>`
+  # (the variable the clause captured). This used to be `/\braise\b/` — the word
+  # anywhere in the clause — and that is the third blind spot of this scanner
+  # (Autodev #73), the one with a live symptom rather than a hypothetical one:
+  #
+  #     rescue StandardError => e
+  #       raise ImplementationError, e.message
+  #
+  # counted as a re-raise, and it is not one. `ImplementationError` is not an
+  # `ApiUnavailableError`, so it does not travel to `PipelineMonitor#check` or
+  # `MrFixer#fix` — it falls into the `rescue StandardError` of the *fix*
+  # boundary one frame up, which marks the ticket `error` and posts a comment
+  # blaming the correction. That is precisely the outcome Autodev #67 removed for
+  # the prompt-context read, reachable again by a form the guard called safe.
+  RERAISE = /\braise(?:\s+[a-z_]\w*)?\s*(?:$|#)/
+  # `raise SomeError, …` / `raise SomeError.new(…)` — a new exception of a
+  # *different* class. Reported as its own kind rather than lumped in with the
+  # swallows, because the fix is not the same: a swallow needs the rescue taken
+  # out, a re-class needs the class it raises to be one the boundary above
+  # recognises (`GitlabHelpers.answer`'s `ApiUnavailableError` is the legitimate
+  # shape of this — a conversion that keeps travelling — which is why the form is
+  # declarable rather than banned).
+  RECLASS = /\braise\s+(?:::)?[A-Z]\w*/
+  RECLASS_NOTE = ' (re-raises a different class)'
+  METHOD_DEF = /^\s*def\s+([a-z_][\w?!]*)/
+  # What the scanner reads is *code*. Strings go first (so removing comments
+  # cannot cut a `#` out of the middle of a literal), comments second. Both
+  # blind spots this handles are the same mistake in two directions: a log
+  # message containing the word "raise" made a clause look like a re-raise —
+  # `RERAISE` was applied after stripping comments but not strings — and the
+  # same text could equally invent a `rescue` where the code has none.
+  STRING = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/
+  COMMENT = /#.*/
+
+  def self.code_of(line) = line.gsub(STRING, '""').sub(COMMENT, '')
+
+  def initialize(lines)
+    @lines = lines
+    @found = []
+    @clause = nil
+    @method = nil
+  end
+
+  # `[method_name, kind]` pairs, `kind` being `:swallow` (the clause substitutes
+  # a value) or `:reclass` (it raises a different class, which reaches a
+  # different handler than the one the rule is about).
+  def swallowing_methods
+    @lines.each { |line| step(self.class.code_of(line)) }
+    close_clause
+    @found
+  end
+
+  private
+
+  def step(code)
+    close_clause if @clause && code.match?(CLAUSE_END)
+    @method = ::Regexp.last_match(1) if code =~ METHOD_DEF
+    return record_modifier(code) if code.match?(MODIFIER)
+    return open_clause if catches_failed_read?(code)
+
+    note_raise(code)
+  end
+
+  def open_clause = @clause = { method: @method, reraises: false, reclasses: false }
+
+  def note_raise(code)
+    return unless @clause
+
+    @clause[:reraises] = true if code.match?(RERAISE)
+    @clause[:reclasses] = true if code.match?(RECLASS)
+  end
+
+  # One line, one whole clause. `x = f rescue raise` re-raises; anything else —
+  # a value, or an exception of another class — substitutes.
+  def record_modifier(code)
+    @found << [@method, :swallow] unless code.sub(MODIFIER, ' rescue ').match?(RERAISE)
+  end
+
+  def catches_failed_read?(code)
+    code.match?(NAMED) || code.match?(CATCH_ALL)
+  end
+
+  def close_clause
+    return unless @clause
+
+    @found << [@clause[:method], @clause[:reclasses] ? :reclass : :swallow] unless @clause[:reraises]
+    @clause = nil
+  end
+end
+
 # The ticket's own criterion: the next GitLab call added must not be able to
 # reproduce the defect unnoticed. Two things carry that, and both are pinned
 # here rather than left to the next reviewer's memory.
@@ -511,125 +780,6 @@ class DegradedApiValueShapeTest < Minitest::Test
     assert_equal MrDiscussions, MrFixer.instance_method(:fetch_unresolved_discussions).owner
     assert_equal MrDiscussions, PipelineMonitor.instance_method(:fetch_unresolved_discussions).owner
   end
-
-  # (b) In the pipeline-monitor / MR-fixer tree, every place a GitLab error stops
-  # travelling is declared below with the reason its substitute cannot be mistaken
-  # for an answer. Everywhere else the error must reach a boundary — which is what
-  # `GitlabHelpers.answer` guarantees for a wrapped read, and what a bare
-  # `@client.…` call with no rescue at all already does for free.
-  #
-  # That is the whole of the ticket's criterion. The failure mode of Autodev #62 was
-  # not that somebody wrote a bad rescue; it was that the rescue looked exactly like
-  # every other line around it, in four places, and nothing made a reviewer ask what
-  # the substitute would be read as. Adding one now means editing this list, in the
-  # same commit, with a sentence.
-  ALLOWED_SWALLOWS = {
-    'lib/autodev/pipeline_monitor.rb' => {
-      # The boundary of one poll: the whole point is that the failure stops here,
-      # with the row untouched and `abandon_expired_watch` unreached.
-      'check' => 'poll boundary'
-    },
-    'lib/autodev/mr_fixer.rb' => {
-      # The boundary of one fix round, for the same reason — and so the exception
-      # does not reach ActiveJob and park the row in Solid Queue's failed
-      # executions, which needs a human for something the next cycle retries.
-      'fix' => 'fix-round boundary',
-      # A write. Failing to mark a thread resolved leaves it unresolved, which the
-      # next round re-reads. No verdict is inferred from the failure.
-      'resolve_discussion' => 'write, not a read'
-    },
-    'lib/autodev/mr_fixer/fix_cycle.rb' => {
-      # Clone, rebase, danger-claude, push. `fetch_unresolved_discussions` is
-      # performed by `MrFixer#fix` *before* calling in here, on purpose, and the
-      # prompt-context read inside `prepare_fix_environment` now raises
-      # `ApiUnavailableError`, which this method re-raises above its two handlers
-      # (Autodev #67 — it used to be swallowed here and imputed to the fix).
-      #
-      # Audited, not assumed: the only GitLab traffic left under this method is
-      # `resolve_discussion` (a write, declared below), `ScreenshotUploader.process`
-      # (uploads, own rescues) and `log_activity` / `notify_localized`, which
-      # swallow their own failures because a note that could not be edited is not
-      # a verdict either.
-      'execute_fix_cycle' => 'fix-round boundary: clone, rebase, danger-claude, push'
-    },
-    'lib/autodev/mr_fixer/stagnation_checker.rb' => {
-      # `JSON.parse(issue.stagnation_signatures || '{}') rescue {}` — the rescue
-      # *modifier*, which the scanner could not see until Autodev #67. Honest and
-      # trivial: the input is a column this same method wrote, the call is local,
-      # there is no GitLab read anywhere underneath, and `{}` means "start the
-      # signature history over", which costs one extra fix round at worst.
-      #
-      # Declared rather than deleted because the form is the hazard, not this
-      # instance: it is the shape a reader reproduces by imitating the line above,
-      # and it sat one directory from the delivery path with its own
-      # `rubocop:disable` comment ready to copy.
-      'discussion_stagnated?' => 'local JSON.parse of a column we wrote, not a read'
-    },
-    'lib/autodev/pipeline_monitor/post_completion.rb' => {
-      # Two more rescue modifiers the scanner was blind to. `Process.kill('KILL', -pid)`
-      # and `Process.wait(pid)` on a process group that already died raise
-      # `Errno::ESRCH` / `Errno::ECHILD`, and "it is already gone" is the outcome
-      # this method wants. No GitLab call, no verdict.
-      'kill_process' => 'local process signalling, not a read'
-    },
-    'lib/autodev/mr_fixer/discussion_formatter.rb' => {
-      # `git diff` in a work directory, for the prompt. No GitLab call, and the
-      # substitute (`nil` = no diff hunk to quote) removes context from a prompt
-      # rather than answering a question.
-      'extract_diff_hunk' => 'local git, not a read'
-    },
-    'lib/autodev/pipeline_monitor/infra_recheck.rb' => {
-      # The boundary of one recheck. `false` means "do not re-enter", which is the
-      # conservative answer and the one the caller wants when nothing was read.
-      'recheck_infra_recovery' => 'recheck boundary'
-    },
-    'lib/autodev/pipeline_monitor/failure_handler.rb' => {
-      # A write. `false` means "the pipeline was not retriggered", which is exactly
-      # what happened; the caller falls through to the triage it would have run.
-      'retrigger_if_needed' => 'write, not a read',
-      # Everything from the triage onwards: clone, danger-claude, push. `handle_red`
-      # reads the failed jobs *before* calling in here — that hoist is Autodev #62's.
-      #
-      # The prompt-context read underneath (`build_fix_context_hash` →
-      # `GitlabHelpers.fetch_full_context`) was the gap #62 left and Autodev #67
-      # closed. It could not be hoisted out of here the way the job list was — it
-      # needs the clone's work directory, for the ticket's images — so instead it
-      # raises `ApiUnavailableError` and this method re-raises it above its two
-      # handlers, and `dispatch_fix` performs it *before* `pipeline_failed_code!` so
-      # the abort leaves the row in `checking_pipeline`. The stagnation counter is
-      # written *after* `clone_and_fix` returns (Autodev #71), so the abort leaves
-      # that column untouched too — it used to be written before, which let a
-      # selective outage on the issue endpoint spend the whole stagnation budget
-      # without a single correction being attempted.
-      #
-      # Audited, not assumed: the GitLab traffic left under this method is
-      # `retry_pipeline` and `fetch_job_trace` (both declared here) plus the label /
-      # assignee / note writes of `abandon_issue`, `log_activity` and
-      # `notify_localized`, each of which swallows its own failure.
-      'attempt_fix' => 'fix boundary: clone, danger-claude, push'
-    },
-    'lib/autodev/pipeline_monitor/reviewer.rb' => {
-      # mr-review is a subprocess, not a GitLab call. A crash is already non-fatal
-      # by design (`false` = review not performed, the round is not counted), and
-      # Autodev #49 made the diagnostic survive it.
-      'execute_mr_review' => 'subprocess, not a read'
-    },
-    'lib/autodev/poll_router.rb' => {
-      # The boundary of one issue's routing (Autodev #67). Per issue rather than
-      # per pass on purpose: raised any higher the error lands in
-      # `PollDispatcher#dispatch`'s own `rescue StandardError` and one unreadable
-      # MR takes the whole project's cycle down with it — pipeline checks,
-      # discussion fixes and retries included.
-      'route' => 'routing boundary for one issue'
-    },
-    'lib/autodev/pipeline_monitor/api_helpers.rb' => {
-      # The one read still allowed to substitute. The substitute names itself in the
-      # value ("(trace unavailable: …)"), it is written into a log file for a human
-      # or for Claude to read as prose rather than compared against anything, and one
-      # unreadable trace must not abandon the fix of the jobs whose traces arrived.
-      'fetch_job_trace' => 'self-describing prose, not a verdict'
-    }
-  }.freeze
 
   # The perimeter is **deliberately restricted, and this is the reason** (Autodev
   # #67 — before it, the restriction was simply where #62's diff happened to
@@ -677,10 +827,12 @@ class DegradedApiValueShapeTest < Minitest::Test
     assert_empty undeclared, <<~MSG
       A GitLab error is caught and not re-raised here: #{undeclared.join(', ')}.
 
-      Whatever the method returns instead, some caller will read it as an answer —
-      that is Autodev #62. Either let it raise (GitlabHelpers.answer is the
-      conversion point) or add the method to ALLOWED_SWALLOWS with the reason its
-      substitute cannot be mistaken for a verdict.
+      Some caller will read whatever it returns instead as an answer — Autodev #62.
+      Let it raise (GitlabHelpers.answer is the conversion point), or declare the
+      method in ALLOWED_SWALLOWS with the reason its substitute cannot be mistaken
+      for a verdict. "(re-raises a different class)" is the same rule for a clause
+      doing `raise SomethingElse, e.message`: that class reaches the handler next
+      door, the one that blames the correction, not the poll boundary (see RECLASS).
     MSG
   end
 
@@ -712,93 +864,15 @@ class DegradedApiValueShapeTest < Minitest::Test
     MSG
   end
 
-  # Line-by-line walk of one file, collecting the names of the methods whose
-  # `rescue` of a GitLab error does not re-raise. Deliberately textual: what it
-  # checks is a property of the source a reader sees, and the point is to make the
-  # list above the only place the exceptions live.
-  class SwallowScanner
-    # A clause counts when it *can catch* a failed read, not when it happens to
-    # name one. `ApiUnavailableError < AutodevError < StandardError`, so a
-    # `rescue StandardError` swallows it just as thoroughly as a clause naming it
-    # — and it is the more likely way to reintroduce Autodev #62, because it does
-    # not look like it has anything to do with GitLab. A bare `rescue` and
-    # `rescue => e` are StandardError spelled shorter. Clauses that name an
-    # unrelated class (`RateLimitError`, `JSON::ParserError`) cannot catch a
-    # failed read and are ignored.
-    NAMED = /^\s*rescue\s+.*(Gitlab::Error|ApiUnavailableError|AutodevError|StandardError)/
-    CATCH_ALL = /^\s*rescue\s*(=>|$|#|\z)/
-    # `expr rescue fallback` — the modifier form, and the second blind spot
-    # Autodev #67 closed. It is `rescue StandardError` spelled with no `rescue`
-    # *line* at all, so the two anchored patterns above cannot see it: something
-    # precedes it on the line. It is also a whole clause on one line — the
-    # substitute is right there — hence its own branch in `step`.
-    MODIFIER = /\S\s+rescue\s+\S/
-    CLAUSE_END = /^\s*(end|def|rescue|ensure)\b/
-    RERAISE = /\braise\b/
-    METHOD_DEF = /^\s*def\s+([a-z_][\w?!]*)/
-    # What the scanner reads is *code*. Strings go first (so removing comments
-    # cannot cut a `#` out of the middle of a literal), comments second. Both
-    # blind spots this handles are the same mistake in two directions: a log
-    # message containing the word "raise" made a clause look like a re-raise —
-    # `RERAISE` was applied after stripping comments but not strings — and the
-    # same text could equally invent a `rescue` where the code has none.
-    STRING = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/
-    COMMENT = /#.*/
-
-    def self.code_of(line) = line.gsub(STRING, '""').sub(COMMENT, '')
-
-    def initialize(lines)
-      @lines = lines
-      @found = []
-      @clause = nil
-      @method = nil
-    end
-
-    def swallowing_methods
-      @lines.each { |line| step(self.class.code_of(line)) }
-      close_clause
-      @found
-    end
-
-    private
-
-    def step(code)
-      close_clause if @clause && code.match?(CLAUSE_END)
-      @method = ::Regexp.last_match(1) if code =~ METHOD_DEF
-      return record_modifier(code) if code.match?(MODIFIER)
-      return open_clause if catches_failed_read?(code)
-
-      note_reraise(code)
-    end
-
-    def open_clause = @clause = { method: @method, reraises: false }
-
-    def note_reraise(code)
-      @clause[:reraises] = true if @clause && code.match?(RERAISE)
-    end
-
-    # One line, one whole clause. `x = f rescue raise Foo` re-raises; anything
-    # else substitutes.
-    def record_modifier(code)
-      @found << @method unless code.sub(MODIFIER, ' rescue ').match?(RERAISE)
-    end
-
-    def catches_failed_read?(code)
-      code.match?(NAMED) || code.match?(CATCH_ALL)
-    end
-
-    def close_clause
-      return unless @clause
-
-      @found << @clause[:method] unless @clause[:reraises]
-      @clause = nil
-    end
-  end
-
   private
 
   def undeclared_swallows(rel, abs)
     reject_declared(rel, SwallowScanner.new(File.readlines(abs)).swallowing_methods)
+  end
+
+  # `[method, kind]`, so the diagnostic says which of the two problems it is.
+  def format_finding(rel, method, kind)
+    "#{rel}##{method}#{SwallowScanner::RECLASS_NOTE if kind == :reclass}"
   end
 
   # The directive-based half of the modifier rule (see the test above). The
@@ -808,7 +882,7 @@ class DegradedApiValueShapeTest < Minitest::Test
     owners = lines.each_index
                   .select { |i| lines[i].match?(RESCUE_MODIFIER_DIRECTIVE) }
                   .map { |i| enclosing_method(lines, i) }
-    reject_declared(rel, owners.compact)
+    reject_declared(rel, owners.compact.map { |method| [method, :swallow] })
   end
 
   def enclosing_method(lines, idx)
@@ -818,9 +892,9 @@ class DegradedApiValueShapeTest < Minitest::Test
     nil
   end
 
-  def reject_declared(rel, methods)
-    methods.reject { |method| ALLOWED_SWALLOWS.fetch(rel, {}).key?(method) }
-           .map { |method| "#{rel}##{method}" }
+  def reject_declared(rel, findings)
+    findings.reject { |method, _kind| ALLOWED_SWALLOWS.fetch(rel, {}).key?(method) }
+            .map { |method, kind| format_finding(rel, method, kind) }
   end
 
   def scanned_files

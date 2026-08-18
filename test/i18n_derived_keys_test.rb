@@ -37,12 +37,22 @@ require_relative 'rails_helper'
 # guards keep it that way, and they are the part that does not go stale:
 #
 #   * a call site whose key argument is not a literal must be declared in
-#     `DYNAMIC_KEY_SITES` with the family that covers the values it takes;
+#     `DYNAMIC_KEY_SITES` with the family that covers the values it takes, and a
+#     declaration that no longer matches a call site is reported as stale
+#     (Autodev #73 — an exception nobody can see is dead reads like a live one);
 #   * an interpolated key namespace (`:"web_foo_#{x}"`) must be declared in
-#     `COVERED_NAMESPACES` with the family that covers it.
+#     `COVERED_NAMESPACES` with the family that covers it — for *any* stem since
+#     Autodev #73, not just the five prefixes somebody had thought of, because the
+#     keys this product interpolates most (the notification keys) carry no prefix
+#     at all;
+#   * a key handed straight to `Locales.t`, with no wrapper to prefix it and no
+#     family to enumerate it, is read off the call site like the rest (Autodev #73).
+#     Four such keys were live and checked by nothing.
 #
 # So a symbol added to an existing family is covered without touching this file,
-# and a new *shape* of derived key fails it until it is declared.
+# and a new *shape* of derived key fails it until it is declared. What a
+# declaration is worth once written is a separate question, and the answer is
+# stated at `DYNAMIC_KEY_SITES` rather than left to be assumed.
 
 # --- the two tables, read once ---------------------------------------------
 
@@ -142,12 +152,42 @@ module KeySites
     # value, the notification key and the activity key (IssueAbandonment).
     Call.new('abandon_issue', 1, :attention_reason),
     # …and `handle_stagnation` derives `stagnation_<type>` from this argument.
-    Call.new('bail_on_stagnation?', 1, :stagnation_type)
+    Call.new('bail_on_stagnation?', 1, :stagnation_type),
+    # The raw door (Autodev #73). Everything above is a wrapper that prefixes or
+    # routes; `Locales.t` is the function they all end at, and it is also called
+    # directly — with keys that carry **no prefix at all**, which is the normal
+    # shape of a notification key in this product (`done_nominal`,
+    # `spec_unclear_header`). Those keys were checked by nothing: not by a family
+    # (no symbol reaches `notify_localized` for them) and not by the literal scan
+    # below (which only knows five namespaces). Verified by injection:
+    # `Locales.t(:absent_from_both_tables, locale: :fr)` in `lib/` left the whole
+    # file green.
+    Call.new('Locales.t', 0, :bare_key)
   ].freeze
 
   # "<file> <call>" => why the key argument is not a literal there, and where the
   # values it takes are covered. This is the guard: a new call site with a
   # literal needs nothing, a new one with a variable fails until it is declared.
+  #
+  # ## What a declaration proves, and what it does not (Autodev #73)
+  #
+  # Two things are checked mechanically: that a call site handing a variable to a
+  # localised message is named here, and — since #73 — that an entry still matches a
+  # call site that exists (`test_no_declaration_outlives_the_call_site_it_excuses`).
+  #
+  # The value is an **English sentence, and nothing verifies it**. "the :activity
+  # vocabulary", "scanned at its call sites" — a reader has to take those on trust,
+  # and if the family it names stops covering the values the call takes, or never
+  # covered them, this file stays green. The same limit sits on
+  # `COVERED_NAMESPACES`, on `NOT_LOCALE_NAMESPACES` and on `NOT_LOCALE_KEYS`: each
+  # is a sentence asserting something about code that is not read back.
+  #
+  # This is not hypothetical for the sibling guard: two entries of
+  # `test/api_failure_is_not_a_verdict_test.rb`'s `ALLOWED_SWALLOWS` claimed "no read
+  # inside" while an unprotected GitLab read sat underneath, and it stayed green
+  # through a review. Read a green run here as "every derived-key shape is
+  # declared", never as "every declaration is true", and re-read the sentence
+  # against the code whenever you touch what it describes.
   DYNAMIC_KEY_SITES = {
     # The definitions themselves — `def log_activity(issue, key, …)` reached
     # through the module's own delegation, not a call site with a vocabulary.
@@ -167,7 +207,15 @@ module KeySites
     # A human moved the workflow label: the reason comes from
     # `LabelHandover::EXPECTED_ACTION`, checked as its own family.
     'app/services/autodev/external_state.rb close_row!' => 'the handover reason (`activity_handover_<reason>`)',
-    'app/services/autodev/external_state.rb notify_stop' => 'the handover reason (`handover_<reason>`)'
+    'app/services/autodev/external_state.rb notify_stop' => 'the handover reason (`handover_<reason>`)',
+    # The `Locales.t` sites that take their key from a variable (Autodev #73). Each
+    # is a wrapper whose own call sites are scanned above, or a lookup in a table
+    # of literals the literal scan reads.
+    'lib/autodev/activity_logger.rb Locales.t' => 'the :activity vocabulary (activity_<key>)',
+    'lib/autodev/issue_notifier.rb Locales.t' => 'the notification key and its `suffix:`',
+    'app/services/autodev/external_state.rb Locales.t' => "`notify_stop`'s key",
+    'app/helpers/web/i18n_helpers.rb Locales.t' => "`t_web`'s delegation — the `web_` literals",
+    'lib/autodev/numeric_settings.rb Locales.t' => '`MESSAGE_KEYS`, two literal `cli_` symbols'
   }.freeze
 
   LITERAL_SYMBOL = /\A:([a-z_]\w*)\z/
@@ -187,41 +235,40 @@ module KeySites
   DYNAMIC_COLUMN_WRITES = ['lib/autodev/issue_abandonment.rb'].freeze
 
   # { vocabulary => { symbol => origin } }
-  def vocabularies
-    scan.first
-  end
+  def vocabularies = scan[:found]
 
   # Call sites whose key argument is neither a literal nor declared.
-  def undeclared_sites
-    scan.last
-  end
+  def undeclared_sites = scan[:undeclared].uniq
+
+  # Every call site whose key argument is not a literal, declared or not. A
+  # declaration naming a site that is not in here is stale, and a stale
+  # declaration is an exception nobody can see is dead (Autodev #73).
+  def dynamic_sites = scan[:dynamic].uniq
 
   def scan
-    @scan ||= begin
-      found = Hash.new { |hash, key| hash[key] = {} }
-      undeclared = []
+    @scan ||= { found: Hash.new { |hash, key| hash[key] = {} }, undeclared: [], dynamic: [] }.tap do |sinks|
       I18nSources.each do |rel, code|
-        CALLS.each { |call| collect_call(rel, code, call, found, undeclared) }
-        collect_regexp(rel, code, SUFFIX_SYMBOL, found[:notification], 'a `suffix:` argument in')
-        collect_column_writes(rel, code, found[:attention_reason], undeclared)
+        CALLS.each { |call| collect_call(rel, code, call, sinks) }
+        collect_regexp(rel, code, SUFFIX_SYMBOL, sinks[:found][:notification], 'a `suffix:` argument in')
+        collect_column_writes(rel, code, sinks[:found][:attention_reason], sinks[:undeclared])
       end
-      [found, undeclared.uniq]
     end
   end
 
   private
 
-  def collect_call(rel, code, call, found, undeclared)
+  def collect_call(rel, code, call, sinks)
     code.to_enum(:scan, call_pattern(call)).each do
       expression = argument_at(code, Regexp.last_match.end(0), call.index)
-      record_key(rel, call, literal_symbols(expression), found, undeclared)
+      record_key(rel, call, literal_symbols(expression), sinks)
     end
   end
 
-  def record_key(rel, call, symbols, found, undeclared)
+  def record_key(rel, call, symbols, sinks)
     site = "#{rel} #{call.name}"
-    undeclared << site if symbols.empty? && !DYNAMIC_KEY_SITES.key?(site)
-    symbols.each { |symbol| found[call.vocabulary][symbol] = "`#{call.name}` in #{rel}" }
+    sinks[:dynamic] << site if symbols.empty?
+    sinks[:undeclared] << site if symbols.empty? && !DYNAMIC_KEY_SITES.key?(site)
+    symbols.each { |symbol| sinks[:found][call.vocabulary][symbol] = "`#{call.name}` in #{rel}" }
   end
 
   def collect_regexp(rel, code, pattern, sink, origin)
@@ -404,6 +451,37 @@ class ScannedI18nKeysTest < Minitest::Test
                      "(`web_errors_explain_attention_<reason>`).\nMissing:"
   end
 
+  # The raw door (Autodev #73): a key handed straight to `Locales.t`, with no
+  # wrapper to prefix it and no family to enumerate it. Four such keys were live
+  # and unchecked — `question_answered_{header,footer}`,
+  # `spec_unclear_{header,footer}` — and a notification key carries no prefix, so
+  # the literal scan below could not see them either.
+  def test_every_key_handed_straight_to_locales_t_exists
+    symbols = KeySites.vocabularies[:bare_key]
+
+    assert_operator symbols.size, :>, 5, "the Locales.t scan found only #{symbols.size} keys"
+    assert_localized symbols,
+                     "Every key passed straight to `Locales.t` needs a template.\nMissing:"
+  end
+
+  # A declaration that no longer matches a call site is an exception nobody can
+  # see is dead: the wrapper was renamed, or its key became a literal, and the
+  # entry stays behind whitelisting a site that no longer exists — while reading
+  # like a live statement about the code. This is as far as the mechanical check
+  # on a declaration goes; see the note at the top of `DYNAMIC_KEY_SITES` for what
+  # it still cannot check.
+  def test_no_declaration_outlives_the_call_site_it_excuses
+    stale = KeySites::DYNAMIC_KEY_SITES.keys - KeySites.dynamic_sites
+
+    assert_empty stale, <<~MSG
+      These KeySites::DYNAMIC_KEY_SITES entries match no call site any more: #{stale.join(', ')}.
+
+      Either the call moved, or it takes a literal key now and needs no excuse.
+      Delete the entry: an exception that excuses nothing reads like one that
+      excuses something.
+    MSG
+  end
+
   # The guard that keeps the four families above derived rather than listed: a
   # call site handing a *variable* to one of them contributes nothing to the
   # scan, so its keys would go unchecked. Autodev #62's `ALLOWED_SWALLOWS` makes
@@ -485,10 +563,35 @@ class LiteralI18nKeysTest < Minitest::Test
     # family here would copy that list rather than derive anything. Their FR/EN
     # pair is what the parity test covers, and a bullet added without a key is
     # visible in the panel on the next page load.
-    'web_project_edit_help_' => 'a literal list inside the view that renders it — no derivation to make'
+    'web_project_edit_help_' => 'a literal list inside the view that renders it — no derivation to make',
+    # No prefix at all, and that is the point of widening the scan below (Autodev
+    # #73): an attention reason is its own notification key, so `:"stagnation_…"`
+    # is a locale key whose namespace is none of the five the old regex knew.
+    'stagnation_' => 'the stagnation types, via the `bail_on_stagnation?` sites — the attention reasons'
   }.freeze
 
-  INTERPOLATED_KEY = /:"((?:web|activity|cli|notify|handover)[a-z0-9_]*_)\#\{/
+  # Symbols built by interpolation that fall outside every locale namespace
+  # because they are not keys. Declared rather than filtered silently, for the
+  # same reason as `NOT_LOCALE_KEYS`: the widened scan below reads *any* prefix,
+  # which is what lets it see `stagnation_`, and the price is naming the handful
+  # of interpolated symbols this codebase builds for other purposes.
+  NOT_LOCALE_NAMESPACES = {
+    'has_' => "StackDetector's per-gem flags (`:\"has_\#{gem}\"`), a stack fingerprint",
+    'pending_' => "HealthReport's per-migration meta keys on the `migrations` card"
+  }.freeze
+
+  # Widened from `(?:web|activity|cli|notify|handover)` to any stem (Autodev #73).
+  # The five namespaces were the ones somebody had thought of, and the keys this
+  # product interpolates most — the notification keys — carry no prefix at all, so
+  # `:"stagnation_\#{type}"` was invisible. Verified by injection:
+  # `Locales.t(:"done_\#{issue.status}", locale: :fr)` in `lib/` left the file green.
+  #
+  # A symbol built *entirely* by interpolation (`:"\#{name}_skill"`) is out of
+  # reach by construction: there is no stem to attribute it to, and a `''`
+  # namespace in the table above would whitelist every future one. No locale key
+  # in this codebase is built that way — they all carry a stable stem, which is
+  # what makes them greppable at all — and that is the limit rather than a claim.
+  INTERPOLATED_KEY = /:"([a-z0-9_]+)\#\{/
 
   def test_every_interpolated_key_namespace_is_covered_by_a_family
     undeclared = undeclared_namespaces
@@ -505,9 +608,10 @@ class LiteralI18nKeysTest < Minitest::Test
   private
 
   def undeclared_namespaces
+    known = COVERED_NAMESPACES.keys + NOT_LOCALE_NAMESPACES.keys
     I18nSources.files.flat_map do |rel, code|
       code.scan(INTERPOLATED_KEY).flatten.uniq
-          .reject { |namespace| COVERED_NAMESPACES.key?(namespace) }
+          .reject { |namespace| known.include?(namespace) }
           .map { |namespace| "#{rel}: :\"#{namespace}\#{…}\"" }
     end
   end
