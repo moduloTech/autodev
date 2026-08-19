@@ -27,8 +27,7 @@ class PipelineMonitor
     # A clone failure is a review failure: unlike a GitLab error while posting,
     # here judgment never started.
     def prepare_review_clone(work_dir, issue, skill)
-      clone_and_checkout(work_dir, issue.branch_name)
-      SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+      clone_and_inject(work_dir, issue)
       return if skill_available?(work_dir, skill)
 
       raise ConfigError,
@@ -36,12 +35,35 @@ class PipelineMonitor
             'is missing — refusing to fall back to the mr-review binary, which would run a different process'
     end
 
+    # `clone_and_checkout` raises `GitError` (a sibling of `ImplementationError`
+    # under `AutodevError`, not a subclass — Autodev #74 fix round 1) and
+    # `SkillsInjector.inject` raises nothing of its own, so a `File.write` /
+    # `FileUtils.mkdir_p` failure underneath it would otherwise escape as a bare
+    # `Errno::*`. Both are normalised to `ImplementationError` here, and only
+    # here: `review_with_skill`'s rescue already treats that class as a review
+    # failure, and the scope stops at this pair on purpose — it must not also
+    # catch `raise ConfigError` two lines below, which is a distinct outcome
+    # (a declared skill missing from the clone), nor anything from
+    # `run_review_skill` or `publish_from_contract`, where an `ApiUnavailableError`
+    # must keep propagating untouched.
+    def clone_and_inject(work_dir, issue)
+      clone_and_checkout(work_dir, issue.branch_name)
+      SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+    rescue StandardError => e
+      raise ImplementationError, "clone or skill injection failed: #{e.message}"
+    end
+
     def skill_available?(work_dir, skill)
       File.exist?(File.join(work_dir, '.claude', 'skills', skill, 'SKILL.md'))
     end
 
+    # `mr_review_timeout` (Reviewer's per-project override, default 3600s), not
+    # `dc_timeout` (600s): a full skill run clones, loads the skill and runs its
+    # adversarial pass, the same duration profile `mr-review` itself has, not an
+    # ordinary implementation call's (Autodev #74 fix round 1).
     def run_review_skill(work_dir, issue, skill, path)
-      danger_claude_prompt(work_dir, review_prompt(issue, skill, path), label: "-p (review via #{skill})")
+      danger_claude_prompt(work_dir, review_prompt(issue, skill, path),
+                           label: "-p (review via #{skill})", timeout: mr_review_timeout)
     end
 
     def publish_from_contract(issue, path)

@@ -49,8 +49,12 @@ class DangerClaudeRunnerHeartbeatTest < Minitest::Test
     # danger-claude emits under --output-format json, so capture_session_and_text
     # parses it instead of taking the parse-failed branch (which would write a
     # warn event of its own and muddy the assertions).
-    def run_with_timeout(cmd, _args, chdir:, label: nil)
-      @timeout_calls << { cmd: cmd, chdir: chdir, label: label }
+    #
+    # `timeout:` accepted and ignored (Autodev #74 fix round 1): `danger_claude_prompt`
+    # now always forwards its own `timeout:` kwarg (nil unless a caller overrides
+    # it), mirroring the real `ProcessRunner#run_with_timeout` signature.
+    def run_with_timeout(cmd, _args, chdir:, label: nil, timeout: nil)
+      @timeout_calls << { cmd: cmd, chdir: chdir, label: label, timeout: timeout }
       ['{"result":"ok","session_id":"s1"}', '', true]
     end
   end

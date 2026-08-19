@@ -84,4 +84,46 @@ class SkillReviewerTest < ActiveSupport::TestCase
     error = assert_raises(ConfigError) { subject.send(:review_with_skill, issue) }
     assert_match(/mr-review/, error.message)
   end
+
+  # Fix round 1: `clone_and_checkout` raises `GitError` — a sibling of
+  # `ImplementationError` under `AutodevError`, not a subclass — so it escaped
+  # `review_with_skill`'s rescue and propagated instead of counting as a review
+  # failure. Every scenario above stubs the clone to succeed, which is why
+  # nothing caught this.
+  def test_a_clone_failure_is_a_review_failure_not_an_escaped_exception
+    subject = reviewer(contract_json: nil)
+    subject.define_singleton_method(:clone_and_checkout) { |*| raise GitError, 'clone failed' }
+
+    refute subject.send(:review_with_skill, issue)
+  end
+
+  # `SkillsInjector.inject` has no rescue of its own, so an `Errno::*` from its
+  # `File.write` / `FileUtils.mkdir_p` calls would otherwise escape untyped —
+  # same shape as the `GitError` case above, different source.
+  def test_a_skill_injection_failure_is_a_review_failure_not_an_escaped_exception
+    subject = reviewer(contract_json: nil)
+
+    SkillsInjector.stub(:inject, ->(*) { raise Errno::ENOENT, 'no such file or directory' }) do
+      refute subject.send(:review_with_skill, issue)
+    end
+  end
+
+  # Fix round 1, Important: `mr_review_timeout` was stubbed by every scenario
+  # above but nothing ever asserted it reached `danger_claude_prompt` — it did
+  # not, so a skill-driven review ran under the ordinary 600s `dc_timeout`
+  # fallback instead of the review's own (3600s default) timeout.
+  def test_the_skill_review_runs_under_the_review_timeout_not_the_default
+    subject = reviewer(contract_json: nil)
+    subject.define_singleton_method(:mr_review_timeout) { 4200 }
+    received_timeout = nil
+    subject.define_singleton_method(:danger_claude_prompt) do |*, **kwargs|
+      received_timeout = kwargs[:timeout]
+      File.write(subject.send(:review_contract_path, 7), { verdict: 'approve', summary: '', findings: [] }.to_json)
+      'ok'
+    end
+
+    subject.send(:review_with_skill, issue)
+
+    assert_equal 4200, received_timeout
+  end
 end

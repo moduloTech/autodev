@@ -652,6 +652,21 @@ ALLOWED_SWALLOWS = {
     # or for Claude to read as prose rather than compared against anything, and one
     # unreadable trace must not abandon the fix of the jobs whose traces arrived.
     'fetch_job_trace' => 'self-describing prose, not a verdict'
+  },
+  'lib/autodev/pipeline_monitor/skill_reviewer.rb' => {
+    # No GitLab read sits under this method at all: `clone_and_checkout` is a
+    # local `git clone` (raising `GitError` on failure) and `SkillsInjector.inject`
+    # never calls the API (an untyped `Errno::*` from its own `File.write` /
+    # `FileUtils.mkdir_p` is the failure being normalised here). The reclass to
+    # `ImplementationError` is deliberate, not a value standing in for an unread
+    # verdict: `review_with_skill`'s own rescue already treats that class as a
+    # review failure (Autodev #74) — judgment never started on a clone or
+    # injection failure, so there is nothing to retry differently. A GitLab error
+    # from `ReviewPublisher#publish`, called later in the same method chain, is a
+    # different class (`ApiUnavailableError`) and is untouched by this rescue —
+    # it keeps propagating past `review_with_skill`, exactly what this entry does
+    # not cover.
+    'clone_and_inject' => 'reclass to a review failure; no GitLab read underneath'
   }
 }.freeze
 
