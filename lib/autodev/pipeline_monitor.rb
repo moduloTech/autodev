@@ -12,6 +12,7 @@ require_relative 'pipeline_monitor/failure_handler'
 require_relative 'pipeline_monitor/infra_recheck'
 require_relative 'pipeline_monitor/pipeline_fixer'
 require_relative 'pipeline_monitor/reviewer'
+require_relative 'pipeline_monitor/skill_reviewer'
 require_relative 'pipeline_monitor/mr_state_checker'
 require_relative 'pipeline_monitor/watch_bound'
 
@@ -29,6 +30,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include InfraRecheck
   include PipelineFixer
   include Reviewer
+  include SkillReviewer
   include MrStateChecker
   include WatchBound
 
