@@ -32,9 +32,14 @@ class ReviewPublisher
 
   private
 
+  # `GitlabHelpers.field`, not the bare reader: `Gitlab::ObjectifiedHash#method_missing`
+  # calls `super` for a key the response does not carry, so `mr.diff_refs` raises
+  # `NoMethodError` on a response that simply has no `diff_refs` yet — which is the
+  # very case this method exists to report as nil. House style, and the helper
+  # exists for exactly this shape.
   def diff_refs(mr_iid)
     mr = GitlabHelpers.answer(:merge_request) { @client.merge_request(@project_path, mr_iid) }
-    refs = mr.diff_refs
+    refs = GitlabHelpers.field(mr, :diff_refs)
     return nil unless refs&.head_sha
 
     refs
@@ -73,9 +78,17 @@ class ReviewPublisher
     !first.nil? && !first.position.nil?
   end
 
-  # Posted last, so its presence means the review went all the way. A cycle that
-  # dies after the discussions but before this comment is retried, and without
-  # this check the retry would post the discussions a second time.
+  # The summary comment is posted last, so its presence means the review went all
+  # the way — and this check is what keeps a retry from doubling **the comment**,
+  # which is all the spec ever promised of it.
+  #
+  # It is not a general idempotence guard, and this comment used to say it was. A
+  # cycle that dies on the second of two discussions has written no marker, so the
+  # retry re-posts the first and the MR ends up with `["f1", "f1", "f2"]`. Nothing
+  # here prevents that: the marker only exists once `post_summary` has run, i.e.
+  # once the review already completed. The behaviour is compliant — no finding is
+  # lost, and `MrFixer` resolves each thread it fixes — but a reader who believed
+  # the old sentence would not go looking for the duplicate.
   def already_published?(mr_iid)
     notes = GitlabHelpers.answer(:mr_notes) do
       @client.merge_request_notes(@project_path, mr_iid, per_page: 100).auto_paginate
@@ -92,9 +105,19 @@ class ReviewPublisher
   def summary_body(contract, demoted)
     lines = [contract.summary]
     (contract.summary_only + demoted).each do |f|
-      where = f['file'] ? " (#{f['file']}:#{f['line']})" : ''
-      lines << "- **#{f['severity']}**#{where} — #{f['body']}"
+      lines << "- **#{f['severity']}**#{location_suffix(f)} — #{f['body']}"
     end
     lines.reject { |l| l.to_s.strip.empty? }.join("\n\n")
+  end
+
+  # A finding may carry a file with no line — legal in the contract, and the only
+  # thing that makes it summary-only rather than inline. Rendering both
+  # unconditionally produced `(app/x.rb:)`, a dangling colon over the field that
+  # is missing.
+  def location_suffix(finding)
+    return '' unless finding['file']
+    return " (#{finding['file']})" unless finding['line']
+
+    " (#{finding['file']}:#{finding['line']})"
   end
 end

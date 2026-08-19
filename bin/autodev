@@ -189,7 +189,7 @@ end
 def validate_config(config, config_path, logger)
   validate_config_entries(config, config_path)
   Config.validate!(config)
-  check_dependencies(logger)
+  check_dependencies(config, logger)
 end
 
 def validate_config_entries(config, config_path)
@@ -207,12 +207,35 @@ def validate_config_entries(config, config_path)
   raise ConfigError, "Set a valid gitlab_url in #{config_path}"
 end
 
-def check_dependencies(logger)
+def check_dependencies(config, logger)
   _, dc_status = Open3.capture2e('which', 'danger-claude')
   raise ConfigError, 'danger-claude is not installed or not on PATH' unless dc_status.success?
 
+  warn_missing_mr_review(config, logger)
+end
+
+# The spec's §7 condition (Autodev #74): the binary stays for every project that
+# does not declare a `review_skill`, and this warning "should only fire when some
+# project actually relies on the binary". It used to fire unconditionally, so a
+# fleet entirely on the skill path was told at every boot that its reviews would
+# be skipped — they will not be; they run the project's own skill through
+# danger-claude, which is a hard dependency two lines above.
+#
+# The DB read is safe here: `validate_config_entries`, which runs before this,
+# already calls `Project.exists?`, so an unreachable database has raised by now.
+def warn_missing_mr_review(config, logger)
   _, mr_status = Open3.capture2e('which', 'mr-review')
-  logger.warn('mr-review not installed, review step will be skipped') unless mr_status.success?
+  return if mr_status.success?
+  return unless any_project_relies_on_mr_review?(Project.runtime_configs(config['projects']))
+
+  logger.warn(Locales.t(:cli_mr_review_missing, locale: cli_locale(config)))
+end
+
+# A blank is not a declaration: `''` is truthy in Ruby and `to_project_config`
+# emits every column of the row, so this has to read a blank as "no skill" exactly
+# as `Reviewer#launch_review` does.
+def any_project_relies_on_mr_review?(project_configs)
+  project_configs.any? { |project_config| project_config['review_skill'].to_s.strip.empty? }
 end
 
 def setup_database(config, logger)

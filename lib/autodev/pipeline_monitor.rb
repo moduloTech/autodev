@@ -43,6 +43,9 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     clear_poll_verdict
     log "Checking pipeline for MR !#{issue.mr_iid} (issue ##{issue.issue_iid})..."
     log_pipeline_poll(issue)
+    # After the seed above (so a row that arrived by `update_all` has a clock at
+    # all) and before any transition can restamp it — see `remember_watch_clock`.
+    remember_watch_clock(issue)
     poll_open_mr(issue)
   # The boundary of one poll (Autodev #62). A read GitLab could not answer aborts
   # here with the row exactly as the previous cycle left it, and

@@ -132,6 +132,50 @@ class ReviewPublisherTest < Minitest::Test
     assert_equal 1, client.notes.size
   end
 
+  # The call counts above say nothing about what the second pass *answered*, and
+  # the answer is what decides the ticket's fate: `nil` is the "no diff_refs yet"
+  # signal, which `publish_from_contract` turns into `:inconclusive` and the poll
+  # turns into another full clone plus another skill run, forever. An
+  # already-published review is a success. Mutating the early return to `nil`
+  # survived the whole suite before this (Autodev #74, fix round 2).
+  def test_an_already_published_review_answers_success_not_inconclusive
+    client = StubClient.new
+    published = publisher(client)
+    finding = [{ 'file' => 'a.rb', 'line' => 1, 'severity' => 'error', 'body' => 'b' }]
+    published.publish(mr_iid: 7, contract: contract(finding))
+    second = published.publish(mr_iid: 7, contract: contract(finding))
+
+    refute_nil second
+    assert_equal({ posted: 0, demoted: 0 }, second)
+  end
+
+  # `Gitlab::ObjectifiedHash#method_missing` calls `super` for a key the response
+  # does not carry, so the bare reader `mr.diff_refs` raised `NoMethodError` rather
+  # than yielding nil — which lands in `launch_review`'s rescue tree instead of
+  # answering `:inconclusive`. `GitlabHelpers.field` exists for exactly this.
+  def test_a_response_without_a_diff_refs_key_reads_as_absent_not_as_a_crash
+    client = StubClient.new
+    client.define_singleton_method(:merge_request) do |_path, _iid|
+      Gitlab::ObjectifiedHash.new({ 'iid' => 7, 'state' => 'opened' })
+    end
+
+    assert_nil publisher(client).publish(mr_iid: 7, contract: contract([]))
+    assert_empty client.notes
+  end
+
+  # `(app/x.rb:)` — a dangling colon over a missing line. A finding with a file and
+  # no line is legal (both skills draw the distinction, and `ReviewContract` keeps
+  # it in `summary_only`), so the summary has to render the half it has.
+  def test_a_summary_finding_with_a_file_and_no_line_renders_the_file_alone
+    client = StubClient.new
+    publisher(client).publish(mr_iid: 7, contract: contract(
+      [{ 'file' => 'app/x.rb', 'severity' => 'info', 'body' => 'no line here' }]
+    ))
+
+    assert_includes client.notes.first, '(app/x.rb)'
+    refute_includes client.notes.first, 'app/x.rb:'
+  end
+
   def test_a_gitlab_error_while_posting_raises_api_unavailable
     client = StubClient.new(raise_on_post: gitlab_response_error)
     assert_raises(ApiUnavailableError) do

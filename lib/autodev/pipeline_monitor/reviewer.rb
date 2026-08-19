@@ -3,7 +3,14 @@
 class PipelineMonitor
   # Runs mr-review on the MR after a green pipeline.
   # Manages review_count and transitions via review_done!.
-  module Reviewer
+  #
+  # `Metrics/ModuleLength` is disabled for the same reason `MrFixer::FixCycle`
+  # disables it: this module holds two cohesive halves that only a metric wants
+  # apart — the review lifecycle (which path, which of the three outcomes, the
+  # failure budget, the give-up) and the `mr-review` binary's own invocation plus
+  # the failure diagnostic Autodev #49 added. Splitting the diagnostic out would put
+  # `DIAGNOSTIC_STREAM_LIMIT` in one file and its only reader in another.
+  module Reviewer # rubocop:disable Metrics/ModuleLength
     MAX_REVIEW_ROUNDS = 3
     # Consecutive mr-review failures before we give up reviewing the MR. Each
     # failed mr-review still fires a state transition, so without a cap the
@@ -21,14 +28,48 @@ class PipelineMonitor
 
     private
 
+    # `.presence`, not truthiness: `''` is truthy in Ruby, so a YAML-only project
+    # spelling `review_skill:` with an empty value took the skill path with an
+    # empty skill name — a clone, a danger-claude run and a prompt naming no skill
+    # at all. A blank reads as absent.
+    #
+    # The three rescues below all answer the same question: `green_first_review`
+    # fires `pipeline_green!` *before* calling in here, so the row is already in
+    # `reviewing`, and `dispatch_pipelines` selects `checking_pipeline` only.
+    # Anything that escapes this method parks the row where no dispatch pass will
+    # re-read it, leaving recovery to `DormantAudit` two hours later at the cost of
+    # one of three `dormant_audit_max` attempts. On the binary path nothing
+    # escapes — `execute_mr_review` rescues `StandardError` — which is why the
+    # skill path needed these.
+    #
+    # `ConfigError` (a declared skill missing from the clone) is deliberately not
+    # among them and keeps escaping: see the error catalogue in CLAUDE.md. Rescuing
+    # it would write an activity row every poll, which keeps the row out of
+    # `DormantAudit`'s active arm forever *and* restarts the age clock — an
+    # unbounded, unsignalled loop, strictly worse than parking.
     def launch_review(issue)
-      skill = @project_config['review_skill']
+      skill = @project_config['review_skill'].presence
       log "Launching review for MR !#{issue.mr_iid} " \
           "(#{skill ? "skill '#{skill}'" : 'mr-review binary'}, review_count: #{issue.review_count})"
       log_activity(issue, :reviewing)
-      # ApiUnavailableError propagates on purpose: a GitLab outage while we publish
-      # is not a review failure and must not spend the budget (Autodev #62, #71).
       dispatch_review_outcome(issue, skill ? review_with_skill(issue) : execute_mr_review(issue))
+    # A GitLab outage while *we* publish is not a review failure and must not spend
+    # the budget (Autodev #62, #71) — so neither counter is touched — but the row
+    # still has to come back to `checking_pipeline` before the poll aborts at
+    # `PipelineMonitor#check`'s boundary, or nothing re-enqueues it. Re-raised so
+    # the abort still happens and `abandon_expired_watch` stays unreached.
+    rescue ApiUnavailableError
+      resume_watch(issue)
+      raise
+    # `check_dc_failures!` runs inside `danger_claude_prompt`, so the skill path can
+    # raise these two where the binary path never could. `handle_review_interruption`
+    # (ErrorHandler) sorts them the way every other `danger_claude_prompt` call site
+    # does — `handle_rate_limit` for the quota, `handle_auth_failure` for dead
+    # credentials. Named here because this path has no generic handler by design (a
+    # `StandardError` from the review is already `false`), so neither class would be
+    # caught otherwise.
+    rescue RateLimitError, AuthenticationError => e
+      handle_review_interruption(issue, e)
     end
 
     # Three outcomes, not two. `:inconclusive` means GitLab had not computed the
@@ -42,7 +83,18 @@ class PipelineMonitor
       return finalize_review_failure(issue) unless outcome == :inconclusive
 
       log "MR !#{issue.mr_iid}: review not published this cycle, retrying next poll"
+      resume_watch(issue)
+    end
+
+    # The two ways the row goes back to the watch having done nothing: an
+    # `:inconclusive` review and a GitLab outage while publishing. Neither counter
+    # moves, so the row did not move either — and `review_done!` would otherwise
+    # restamp `checking_pipeline_since` to now on the way in, restarting the age
+    # bound on every poll (Autodev #74). `restore_watch_clock` puts the age this
+    # poll started with back.
+    def resume_watch(issue)
       issue.review_done!
+      restore_watch_clock(issue)
     end
 
     def finalize_review_success(issue)

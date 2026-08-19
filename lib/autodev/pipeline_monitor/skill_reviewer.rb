@@ -10,18 +10,36 @@ class PipelineMonitor
   module SkillReviewer
     private
 
+    # The boundary of one review: what counts as a review failure, and the clone
+    # cleanup. Split from the steps below the way `FixCycle#execute_fix_cycle` is
+    # split from `run_fix_cycle`, for the same reason — the boundary is what a
+    # reader has to be able to take in at a glance.
+    #
+    # The `ensure` is the line both sibling clone paths already carry
+    # (`FailureHandler#clone_and_fix`, `FixCycle#execute_fix_cycle`). The spec calls
+    # the work directory disposable and named `prepare_work_dir` as the idiom; the
+    # cleanup half was dropped, so one shallow clone per reviewed ticket accumulated
+    # in /tmp until reboot. It has to be `ensure` rather than a trailing statement
+    # because two outcomes leave by exception: `ApiUnavailableError` from the publish
+    # and `ConfigError` from a declared skill missing from the clone.
     def review_with_skill(issue)
-      skill = @project_config['review_skill']
       work_dir = "/tmp/autodev_review_#{@project_path.tr('/', '_')}_#{issue.issue_iid}"
+      run_skill_review(work_dir, issue)
+    rescue ImplementationError, ReviewContract::InvalidError => e
+      log_error "MR !#{issue.mr_iid}: review via skill " \
+                "'#{@project_config['review_skill']}' failed: #{e.message}"
+      false
+    ensure
+      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
+    end
+
+    def run_skill_review(work_dir, issue)
+      skill = @project_config['review_skill']
       path = review_contract_path(issue.mr_iid)
       FileUtils.rm_f(path)
-
       prepare_review_clone(work_dir, issue, skill)
       run_review_skill(work_dir, issue, skill, path)
       publish_from_contract(issue, path)
-    rescue ImplementationError, ReviewContract::InvalidError => e
-      log_error "MR !#{issue.mr_iid}: review via skill '#{skill}' failed: #{e.message}"
-      false
     end
 
     # A clone failure is a review failure: unlike a GitLab error while posting,

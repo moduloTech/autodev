@@ -421,6 +421,34 @@ Tire la pipeline head de la MR via l'API GitLab et applique une matrice de déci
 
 **Deux chemins pour une même étape (Autodev #74).** `launch_review` bifurque sur `@project_config['review_skill']` : absent → le binaire `mr-review`, comme avant ; renseigné → `SkillReviewer#review_with_skill` clone la branche de la MR dans un répertoire de travail dédié, y injecte les skills du projet et lance le skill déclaré via `danger-claude -p`, en lui interdisant d'écrire sur GitLab — il dépose son verdict dans un fichier de contrat (`ReviewContract`) que `ReviewPublisher` seul traduit en discussions/commentaire. Les deux chemins répondent par une des trois mêmes issues, tranchées par `dispatch_review_outcome` : `true` → `finalize_review_success` ; `false` → `finalize_review_failure` (budget de 5 échecs consécutifs) ; `:inconclusive` (chemin skill uniquement — GitLab n'avait pas encore calculé les `diff_refs` de la MR, donc rien n'a pu être publié) → retour direct à `checking_pipeline` via `review_done!`, **sans toucher aucun des deux compteurs**, pour que le poll suivant refasse la review en entier plutôt que de la compter comme un succès ou un échec qui n'a pas eu lieu.
 
+**Rien ne doit sortir de `launch_review` (Autodev #74, 2e passe de correction).** `green_first_review` tire
+`pipeline_green!` **avant** d'appeler `launch_review`, donc la ligne est déjà en `reviewing` — un état que
+`dispatch_pipelines` ne sélectionne pas. Toute exception qui s'échappe y parque la ligne : la reprise retombe sur
+`DormantAudit` deux heures plus tard et dépense une des trois tentatives `dormant_audit_max`. Le chemin binaire n'a
+jamais eu ce problème (`execute_mr_review` rescue `StandardError`), le chemin skill en avait quatre. Trois sont
+maintenant traitées : `ApiUnavailableError` (les quatre appels GitLab de `ReviewPublisher`) → retour à
+`checking_pipeline` avec les deux compteurs intacts, puis **re-`raise`** pour que le poll s'arrête bien à la frontière
+de `PipelineMonitor#check` ; `RateLimitError` → `handle_rate_limit` comme à tous les autres sites d'appel de
+`danger_claude_prompt` (`IssueProcessor`, `FailureHandler`, `FixCycle`) ; `AuthenticationError` → `handle_auth_failure`,
+la ligne passe en `error` sans retry programmé et la carte 401 du tableau de bord la lit. La quatrième,
+`ConfigError` (skill déclaré absent du clone), continue **délibérément** de s'échapper — voir le catalogue d'erreurs.
+
+**Un retour à la surveillance ne remet pas l'horloge à zéro.** `review_done!` transitionne vers `checking_pipeline` et
+`Issue#stamp_pipeline_watch!` réécrit `checking_pipeline_since = Time.current` à **chaque** entrée dans cet état. C'est
+la bonne sémantique pour une ligne qui bouge (un cycle de correction qui fait des allers-retours redémarre son horloge,
+et c'est la détection de stagnation qui le borne), et la mauvaise pour une ligne qui est sortie de l'état et y est
+revenue sans rien faire. `check` lit donc l'horloge une fois au début du poll (`remember_watch_clock`, après le seed de
+`PollTracker`) et `resume_watch` la réécrit (`restore_watch_clock`) sur les deux sorties qui n'ont rien publié :
+`:inconclusive` et la panne GitLab. Sans ça, une surveillance de 40 jours qui répondait `:inconclusive` redémarrait son
+horloge à chaque poll — `abandon_expired_watch` ne pouvait plus jamais tirer, et chaque poll payait un clone et une
+revue complète sous `mr_review_timeout`. Ce n'est **pas** `poll_inconclusive!` : ce drapeau *désarme* la borne d'âge
+pour le cycle, et un poll `:inconclusive` a bien lu un statut de pipeline — il n'a pas pu publier, c'est autre chose.
+Même arbitrage que `locked` (Autodev #69).
+
+**Le clone de review est supprimé** (`ensure` sur `review_with_skill`), comme sur les deux chemins de clone frères
+(`FailureHandler#clone_and_fix`, `FixCycle#execute_fix_cycle`). Il le faut en `ensure` et pas en instruction finale :
+deux issues sortent par exception (`ApiUnavailableError` de la publication, `ConfigError` du skill absent).
+
 ## Correction de pipeline (PipelineFixer)
 
 Récupère les logs complets de chaque job en échec, les écrit dans `tmp/ci_logs/<job_name>.log` du workdir (sans troncature), et appelle `danger-claude` une fois par job en échec (chaque appel produit un commit). Stagnation détectée si la signature SHA256 des noms de jobs en échec se répète 5 fois (configurable via `stagnation_threshold`) — la demande passe alors `done` avec un commentaire d'alerte.
@@ -531,7 +559,7 @@ DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`
 | Cas | Comportement |
 |---|---|
 | `danger-claude` non installé | Abort au démarrage |
-| `mr-review` non installé | Warning au démarrage, étape review skippée |
+| `mr-review` non installé | Warning au démarrage **si au moins un projet ne déclare pas de `review_skill`** (Autodev #74), et étape review skippée pour ces projets-là seulement. Un projet sur le chemin skill lance sa revue via `danger-claude`, qui est une dépendance dure : rien n'est skippé pour lui |
 | Clone échoue | `error`, retry au prochain poll avec backoff |
 | Aucun changement produit par `danger-claude` | `error` |
 | Push échoue | Retry avec `--force-with-lease` |

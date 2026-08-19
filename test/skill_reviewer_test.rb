@@ -108,6 +108,43 @@ class SkillReviewerTest < ActiveSupport::TestCase
     end
   end
 
+  # Fix round 2: `review_with_skill` had no `ensure`, so one shallow clone per
+  # reviewed ticket accumulated in /tmp until reboot. Both sibling clone paths —
+  # `FailureHandler#clone_and_fix` and `FixCycle#execute_fix_cycle` — carry the
+  # same line; the spec named `prepare_work_dir` as the idiom and only the
+  # cleanup half was dropped. Every scenario above stubs the clone to a no-op,
+  # which is why nothing noticed.
+  def review_clone_dir = '/tmp/autodev_review_g_a_1'
+
+  def reviewer_that_really_clones(**)
+    subject = reviewer(**)
+    subject.define_singleton_method(:clone_and_checkout) { |dir, _| FileUtils.mkdir_p(dir) }
+    subject
+  end
+
+  def test_the_review_clone_is_removed_after_a_successful_review
+    json = { verdict: 'approve', summary: '', findings: [] }.to_json
+    reviewer_that_really_clones(contract_json: json).send(:review_with_skill, issue)
+
+    refute_path_exists review_clone_dir
+  end
+
+  def test_the_review_clone_is_removed_after_a_review_failure
+    reviewer_that_really_clones(contract_json: nil, dc_raises: true).send(:review_with_skill, issue)
+
+    refute_path_exists review_clone_dir
+  end
+
+  # The `ensure` has to cover the outcome that leaves by exception too — the
+  # declared skill missing from the clone, which is the one failure that is
+  # *guaranteed* to recur on every poll of that project.
+  def test_the_review_clone_is_removed_when_the_declared_skill_is_missing
+    subject = reviewer_that_really_clones(contract_json: nil, skill_present: false)
+
+    assert_raises(ConfigError) { subject.send(:review_with_skill, issue) }
+    refute_path_exists review_clone_dir
+  end
+
   # Fix round 1, Important: `mr_review_timeout` was stubbed by every scenario
   # above but nothing ever asserted it reached `danger_claude_prompt` — it did
   # not, so a skill-driven review ran under the ordinary 600s `dc_timeout`
