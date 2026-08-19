@@ -86,7 +86,34 @@ materialization entirely. So two branches, not three:
 error**, not a silent fall back to the binary. Falling back would mean
 believing we run the project's process while running the other one.
 
-### 2. The prompt names one skill and forbids writing
+### 2. The skill path clones the MR branch
+
+The review step has no clone today. `run_mr_review_command` runs with
+`chdir: Dir.pwd` — autodev's own directory — and `PipelineMonitor` only clones in
+`FailureHandler` (the pipeline-fix path) and `PostCompletion`. The skill path
+needs one: `.claude/skills/` has to exist for the skill to load at all.
+
+So, following the idiom `FailureHandler#prepare_work_dir` already uses:
+
+1. `clone_and_checkout(work_dir, issue.branch_name)` into
+   `/tmp/autodev_review_<project>_<iid>`;
+2. `SkillsInjector.inject` on that clone, which normalises `.claude/skills/` and
+   is how the declared skill's presence is checked;
+3. `danger-claude` runs **in that clone**, so the skill, the project's
+   `CLAUDE.md` and its `.claude/agents/adversarial-reviewer.md` are all in reach.
+
+A clone per review is a real cost, already paid on the fix path, and
+`clone_depth` is a per-project setting for exactly this.
+
+**This also names a live defect on the binary path, which this spec does not
+fix.** `mr-review`'s prompt instructs Claude to *"Read `CLAUDE.md` at the repo
+root if it exists, for project conventions"* — and `mr-review` neither clones nor
+`chdir`s anywhere in its 1846 lines. Running in autodev's directory, it has been
+reading **autodev's** `CLAUDE.md` as the reviewed project's conventions. Every
+review autodev has ever produced judged the project's code against autodev's
+conventions. Its own ticket; it applies to the binary path even after this work.
+
+### 3. The prompt names one skill and forbids writing
 
 ```
 Charge le skill `<review_skill>`. Revois la merge request !<iid> contre sa
@@ -104,7 +131,7 @@ is tightened in the same pass: the review prompt names its own skill, and the
 implementation and fix prompts stop enumerating skills that have nothing to do
 with the task at hand.
 
-### 3. The contract is a file, outside the clone
+### 4. The contract is a file, outside the clone
 
 `/tmp/autodev_review_#{project_path.gsub('/', '_')}_#{issue_iid}.json` — the same
 sanitizing idiom `MrFixer::FixCycle` already uses for its work directory. The shape
@@ -134,7 +161,7 @@ invalid file, by contrast, is an unambiguous failure.
 **Outside the clone**, like the CI logs already are: the work directory is
 disposable and the fix cycle commits what it finds there.
 
-### 4. What autodev posts
+### 5. What autodev posts
 
 Autodev reads the file and writes two things with its own PAT: each anchorable
 finding as an inline discussion, then `summary` plus the non-anchorable findings
@@ -185,11 +212,13 @@ findings produces N unresolved discussions, so the next green poll routes to
 `fixing_discussions` and autodev fixes its own review. The existing loop is
 preserved as-is.
 
-### 5. What counts as a review failure
+### 6. What counts as a review failure
 
 Failures, which increment `review_failure_count` — threshold 5 and
 `give_up_reviewing` unchanged:
 
+- the clone or the skill injection fails — unlike a GitLab error while posting,
+  here judgment never started;
 - `danger-claude` exits non-zero;
 - the contract file is missing;
 - its JSON does not parse, or does not match the schema.
@@ -212,7 +241,7 @@ through config, database and docs for nothing. And Autodev #60's health check
 counts the `review_failed` / `review_failures_exhausted` activity keys, so **the
 alert that would have caught the revoked token covers the skill path too**.
 
-### 6. The binary stays
+### 7. The binary stays
 
 `review_skill` absent → `run_mr_review_command`, untouched, with its own
 credential. It remains an optional Homebrew dependency; the boot warning should
