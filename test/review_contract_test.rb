@@ -61,4 +61,38 @@ class ReviewContractTest < Minitest::Test
       contract([{ file: 'a.rb', line: 1, severity: 'blocker', body: 'B' }])
     end
   end
+
+  def test_a_blocking_finding_with_file_but_no_line_is_not_inline
+    c = contract([{ file: 'a.rb', severity: 'error', body: 'B' }])
+
+    assert_empty c.inline
+    assert_equal 1, c.summary_only.size
+  end
+
+  def test_a_blocking_finding_with_line_but_no_file_is_not_inline
+    c = contract([{ line: 4, severity: 'error', body: 'B' }])
+
+    assert_empty c.inline
+    assert_equal 1, c.summary_only.size
+  end
+
+  def test_a_top_level_array_raises
+    assert_raises(ReviewContract::InvalidError) { ReviewContract.parse('[]') }
+  end
+
+  def test_a_top_level_scalar_raises
+    assert_raises(ReviewContract::InvalidError) { ReviewContract.parse('42') }
+  end
+
+  def test_findings_present_but_not_an_array_raises
+    assert_raises(ReviewContract::InvalidError) do
+      ReviewContract.parse({ verdict: 'approve', findings: 'not_an_array' }.to_json)
+    end
+  end
+
+  def test_a_finding_that_is_not_an_object_raises
+    assert_raises(ReviewContract::InvalidError) do
+      contract(['not_an_object'])
+    end
+  end
 end
