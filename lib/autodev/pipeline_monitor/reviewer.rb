@@ -22,21 +22,34 @@ class PipelineMonitor
     private
 
     def launch_review(issue)
-      log "Launching mr-review for MR !#{issue.mr_iid} (review_count: #{issue.review_count})"
+      skill = @project_config['review_skill']
+      log "Launching review for MR !#{issue.mr_iid} " \
+          "(#{skill ? "skill '#{skill}'" : 'mr-review binary'}, review_count: #{issue.review_count})"
       log_activity(issue, :reviewing)
-      if execute_mr_review(issue)
-        finalize_review_success(issue)
-      else
-        finalize_review_failure(issue)
-      end
+      # ApiUnavailableError propagates on purpose: a GitLab outage while we publish
+      # is not a review failure and must not spend the budget (Autodev #62, #71).
+      dispatch_review_outcome(issue, skill ? review_with_skill(issue) : execute_mr_review(issue))
+    end
+
+    # Three outcomes, not two. `:inconclusive` means GitLab had not computed the
+    # MR's diff_refs yet, so nothing could be published: hand the row back to
+    # `checking_pipeline` WITHOUT touching either counter, and the next cycle runs
+    # the whole review again (review_count is still 0). Counting it as a success
+    # would deliver the MR unreviewed; counting it as a failure would spend a
+    # budget on a cycle that could not act (Autodev #71).
+    def dispatch_review_outcome(issue, outcome)
+      return finalize_review_success(issue) if outcome == true
+      return finalize_review_failure(issue) unless outcome == :inconclusive
+
+      log "MR !#{issue.mr_iid}: review not published this cycle, retrying next poll"
+      issue.review_done!
     end
 
     def finalize_review_success(issue)
       increment_review_count(issue)
       reset_review_failure_count(issue)
-      DiscussionSnapshot.capture(context: :post_mr_review, client: @client,
-                                 project_path: @project_path, mr_iid: issue.mr_iid,
-                                 logger: @logger, issue: issue)
+      DiscussionSnapshot.capture(context: :post_mr_review, client: @client, project_path: @project_path,
+                                 mr_iid: issue.mr_iid, logger: @logger, issue: issue)
       issue.review_done!
       log_activity(issue, :review_done)
     end
@@ -85,10 +98,7 @@ class PipelineMonitor
     end
 
     def execute_mr_review(issue)
-      unless command_exists?('mr-review')
-        log 'mr-review not installed, skipping review'
-        return false
-      end
+      return log('mr-review not installed, skipping review') && false unless command_exists?('mr-review')
 
       log 'Waiting 15s for GitLab to compute diff_refs...'
       sleep 15
@@ -120,8 +130,7 @@ class PipelineMonitor
     def run_mr_review_command(mr_url)
       log "Running mr-review on #{mr_url}..."
       dc_heartbeat!('mr-review')
-      out, err, ok, status = run_with_timeout('mr-review', ['-H', mr_url], chdir: Dir.pwd,
-                                                                           timeout: mr_review_timeout)
+      out, err, ok, status = run_with_timeout('mr-review', ['-H', mr_url], chdir: Dir.pwd, timeout: mr_review_timeout)
       return log('Review completed successfully') || true if ok
 
       log_error "mr-review failed (non-fatal): #{review_failure_diagnostic(out, err, status)}"

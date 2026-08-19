@@ -177,6 +177,7 @@ Tout réglage numérique déclare son **type** et sa **plage** dans `NumericSett
 | Général | `target_branch` | Branche cible des MRs (défaut : branche par défaut du dépôt). |
 | Général | `labels_todo` / `label_doing` / `label_done` | Les 3 labels du cycle de vie GitLab (listes, une entrée par ligne). |
 | Général | `label_attention` | Label posé quand Autodev **abandonne** la demande, à la place de `label_done` (Autodev #63) : sur les projets concernés `label_done` vaut `Development::Awaiting Feature Review`, donc le poser sur un abandon présentait comme relu un ticket que personne n'avait relu. Optionnel, à choisir dans le même scope que `label_doing` / `label_done` — le scope dérivé nomme un *scope*, pas ses valeurs, donc aucune troisième valeur n'est déductible. **Absent : aucun label de fin n'est posé, la demande reste sur `label_doing`** (un ticket qui a l'air en cours est moins faux qu'un ticket qui a l'air relu). Refusé seul (sans les 3 labels requis) ou vide. |
+| Général | `review_skill` | Nom d'un skill de revue chargé depuis `.claude/skills/<nom>/SKILL.md` dans le dépôt du projet (ex. `mr-review`, `prepare-mr`). Renseigné, l'étape de review clone la branche de la MR, injecte les skills du projet et lance le skill déclaré via `danger-claude -p` au lieu du binaire `mr-review` (Autodev #74) ; le skill dépose son verdict dans un fichier de contrat, qu'Autodev seul publie sur GitLab (voir §*Pipeline et review*). Vide (par défaut) : le binaire `mr-review` est utilisé, comme avant. |
 | Général | `extra_prompt` | Texte ajouté à tous les prompts `danger-claude` du projet. |
 | Exécution | `dc_timeout` | Délai max d'un appel `danger-claude` (s). |
 | Exécution | `mr_review_timeout` | Délai max d'une exécution de `mr-review` (s, défaut 3600). Au-delà, la review est interrompue et comptée comme un échec ; 5 échecs consécutifs clôturent la demande et la réassignent à son auteur. |
@@ -405,7 +406,7 @@ Tire la pipeline head de la MR via l'API GitLab et applique une matrice de déci
 | Pipeline | Review count | Discussions | Action |
 |---|---|---|---|
 | Running | * | * | Skip, recheck au poll suivant |
-| Green | 0 | * | → `reviewing` (mr-review) → `checking_pipeline` |
+| Green | 0 | * | → `reviewing` (mr-review ou skill déclaré) → `checking_pipeline` |
 | Green | > 0 | aucune | → `done` |
 | Green | > 0 | non résolues | → `fixing_discussions` |
 | Green | ≥ 3 | * | → `done` avec alerte (cap atteint) |
@@ -416,7 +417,9 @@ Tire la pipeline head de la MR via l'API GitLab et applique une matrice de déci
 | Manual / skipped, jobs illisibles (erreur API) | * | * | Reste en `checking_pipeline`, nouvelle tentative au poll suivant |
 | Canceled | * | * | Reste en `checking_pipeline` (manuel) |
 
-`MAX_REVIEW_ROUNDS = 3`. `review_count` incrémenté uniquement sur succès `mr-review`.
+`MAX_REVIEW_ROUNDS = 3`. `review_count` incrémenté uniquement sur succès de la review.
+
+**Deux chemins pour une même étape (Autodev #74).** `launch_review` bifurque sur `@project_config['review_skill']` : absent → le binaire `mr-review`, comme avant ; renseigné → `SkillReviewer#review_with_skill` clone la branche de la MR dans un répertoire de travail dédié, y injecte les skills du projet et lance le skill déclaré via `danger-claude -p`, en lui interdisant d'écrire sur GitLab — il dépose son verdict dans un fichier de contrat (`ReviewContract`) que `ReviewPublisher` seul traduit en discussions/commentaire. Les deux chemins répondent par une des trois mêmes issues, tranchées par `dispatch_review_outcome` : `true` → `finalize_review_success` ; `false` → `finalize_review_failure` (budget de 5 échecs consécutifs) ; `:inconclusive` (chemin skill uniquement — GitLab n'avait pas encore calculé les `diff_refs` de la MR, donc rien n'a pu être publié) → retour direct à `checking_pipeline` via `review_done!`, **sans toucher aucun des deux compteurs**, pour que le poll suivant refasse la review en entier plutôt que de la compter comme un succès ou un échec qui n'a pas eu lieu.
 
 ## Correction de pipeline (PipelineFixer)
 
