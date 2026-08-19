@@ -44,3 +44,4 @@ fr:
     :checkered_flag: %{tag} : j'ai termine mon investigation !
 
     :arrow_right: **Vous souhaitez creuser davantage ou passer a une implementation ?** Laissez un commentaire pour me guider, remettez le label _%{label_todo}_, reassignez-moi, et c'est parti.
+  review_summary: "<!-- autodev:review -->\n:mag: **autodev** — revue automatique (verdict : %{verdict})\n\n%{summary}"
