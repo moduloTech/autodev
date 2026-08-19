@@ -26,4 +26,17 @@ class SkillsInstructionScopeTest < Minitest::Test
   def test_no_relevant_skill_yields_no_instruction
     assert_equal '', SkillsInjector.skills_instruction(%w[hotfix])
   end
+
+  def test_it_does_not_name_a_workflow_skill_absent_from_any_denylist
+    line = SkillsInjector.skills_instruction(%w[rails-conventions deploy-staging db-migration-runbook])
+
+    refute_match(/deploy-staging/, line)
+    refute_match(/db-migration-runbook/, line)
+  end
+
+  def test_it_does_not_name_a_skill_with_a_suffix_that_is_not_at_the_end
+    line = SkillsInjector.skills_instruction(%w[rails-conventions old-conventions-archive])
+
+    refute_match(/old-conventions-archive/, line)
+  end
 end
