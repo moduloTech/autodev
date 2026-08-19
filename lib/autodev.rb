@@ -16,6 +16,7 @@ require 'phlex'
 require 'sqlite3'
 
 require_relative 'autodev/errors'
+require_relative 'autodev/review_contract'
 require_relative 'autodev/redactor'
 require_relative 'autodev/logger'
 require_relative 'autodev/numeric_settings'
