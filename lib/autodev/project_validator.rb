@@ -96,17 +96,18 @@ module ProjectValidator
         raise ConfigError, "#{path}: '#{field}' must be a non-empty string."
       end
     end
-    validate_optional_label_types!(project_config, path)
+    validate_optional_string_fields!(project_config, path)
   end
   private_class_method :validate_label_types!
 
-  # `label_attention` (Autodev #63) is optional — most projects have no third
-  # value in their workflow scope, and its absence is a defined fallback (no end
-  # label on a give-up, the row keeps `label_doing`), not a partial workflow. But
-  # a present-and-blank value is a typo, and it would otherwise read as "not
+  # `label_attention` (Autodev #63) and `review_skill` (Autodev #74) are
+  # optional — most projects have no third label-workflow value and no project
+  # review skill, and either's absence is a defined fallback (no end label on a
+  # give-up; the `mr-review` binary for review), not a partial config. But a
+  # present-and-blank value is a typo, and it would otherwise read as "not
   # configured" and silently take the fallback.
-  def self.validate_optional_label_types!(project_config, path)
-    ConfigValidator::OPTIONAL_LABEL_FIELDS.each do |field|
+  def self.validate_optional_string_fields!(project_config, path)
+    ConfigValidator::OPTIONAL_STRING_FIELDS.each do |field|
       next unless project_config.key?(field)
 
       value = project_config[field]
@@ -115,5 +116,5 @@ module ProjectValidator
       raise ConfigError, "#{path}: '#{field}' must be a non-empty string when set."
     end
   end
-  private_class_method :validate_optional_label_types!
+  private_class_method :validate_optional_string_fields!
 end

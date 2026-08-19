@@ -123,7 +123,7 @@ module Config # rubocop:disable Metrics/ModuleLength
                                 dc_timeout max_retries retry_backoff stagnation_threshold clone_depth
                                 sparse_checkout post_completion post_completion_timeout mr_review_timeout
                                 model effort parallel_agents split_implementation implementer_agent
-                                test_writer_agent mr_fixer_agent app].freeze
+                                test_writer_agent mr_fixer_agent review_skill app].freeze
   VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
 
   # Single source of truth for the effective retry budget (Autodev #34).

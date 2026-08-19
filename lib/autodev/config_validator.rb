@@ -3,13 +3,22 @@
 # Validation helpers for Config. Extracted to keep Config module focused on loading.
 module ConfigValidator
   LABEL_FIELDS = %w[labels_todo label_doing label_done].freeze
-  # The label a give-up poses instead of `label_done` (Autodev #63). Optional
-  # because the scope autodev derives from `label_doing` + `label_done` names a
-  # scope, not its values: powerpanne/core has `Development::StandBy` /
-  # `Awaiting CR` / `Awaiting Merge` to choose from, ff/fast/core only
-  # `NeedEstimation` — there is no third value autodev can derive. Unset means no
-  # end label at all on a give-up, so the row keeps `label_doing`.
-  OPTIONAL_LABEL_FIELDS = %w[label_attention].freeze
+  # "If set, must not be blank" fields (checked by
+  # ProjectValidator.validate_optional_string_fields!): a present-and-blank
+  # value is a typo, and it would otherwise read as "not configured" and
+  # silently take the fallback.
+  #
+  # `label_attention` (Autodev #63): the label a give-up poses instead of
+  # `label_done`. Optional because the scope autodev derives from `label_doing`
+  # + `label_done` names a scope, not its values: powerpanne/core has
+  # `Development::StandBy` / `Awaiting CR` / `Awaiting Merge` to choose from,
+  # ff/fast/core only `NeedEstimation` — there is no third value autodev can
+  # derive. Unset means no end label at all on a give-up, so the row keeps
+  # `label_doing`.
+  #
+  # `review_skill` (Autodev #74): the skill the review step loads from the
+  # cloned repo. Unset means the `mr-review` binary.
+  OPTIONAL_STRING_FIELDS = %w[label_attention review_skill].freeze
 
   def self.validate_globals!(config)
     validate_gitlab_token!(config)
