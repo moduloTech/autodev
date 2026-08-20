@@ -11,14 +11,18 @@ require 'autodev/review_publisher'
 # its inline `api_error` builder — for the same minimum surface
 # `Gitlab::Error::ResponseError` needs to construct.
 
-# A logger that discards everything, for a class that only needs one.
-class NullLogger
-  %i[info warn error debug].each { |level| define_method(level) { |*| nil } }
-end
-
 # Autodev posts the review itself, with its own PAT (Autodev #74) — the skill
 # stops before writing, which is its own invariant.
 class ReviewPublisherTest < Minitest::Test
+  # A logger that discards everything, for a class that only needs one. Nested,
+  # like every other `NullLogger` in this suite: at the top level, a second file
+  # declaring the same name would silently reopen this one instead of colliding,
+  # so a test could pass on a method its own file never defined and fail when run
+  # alone — the failure class Autodev #64 exists to keep out of this suite.
+  class NullLogger
+    %i[info warn error debug].each { |level| define_method(level) { |*| nil } }
+  end
+
   FakeRefs = Struct.new(:base_sha, :start_sha, :head_sha)
   FakeMr = Struct.new(:diff_refs)
   FakeNote = Struct.new(:position)
