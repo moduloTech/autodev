@@ -23,14 +23,15 @@ module Autodev
     POLL_STALE_FLOOR = 900 # never flag stale before 15 min, even on a tight interval
     BACKLOG_WARN = 100
 
-    # "mr-review is broken for everybody" detection (Autodev #60, item 1) — the
+    # "the review is broken for everybody" detection (Autodev #60, item 1) — the
     # alert missing behind Autodev #49. `review_failure_count` is per ticket and
     # `review_failures_exhausted` raises a per-ticket `needs_attention` flag, so a
     # tool-wide outage produced N unrelated flags and nothing saying the tool was
     # dead. Nobody correlates three isolated tickets: the real incident ran for
     # weeks and three MRs shipped unreviewed.
     #
-    # The two activity keys every mr-review failure is recorded under —
+    # The two activity keys every review failure is recorded under, on either
+    # path (Autodev #74) —
     # `review_failed` per attempt (Reviewer#finalize_review_failure) and
     # `review_failures_exhausted` on the last one (Reviewer#give_up_reviewing).
     REVIEW_FAILURE_KEYS = %w[review_failed review_failures_exhausted].freeze
@@ -51,7 +52,7 @@ module Autodev
     #
     # Counted in *distinct issues*, deliberately, not events: Autodev #61's replay
     # bug put 26 identical give-up comments on a single ticket, and an event count
-    # would have been inflated by something that says nothing about mr-review.
+    # would have been inflated by something that says nothing about the review.
     DEFAULT_REVIEW_FAILURE_WINDOW = 21_600 # 6h
     DEFAULT_REVIEW_FAILURE_THRESHOLD = 3   # distinct issues inside the window
 
@@ -200,7 +201,7 @@ module Autodev
       build(:ok, 'no issues in error', meta)
     end
 
-    # `warn`, not `down`: a broken mr-review does not stop delivery, so the uptime
+    # `warn`, not `down`: a broken review does not stop delivery, so the uptime
     # probe must keep seeing 200 while the JSON body carries the warn for a
     # secondary alert. Same tier as "issues in error".
     def check_mr_review
@@ -208,11 +209,11 @@ module Autodev
       meta = { issues: count, window_seconds: review_failure_window,
                threshold: review_failure_threshold }
       if count >= review_failure_threshold
-        return build(:warn, "mr-review failed on #{count} issue(s) in the last " \
+        return build(:warn, "the review failed on #{count} issue(s) in the last " \
                             "#{review_failure_window}s — the tool may be broken for everybody", meta)
       end
 
-      build(:ok, "mr-review failures on #{count} issue(s)", meta)
+      build(:ok, "review failures on #{count} issue(s)", meta)
     end
 
     def check_database

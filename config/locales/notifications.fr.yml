@@ -12,7 +12,7 @@ fr:
   pipeline_fix_error: ":x: %{tag} : echec de la correction du pipeline — %{error}"
   pipeline_fix_success: ":wrench: %{tag} : correction du pipeline appliquee sur %{mr_url} — %{count} job(s) corrige(s) (round %{round})"
   review_limit_reached: ":warning: %{tag} : la limite de review (3 tours) est atteinte pour %{mr_url}. Les discussions non resolues restantes necessitent une intervention manuelle."
-  review_failures_exhausted: ":warning: %{tag} : mr-review a echoue %{count} fois consecutives sur %{mr_url}. Intervention manuelle requise (binaire, jeton, ou MR en cause)."
+  review_failures_exhausted: ":warning: %{tag} : la review a echoue %{count} fois consecutives sur %{mr_url}. Intervention manuelle requise (binaire ou skill de review, jeton, ou MR en cause)."
   stagnation_pipeline: ":warning: %{tag} : stagnation detectee — les memes jobs echouent de maniere repetee sur %{mr_url}. Job(s) en cause : %{detail}. Intervention manuelle requise."
   stagnation_discussions: ":warning: %{tag} : stagnation detectee — les memes discussions restent non resolues sur %{mr_url}. Intervention manuelle requise."
   pipeline_watch_expired: ":warning: %{tag} : je surveille la pipeline de %{mr_url} depuis plus de %{days} jours sans jamais pouvoir conclure — j'arrete de la surveiller. La MR reste ouverte ; a reprendre a la main."

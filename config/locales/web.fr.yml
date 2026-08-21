@@ -290,7 +290,7 @@ fr:
   web_project_edit_desc_labels_todo: Labels GitLab qui déclenchent le traitement par Autodev. Une entrée par ligne ; requis avec label_doing et label_done.
   web_project_edit_desc_label_doing: Label posé sur l'issue pendant tout le traitement. Requis avec labels_todo et label_done.
   web_project_edit_desc_label_done: Label posé quand l'issue est livrée (état done). Requis avec labels_todo et label_doing.
-  web_project_edit_desc_label_attention: "Label posé quand Autodev abandonne la demande (stagnation, surveillance expirée, limite de review, mr-review en échec) : la demande n'est pas livrée et attend une intervention. Optionnel ; à choisir dans le même scope que label_doing / label_done. Défaut : aucun label de fin n'est posé, la demande reste sur label_doing."
+  web_project_edit_desc_label_attention: "Label posé quand Autodev abandonne la demande (stagnation, surveillance expirée, limite de review, échecs de review répétés) : la demande n'est pas livrée et attend une intervention. Optionnel ; à choisir dans le même scope que label_doing / label_done. Défaut : aucun label de fin n'est posé, la demande reste sur label_doing."
   web_project_edit_desc_review_skill: "Skill de revue du projet, chargé depuis .claude/skills/ du dépôt (ex. mr-review, prepare-mr). Vide : le binaire mr-review est utilisé."
   web_project_edit_desc_extra_prompt: "Instructions supplémentaires injectées dans les prompts danger-claude. Défaut : aucune."
   web_project_edit_desc_dc_timeout: Délai maximum d'un appel danger-claude, en secondes.
