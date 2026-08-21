@@ -83,6 +83,37 @@ class PipelineMonitor
       @poll_inconclusive = nil
     end
 
+    # The watch clock as this poll found it, read once at the top of `check` —
+    # after `log_pipeline_poll` has seeded a NULL column and before any transition
+    # can restamp it (Autodev #74).
+    #
+    # `Issue#stamp_pipeline_watch!` writes `checking_pipeline_since = Time.current`
+    # on *every* transition into `checking_pipeline`, and that is the semantics the
+    # bound wants for a row that is moving: a ticket ping-ponging through a fix
+    # cycle restarts its clock, correctly, because stagnation detection is what
+    # bounds that shape. It is the wrong semantics for a row that left the state
+    # and came straight back having done nothing, which is what the review
+    # round-trip is when the review could not be published.
+    def remember_watch_clock(issue)
+      @watch_clock = issue.checking_pipeline_since
+    end
+
+    # Puts the clock this poll started with back on a row that returned to
+    # `checking_pipeline` without having moved, so the true age survives and
+    # `abandon_expired_watch` — the last statement of `poll_open_mr`, a few frames
+    # below — can still fire on it.
+    #
+    # Deliberately **not** `poll_inconclusive!`, which is the neighbouring idiom
+    # and the wrong one here: that flag stands the age bound *down* for the cycle,
+    # and a review that could not publish did read a pipeline status. The
+    # precedent is Autodev #69's `locked` handling, which does not raise the flag
+    # either, precisely so the wait stays bounded.
+    def restore_watch_clock(issue)
+      return if @watch_clock.nil? || issue.checking_pipeline_since == @watch_clock
+
+      issue.update(checking_pipeline_since: @watch_clock)
+    end
+
     # Logged, not recorded as activity: it happens on every poll of an expired
     # watch for as long as the outage lasts, and #53 went to some trouble to keep
     # the per-poll GitLab note from growing.

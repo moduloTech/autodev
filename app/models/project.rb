@@ -49,10 +49,10 @@ class Project < ApplicationRecord
   # "Advanced" keys columnized in phase 2 (were YAML-only in phase 1).
   STRING_CONFIG_FIELDS = %i[model effort implementer_agent test_writer_agent mr_fixer_agent].freeze
   BOOLEAN_CONFIG_FIELDS = %i[parallel_agents split_implementation].freeze
-  # The label an abandon poses instead of `label_done` (Autodev #63). Optional, so
-  # it is not part of the all-or-nothing LABEL_FIELDS set below — but it only
-  # means anything alongside them, and blank is a typo rather than "unset".
-  OPTIONAL_LABEL_FIELDS = %i[label_attention].freeze
+  # "If set, must not be blank" — a present-and-blank value is a typo, and it
+  # would otherwise read as "not configured" and silently take the fallback.
+  # `label_attention` (Autodev #63) then `review_skill` (Autodev #74).
+  OPTIONAL_STRING_FIELDS = %i[label_attention review_skill].freeze
 
   validates(*CONFIG_INTEGER_FIELDS, numericality: { only_integer: true }, allow_nil: true)
   validate :validate_numeric_ranges
@@ -60,9 +60,7 @@ class Project < ApplicationRecord
   # / whitespace but lets an unset field through). The boolean columns are
   # type-cast by AR, so a NULL stays nil and only true/false survive.
   validates(*STRING_CONFIG_FIELDS, presence: true, allow_nil: true)
-  # Same "if set, must not be blank" rule: a blank `label_attention` would read as
-  # "not configured" and silently take the no-end-label fallback (Autodev #63).
-  validates(*OPTIONAL_LABEL_FIELDS, presence: true, allow_nil: true)
+  validates(*OPTIONAL_STRING_FIELDS, presence: true, allow_nil: true)
   validates(*BOOLEAN_CONFIG_FIELDS, inclusion: { in: [true, false] }, allow_nil: true)
   validate :validate_label_workflow
   validate :validate_string_arrays
@@ -87,7 +85,7 @@ class Project < ApplicationRecord
                           max_retries retry_backoff stagnation_threshold clone_depth
                           post_completion_timeout mr_review_timeout model effort parallel_agents
                           split_implementation implementer_agent test_writer_agent
-                          mr_fixer_agent].freeze
+                          mr_fixer_agent review_skill].freeze
   LIST_CONFIG_KEYS = %i[labels_todo sparse_checkout post_completion].freeze
   LABEL_FIELDS = %i[labels_todo label_doing label_done].freeze
 
@@ -156,8 +154,15 @@ class Project < ApplicationRecord
   # `nil`, not `blank_config?`: a blank `label_attention` is already rejected by
   # its own `presence` validation, and reading it as "unset" here would let the
   # typo through the workflow-completeness check as well (Autodev #63).
+  #
+  # Checks `label_attention` specifically, not all of `OPTIONAL_STRING_FIELDS`:
+  # that set is now a generic "if set, must not be blank" list and also holds
+  # `review_skill` (Autodev #74), which has nothing to do with the label
+  # workflow. Folding it in here would force a project that only configures a
+  # review skill — no labels at all — through the "incomplete label workflow"
+  # error below, for a field that never poses a label.
   def no_optional_labels?
-    OPTIONAL_LABEL_FIELDS.all? { |f| public_send(f).nil? }
+    label_attention.nil?
   end
 
   def blank_config?(value)

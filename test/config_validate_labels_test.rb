@@ -71,6 +71,33 @@ class ConfigValidateLabelsTest < Minitest::Test
     Config.validate!(config)
   end
 
+  # `review_skill` is not a label field (Autodev #74): a project that overrides
+  # no label and declares only a review skill is a legitimate config, so this
+  # must not be read as an incomplete label workflow.
+  def test_review_skill_without_the_label_workflow_passes
+    config = base_config([{ 'path' => 'g/p', 'review_skill' => 'mr-review' }])
+    Config.validate!(config)
+  end
+
+  def test_review_skill_empty_string_raises
+    config = base_config([{
+                           'path' => 'g/p', 'labels_todo' => ['todo'],
+                           'label_doing' => 'doing', 'label_done' => 'mr',
+                           'review_skill' => '  '
+                         }])
+    assert_raises(ConfigError) { Config.validate!(config) }
+  end
+
+  # The blank-value rule has to hold on its own, not only when a label field
+  # happens to be present too: `validate_optional_string_fields!` used to sit
+  # under `validate_labels!`'s early return, which named `label_attention` and
+  # not `review_skill`, so this exact config skipped the check entirely and the
+  # typo read as "no skill declared".
+  def test_review_skill_empty_string_raises_without_the_label_workflow
+    config = base_config([{ 'path' => 'g/p', 'review_skill' => '  ' }])
+    assert_raises(ConfigError) { Config.validate!(config) }
+  end
+
   # Previously-deprecated label fields (label_mr, label_blocked, …) are now
   # silently ignored — no warning, and validation still passes.
   def test_legacy_label_fields_are_ignored_without_warning

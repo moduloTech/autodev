@@ -1,0 +1,126 @@
+# frozen_string_literal: true
+
+class PipelineMonitor
+  # Runs the reviewed project's own review skill (Autodev #74).
+  #
+  # The skill judges and stops — both PowerPanne's and Fast's state in bold that
+  # they write nothing without the developer's explicit go-ahead, and
+  # `danger-claude` runs `claude -p`, so there is nobody to ask. That STOP is the
+  # contract: autodev reads the findings back and posts them itself.
+  module SkillReviewer
+    private
+
+    # The boundary of one review: what counts as a review failure, and the clone
+    # cleanup. Split from the steps below the way `FixCycle#execute_fix_cycle` is
+    # split from `run_fix_cycle`, for the same reason — the boundary is what a
+    # reader has to be able to take in at a glance.
+    #
+    # The `ensure` is the line both sibling clone paths already carry
+    # (`FailureHandler#clone_and_fix`, `FixCycle#execute_fix_cycle`). The spec calls
+    # the work directory disposable and named `prepare_work_dir` as the idiom; the
+    # cleanup half was dropped, so one shallow clone per reviewed ticket accumulated
+    # in /tmp until reboot. It has to be `ensure` rather than a trailing statement
+    # because two outcomes leave by exception: `ApiUnavailableError` from the publish
+    # and `ConfigError` from a declared skill missing from the clone.
+    def review_with_skill(issue)
+      work_dir = "/tmp/autodev_review_#{@project_path.tr('/', '_')}_#{issue.issue_iid}"
+      run_skill_review(work_dir, issue)
+    rescue ImplementationError, ReviewContract::InvalidError => e
+      log_error "MR !#{issue.mr_iid}: review via skill " \
+                "'#{@project_config['review_skill']}' failed: #{e.message}"
+      false
+    ensure
+      FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
+    end
+
+    def run_skill_review(work_dir, issue)
+      skill = @project_config['review_skill']
+      path = review_contract_path(issue.mr_iid)
+      FileUtils.rm_f(path)
+      prepare_review_clone(work_dir, issue, skill)
+      run_review_skill(work_dir, issue, skill, path)
+      publish_from_contract(issue, path)
+    end
+
+    # A clone failure is a review failure: unlike a GitLab error while posting,
+    # here judgment never started.
+    def prepare_review_clone(work_dir, issue, skill)
+      clone_and_inject(work_dir, issue)
+      return if skill_available?(work_dir, skill)
+
+      raise ConfigError,
+            "project declares review_skill '#{skill}' but #{work_dir}/.claude/skills/#{skill}/SKILL.md " \
+            'is missing — refusing to fall back to the mr-review binary, which would run a different process'
+    end
+
+    # `clone_and_checkout` raises `GitError` (a sibling of `ImplementationError`
+    # under `AutodevError`, not a subclass — Autodev #74 fix round 1) and
+    # `SkillsInjector.inject` raises nothing of its own, so a `File.write` /
+    # `FileUtils.mkdir_p` failure underneath it would otherwise escape as a bare
+    # `Errno::*`. Both are normalised to `ImplementationError` here, and only
+    # here: `review_with_skill`'s rescue already treats that class as a review
+    # failure, and the scope stops at this pair on purpose — it must not also
+    # catch `raise ConfigError` two lines below, which is a distinct outcome
+    # (a declared skill missing from the clone), nor anything from
+    # `run_review_skill` or `publish_from_contract`, where an `ApiUnavailableError`
+    # must keep propagating untouched.
+    def clone_and_inject(work_dir, issue)
+      clone_and_checkout(work_dir, issue.branch_name)
+      SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
+    rescue StandardError => e
+      raise ImplementationError, "clone or skill injection failed: #{e.message}"
+    end
+
+    def skill_available?(work_dir, skill)
+      File.exist?(File.join(work_dir, '.claude', 'skills', skill, 'SKILL.md'))
+    end
+
+    # `mr_review_timeout` (Reviewer's per-project override, default 3600s), not
+    # `dc_timeout` (600s): a full skill run clones, loads the skill and runs its
+    # adversarial pass, the same duration profile `mr-review` itself has, not an
+    # ordinary implementation call's (Autodev #74 fix round 1).
+    def run_review_skill(work_dir, issue, skill, path)
+      danger_claude_prompt(work_dir, review_prompt(issue, skill, path),
+                           label: "-p (review via #{skill})", timeout: mr_review_timeout)
+    end
+
+    def publish_from_contract(issue, path)
+      raise ReviewContract::InvalidError, "contract file #{path} was not written" unless File.exist?(path)
+
+      contract = ReviewContract.parse(File.read(path))
+      # nil = no diff_refs yet. NOT a success: returning true here would increment
+      # review_count, and the next poll would take the post-review branch, find no
+      # discussion and deliver the MR without the review ever having been posted —
+      # the exact shape Autodev #62 exists to remove.
+      publish_review(issue, contract).nil? ? :inconclusive : true
+    end
+
+    def review_contract_path(mr_iid)
+      "/tmp/autodev_review_#{@project_path.tr('/', '_')}_#{mr_iid}.json"
+    end
+
+    def review_prompt(issue, skill, path)
+      <<~PROMPT
+        Charge le skill `#{skill}`. Revois la merge request !#{issue.mr_iid} contre sa
+        branche cible réelle, en appliquant intégralement la discipline du skill, y
+        compris sa passe adversariale.
+
+        Tu es en mode non interactif : il n'y a personne à qui demander une validation.
+        N'écris rien sur GitLab — ni discussion, ni label, ni commentaire, ni note de
+        ticket. Dépose tes constats consolidés dans #{path}, au format :
+
+        {"verdict":"approve|changes_requested","summary":"…",
+         "findings":[{"file":"chemin","line":12,"severity":"error|warning|info|nitpick","body":"…"}]}
+
+        Un constat sans `file`/`line` est accepté : il sera rendu dans le commentaire
+        de synthèse au lieu d'une discussion inline.
+      PROMPT
+    end
+
+    def publish_review(issue, contract)
+      ReviewPublisher.new(client: @client, project_path: @project_path,
+                          logger: @logger, locale: issue.locale.to_sym)
+                     .publish(mr_iid: issue.mr_iid, contract: contract)
+    end
+  end
+end

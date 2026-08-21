@@ -7,6 +7,7 @@ module ProjectValidator
     validate_post_completion!(project_config, path)
     validate_clone_options!(project_config, path)
     validate_labels!(project_config, path)
+    validate_optional_string_fields!(project_config, path)
     AdvancedValidator.validate!(project_config, path)
     AppValidator.validate!(project_config, path)
   end
@@ -96,17 +97,28 @@ module ProjectValidator
         raise ConfigError, "#{path}: '#{field}' must be a non-empty string."
       end
     end
-    validate_optional_label_types!(project_config, path)
   end
   private_class_method :validate_label_types!
 
-  # `label_attention` (Autodev #63) is optional — most projects have no third
-  # value in their workflow scope, and its absence is a defined fallback (no end
-  # label on a give-up, the row keeps `label_doing`), not a partial workflow. But
-  # a present-and-blank value is a typo, and it would otherwise read as "not
+  # `label_attention` (Autodev #63) and `review_skill` (Autodev #74) are
+  # optional — most projects have no third label-workflow value and no project
+  # review skill, and either's absence is a defined fallback (no end label on a
+  # give-up; the `mr-review` binary for review), not a partial config. But a
+  # present-and-blank value is a typo, and it would otherwise read as "not
   # configured" and silently take the fallback.
-  def self.validate_optional_label_types!(project_config, path)
-    ConfigValidator::OPTIONAL_LABEL_FIELDS.each do |field|
+  #
+  # Called from `validate!` as a sibling of `validate_labels!`, not from inside
+  # it: this rule is about a field's *shape*, which holds whatever else the
+  # project configures, while `validate_labels!` answers a different question —
+  # is the label workflow complete — and returns early when the project
+  # overrides no label at all. Nested under that early return, the blank check
+  # was reachable only for a project that also configured a label, so
+  # `review_skill: ''` alone skipped it and read as "no skill declared".
+  # `review_skill` cannot be added to that gate instead: it is not a label, so a
+  # project declaring only a review skill would then be rejected for an
+  # incomplete label workflow it never claimed to have.
+  def self.validate_optional_string_fields!(project_config, path)
+    ConfigValidator::OPTIONAL_STRING_FIELDS.each do |field|
       next unless project_config.key?(field)
 
       value = project_config[field]
@@ -115,5 +127,5 @@ module ProjectValidator
       raise ConfigError, "#{path}: '#{field}' must be a non-empty string when set."
     end
   end
-  private_class_method :validate_optional_label_types!
+  private_class_method :validate_optional_string_fields!
 end

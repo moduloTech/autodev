@@ -45,15 +45,20 @@ module DangerClaudeRunner
     @last_session_id = nil
   end
 
+  # `timeout:` overrides the ordinary `dc_timeout` fallback for a caller whose
+  # danger-claude call has a different duration profile — left nil, resolution
+  # is unchanged for every pre-existing caller (Autodev #74 fix round 1: the
+  # skill reviewer passes `mr_review_timeout` here, the same reasoning
+  # `run_with_timeout`'s own `timeout:` already carries for `mr-review` itself).
   # rubocop:disable Metrics/ParameterLists, Metrics/MethodLength
-  def danger_claude_prompt(work_dir, prompt, label: '-p', agent: nil, model: nil, resume: nil)
+  def danger_claude_prompt(work_dir, prompt, label: '-p', agent: nil, model: nil, resume: nil, timeout: nil)
     args = dc_global_args(model_default: model)
     args.push('-r', resume) if resume
     args.push('-a', agent) if agent
     args += ['-p', prompt]
     log_dc_prompt(prompt, agent)
     dc_heartbeat!(label)
-    out, err, ok = run_with_timeout('danger-claude', args, chdir: work_dir, label: label)
+    out, err, ok = run_with_timeout('danger-claude', args, chdir: work_dir, label: label, timeout: timeout)
     text = capture_session_and_text(out)
     check_dc_failures!(text, err)
     raise ImplementationError, dc_error_msg('-p', text, err) unless ok

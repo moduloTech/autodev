@@ -28,6 +28,18 @@ class PipelineMonitor
       log_activity(issue, :auth_failure)
     end
 
+    # The review path's answer to the two typed failures `check_dc_failures!` raises
+    # from inside `danger_claude_prompt` (Autodev #74). Same dispatch shape as
+    # `handle_failure_error` below, minus the generic arm: a `StandardError` out of
+    # a review is already `false` (a counted review failure), so only these two need
+    # sorting, and `launch_review` must not let either escape — the row is in
+    # `reviewing` by then, which no dispatch pass selects.
+    def handle_review_interruption(issue, error)
+      return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
+
+      handle_rate_limit(issue, error)
+    end
+
     def handle_failure_error(issue, error)
       return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
 

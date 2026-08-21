@@ -18,7 +18,7 @@ module Web
       # per key from the Project::CONFIG_* groupings.
       SECTIONS = [
         [:web_project_edit_section_basic,
-         %i[target_branch labels_todo label_doing label_done label_attention extra_prompt]],
+         %i[target_branch labels_todo label_doing label_done label_attention review_skill extra_prompt]],
         [:web_project_edit_section_execution,
          %i[dc_timeout max_retries retry_backoff stagnation_threshold clone_depth
             sparse_checkout post_completion post_completion_timeout mr_review_timeout]],

@@ -56,7 +56,7 @@ class YamlProjectImporter
                    dc_timeout max_retries retry_backoff stagnation_threshold
                    clone_depth sparse_checkout post_completion post_completion_timeout
                    mr_review_timeout model effort parallel_agents split_implementation
-                   implementer_agent test_writer_agent mr_fixer_agent].freeze
+                   implementer_agent test_writer_agent mr_fixer_agent review_skill].freeze
 
   def initialize(yaml:)
     @yaml = yaml || {}

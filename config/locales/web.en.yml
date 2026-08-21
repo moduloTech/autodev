@@ -291,6 +291,7 @@ en:
   web_project_edit_desc_label_doing: Label set on the issue throughout processing. Required with labels_todo and label_done.
   web_project_edit_desc_label_done: Label set when the issue is delivered (done state). Required with labels_todo and label_doing.
   web_project_edit_desc_label_attention: "Label set when Autodev gives the request up (stagnation, expired watch, review limit, failing mr-review): the request is not delivered and needs a human. Optional; pick a value in the same scope as label_doing / label_done. Default: no end label is set at all, the request stays on label_doing."
+  web_project_edit_desc_review_skill: "The project's review skill, loaded from the repo's .claude/skills/ (e.g. mr-review, prepare-mr). Empty: the mr-review binary is used."
   web_project_edit_desc_extra_prompt: "Extra instructions injected into the danger-claude prompts. Default: none."
   web_project_edit_desc_dc_timeout: Maximum time for a single danger-claude call, in seconds.
   web_project_edit_desc_max_retries: Maximum number of attempts on an issue after a failure.

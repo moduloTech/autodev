@@ -28,12 +28,19 @@ module SkillsInjector
     { stack: stack, existing: existing, injected: injected, all_skills: (existing + injected).uniq.sort }
   end
 
-  # Builds a prompt instruction line listing skills to load.
-  def skills_instruction(all_skills)
-    return '' if all_skills.nil? || all_skills.empty?
+  # The convention skills are the ones a prompt should load: they describe how to
+  # write code in this project. A workflow skill (`mr-review`, `hotfix`,
+  # `ship-mep-to-production`) drives a process with its own trigger and its own
+  # writes — it is named explicitly by the step that wants it, never broadcast.
+  # The review step names its own (Autodev #74).
+  PROMPT_SKILL_SUFFIXES = %w[-conventions -patterns].freeze
 
-    skill_list = all_skills.map { |s| "`#{s}`" }.join(', ')
-    "- Avant de commencer, charge les skills suivants : #{skill_list}."
+  # Builds a prompt instruction line listing the convention skills to load.
+  def skills_instruction(all_skills)
+    relevant = Array(all_skills).select { |s| PROMPT_SKILL_SUFFIXES.any? { |suffix| s.end_with?(suffix) } }
+    return '' if relevant.empty?
+
+    "- Avant de commencer, charge les skills suivants : #{relevant.map { |s| "`#{s}`" }.join(', ')}."
   end
 
   # Delegates to StackDetector for backward compatibility with tests.
