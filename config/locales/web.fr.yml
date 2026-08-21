@@ -301,7 +301,7 @@ fr:
   web_project_edit_desc_sparse_checkout: "Chemins à récupérer en sparse checkout (utile pour les monorepos). Une entrée par ligne. Défaut : clone complet."
   web_project_edit_desc_post_completion: "Commande exécutée après un pipeline vert (format CMD Docker). Une entrée par ligne. Défaut : aucun hook."
   web_project_edit_desc_post_completion_timeout: Délai maximum de la commande post_completion, en secondes.
-  web_project_edit_desc_mr_review_timeout: Délai maximum d'une exécution de mr-review, en secondes. Au-delà, la review est interrompue et comptée comme un échec.
+  web_project_edit_desc_mr_review_timeout: Délai maximum d'une review de MR, quel que soit le chemin (binaire mr-review ou skill de review du projet), en secondes. Au-delà, la review est interrompue et comptée comme un échec.
   web_project_edit_desc_model: "Modèle danger-claude (option -m). Défaut : modèle par défaut de danger-claude."
   web_project_edit_desc_effort: "Effort de raisonnement danger-claude (option -e). Défaut : effort par défaut de danger-claude."
   web_project_edit_desc_parallel_agents: Découpe les issues complexes sur plusieurs agents en parallèle (worktrees git).
