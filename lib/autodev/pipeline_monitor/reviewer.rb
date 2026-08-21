@@ -110,7 +110,7 @@ class PipelineMonitor
       new_failures = (issue.review_failure_count || 0) + 1
       Issue.where(id: issue.id).update(review_failure_count: new_failures)
       issue.review_failure_count = new_failures
-      log "mr-review failed (consecutive failures: #{new_failures}/#{REVIEW_FAILURE_THRESHOLD})"
+      log "review failed (consecutive failures: #{new_failures}/#{REVIEW_FAILURE_THRESHOLD})"
       return give_up_reviewing(issue) if new_failures >= REVIEW_FAILURE_THRESHOLD
 
       issue.review_done!
@@ -139,7 +139,7 @@ class PipelineMonitor
       notify_localized(issue.issue_iid, :review_failures_exhausted,
                        mr_url: issue.mr_url, count: REVIEW_FAILURE_THRESHOLD)
       log_activity(issue, :review_failures_exhausted, count: REVIEW_FAILURE_THRESHOLD)
-      log "Issue ##{issue.issue_iid}: #{REVIEW_FAILURE_THRESHOLD} consecutive mr-review failures → done"
+      log "Issue ##{issue.issue_iid}: #{REVIEW_FAILURE_THRESHOLD} consecutive review failures → done"
     end
 
     def reset_review_failure_count(issue)

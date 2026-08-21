@@ -180,7 +180,7 @@ Tout réglage numérique déclare son **type** et sa **plage** dans `NumericSett
 | Général | `review_skill` | Nom d'un skill de revue chargé depuis `.claude/skills/<nom>/SKILL.md` dans le dépôt du projet (ex. `mr-review`, `prepare-mr`). Renseigné, l'étape de review clone la branche de la MR, injecte les skills du projet et lance le skill déclaré via `danger-claude -p` au lieu du binaire `mr-review` (Autodev #74) ; le skill dépose son verdict dans un fichier de contrat, qu'Autodev seul publie sur GitLab (voir §*Pipeline et review*). Vide (par défaut) : le binaire `mr-review` est utilisé, comme avant. |
 | Général | `extra_prompt` | Texte ajouté à tous les prompts `danger-claude` du projet. |
 | Exécution | `dc_timeout` | Délai max d'un appel `danger-claude` (s). |
-| Exécution | `mr_review_timeout` | Délai max d'une exécution de `mr-review` (s, défaut 3600). Au-delà, la review est interrompue et comptée comme un échec ; 5 échecs consécutifs clôturent la demande et la réassignent à son auteur. |
+| Exécution | `mr_review_timeout` | Délai max d'une review de MR, quel que soit le chemin — binaire `mr-review` ou skill déclaré (s, défaut 3600). Au-delà, la review est interrompue et comptée comme un échec ; 5 échecs consécutifs clôturent la demande et la réassignent à son auteur. |
 | Exécution | `max_retries` | Nb max de **retries** (pas de tentatives totales) sur échec — défaut `1`, soit 1 retry après le premier échec. Résolu par `Config.max_retries` et comparé de façon inclusive (`retry_count <= max_retries`) à chaque site. Un `max_retries` **global** dans `config.yml` est ignoré (`IGNORED_GLOBAL_FIELDS`) : seuls l'override par projet et le `DEFAULTS` s'appliquent. |
 | Exécution | `retry_backoff` | Délai de base entre deux tentatives (s). |
 | Exécution | `dormant_audit_max` | Nb max de secondes chances accordées à une ligne dormante (`pending` orpheline, budget de retry épuisé, ou état actif figé) avant abandon (défaut 3, `DEFAULT_DORMANT_AUDIT_MAX`). Ancien nom `error_recheck_max`, toujours accepté. |
@@ -308,7 +308,7 @@ pending → cloning → checking_spec → implementing → committing → pushin
                           ↓                                                            │    code)   canceled)
                        pending                                                         ↓        │        │
                                                                                   reviewing  fixing_   skip
-                                                                                 (mr-review) pipeline
+                                                                                 (bin/skill) pipeline
                                                                                        │        │
                                                                                        ↓        ↓
                                                                                    checking_pipeline
@@ -385,7 +385,7 @@ Chaque dispatch enfile un `IssueProcessJob(project_path, issue_iid, action)` sur
 | `dispatch_dormant_audit` | tourne |
 | `dispatch_infra_recheck` (`:recheck_infra`) | tourne |
 
-`:check_pipeline` continue d'être enfilée, donc `PipelineMonitor` porte son propre gate aux deux points qui appellent Claude : pipeline verte avec `review_count == 0` (mr-review) et branche `code` de `triage_and_fix`. Le premier est placé **avant** `log_activity(:pipeline_green)` (sinon une coupure longue ajoute une ligne à la note GitLab à chaque poll et fait sauter le cap de 1 M caractères) ; le second retourne **avant** toute écriture sur la ligne (sinon un cycle en pause brûle le budget de stagnation — voir §*Le compteur de stagnation compte des tentatives*). `IssueProcessJob` porte une garde défensive pour les jobs déjà en file (`:process`, `:fix_discussions`, `:retry_stuck`).
+`:check_pipeline` continue d'être enfilée, donc `PipelineMonitor` porte son propre gate aux deux points qui appellent Claude : pipeline verte avec `review_count == 0` (lancement de la review) et branche `code` de `triage_and_fix`. Le premier est placé **avant** `log_activity(:pipeline_green)` (sinon une coupure longue ajoute une ligne à la note GitLab à chaque poll et fait sauter le cap de 1 M caractères) ; le second retourne **avant** toute écriture sur la ligne (sinon un cycle en pause brûle le budget de stagnation — voir §*Le compteur de stagnation compte des tentatives*). `IssueProcessJob` porte une garde défensive pour les jobs déjà en file (`:process`, `:fix_discussions`, `:retry_stuck`).
 
 Tout échoue **ouvert** : absence de sonde, payload illisible, ou verdict plus vieux que `max(2 × poll_interval, 600 s)` se lisent « disponible ». Ne pas réussir à *observer* le quota ne doit jamais arrêter le pipeline. Le verdict est lu par `HealthReport#check_claude_usage` et par la bannière du dashboard (`Autodev::UsageGate.state`).
 
@@ -572,7 +572,7 @@ DB primaire : `autospec_drafts` (dont `ticket_template_id`), `autospec_messages`
 | Pipeline rouge (code, pré-triage) | `fixing_pipeline` immédiat (skip retrigger) |
 | Pipeline rouge (infra / incertaine, 1re fois) | Retrigger unique, recheck au poll suivant |
 | Pipeline rouge (infra / incertaine, après retrigger) | Reste en `checking_pipeline` (manuel) |
-| Pipeline manual / skipped | Résolu sur les jobs bloquants : aucun en échec → vert → `mr-review` → livraison ; un en échec → chemin rouge. `manual` est l'état final normal d'une MR verte sur un projet dont la pipeline se termine par un `deploy_review` manuel — l'attente était infinie par construction |
+| Pipeline manual / skipped | Résolu sur les jobs bloquants : aucun en échec → vert → review → livraison ; un en échec → chemin rouge. `manual` est l'état final normal d'une MR verte sur un projet dont la pipeline se termine par un `deploy_review` manuel — l'attente était infinie par construction |
 | Pipeline canceled | Reste en `checking_pipeline` (manuel) : un run interrompu n'a pas de verdict lisible, et il est en général remplacé par une nouvelle pipeline. **Borné** par `pipeline_watch_max_days` |
 | Stagnation pipeline (5 corrections identiques) | `done` + `needs_attention` (`stagnation_pipeline`) + `label_attention`, commentaire d'alerte incluant le job en cause (`attention_detail`, ex. `deploy_review (script_failure)`). Re-tentative auto une fois CI rétablie (voir ligne suivante) |
 | Stagnation pipeline infra — CI rétabli | `dispatch_infra_recheck` ré-enfile `:recheck_infra` ; pipeline courante verte → réentrée `checking_pipeline`. Borné par `infra_recheck_max` (5) / `infra_recheck_backoff` (3600 s) ; jamais de boucle |

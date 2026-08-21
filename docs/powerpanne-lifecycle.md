@@ -31,7 +31,7 @@ Autodev pose `Development::Doing` des qu'il commence, retire `To Do`, puis :
 
 - **Clone** le repo.
 - **Evalue** la spec.
-- Soit **implemente** (commit, push, MR vers `staging`, pipeline, mr-review, corrections), soit **pose des questions** si la spec reste floue, soit **repond en commentaire** si le ticket est une question/investigation sans code.
+- Soit **implemente** (commit, push, MR vers `staging`, pipeline, review automatique, corrections), soit **pose des questions** si la spec reste floue, soit **repond en commentaire** si le ticket est une question/investigation sans code.
 - Quand c'est termine, il retire `Development::Doing` et pose **`Development::Awaiting Feature Review`** : la main est rendue au CSM.
 
 Les sections plus bas detaillent chaque type d'interaction avec Autodev pendant cette phase.
@@ -98,7 +98,7 @@ Pas besoin de marquer explicitement le type : c'est la formulation du ticket qui
 
 ## Review de la MR : comment demander des changements
 
-Autodev ouvre la MR vers `staging`. Apres le premier pipeline vert, il lance une review automatique (`mr-review`) qui depose ses propres commentaires.
+Autodev ouvre la MR vers `staging`. Apres le premier pipeline vert, il lance une review automatique qui depose ses propres commentaires.
 
 Pour demander une modification, que ce soit depuis la review auto, un dev en CR, ou le CSM en test fonctionnel :
 
@@ -190,7 +190,7 @@ sequenceDiagram
         loop Pipeline + review + corrections
             AD->>GL: Attend le pipeline vert
             opt Premier tour
-                AD->>GL: Lance mr-review
+                AD->>GL: Lance la review automatique
             end
             alt Discussions non resolues
                 AD->>GL: Corrige, pousse, resout
