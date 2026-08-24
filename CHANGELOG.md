@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.48] - 2026-08-24
+
 ### Added
 
 - **The review step forks on `review_skill`, wiring the last four tasks into the live poll (Autodev #74).** `PipelineMonitor::Reviewer#launch_review` picks the path: a project with no `review_skill` still runs the `mr-review` binary exactly as before; a project that declares one now takes `SkillReviewer#review_with_skill` instead — clone, skill, contract, publish. Both paths answer through the same three-valued dispatch, `dispatch_review_outcome`: `true` → `finalize_review_success` (review count incremented, as before), `false` → `finalize_review_failure` (spends one of the five review-failure budgets, as before), and the new `:inconclusive` — GitLab had not computed the MR's `diff_refs` yet, so nothing could be published — sends the row back to `checking_pipeline` via `review_done!` **without touching either counter**, so the next poll runs the whole review again instead of either delivering the MR with no review posted (counting it a success) or spending a budget on a cycle that never got to act (counting it a failure). `ApiUnavailableError` from a GitLab outage while publishing still propagates out of `launch_review` untouched — it is not a review failure. `finalize_review_success` / `finalize_review_failure` are unchanged.

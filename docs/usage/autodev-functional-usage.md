@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-08-11
+date: 2026-08-24
 lang: fr
 documentclass: article
 papersize: a4
