@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The technical guide's error catalogue catches up with eleven cases the code already handles.** `docs/usage/autodev-technical-usage.md` is rendered at `/admin/help`, and its catalogue had not been extended since the review step forked in two: the four failure classes the skill path introduced (a declared skill missing from the clone, `diff_refs` not yet computed, a GitLab error while `ReviewPublisher` posts, a Claude quota or credential failure *during* a skill review — Autodev #74), the three unreachable-read cases that must abort a poll instead of reading as good news (the jobs endpoint, any read the poll concludes from, the prompt-context read — Autodev #62, #67, #71), the two todo-label-reposed cases the poll router now answers per issue (Autodev #67), the interrupted pre-MR reset that must stamp `next_retry_at`, and the health probe that sees the review broken for everybody (Autodev #60). Also added: `autodev -t TOKEN` to the supervisor's flag table, and the `needs_clarification` row of the technical→métier mapping now carries the exact label `web.fr.yml` renders. The functional guide needed nothing — it was kept in step ticket by ticket. The two configuration-form screenshots (`15-project-edit.png`, `16-project-new.png`) are reshot: they predated `label_attention` (Autodev #63) and `review_skill` (Autodev #74), so the form they showed was missing both fields the release documents.
+
 ## [1.0.0-alpha.48] - 2026-08-24
 
 ### Added
