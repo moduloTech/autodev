@@ -73,6 +73,16 @@ def autodev_compact_activity_events
   Autodev::ActivityEventCompaction.new(apply: ENV['APPLY'] == '1', vacuum: ENV['VACUUM'] == '1').run
 end
 
+# Autodev #75. The arrears of the unreachable clarification pickup: every row
+# parked in `needs_clarification` is re-asked "did a human answer?", and the ones
+# that did go back into the queue. Reads the `issues` table rather than GitLab's
+# label filter, so it reaches the requests whose ticket is still on `label_doing`
+# and which `dispatch_new_issues` therefore never sees. Reports unless APPLY=1;
+# idempotent (a re-armed row leaves the population).
+def autodev_recheck_clarifications
+  Autodev::ClarificationSweep.new(config: Web.config, apply: ENV['APPLY'] == '1').run
+end
+
 namespace :autodev do
   desc 'Import ~/.autodev/config.yml `projects:` block into projects + project_app_commands. ' \
        'DRY_RUN=1 logs the summary without writing. AUTODEV_CONFIG=path overrides the file path.'
@@ -97,4 +107,8 @@ namespace :autodev do
   desc 'Delete superseded occurrences of collapsible activity entries, keeping the newest per issue. ' \
        'Reports only unless APPLY=1. VACUUM=1 reclaims the file afterwards. Idempotent.'
   task(compact_activity_events: :environment) { autodev_compact_activity_events }
+
+  desc 'Re-ask GitLab whether the requests parked in needs_clarification have been answered, ' \
+       'and re-queue the ones that have. Reports only unless APPLY=1. Idempotent.'
+  task(recheck_clarifications: :environment) { autodev_recheck_clarifications }
 end

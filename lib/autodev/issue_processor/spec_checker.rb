@@ -88,6 +88,22 @@ class IssueProcessor
       SPEC_CONTINUE
     end
 
+    # This is where the request leaves autodev's own field of view, and it is
+    # deliberately still the case (Autodev #75).
+    #
+    # `dispatch_new_issues` asks GitLab for the issues assigned to autodev *and*
+    # carrying a `labels_todo` label. Nothing here touches the label, so the
+    # ticket stays on `label_doing` and drops out of that query: the row is
+    # reachable again since `Issue::PROCESSABLE_STATES` (the router used to drop
+    # it one step later), but only while a todo label is on the ticket.
+    #
+    # Reposing one here is the obvious one-line fix and it is **not** ours to
+    # make: on the configured projects `labels_todo` is `To do` / `Development::ToDo`,
+    # so it moves the ticket back onto the PM's board — which may be exactly what
+    # she wants when autodev is waiting on her, or may be noise. The alternative
+    # is to give `needs_clarification` a dispatch population of its own, which
+    # changes nothing she sees. Both are cheap from here; the choice is hers, and
+    # `Autodev::ClarificationSweep` drains the existing backlog in the meantime.
     def post_clarification(issues_list, iid, issue)
       notify_clarification_questions(issues_list, iid)
       issue.spec_unclear!

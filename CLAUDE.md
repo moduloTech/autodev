@@ -240,7 +240,7 @@ Pipeline fix strategy: full job logs are written to `tmp/ci_logs/<job_name>.log`
 
 `app/services/autodev/poll_dispatcher.rb` runs one polling cycle per call: discovers issues from GitLab + DB, enqueues an `IssueProcessJob(project_path, issue_iid, action)` per work item. Eight dispatch passes per project:
 
-- `dispatch_new_issues` — new `label_todo` issues → `:process`
+- `dispatch_new_issues` — new `label_todo` issues → `:process`. Also the pass that re-reads a request parked in `needs_clarification`: `process_issue` → `skip_existing?` → `clarification_received?` is the only place that asks whether the human answered. It gets there because `PollRouter#route_by_state` tests `Issue::PROCESSABLE_STATES` (`pending` + `needs_clarification`) rather than `== 'pending'` — one declaration, also read by `IssueProcessJob::DISPATCHED_FROM[:process]`, which had accepted `needs_clarification` all along while the router did not (Autodev #75). What this pass still cannot reach is a parked request whose ticket carries `label_doing`: asking a question does not repose a todo label, so it leaves the GitLab query's population. `bin/rails autodev:recheck_clarifications` (`Autodev::ClarificationSweep`) drains that arrears from the `issues` table; making it a recurring pass is the open arbitration, not a decision the fix took
 - `dispatch_pipelines` — `checking_pipeline` rows → `:check_pipeline`
 - `dispatch_discussions` — `fixing_discussions` rows → `:fix_discussions`
 - `dispatch_unassignment` — active rows closed on GitLab, no longer assigned, or handed over via the labels → `closed` inline (no job). One `@client.issue` read answers all three questions
@@ -313,7 +313,7 @@ active + unassigned at poll → closed (+ GitLab comment) — a mid-flight stop,
 active + workflow label moved by a human at poll → closed (+ GitLab comment)
 closed + label_todo reapplied *after* finished_at → pending / checking_pipeline (reentry)
 error (from any active state) → pending (on retry, with backoff)
-needs_clarification (from checking_spec) → pending (when clarification comment posted)
+needs_clarification (from checking_spec) → pending (when a human answers on the ticket)
 ```
 
 ## Error Handling
@@ -333,6 +333,7 @@ needs_clarification (from checking_spec) → pending (when clarification comment
 | Issue closed between poll and processing | `clone_complete!` → done (guard: issue_closed?) |
 | Issues in error at startup | `Issue.recover_on_startup!` resets transient states |
 | Interrupted pre-MR processing (`cloning`…`creating_mr`, no MR yet) | Reset to `pending` **and `next_retry_at` stamped** → re-enqueued via `:retry_stuck` next poll (without the stamp the GitLab label stays `label_doing`, so `dispatch_new_issues` never re-discovers it → orphaned `pending`) |
+| Spec unclear: a question posted, the row parked in `needs_clarification` | Re-read on every cycle by `dispatch_new_issues` **provided the ticket still carries a todo label** — `Issue::PROCESSABLE_STATES` is what lets the row past `PollRouter#route_by_state`, and `clarification_received?` then asks GitLab whether a human posted after `clarification_requested_at` (Autodev #75). A GitLab error there concludes nothing: the row stays put and the next cycle re-asks. `SpecChecker#post_clarification` does **not** repose a todo label, so a request asked from `label_doing` is outside that population — that gap is what `autodev:recheck_clarifications` drains, and closing it for good is an open arbitration (reposing the label moves the ticket on the PM's board) |
 | Pipeline red (code by pre-triage) | Skip retrigger, go straight to fix phase |
 | Pipeline red (infra/uncertain, first time) | Retrigger once, recheck next poll |
 | Pipeline red (infra/uncertain, after retrigger) | Stay in checking_pipeline; if the same infra job set recurs `stagnation_threshold` times, bail via stagnation → done + needs_attention (`stagnation_pipeline`) |

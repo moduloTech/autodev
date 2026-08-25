@@ -178,24 +178,22 @@ module Autodev
     # the substitute cannot be mistaken for a verdict the way
     # `open_mr_destination`'s could. Declared at the caller rather than hidden in
     # the helper, so the helper has one behaviour and each boundary owns its own.
+    #
+    # "Re-reads the same question every cycle" was a claim about a step upstream of
+    # this method, and it was false for four months (Autodev #75): `route_by_state`
+    # answered `:next` for anything that was not `pending`, so `process_issue` — and
+    # therefore this method — was never reached for the state it exists to serve.
+    # The rule is now stated once, as `Issue::PROCESSABLE_STATES`, and read by both
+    # the router and `IssueProcessJob`.
     def clarification_received?(existing, gl_issue)
-      return false unless ::GitlabHelpers.clarification_answered?(
-        @client, @path, gl_issue.iid, existing.clarification_requested_at
-      )
+      resumer = ClarificationResume.new(client: @client, path: @path, logger: @logger)
+      return false unless resumer.answered?(existing)
 
-      requeue_after_clarification(existing, gl_issue)
+      resumer.resume!(existing)
       true
     rescue ::ApiUnavailableError => e
       @logger.error("Issue ##{gl_issue.iid}: #{e.message} — clarification check deferred", project: @path)
       false
-    end
-
-    def requeue_after_clarification(existing, gl_issue)
-      @logger.info("Issue ##{gl_issue.iid}: clarification received, re-queuing", project: @path)
-      existing.clarification_received!
-      existing.update(clarification_requested_at: nil, error_message: nil)
-      ::ActivityLogger.post(::ActivityLogger::Ctx.new(@client, @path, @logger),
-                            existing, :clarification_received)
     end
 
     def find_or_create_issue(gl_issue)
