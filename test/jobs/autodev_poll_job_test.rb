@@ -108,6 +108,32 @@ class AutodevPollJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cla
     assert_equal 2, ActivityEvent.where(kind: 'poller').order(:id).last.payload['projects']
   end
 
+  # Autodev #81: the review-skill check is a per-cycle probe like the quota one,
+  # for the same reason — the reader (HealthReport) is passive by contract, so
+  # the cycle is what runs the live read and records the verdict. Once per cycle,
+  # over the same project list the dispatchers get.
+  test 'probes the declared review skills once per cycle, over the cycle projects' do
+    calls = []
+    probe = ->(config:, projects:, logger: nil) { (calls << [config, projects, logger]) && [] }
+
+    Autodev::ReviewSkillProbe.stub(:probe!, probe) { run_with_stubs(usage_available: true) }
+
+    assert_equal 1, calls.size
+    assert_equal(%w[group/foo group/bar], calls.first[1].map { |project| project['path'] })
+  end
+
+  # An advisory check must never be the thing that stops a poll cycle — the same
+  # ruling `bin/autodev`'s `warn_rejected_numeric_settings` carries.
+  test 'a review-skill probe failure does not break the cycle' do
+    probe = ->(**) { raise StandardError, 'gitlab down' }
+
+    dispatched = Autodev::ReviewSkillProbe.stub(:probe!, probe) do
+      run_with_stubs(usage_available: true)
+    end
+
+    assert_equal %w[group/foo group/bar], dispatched
+  end
+
   test 'records a cycle error and re-raises when the cycle blows up' do
     fake_checker = build_fake_checker(true)
     assert_raises(StandardError) do
