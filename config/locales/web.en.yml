@@ -235,6 +235,7 @@ en:
   web_errors_explain_attention_pipeline_watch_expired: "Autodev watched this request's pipeline for weeks without ever reaching a verdict (never green, never actionably red — waiting on a manual action, canceled, or blocked). It stopped watching. The MR is still open: check the pipeline on GitLab, or close the request if it is no longer relevant."
   web_errors_explain_attention_mr_closed_unmerged: "The merge request was closed without being merged: nothing was delivered and Autodev stopped following the request. The request is handed back to you — decide whether the work should be picked up again (put the starting label back and reassign Autodev) or whether the request is no longer relevant."
   web_errors_explain_attention_dormant_exhausted: The request stopped progressing and the automatic checks could not restart it. It is left as is — check on GitLab whether it is still relevant.
+  web_errors_explain_attention_review_skill_missing: "The project declares a review skill its repository does not carry on the MR branch: Autodev will not replace it with the mr-review binary, which would run a different process, so it stops this request. The comment posted on the GitLab ticket names the expected skill and its path. Until this is fixed every request of the project will stop at the same place — fix “Review skill” in the project configuration, or add the skill to the repository."
   web_errors_attention_detail: "Failing job(s): %{detail}"
   web_errors_show_technical: Show technical details
   web_errors_view_detail: See details

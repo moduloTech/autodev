@@ -21,7 +21,7 @@ class PipelineMonitor
     # cleanup half was dropped, so one shallow clone per reviewed ticket accumulated
     # in /tmp until reboot. It has to be `ensure` rather than a trailing statement
     # because two outcomes leave by exception: `ApiUnavailableError` from the publish
-    # and `ConfigError` from a declared skill missing from the clone.
+    # and `MissingReviewSkillError` from a declared skill missing from the clone.
     def review_with_skill(issue)
       work_dir = "/tmp/autodev_review_#{@project_path.tr('/', '_')}_#{issue.issue_iid}"
       run_skill_review(work_dir, issue)
@@ -44,13 +44,19 @@ class PipelineMonitor
 
     # A clone failure is a review failure: unlike a GitLab error while posting,
     # here judgment never started.
+    #
+    # The missing declared skill raises `MissingReviewSkillError` — still a
+    # `ConfigError`, so the ruling that this must never fall back to the
+    # `mr-review` binary is unchanged, but a class `launch_review` can recognise
+    # on its own (Autodev #81). It carries the skill name and the repository path
+    # that was looked for, because both end up in a GitLab comment an operator
+    # reads, and re-parsing them out of a message would be one more thing to keep
+    # in step.
     def prepare_review_clone(work_dir, issue, skill)
       clone_and_inject(work_dir, issue)
       return if skill_available?(work_dir, skill)
 
-      raise ConfigError,
-            "project declares review_skill '#{skill}' but #{work_dir}/.claude/skills/#{skill}/SKILL.md " \
-            'is missing — refusing to fall back to the mr-review binary, which would run a different process'
+      raise MissingReviewSkillError.new(skill, work_dir)
     end
 
     # `clone_and_checkout` raises `GitError` (a sibling of `ImplementationError`
@@ -60,8 +66,8 @@ class PipelineMonitor
     # `Errno::*`. Both are normalised to `ImplementationError` here, and only
     # here: `review_with_skill`'s rescue already treats that class as a review
     # failure, and the scope stops at this pair on purpose — it must not also
-    # catch `raise ConfigError` two lines below, which is a distinct outcome
-    # (a declared skill missing from the clone), nor anything from
+    # catch the `MissingReviewSkillError` raised two lines below, which is a
+    # distinct outcome (a declared skill missing from the clone), nor anything from
     # `run_review_skill` or `publish_from_contract`, where an `ApiUnavailableError`
     # must keep propagating untouched.
     def clone_and_inject(work_dir, issue)
