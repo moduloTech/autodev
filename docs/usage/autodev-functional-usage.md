@@ -51,7 +51,7 @@ C'est tout. Autodev change le label en **{{label_doing|en cours}}** dès qu'il c
 3. **Écriture du code.** Sinon, il code, sauvegarde, et envoie son travail.
 4. **Ouverture de la *Merge Request*.** La MR est créée automatiquement avec le numéro de votre ticket.
 5. **Tests.** La pipeline d'intégration tourne. Si elle échoue, Autodev corrige et recommence.
-6. **Relecture.** Une relecture automatique est faite ; Autodev applique les retours.
+6. **Relecture.** Une relecture automatique est faite ; Autodev applique les retours. Chaque correction est ensuite **relue par un second regard** avant que la discussion correspondante soit marquée résolue : une correction qui ne répond pas à la remarque laisse la discussion **ouverte**, et Autodev la reprend au tour suivant. Une discussion qui reste ouverte tour après tour finit par vous être rendue, avec un commentaire — plutôt que refermée sur une correction que personne n'a validée.
 7. **Livraison.** Quand tout est vert, le label passe à **{{label_done|livré}}** et la MR est prête à merger.
 
 Le label **{{label_done|livré}}** ne sert qu'à ça. Quand Autodev **renonce** — une pipeline qui échoue en boucle, une relecture automatique qui plante, une surveillance qui traîne depuis deux semaines, ou une merge request que quelqu'un a fermée sans la fusionner — il ne pose **pas** ce label : il vous rend le ticket, explique pourquoi en commentaire, et pose le label d'attention configuré sur le projet (ou, si le projet n'en a pas, laisse le ticket sur **{{label_doing|en cours}}**). Un ticket abandonné n'arrive donc jamais sur le tableau de relecture en se faisant passer pour relu.

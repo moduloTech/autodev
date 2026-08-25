@@ -97,6 +97,12 @@ module NumericSettings
     # the six-week "nobody will look at this again" horizon Autodev #53 set,
     # and it keeps the bound finite.
     'pipeline_watch_max_days' => [0, 365],
+    # How many corrections one MR fix round verifies, and therefore how many
+    # threads it attempts (Autodev #79). Accepts 0 — the sentinel that switches
+    # the verification off and restores the pre-#79 "fix, resolve, push" — but
+    # not a string, for the same reason `pipeline_watch_max_days` does not: a
+    # value read as `.to_i` → 0 would disable a safety net in silence.
+    'fix_verification_max' => [0, ROUNDS_MAX],
     'infra_recheck_max' => [1, ROUNDS_MAX],
     'infra_recheck_backoff' => [1, DAY],
     'dormant_audit_max' => [1, ROUNDS_MAX],
