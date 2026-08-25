@@ -55,6 +55,18 @@ class PollRouter
     @use_labels   = Config.label_workflow?(project_config)
   end
 
+  # `:process` does not mean "start implementing" — it means "hand this row to
+  # `PollDispatcher#process_issue`", which is where the decision actually lives:
+  # `skip_existing?` re-reads the status and only a `pending` row is enqueued.
+  #
+  # That is why the last line asks `Issue::PROCESSABLE_STATES` rather than
+  # `== 'pending'` (Autodev #75). A row in `needs_clarification` has one question
+  # left to ask — did the human answer? — and `process_issue` is the only code
+  # that asks it. Answering `:next` here dropped the row one step before the
+  # question, so the answer was never read: 12 production tickets parked on
+  # PowerPanne, the oldest since 15/05/2026, three of them still carrying a todo
+  # label and therefore rediscovered by `dispatch_new_issues` every five minutes
+  # with a human answer already on the thread.
   def route_by_state(gl_issue, existing)
     return :process unless existing
 
@@ -63,7 +75,7 @@ class PollRouter
       return :next
     end
 
-    existing.status == 'pending' ? :process : :next
+    Issue::PROCESSABLE_STATES.include?(existing.status) ? :process : :next
   end
 
   # `done` always reenters. `closed` only does when somebody applied a todo label

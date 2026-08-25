@@ -59,6 +59,20 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     fixing_discussions fixing_pipeline running_post_completion
   ].freeze
 
+  # The states a `:process` cycle may start from — the two waiting states, and
+  # only those. Read by `PollRouter#route_by_state`, which decides whether a
+  # discovered GitLab issue reaches `PollDispatcher#process_issue` at all, and by
+  # `IssueProcessJob::DISPATCHED_FROM`, which refuses a dispatch whose row has
+  # moved on since (Autodev #61).
+  #
+  # One declaration because the two disagreed, silently and for months (Autodev
+  # #75): the job already accepted `needs_clarification`, the router did not, and
+  # the narrower of the two wins by dropping the row. `process_issue` is the only
+  # code that ever asks whether the human answered, so a row the router refuses is
+  # a question that is never re-read — 12 production tickets, the oldest waiting
+  # since 15/05/2026.
+  PROCESSABLE_STATES = %w[pending needs_clarification].freeze
+
   aasm column: :status, whiny_transitions: false do # rubocop:disable Metrics/BlockLength
     state :pending, initial: true
     state :cloning, :checking_spec, :implementing, :committing, :pushing
