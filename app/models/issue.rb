@@ -135,7 +135,15 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # per-site (`attention_reason`) because `dispatch_infra_recheck` selects
     # `stagnation_pipeline` and must not re-arm rows given up for another cause;
     # only the mechanics are shared.
-    event(:abandon) { transitions from: %i[checking_pipeline fixing_discussions], to: :done }
+    # `reviewing` joined the sources with Autodev #81. `green_first_review` fires
+    # `pipeline_green!` before calling the review, so a give-up decided *inside*
+    # the review starts from `reviewing` — and until then the only such give-up,
+    # `review_giveup`, had its own event and its own end. A declared review skill
+    # missing from the clone is the second, and it must stop the request from
+    # exactly there: leaving it in `reviewing` is what made Autodev #81's request
+    # invisible to every dispatch pass, and handing it back to `checking_pipeline`
+    # is the unbounded loop that ticket refuses.
+    event(:abandon) { transitions from: %i[checking_pipeline fixing_discussions reviewing], to: :done }
 
     # === Fix cycles, clarification, reentry ===
 

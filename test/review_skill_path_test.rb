@@ -119,17 +119,22 @@ class ReviewSkillPathTest < ActiveSupport::TestCase
     assert_includes row.reload.error_message.to_s, 'AuthenticationError'
   end
 
-  # A recorded ruling, pinned so nobody "improves" it: a declared skill missing
-  # from the clone keeps escaping. Rescuing it and handing the row back would
-  # write an activity row every poll, which keeps the row out of `DormantAudit`'s
-  # active arm forever *and* restarts the age clock — a genuinely unbounded,
-  # unsignalled loop. Parking in `reviewing` is the better of the two available
-  # behaviours: `DormantAudit` gives it three bounded second looks and then flags
-  # `dormant_exhausted`.
-  def test_a_missing_declared_skill_still_escapes_and_leaves_the_row_in_reviewing
+  # A recorded ruling, pinned so nobody "improves" it: a `ConfigError` this path
+  # cannot name keeps escaping, and parking in `reviewing` is the better of the
+  # two behaviours available to it. Rescuing it and handing the row back to
+  # `checking_pipeline` would write an activity row every poll, which keeps the
+  # row out of `DormantAudit`'s active arm forever *and* restarts the age clock —
+  # a genuinely unbounded, unsignalled loop. Parked, `DormantAudit` gives it
+  # three bounded second looks and then flags `dormant_exhausted`.
+  #
+  # Its one named member is out of scope here: a `MissingReviewSkillError` is
+  # rescued and **stops** the request rather than resuming it, which is a third
+  # behaviour the dilemma above does not cover. See
+  # `test/review_skill_missing_stops_the_line_test.rb` (Autodev #81).
+  def test_an_unnamed_config_error_still_escapes_and_leaves_the_row_in_reviewing
     row = issue
     mon = monitor(review_skill: 'mr-review')
-    mon.define_singleton_method(:review_with_skill) { |_| raise ConfigError, 'skill missing' }
+    mon.define_singleton_method(:review_with_skill) { |_| raise ConfigError, 'something else entirely' }
 
     assert_raises(ConfigError) { mon.send(:launch_review, row) }
     assert_equal 'reviewing', row.reload.status

@@ -13,6 +13,9 @@ class ActivityEvent < ApplicationRecord
   # persists once per cycle (Autodev #46). `heartbeat` is different — it carries
   # an issue_id: it is the per-danger-claude-call liveness marker that bounds a
   # live worker's silence (Autodev #50, DangerClaudeRunner#dc_heartbeat!).
+  # `review_skill` is the same shape as `usage`: the per-cycle verdict on whether
+  # each project declaring a `review_skill` actually carries it, recorded once by
+  # Autodev::ReviewSkillProbe and read passively by HealthReport (Autodev #81).
   # `discussions_snapshot` (DiscussionSnapshot.capture) is rendered in the issue
   # timeline and broadcast to /stream like any other row.
   #
@@ -22,7 +25,7 @@ class ActivityEvent < ApplicationRecord
   # ActivityEvent.create and swallows failures, so an inclusion validation
   # would silently stop logging the first time anyone introduces an unlisted
   # kind, which is strictly worse than this comment being stale.
-  KINDS = %w[transition danger_claude poller error usage heartbeat discussions_snapshot].freeze
+  KINDS = %w[transition danger_claude poller error usage heartbeat review_skill discussions_snapshot].freeze
   LEVELS = %w[info warn error].freeze
 
   # The kinds that exist for the machinery, not for a reader: liveness and
@@ -33,7 +36,7 @@ class ActivityEvent < ApplicationRecord
   # both invisible (`user_visible` below) and disposable
   # (Autodev::ActivityEventJanitor, Autodev #57): a row nobody asked to see and
   # nobody will read again is a row we may delete.
-  MACHINERY_KINDS = %w[poller error usage heartbeat].freeze
+  MACHINERY_KINDS = %w[poller error usage heartbeat review_skill].freeze
 
   belongs_to :issue, optional: true
 
