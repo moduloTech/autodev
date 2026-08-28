@@ -88,26 +88,31 @@ class IssueProcessor
       SPEC_CONTINUE
     end
 
-    # This is where the request leaves autodev's own field of view, and it is
-    # deliberately still the case (Autodev #75).
+    # Handing the request to a human, and saying so on the board (Autodev #75).
     #
-    # `dispatch_new_issues` asks GitLab for the issues assigned to autodev *and*
-    # carrying a `labels_todo` label. Nothing here touches the label, so the
-    # ticket stays on `label_doing` and drops out of that query: the row is
-    # reachable again since `Issue::PROCESSABLE_STATES` (the router used to drop
-    # it one step later), but only while a todo label is on the ticket.
+    # `dispatch_new_issues` discovers by asking GitLab for the issues assigned to
+    # autodev **and** carrying a `labels_todo` label. This used to leave the
+    # ticket on `label_doing`, so the request left that population the moment the
+    # question was asked and nothing ever re-read the answer — `Issue::PROCESSABLE_STATES`
+    # fixed the step after this one, but a row nobody discovers is not routed at
+    # all. `apply_label_todo` closes the other half.
     #
-    # Reposing one here is the obvious one-line fix and it is **not** ours to
-    # make: on the configured projects `labels_todo` is `To do` / `Development::ToDo`,
-    # so it moves the ticket back onto the PM's board — which may be exactly what
-    # she wants when autodev is waiting on her, or may be noise. The alternative
-    # is to give `needs_clarification` a dispatch population of its own, which
-    # changes nothing she sees. Both are cheap from here; the choice is hers, and
-    # `Autodev::ClarificationSweep` drains the existing backlog in the meantime.
+    # It is also the truthful label: while autodev waits, the ticket is in the
+    # hands of the person who was asked. Showing it as work in progress is a lie
+    # about the board, and it is that lie that let 12 requests sleep for up to
+    # three months without autodev or the PM seeing them. The cost is accepted and
+    # named: the ticket goes back to the entry column, which reads as "nothing has
+    # been done" on work that has already been cloned and analysed.
+    #
+    # `apply_label_todo` puts back the entry label the request arrived with, not a
+    # guess between the two live ones. Idempotent: `manage_labels` skips the write
+    # when it would change nothing, so re-posting on every poll costs no resource
+    # label event.
     def post_clarification(issues_list, iid, issue)
       notify_clarification_questions(issues_list, iid)
       issue.spec_unclear!
       Issue.where(id: issue.id).update_all(clarification_requested_at: Time.current)
+      apply_label_todo(iid)
       log_activity(issue, :spec_unclear, count: issues_list.size)
     end
 

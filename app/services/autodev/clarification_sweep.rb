@@ -12,13 +12,15 @@ module Autodev
   # already on the thread.
   #
   # So this sweep reads the `issues` table instead of GitLab's label filter: the
-  # label a ticket carries is irrelevant to it. That is also why it is a one-shot
-  # `bin/rails autodev:recheck_clarifications` rather than a ninth dispatch pass.
-  # Which pass should own `needs_clarification` from now on — repose a todo label
-  # when the question is asked, or give the state a population of its own — moves
-  # the ticket on the PM's board either way, so it is hers to arbitrate; a
-  # scheduled pass added here would be that decision, taken quietly. Do not
-  # promote this class into one.
+  # label a ticket carries is irrelevant to it.
+  #
+  # `SpecChecker#post_clarification` now reposes the entry label, so a question
+  # asked from here on keeps its request discoverable. That fixes the *flow*, not
+  # the *stock*: nothing reposes a label on a request that was already parked, so
+  # the 12 rows carrying `Development::Doing` on the 18/08/2026 copy stay outside
+  # `dispatch_new_issues`' population until this sweep re-arms them. Run it once,
+  # after the fix ships; it does not become a recurring pass, because the flow it
+  # would guard is guarded at the source now.
   #
   # Reports by default. It transitions rows and writes a note on each ticket, so
   # the acting half is `APPLY=1`, the same shape as `ActivityEventCompaction`.

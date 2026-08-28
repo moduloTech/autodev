@@ -15,7 +15,31 @@ module LabelManager
     return unless label_workflow?
 
     doing = @project_config['label_doing']
-    manage_labels(iid, remove: other_workflow_labels(doing), add: doing)
+    remember_entry_label(manage_labels(iid, remove: other_workflow_labels(doing), add: doing))
+  end
+
+  # The entry label, put back while autodev waits on a human (Autodev #75).
+  #
+  # `dispatch_new_issues` discovers by asking GitLab for the issues assigned to
+  # autodev **and** carrying a `labels_todo` label, so a request whose ticket
+  # stays on `label_doing` leaves the population the moment the question is
+  # asked. It is also the honest label: during the wait the ticket is in the
+  # hands of the person who was asked, and showing it as work in progress is a
+  # lie about the board — the lie that let 12 requests sleep for up to three
+  # months.
+  #
+  # Which value: `labels_todo` is a list, and on powerpanne both of its entries
+  # are in live use by different people (`To do`, `Development::ToDo` — read off
+  # the parked tickets' resource label events). So the one autodev strips on
+  # pickup is the one it puts back, and the project's first declared entry label
+  # is only the fallback for a request that never carried one (a `:retry_stuck`
+  # re-entry, or an assignment made without touching the board). Never a guess
+  # between two live board columns when the answer is known.
+  def apply_label_todo(iid)
+    return unless label_workflow?
+
+    todo = entry_todo_label
+    manage_labels(iid, remove: other_workflow_labels(todo), add: todo)
   end
 
   def apply_label_done(iid)
@@ -64,21 +88,62 @@ module LabelManager
       .compact.uniq - [applied]
   end
 
+  # Remembered from the pickup rather than re-read from GitLab: `apply_label_doing`
+  # is the call that strips it, it runs in the same `IssueProcessor#process` as
+  # the spec check that may ask the question, and it already computes the list it
+  # removed. An `issue_label_events` call would answer the same question at the
+  # cost of one API round trip on a path that has just written the labels itself.
+  #
+  # Only ever *set*, never cleared, and only from a non-empty intersection: a
+  # later `apply_label_done` removing nothing must not erase what the pickup
+  # learned.
+  def remember_entry_label(removed)
+    entry = Array(removed) & Array(@project_config['labels_todo'])
+    @entry_todo_label = entry.first if entry.any?
+  end
+
+  def entry_todo_label
+    @entry_todo_label || Array(@project_config['labels_todo']).first
+  end
+
   # Blank is "not configured", not a label named "".
   def label_attention
     value = @project_config['label_attention'].to_s.strip
     value.empty? ? nil : value
   end
 
+  # The read is unavoidable — nothing else can say what the ticket carries — but
+  # the *write* is skipped when it would change nothing (Autodev #75).
+  #
+  # A no-op label edit is not free: GitLab records a resource label event for it,
+  # and those events are the evidence `LabelHandover#by_someone_else?` and
+  # `PollRouter#reenterable?` (via `todo_reapplied_after?`) read to decide whether
+  # a *human* asked for something new. Every event autodev writes for nothing is
+  # noise in the one record those two readers have.
+  #
+  # Three call shapes actually repeat. A second clarification round re-poses the
+  # entry label the first one already put on (powerpanne #15842 asked twice in 13
+  # minutes on 05/08/2026). A human who moves the ticket back to the entry column
+  # themselves — powerpanne #16261, 21/07/2026 — must not have that edit doubled
+  # by autodev's. And a duplicate `IssueProcessJob` re-applies `label_doing` or
+  # `label_done` on a row that already carries it, which is the #61 shape:
+  # `whiny_transitions: false` no-ops the transition and the side effects run
+  # anyway.
   def manage_labels(iid, remove:, add:)
-    gi = @client.issue(@project_path, iid)
-    current = gi.labels || []
-    new_labels = current - remove.compact
-    new_labels << add if add && !new_labels.include?(add)
-    @client.edit_issue(@project_path, iid, labels: new_labels.join(','))
+    current = @client.issue(@project_path, iid).labels || []
+    wanted = target_labels(current, remove, add)
+    return [] if wanted.sort == current.sort
+
+    @client.edit_issue(@project_path, iid, labels: wanted.join(','))
     removed = current & remove.compact
-    log "Labels updated on ##{iid}: removed #{removed}, added #{add}" if removed.any? || add
+    log "Labels updated on ##{iid}: removed #{removed}, added #{add}"
+    removed
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to update labels for ##{iid}: #{e.message}"
+  end
+
+  def target_labels(current, remove, add)
+    kept = current - remove.compact
+    add && !kept.include?(add) ? kept + [add] : kept
   end
 end

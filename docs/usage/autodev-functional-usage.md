@@ -255,6 +255,8 @@ Si Autodev a besoin d'une précision, l'écran change légèrement :
 
 Répondez directement sur le ticket GitLab (commentaire). Autodev verra votre réponse au prochain tour. Si vous voulez accélérer le redémarrage, l'action **Précision reçue** est disponible dans le panneau **Actions**.
 
+Pendant cette attente, Autodev **remet le ticket sur le label *{{label_todo|à traiter}}*** — celui-là même avec lequel la demande lui est arrivée. C'est volontaire : tant qu'il attend votre réponse, le travail est entre vos mains et pas entre les siennes, et le ticket doit être visible là où vous regardez plutôt que de rester affiché comme en cours. Dès que vous avez répondu, il le repasse sur le label de travail en cours et reprend là où il s'était arrêté. Vous n'avez rien d'autre à faire que de répondre : ni retirer, ni remettre un label.
+
 \newpage
 
 # Déployer un environnement de review
