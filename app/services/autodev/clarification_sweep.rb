@@ -44,7 +44,7 @@ module Autodev
     def run
       tally = { examined: 0, answered: 0, waiting: 0, not_ours: 0, unreadable: 0 }
       @client = ::GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @config['gitlab_token'])
-      parked.find_each do |issue|
+      parked.each do |issue|
         tally[:examined] += 1
         examine(issue, tally)
       end
@@ -56,6 +56,15 @@ module Autodev
 
     # Ordered oldest question first: on a partial run that is the order the
     # backlog should drain in, and it is the order the report reads best in.
+    #
+    # Loaded whole rather than batched, and that is what makes the order real
+    # (Autodev #75): Rails 8 discards a scope's order inside `find_each`, forces
+    # primary-key order and logs a warning, so the declared order and the actual
+    # one disagreed in silence. The population is bounded by construction — the
+    # requests waiting on a human answer, 12 on the 18/08/2026 production copy —
+    # and this is a one-shot rake, so there is nothing for batching to protect.
+    # Keep the two in step: an `each` that becomes a `find_each` silently drops
+    # this promise again, which is why the order is pinned by a test.
     def parked
       ::Issue.where(status: 'needs_clarification').order(:clarification_requested_at)
     end

@@ -38,7 +38,7 @@ module LabelManager
   def apply_label_todo(iid)
     return unless label_workflow?
 
-    todo = entry_todo_label
+    todo = entry_todo_label(carried_todo_labels(iid))
     manage_labels(iid, remove: other_workflow_labels(todo), add: todo)
   end
 
@@ -102,8 +102,36 @@ module LabelManager
     @entry_todo_label = entry.first if entry.any?
   end
 
-  def entry_todo_label
-    @entry_todo_label || Array(@project_config['labels_todo']).first
+  # Three answers, in decreasing order of evidence, and the middle one is what
+  # the memory alone could not give.
+  #
+  # `apply_label_doing` only remembers what it actually *removed*, so a pickup
+  # whose `edit_issue` failed remembers nothing — and the ticket is then still
+  # carrying the entry label it arrived with. Falling straight through to the
+  # first of the list there strips a live board column to pose another one: on
+  # powerpanne it moves a ticket entered as `Development::ToDo` over to `To do`,
+  # somebody else's column, which is exactly what this method exists to prevent.
+  # The same shape covers a human who reposed the entry label themselves
+  # (powerpanne #16261, 21/07/2026).
+  #
+  # Note that returning `[]` from `manage_labels`' rescue does not fix this on its
+  # own: `Array(true)` and `Array([])` both intersect `labels_todo` to `[]`. The
+  # honest return type is worth having, but the fix is reading the ticket.
+  def entry_todo_label(carried = [])
+    @entry_todo_label ||
+      (Array(carried) & Array(@project_config['labels_todo'])).first ||
+      Array(@project_config['labels_todo']).first
+  end
+
+  # One extra GitLab read, on a path taken fifteen times in four months (the
+  # whole `spec_unclear` history), against a board-column decision taken blind.
+  # It answers `[]` for an unreadable ticket, which falls back to the first
+  # declared entry label — the same answer as before, never worse.
+  def carried_todo_labels(iid)
+    Array(@client.issue(@project_path, iid).labels) & Array(@project_config['labels_todo'])
+  rescue Gitlab::Error::ResponseError => e
+    log_error "Failed to read labels for ##{iid}: #{e.message}"
+    []
   end
 
   # Blank is "not configured", not a label named "".
@@ -139,7 +167,13 @@ module LabelManager
     log "Labels updated on ##{iid}: removed #{removed}, added #{add}"
     removed
   rescue Gitlab::Error::ResponseError => e
+    # `[]`, not the value of `log_error` — which is `Logger#error`'s `true`. The
+    # method's contract is "the workflow labels it removed", and a failed write
+    # removed none; `apply_label_doing` hands this straight to
+    # `remember_entry_label`, where a Boolean is a type lie waiting for the next
+    # reader.
     log_error "Failed to update labels for ##{iid}: #{e.message}"
+    []
   end
 
   def target_labels(current, remove, add)
