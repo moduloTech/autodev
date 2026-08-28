@@ -23,7 +23,10 @@
 class MissingReviewSkillError < ConfigError
   attr_reader :skill, :relative_path
 
-  def self.skill_path(skill) = File.join('.claude', 'skills', skill.to_s, 'SKILL.md')
+  # The canonical layout, which is what an operator should be told to add — the
+  # flat one `SkillsInjector` still migrates is accepted, not recommended. Read
+  # from the one list so this cannot name a path the review step does not use.
+  def self.skill_path(skill) = ::SkillsInjector.skill_paths(skill).first
 
   def initialize(skill, work_dir)
     @skill = skill.to_s

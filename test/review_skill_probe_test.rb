@@ -31,9 +31,10 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
 
     attr_reader :asked
 
-    def initialize(present: [], raising: nil, default_branch: 'main')
+    def initialize(present: [], raising: nil, raising_on: nil, default_branch: 'main')
       @present = present
       @raising = raising
+      @raising_on = raising_on
       @default_branch = default_branch
       @asked = []
     end
@@ -43,6 +44,7 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
     def get_file(path, file_path, ref)
       @asked << [path, file_path, ref]
       raise @raising if @raising
+      raise Errno::ECONNREFUSED if @raising_on == file_path
       raise Gitlab::Error::NotFound, fake_response(404) unless @present.include?([path, file_path, ref])
 
       Struct.new(:file_path).new(file_path)
@@ -66,6 +68,9 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
   end
 
   SKILL_PATH = '.claude/skills/prepare-mr/SKILL.md'
+  # The flat layout `SkillsInjector.migrate_legacy_skills` moves into the one
+  # above, inside every clone, before the review step looks.
+  LEGACY_SKILL_PATH = '.claude/skills/prepare-mr.md'
 
   def setup
     setup_database
@@ -130,11 +135,14 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
     assert_equal [['modulosource/ff/fast/core', 'present']], statuses(verdicts)
   end
 
+  # About the ref, not the number of questions: with no layout present the probe
+  # asks about both, and each has to be asked on the repository's default branch.
   def test_the_repository_default_branch_is_used_when_no_target_branch_is_configured
     client = FakeClient.new(default_branch: 'trunk')
     probe([fast.except('target_branch')], client)
 
-    assert_equal [['modulosource/ff/fast/core', SKILL_PATH, 'trunk']], client.asked
+    assert_equal [['modulosource/ff/fast/core', 'trunk']],
+                 client.asked.map { |path, _file, ref| [path, ref] }.uniq
   end
 
   # --- the three verdicts --------------------------------------------------
@@ -161,6 +169,48 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
 
     assert_equal ['prepare-mr', 'master', SKILL_PATH],
                  [verdict[:skill], verdict[:ref], verdict[:expected]]
+  end
+
+  # The defect this file was blind to. `SkillsInjector.inject` runs
+  # `migrate_legacy_skills` *before* `SkillReviewer#skill_available?` looks, and
+  # that pass moves `.claude/skills/<name>.md` to `<name>/SKILL.md` inside the
+  # clone. So a repository still on the flat layout reviews perfectly well, and a
+  # probe that only knows the directory layout records it `missing` — the health
+  # card then tells the operator that every request of that project stops at the
+  # review step, which is false. Same ruling as `unknown` vs `missing`: this
+  # class may not accuse a working configuration.
+  def test_the_flat_legacy_layout_reads_as_present
+    client = FakeClient.new(present: [['modulosource/ff/fast/core', LEGACY_SKILL_PATH, 'staging']])
+
+    assert_equal [['modulosource/ff/fast/core', 'present']], statuses(probe([fast], client))
+  end
+
+  # The sobriety the ticket asked for is kept where it matters: the directory
+  # layout is asked first, so a healthy fleet still costs one request per project
+  # per cycle. Only a repository that does *not* carry it pays for the second
+  # question.
+  def test_the_legacy_layout_is_only_asked_when_the_directory_layout_is_absent
+    client = FakeClient.new(present: [['modulosource/ff/fast/core', LEGACY_SKILL_PATH, 'staging']])
+    probe([fast], client)
+
+    asked = client.asked.map { |_path, file, ref| [file, ref] }
+
+    assert_equal [[SKILL_PATH, 'staging'], [LEGACY_SKILL_PATH, 'staging']], asked
+  end
+
+  # Both layouts absent is the only thing that may read as `missing`.
+  def test_neither_layout_present_still_reads_as_missing
+    client = FakeClient.new
+
+    assert_equal [['modulosource/ff/fast/core', 'missing']], statuses(probe([fast], client))
+  end
+
+  # And the fail-open rule survives the second question: a GitLab error on the
+  # legacy read is still `unknown`, never `missing`.
+  def test_an_outage_on_the_second_question_is_unknown_not_missing
+    client = FakeClient.new(raising_on: LEGACY_SKILL_PATH)
+
+    assert_equal [['modulosource/ff/fast/core', 'unknown']], statuses(probe([fast], client))
   end
 
   # Fail-open. An unreachable GitLab is not a verdict on the configuration

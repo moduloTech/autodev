@@ -12,7 +12,32 @@ require_relative 'skills_injector/templates'
 module SkillsInjector
   SKILL_NAMES = %w[code-conventions rails-conventions test-patterns database-patterns].freeze
 
+  # Where a project keeps its skills, relative to the repository root.
+  SKILLS_DIR = File.join('.claude', 'skills')
+
   module_function
+
+  # Every repository layout under which a declared skill is available to a
+  # danger-claude run, canonical first (Autodev #81, fix round 2).
+  #
+  # There are two, because `inject` accepts two: `existing_skills` globs
+  # `<name>/SKILL.md`, and `migrate_legacy_skills` globs `<name>.md` and moves it
+  # into the first shape **before** anything looks. So a repository still on the
+  # flat layout reviews perfectly well — the migration happens in the clone.
+  #
+  # Named here rather than at each reader because the two readers do not look at
+  # the same thing. `SkillReviewer#skill_available?` looks at the clone *after*
+  # `inject`, where only the canonical shape can remain, and one `File.exist?` is
+  # the whole answer. `Autodev::ReviewSkillProbe` looks at the repository over
+  # the GitLab API *before* any of that, so it has to ask about both — and the
+  # first version of it asked only about the canonical one, which recorded a
+  # working project `missing` and put a false accusation of a broken
+  # configuration on the health card. One list, so the two cannot drift again;
+  # `test/skill_layouts_are_one_definition_test.rb` derives it from the globs
+  # below and checks each entry against the real review step.
+  def skill_paths(skill)
+    [File.join(SKILLS_DIR, skill.to_s, 'SKILL.md'), File.join(SKILLS_DIR, "#{skill}.md")]
+  end
 
   # Main entry point. Call after clone + ensure_claude_md, before implement.
   # Returns a hash describing what was detected and injected.

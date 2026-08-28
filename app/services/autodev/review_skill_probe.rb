@@ -105,12 +105,40 @@ module Autodev
         ref = ref_for(client, project)
         return base.merge(ref: nil, status: 'unknown') if ref.nil?
 
-        client.get_file(base[:path], base[:expected], ref)
-        base.merge(ref: ref, status: 'present')
-      rescue ::Gitlab::Error::NotFound
-        base.merge(ref: ref, status: 'missing')
-      rescue StandardError
-        base.merge(ref: ref, status: 'unknown')
+        base.merge(ref: ref, status: layouts_status(client, base, ref))
+      end
+
+      # The same question the review step ends up asking, not an approximation of
+      # it (Autodev #81, fix round 2). `SkillsInjector.skill_paths` lists every
+      # layout a declared skill may take in the repository — the canonical
+      # `<name>/SKILL.md` and the flat `<name>.md` that `migrate_legacy_skills`
+      # moves into it inside the clone, before `skill_available?` looks. Asking
+      # only about the first recorded a project that reviews perfectly well as
+      # `missing`, which is the false accusation this class exists not to make.
+      #
+      # Canonical first, and the loop stops on the first hit, so the sobriety the
+      # ticket asked for is kept where it counts: a fleet on the current layout —
+      # which is both configured projects today — still costs one request per
+      # declaring project per cycle. Only a repository that does not carry it pays
+      # for the second question.
+      #
+      # `NotFound` on *every* layout is the only thing that may read as `missing`;
+      # any other error on any of them is `unknown`, because a read that failed
+      # answers nothing about the configuration (Autodev #62).
+      def layouts_status(client, base, ref)
+        ::SkillsInjector.skill_paths(base[:skill]).each do |path|
+          return 'present' if file_on_ref?(client, base[:path], path, ref)
+        rescue ::Gitlab::Error::NotFound
+          next
+        rescue StandardError
+          return 'unknown'
+        end
+        'missing'
+      end
+
+      def file_on_ref?(client, project_path, file_path, ref)
+        client.get_file(project_path, file_path, ref)
+        true
       end
 
       # The branch autodev cuts its MR branch from, hence the revision the review
