@@ -70,18 +70,36 @@ class MrFixer
     # caught — they are not verdicts about this correction either, and every
     # other `danger_claude_prompt` call site lets them travel to the round's
     # boundary, which parks the row with a retry instead of closing anything.
+    #
+    # Landing on the same *side* is not landing on the same *cause*, and the two
+    # were confused here once (Autodev #79, fix round 2). An empty diff and a
+    # `git` that did not answer both used to arrive as `nil` and both were read
+    # as `:unchanged` — "the correction changed nothing", a measured fact,
+    # imputed to a measurement that never happened. That is the same mistake one
+    # level down from the doctrine written above, and it is not cosmetic: every
+    # thread of the round takes that path, so the round resolves nothing, the
+    # next round finds the identical thread set, `discussion_stagnated?`
+    # recognises the signature, and the request is given up on a stagnation that
+    # is really a broken work directory. `correction_diff` now raises rather than
+    # answering `nil`, so the two cannot merge again.
     def verify_fix(discussion, thread_context, work_dir, base_sha)
       diff = correction_diff(work_dir, base_sha)
-      return FixCheck.rejected(:unchanged) if diff.nil? || diff.empty?
+      return FixCheck.rejected(:unchanged) if diff.empty?
 
       contract = run_verification(discussion, thread_context, work_dir, diff)
       return FixCheck.passed if contract.addressed?
 
       FixCheck.rejected(:verdict, contract.reason)
-    rescue ImplementationError, VerificationContract::InvalidError => e
+    rescue GitError, ImplementationError, VerificationContract::InvalidError => e
       FixCheck.rejected(:unverifiable, "#{e.class}: #{e.message[0, 200]}")
     end
 
+    # Deliberately still `nil` on failure rather than raising: this runs *before*
+    # the fix, from `fix_single_discussion`, where an exception would escape to
+    # `execute_fix_cycle`'s `rescue StandardError` and mark the whole request
+    # `error` with a comment blaming the correction. `correction_diff` turns the
+    # missing sha into the per-thread outcome instead, which is the granularity
+    # the failure actually has.
     def head_sha(work_dir)
       out, _err, ok = run_cmd_status(%w[git rev-parse HEAD], chdir: work_dir)
       ok && !out.empty? ? out : nil
@@ -90,11 +108,27 @@ class MrFixer
     # What this thread's correction actually changed, and nothing else: the
     # commit `danger_claude_commit` just made, measured from the sha the thread
     # started on. Not `origin/branch..HEAD`, which would carry the whole round.
+    #
+    # `nil` is not in this method's vocabulary, and that is the whole point
+    # (Autodev #79, fix round 2). An **empty String** is an answer — "this
+    # correction changed nothing" — and it is the only thing `:unchanged` may
+    # ever be built from. Everything else is the *absence* of an answer and
+    # raises, so no caller can read it as one: the same rule `GitlabHelpers.answer`
+    # states for a GitLab read (Autodev #62), for the same reason — a failing
+    # `git` reports a non-zero status and an empty stdout, which is byte-for-byte
+    # what "nothing changed" looks like.
+    #
+    # Both causes raise the same class on purpose. A reader's next move is
+    # identical (look at the work directory), so they share `:unverifiable` and
+    # its sentence; what differs is the message, and the message is what says
+    # which of the two `git` questions went unanswered.
     def correction_diff(work_dir, base_sha)
-      return nil unless base_sha
+      raise GitError, 'could not read HEAD before the correction' unless base_sha
 
-      out, _err, ok = run_cmd_status(['git', 'diff', "#{base_sha}..HEAD"], chdir: work_dir)
-      ok ? out : nil
+      out, err, ok = run_cmd_status(['git', 'diff', "#{base_sha}..HEAD"], chdir: work_dir)
+      raise GitError, "git diff #{base_sha}..HEAD failed: #{err[0, 200]}" unless ok
+
+      out
     end
 
     def run_verification(discussion, thread_context, work_dir, diff)
