@@ -59,6 +59,20 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     fixing_discussions fixing_pipeline running_post_completion
   ].freeze
 
+  # The states a `:process` cycle may start from — the two waiting states, and
+  # only those. Read by `PollRouter#route_by_state`, which decides whether a
+  # discovered GitLab issue reaches `PollDispatcher#process_issue` at all, and by
+  # `IssueProcessJob::DISPATCHED_FROM`, which refuses a dispatch whose row has
+  # moved on since (Autodev #61).
+  #
+  # One declaration because the two disagreed, silently and for months (Autodev
+  # #75): the job already accepted `needs_clarification`, the router did not, and
+  # the narrower of the two wins by dropping the row. `process_issue` is the only
+  # code that ever asks whether the human answered, so a row the router refuses is
+  # a question that is never re-read — 12 production tickets, the oldest waiting
+  # since 15/05/2026.
+  PROCESSABLE_STATES = %w[pending needs_clarification].freeze
+
   aasm column: :status, whiny_transitions: false do # rubocop:disable Metrics/BlockLength
     state :pending, initial: true
     state :cloning, :checking_spec, :implementing, :committing, :pushing
@@ -121,7 +135,15 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # per-site (`attention_reason`) because `dispatch_infra_recheck` selects
     # `stagnation_pipeline` and must not re-arm rows given up for another cause;
     # only the mechanics are shared.
-    event(:abandon) { transitions from: %i[checking_pipeline fixing_discussions], to: :done }
+    # `reviewing` joined the sources with Autodev #81. `green_first_review` fires
+    # `pipeline_green!` before calling the review, so a give-up decided *inside*
+    # the review starts from `reviewing` — and until then the only such give-up,
+    # `review_giveup`, had its own event and its own end. A declared review skill
+    # missing from the clone is the second, and it must stop the request from
+    # exactly there: leaving it in `reviewing` is what made Autodev #81's request
+    # invisible to every dispatch pass, and handing it back to `checking_pipeline`
+    # is the unbounded loop that ticket refuses.
+    event(:abandon) { transitions from: %i[checking_pipeline fixing_discussions reviewing], to: :done }
 
     # === Fix cycles, clarification, reentry ===
 

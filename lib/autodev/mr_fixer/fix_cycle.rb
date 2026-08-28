@@ -2,6 +2,7 @@
 
 require_relative 'stagnation_checker'
 require_relative 'fix_prompts'
+require_relative 'fix_verifier'
 
 class MrFixer
   # Orchestrates the clone-fix-push cycle and error handling for MR discussion fixes.
@@ -9,6 +10,7 @@ class MrFixer
   module FixCycle # rubocop:disable Metrics/ModuleLength
     include StagnationChecker
     include FixPrompts
+    include FixVerifier
 
     private
 
@@ -37,12 +39,12 @@ class MrFixer
       rebase_branch_on_target(work_dir, branch)
       env = prepare_fix_environment(work_dir, issue.issue_iid, issue.mr_iid)
 
-      fix_each_discussion(discussions, work_dir, branch, issue.mr_iid, env)
+      resolved = Array(fix_each_discussion(discussions, work_dir, branch, issue.mr_iid, env))
 
       return finalize_no_commits(issue) unless new_commits?(work_dir, branch)
 
       push_fixes(work_dir, branch)
-      finalize_success(issue, discussions)
+      finalize_success(issue, discussions, resolved)
     end
 
     # The GitLab read first, the local work after: the read is the only step here
@@ -67,20 +69,57 @@ class MrFixer
         agent: detect_agent(work_dir, 'mr-fixer') }
     end
 
+    # Answers with the discussions this round actually resolved, which since
+    # Autodev #79 is a subset of the ones it attempted rather than all of them.
     def fix_each_discussion(discussions, work_dir, branch, mr_iid, env)
       @mr_fix_session_id = nil
-      discussions.each_with_index do |discussion, idx|
-        log "Fixing discussion #{idx + 1}/#{discussions.size}: #{discussion[:title]}"
+      attempted = attempted_this_round(discussions)
+      note_deferred(discussions.size - attempted.size)
+      attempted.each_with_index.filter_map do |discussion, idx|
+        log "Fixing discussion #{idx + 1}/#{attempted.size}: #{discussion[:title]}"
         log_activity(@fix_issue, :discussion_fixing, title: discussion[:title])
         fix_single_discussion(discussion, work_dir, branch, mr_iid, env)
       end
     end
 
+    def note_deferred(count)
+      return unless count.positive?
+
+      log "Deferring #{count} discussion(s) to the next round (fix_verification_max=#{fix_verification_max})"
+      log_activity(@fix_issue, :discussions_deferred, count: count)
+    end
+
+    # The resolution is the claim that the review point is dealt with, and since
+    # Autodev #79 it is only ever made behind a verdict something other than the
+    # fixing session produced. Returns the discussion when the thread was
+    # resolved, nil when it was left open for the next round.
     def fix_single_discussion(discussion, work_dir, branch, mr_iid, env)
       thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: env[:target_branch])
+      base_sha = head_sha(work_dir) if verify_fixes?
       run_fix_prompt(thread_context, work_dir, branch, env)
       danger_claude_commit(work_dir, resume: @mr_fix_session_id)
+      check = verify_fixes? ? verify_fix(discussion, thread_context, work_dir, base_sha) : FixCheck.passed
+      return record_unverified(discussion, check) unless check.addressed
+
       resolve_discussion(mr_iid, discussion[:id])
+      discussion
+    end
+
+    # One consequence, three sentences: which of them a reader gets decides
+    # whether they go and look at the correction, at the review comment, or at
+    # danger-claude. Written out rather than dispatched on a variable key, so
+    # `test/i18n_derived_keys_test.rb` reads all three off the call sites.
+    def record_unverified(discussion, check)
+      log "Discussion #{discussion[:id]} left unresolved (#{check.cause}): #{check.detail}"
+      case check.cause
+      when :unchanged
+        log_activity(@fix_issue, :discussion_unchanged, title: discussion[:title])
+      when :verdict
+        log_activity(@fix_issue, :discussion_unverified, title: discussion[:title], reason: check.detail)
+      else
+        log_activity(@fix_issue, :discussion_unverifiable, title: discussion[:title], error: check.detail)
+      end
+      nil
     end
 
     def run_fix_prompt(thread_context, work_dir, branch, env)
@@ -116,7 +155,11 @@ class MrFixer
       push_with_lease_fallback(work_dir, branch)
     end
 
-    def finalize_success(issue, discussions)
+    # The stagnation signature is still taken over the threads the round *found*,
+    # not over the ones it resolved: "the same discussions are still open" is the
+    # question it answers, and a round that resolved none of them is exactly the
+    # case it exists to end.
+    def finalize_success(issue, discussions, resolved)
       ScreenshotUploader.process(client: @client, project_path: @project_path,
                                  iid: issue.issue_iid, logger: @logger)
       round = issue.fix_round + 1
@@ -124,15 +167,35 @@ class MrFixer
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
       return if discussion_stagnated?(issue, discussions)
 
-      complete_discussion_fix(issue, discussions, round)
+      complete_discussion_fix(issue, resolved.size, round)
     end
 
-    def complete_discussion_fix(issue, discussions, round)
+    def complete_discussion_fix(issue, count, round)
       issue.discussions_fixed!
-      notify_localized(issue.issue_iid, :mr_fix_success, count: discussions.size, mr_url: issue.mr_url, round: round)
-      log_activity(issue, :discussions_fixed, count: discussions.size, round: round)
+      report_round(issue, count, round)
       log_activity(issue, :pipeline_watch)
-      log "MR !#{issue.mr_iid}: fixed #{discussions.size} discussion(s) (round #{round})"
+      log "MR !#{issue.mr_iid}: resolved #{count} discussion(s) (round #{round})"
+    end
+
+    # What the round says about itself, decided **once** (Autodev #79, fix round
+    # 2). It used to be decided twice: `announce_fix_success` withheld the GitLab
+    # comment when nothing was resolved, and the `:discussions_fixed` activity
+    # entry was written three lines below with no condition at all — and
+    # `ActivityLogger.post` writes that entry into the activity note **on the
+    # same GitLab issue**. The sentence the guard existed to suppress was posted
+    # anyway, by the other sink. Two guards were needed for one rule, only one
+    # was written, and there is now one place where the rule can be read.
+    #
+    # A round that resolved nothing is not silent either. "This round could not
+    # resolve anything" is worth reading — it is what makes the run of identical
+    # rounds before a `stagnation_discussions` give-up legible instead of
+    # sudden — but it gets its own key, so neither a reader nor a counter can
+    # take it for a delivery.
+    def report_round(issue, count, round)
+      return log_activity(issue, :discussions_none_resolved, round: round) unless count.positive?
+
+      notify_localized(issue.issue_iid, :mr_fix_success, count: count, mr_url: issue.mr_url, round: round)
+      log_activity(issue, :discussions_fixed, count: count, round: round)
     end
   end
 end

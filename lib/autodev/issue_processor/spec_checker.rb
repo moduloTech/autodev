@@ -88,11 +88,60 @@ class IssueProcessor
       SPEC_CONTINUE
     end
 
+    # Handing the request to a human, and saying so on the board (Autodev #75).
+    #
+    # `dispatch_new_issues` discovers by asking GitLab for the issues assigned to
+    # autodev **and** carrying a `labels_todo` label. This used to leave the
+    # ticket on `label_doing`, so the request left that population the moment the
+    # question was asked and nothing ever re-read the answer — `Issue::PROCESSABLE_STATES`
+    # fixed the step after this one, but a row nobody discovers is not routed at
+    # all. `apply_label_todo` closes the other half.
+    #
+    # It is also the truthful label: while autodev waits, the ticket is in the
+    # hands of the person who was asked. Showing it as work in progress is a lie
+    # about the board, and it is that lie that let 12 requests sleep for up to
+    # three months without autodev or the PM seeing them. The cost is accepted and
+    # named: the ticket goes back to the entry column, which reads as "nothing has
+    # been done" on work that has already been cloned and analysed.
+    #
+    # `apply_label_todo` puts back the entry label the request arrived with, not a
+    # guess between the two live ones. Idempotent: `manage_labels` skips the write
+    # when it would change nothing, so re-posting on every poll costs no resource
+    # label event.
     def post_clarification(issues_list, iid, issue)
       notify_clarification_questions(issues_list, iid)
       issue.spec_unclear!
       Issue.where(id: issue.id).update_all(clarification_requested_at: Time.current)
+      repose_entry_label(iid)
       log_activity(issue, :spec_unclear, count: issues_list.size)
+    end
+
+    # Every GitLab call in `post_clarification` swallows its own failure, and this
+    # one has to as well (Autodev #75).
+    #
+    # `notify_issue` rescues, `ActivityLogger.post` rescues — "failures must never
+    # break the state machine". `apply_label_todo` was the exception: it is the
+    # first *raising* GitLab call after `spec_unclear!` has already parked the row,
+    # and `manage_labels` only catches `Gitlab::Error::ResponseError`. A transport
+    # failure the gem does not wrap (`Errno::ECONNRESET`, `Net::OpenTimeout`)
+    # escaped to `IssueProcessor#process`'s `rescue StandardError` →
+    # `handle_process_error`, where `safe_mark_failed!` does nothing at all
+    # (`needs_clarification` is not a `mark_failed` source state, and
+    # `whiny_transitions: false` makes that a silent no-op) while every side effect
+    # ran anyway: `retry_count` incremented, `finished_at` and `next_retry_at`
+    # stamped, and an error comment posted directly under the questions. The
+    # Autodev #61 shape — a no-op transition whose consequences still fire — made
+    # reachable by adding a write after the state change.
+    #
+    # What is lost by swallowing is a board column: the ticket stays on
+    # `label_doing` and the request is invisible until the next question or the
+    # `autodev:recheck_clarifications` sweep. That is the pre-#75 behaviour, and it
+    # is strictly better than telling the requester their ticket failed.
+    def repose_entry_label(iid)
+      apply_label_todo(iid)
+    rescue StandardError => e
+      log_error "Issue ##{iid}: could not repose the entry label (#{e.class}: #{e.message}) — " \
+                'the question stands, the ticket stays on the doing label'
     end
 
     def notify_clarification_questions(issues_list, iid)

@@ -14,7 +14,7 @@ module Autodev
   #     checks: { <name> => { status:, detail:, meta: {} }, ... } }
   # where the top-level status is the worst severity across checks.
   class HealthReport # rubocop:disable Metrics/ClassLength
-    CHECKS = %i[poller workers queue claude_usage issues_error mr_review
+    CHECKS = %i[poller workers queue claude_usage issues_error mr_review review_skill
                 stuck_issues database migrations].freeze
     SEVERITY = { ok: 0, warn: 1, down: 2 }.freeze
 
@@ -214,6 +214,41 @@ module Autodev
       end
 
       build(:ok, "review failures on #{count} issue(s)", meta)
+    end
+
+    # A project declaring a `review_skill` its repository does not carry stops
+    # every one of its requests at the review step (Autodev #81). Passive like
+    # everything else here: the poll cycle runs the live check
+    # (Autodev::ReviewSkillProbe) and this reads the recorded verdict, exactly as
+    # `check_claude_usage` reads UsageGate's.
+    #
+    # `warn`, not `down`, and the same tier as `mr_review`: the fault is confined
+    # to the misconfigured project, so `/healthz` must keep answering 200 while
+    # the body carries the warn for a secondary alert.
+    #
+    # Only `missing` raises it. An `unknown` verdict — GitLab unreachable when the
+    # cycle probed — is deliberately absent from what is recorded: telling an
+    # operator their configuration is broken because of an outage is the mistake
+    # Autodev #62 is about, in another costume.
+    def check_review_skill
+      state = ReviewSkillProbe.state(config: @config, now: @now)
+      return build(:ok, 'no review-skill probe on file') if state[:checked_at].nil?
+
+      review_skill_verdict(state)
+    end
+
+    def review_skill_verdict(state)
+      missing = state[:missing]
+      meta = { checked: state[:checked], missing: missing.size, checked_at: iso(state[:checked_at]) }
+      return build(:ok, "#{state[:checked]} declared review skill(s), all present", meta) if missing.empty?
+
+      meta[:sample] = missing.first(5).map { |entry| review_skill_fault(entry) }.join(' ')
+      build(:warn, "#{missing.size} project(s) declare a review skill their repository does not carry — " \
+                   'every request of those projects stops at the review step', meta)
+    end
+
+    def review_skill_fault(entry)
+      "#{entry['path']}(#{entry['expected']}@#{entry['ref'] || '?'})"
     end
 
     def check_database

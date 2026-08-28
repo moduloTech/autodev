@@ -51,7 +51,7 @@ C'est tout. Autodev change le label en **{{label_doing|en cours}}** dès qu'il c
 3. **Écriture du code.** Sinon, il code, sauvegarde, et envoie son travail.
 4. **Ouverture de la *Merge Request*.** La MR est créée automatiquement avec le numéro de votre ticket.
 5. **Tests.** La pipeline d'intégration tourne. Si elle échoue, Autodev corrige et recommence.
-6. **Relecture.** Une relecture automatique est faite ; Autodev applique les retours.
+6. **Relecture.** Une relecture automatique est faite ; Autodev applique les retours. Chaque correction est ensuite **relue par un second regard** avant que la discussion correspondante soit marquée résolue : une correction qui ne répond pas à la remarque laisse la discussion **ouverte**, et Autodev la reprend au tour suivant. Une discussion qui reste ouverte tour après tour finit par vous être rendue, avec un commentaire — plutôt que refermée sur une correction que personne n'a validée.
 7. **Livraison.** Quand tout est vert, le label passe à **{{label_done|livré}}** et la MR est prête à merger.
 
 Le label **{{label_done|livré}}** ne sert qu'à ça. Quand Autodev **renonce** — une pipeline qui échoue en boucle, une relecture automatique qui plante, une surveillance qui traîne depuis deux semaines, ou une merge request que quelqu'un a fermée sans la fusionner — il ne pose **pas** ce label : il vous rend le ticket, explique pourquoi en commentaire, et pose le label d'attention configuré sur le projet (ou, si le projet n'en a pas, laisse le ticket sur **{{label_doing|en cours}}**). Un ticket abandonné n'arrive donc jamais sur le tableau de relecture en se faisant passer pour relu.
@@ -254,6 +254,8 @@ Si Autodev a besoin d'une précision, l'écran change légèrement :
 ![Une demande en attente d'une précision. Autodev a posté une question sur le ticket GitLab.](screenshots/09-issue-clarification.png)
 
 Répondez directement sur le ticket GitLab (commentaire). Autodev verra votre réponse au prochain tour. Si vous voulez accélérer le redémarrage, l'action **Précision reçue** est disponible dans le panneau **Actions**.
+
+Pendant cette attente, Autodev **remet le ticket sur le label *{{label_todo|à traiter}}*** — celui-là même avec lequel la demande lui est arrivée. C'est volontaire : tant qu'il attend votre réponse, le travail est entre vos mains et pas entre les siennes, et le ticket doit être visible là où vous regardez plutôt que de rester affiché comme en cours. Dès que vous avez répondu, il le repasse sur le label de travail en cours et reprend là où il s'était arrêté. Vous n'avez rien d'autre à faire que de répondre : ni retirer, ni remettre un label.
 
 \newpage
 

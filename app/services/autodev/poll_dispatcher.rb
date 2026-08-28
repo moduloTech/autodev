@@ -137,10 +137,29 @@ module Autodev
       Time.now.utc - Time.parse(gl_issue.created_at.to_s) < delay
     end
 
+    # The budget question is asked **first**, and that order is the fix rather
+    # than a re-check inside `clarification_received?` (Autodev #75).
+    #
+    # `skip_existing?` stopped being a predicate when #75 made the clarification
+    # branch reachable: it now transitions the row, clears
+    # `clarification_requested_at` and posts a note on the ticket. Run before the
+    # budget check, it *consumed* the human's answer on a row that was then
+    # refused on the next line — the dormant audit can re-arm the row, but the
+    # question is no longer on record, so the next look finds nothing to compare a
+    # comment against and reads the request as answered and done. The answer is
+    # gone, and it is the one thing here that cannot be recomputed.
+    #
+    # Re-checking the budget inside `clarification_received?` would fix the same
+    # symptom and was rejected: it writes `Config.max_retries` at a second call
+    # site, and it leaves a method that acts sitting in front of a question about
+    # whether autodev may act at all. `exceeded_retries?` asks about the *row*
+    # ("may autodev still work this?"), not about its status, so it belongs above
+    # every branch that has a side effect. The move is behaviour-neutral for every
+    # other status: `skip_existing?` returns true for them and both orders `return`.
     def process_issue(gl_issue)
       existing = ::Issue.where(project_path: @path, issue_iid: gl_issue.iid).first
+      return log_budget_spent(existing) if exceeded_retries?(existing)
       return if existing && skip_existing?(existing, gl_issue)
-      return if exceeded_retries?(existing)
       return log_dry_run(gl_issue) if @config['dry_run']
 
       existing ||= find_or_create_issue(gl_issue)
@@ -167,6 +186,21 @@ module Autodev
       existing.retry_count > ::Config.max_retries(@project_config, @config)
     end
 
+    # Narrowed to the waiting state on purpose. A `pending` row over budget has
+    # been refused here silently since Autodev #34 and has `dispatch_dormant_audit`
+    # to reach a human; logging that population every cycle would be noise. A
+    # request in `needs_clarification` has neither — no pass sweeps the state — so
+    # a human's answer sitting unread behind a spent budget would otherwise leave
+    # no trace anywhere.
+    def log_budget_spent(existing)
+      return unless existing.status == 'needs_clarification'
+
+      max = ::Config.max_retries(@project_config, @config)
+      @logger.info("Issue ##{existing.issue_iid}: waiting for a clarification but the retry budget " \
+                   "is spent (#{existing.retry_count}/#{max}) — the question stays on record, " \
+                   'nothing is consumed', project: @path)
+    end
+
     def log_dry_run(gl_issue)
       @logger.info("[dry-run] Would process issue ##{gl_issue.iid}: #{gl_issue.title}", project: @path)
     end
@@ -178,24 +212,22 @@ module Autodev
     # the substitute cannot be mistaken for a verdict the way
     # `open_mr_destination`'s could. Declared at the caller rather than hidden in
     # the helper, so the helper has one behaviour and each boundary owns its own.
+    #
+    # "Re-reads the same question every cycle" was a claim about a step upstream of
+    # this method, and it was false for four months (Autodev #75): `route_by_state`
+    # answered `:next` for anything that was not `pending`, so `process_issue` — and
+    # therefore this method — was never reached for the state it exists to serve.
+    # The rule is now stated once, as `Issue::PROCESSABLE_STATES`, and read by both
+    # the router and `IssueProcessJob`.
     def clarification_received?(existing, gl_issue)
-      return false unless ::GitlabHelpers.clarification_answered?(
-        @client, @path, gl_issue.iid, existing.clarification_requested_at
-      )
+      resumer = ClarificationResume.new(client: @client, path: @path, logger: @logger)
+      return false unless resumer.answered?(existing)
 
-      requeue_after_clarification(existing, gl_issue)
+      resumer.resume!(existing)
       true
     rescue ::ApiUnavailableError => e
       @logger.error("Issue ##{gl_issue.iid}: #{e.message} — clarification check deferred", project: @path)
       false
-    end
-
-    def requeue_after_clarification(existing, gl_issue)
-      @logger.info("Issue ##{gl_issue.iid}: clarification received, re-queuing", project: @path)
-      existing.clarification_received!
-      existing.update(clarification_requested_at: nil, error_message: nil)
-      ::ActivityLogger.post(::ActivityLogger::Ctx.new(@client, @path, @logger),
-                            existing, :clarification_received)
     end
 
     def find_or_create_issue(gl_issue)

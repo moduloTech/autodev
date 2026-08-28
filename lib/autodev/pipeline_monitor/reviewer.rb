@@ -42,22 +42,30 @@ class PipelineMonitor
     # escapes — `execute_mr_review` rescues `StandardError` — which is why the
     # skill path needed these.
     #
-    # `ConfigError` (a declared skill missing from the clone) is deliberately not
-    # among them and keeps escaping: see the error catalogue in CLAUDE.md. Rescuing
-    # it would write an activity row every poll, which keeps the row out of
+    # A bare `ConfigError` is deliberately still not among them and keeps escaping:
+    # see the error catalogue in CLAUDE.md. Rescuing it *and resuming the watch*
+    # would write an activity row every poll, which keeps the row out of
     # `DormantAudit`'s active arm forever *and* restarts the age clock — an
     # unbounded, unsignalled loop, strictly worse than parking.
+    #
+    # Its one named member is the exception (Autodev #81), and the reason the
+    # trap above does not apply to it is that the row does not come back: see
+    # `give_up_on_missing_review_skill`.
     def launch_review(issue)
       skill = @project_config['review_skill'].presence
-      log "Launching review for MR !#{issue.mr_iid} " \
-          "(#{skill ? "skill '#{skill}'" : 'mr-review binary'}, review_count: #{issue.review_count})"
-      log_activity(issue, :reviewing)
+      announce_review(issue, skill)
       dispatch_review_outcome(issue, skill ? review_with_skill(issue) : execute_mr_review(issue))
     # A GitLab outage while *we* publish is not a review failure and must not spend
     # the budget (Autodev #62, #71) — so neither counter is touched — but the row
     # still has to come back to `checking_pipeline` before the poll aborts at
     # `PipelineMonitor#check`'s boundary, or nothing re-enqueues it. Re-raised so
     # the abort still happens and `abandon_expired_watch` stays unreached.
+    # The project declared a review skill its repository does not carry. Nothing
+    # further can be attempted for this request, or for any other request of the
+    # project, until somebody fixes the configuration or adds the skill — so the
+    # answer is a give-up that says so, not a retry (Autodev #81).
+    rescue MissingReviewSkillError => e
+      give_up_on_missing_review_skill(issue, e)
     rescue ApiUnavailableError
       resume_watch(issue)
       raise
@@ -70,6 +78,14 @@ class PipelineMonitor
     # caught otherwise.
     rescue RateLimitError, AuthenticationError => e
       handle_review_interruption(issue, e)
+    end
+
+    # Which path is about to run, on both sinks. Split out of `launch_review` so
+    # that method reads as what it is — one call and the four ways it can end.
+    def announce_review(issue, skill)
+      log "Launching review for MR !#{issue.mr_iid} " \
+          "(#{skill ? "skill '#{skill}'" : 'mr-review binary'}, review_count: #{issue.review_count})"
+      log_activity(issue, :reviewing)
     end
 
     # Three outcomes, not two. `:inconclusive` means GitLab had not computed the
@@ -140,6 +156,39 @@ class PipelineMonitor
                        mr_url: issue.mr_url, count: REVIEW_FAILURE_THRESHOLD)
       log_activity(issue, :review_failures_exhausted, count: REVIEW_FAILURE_THRESHOLD)
       log "Issue ##{issue.issue_iid}: #{REVIEW_FAILURE_THRESHOLD} consecutive review failures → done"
+    end
+
+    # The sixth give-up path, and the answer to Autodev #81 (the ticket's option
+    # 1): a `review_skill` whose `SKILL.md` is not in the clone.
+    #
+    # Two things have to be true at once, and only one of them was available to
+    # Autodev #74. **The cause is named**: `review_skill_missing` reaches the
+    # operator through all three sinks the abandon point drives — the GitLab
+    # comment, the activity line and the `/errors` + health-card explanation —
+    # instead of the request surfacing five hours later as a generic
+    # `dormant_exhausted`, with the real message only in the log. And **the line
+    # stops**: `abandon` takes the row to `done`, which `dispatch_pipelines` does
+    # not select, which `dispatch_done_unassigned` excludes because the row is
+    # flagged, and which `dispatch_infra_recheck` excludes because the reason is
+    # not `stagnation_pipeline`.
+    #
+    # That second half is not a nicety, it is what makes rescuing this safe at
+    # all. Rescuing and resuming the watch — the obvious shape — writes an
+    # activity row on every poll, so `Issue.without_activity_since` never reads
+    # the row as dormant and `DormantAudit`'s active arm never sees it again,
+    # while every return to `checking_pipeline` restamps
+    # `checking_pipeline_since` and stands the age bound back up. That is an
+    # unbounded, unsignalled loop, and it is why Autodev #74 preferred to let the
+    # error escape. A give-up has neither property because the row never comes
+    # back.
+    #
+    # No `detail:`. It lands on `attention_detail`, which renders verbatim
+    # through `web_errors_attention_detail` ("Job(s) en cause : …"), so it may
+    # only carry a failing job name; the skill and its expected path travel as
+    # ordinary template vars to the two sinks that can phrase them.
+    def give_up_on_missing_review_skill(issue, error)
+      log_error "Issue ##{issue.issue_iid}: #{error.message}"
+      abandon_issue(issue, :review_skill_missing, skill: error.skill, path: error.relative_path)
     end
 
     def reset_review_failure_count(issue)

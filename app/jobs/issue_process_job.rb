@@ -63,7 +63,7 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # (`limits_concurrency` is that) — it answers the different question of
   # whether the work this job was queued for still needs doing.
   DISPATCHED_FROM = {
-    process: %w[pending needs_clarification].freeze,
+    process: ::Issue::PROCESSABLE_STATES,
     check_pipeline: %w[checking_pipeline].freeze,
     fix_discussions: %w[fixing_discussions].freeze,
     post_completion: %w[done].freeze,

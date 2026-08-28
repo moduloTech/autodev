@@ -48,11 +48,28 @@ class AutodevPollJob < ApplicationJob
   def run_cycle(config, usage_ok:)
     projects = ::Project.runtime_configs(config['projects'])
     wrapped_logger = ::Autodev::JobLogger.new(logger)
+    probe_review_skills(config, projects)
     projects.each do |project_config|
       ::Autodev::PollDispatcher.new(config: config, project_config: project_config,
                                     logger: wrapped_logger, usage_ok: usage_ok).dispatch
     end
     projects.size
+  end
+
+  # One review-skill check per cycle, recorded for the health card to read
+  # (Autodev #81). Same shape and same reason as the quota probe above:
+  # `HealthReport` is passive by contract, so the live read has to happen here.
+  #
+  # It costs one GitLab request per project that declares a `review_skill` — the
+  # repository-files endpoint answers "is this path on this ref" without a clone
+  # — and it is the only thing that can name a misconfigured skill *before* the
+  # project's next request stops at the review step. Advisory, so it never breaks
+  # a cycle: the probe rescues internally and this guards the call itself, the
+  # same ruling `bin/autodev`'s `warn_rejected_numeric_settings` carries.
+  def probe_review_skills(config, projects)
+    ::Autodev::ReviewSkillProbe.probe!(config: config, projects: projects, logger: logger)
+  rescue StandardError => e
+    logger.warn("[autodev_poll] review-skill probe failed: #{e.class}: #{e.message}")
   end
 
   # Poller liveness heartbeat — the dashboard health surface (Autodev::HealthReport)
