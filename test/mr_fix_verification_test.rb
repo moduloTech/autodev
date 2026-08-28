@@ -36,12 +36,15 @@ module FixVerificationHarness
   # clone, the two danger-claude calls of the fix itself, and the GitLab write.
   #
   # `answer` is what the verification pass writes into its contract file (nil =
-  # writes nothing, i.e. the pass ran and produced no contract).
-  def fixer(project_config: {}, config: {}, answer: nil, diff: DIFF, raises: nil)
+  # writes nothing, i.e. the pass ran and produced no contract). `git` is how the
+  # work directory behaves: `:ok`, or one of the two ways `git` can decline to
+  # answer at all — which is a different thing from answering "nothing changed",
+  # see section 1b.
+  def fixer(project_config: {}, answer: nil, diff: DIFF, raises: nil, git: :ok)
     MrFixer.allocate.tap do |fix|
-      configure(fix, project_config, config)
+      configure(fix, project_config)
       silence(fix)
-      stub_fix_steps(fix, diff)
+      stub_fix_steps(fix, diff, git)
       stub_verification(fix, answer, raises)
     end
   end
@@ -71,9 +74,9 @@ module FixVerificationHarness
 
   private
 
-  def configure(fix, project_config, config)
+  def configure(fix, project_config)
     fix.instance_variable_set(:@project_config, project_config)
-    fix.instance_variable_set(:@config, config)
+    fix.instance_variable_set(:@config, {})
     fix.instance_variable_set(:@project_path, 'group/project')
     fix.instance_variable_set(:@fix_issue, nil)
   end
@@ -86,14 +89,26 @@ module FixVerificationHarness
 
   # The fix half of one thread: the prompt, the commit, the GitLab write, and the
   # two `git` questions the verification asks around them.
-  def stub_fix_steps(fix, diff)
+  def stub_fix_steps(fix, diff, git)
     bucket = sink
     fix.define_singleton_method(:format_discussion) { |d, **| "thread body of #{d[:id]}" }
     fix.define_singleton_method(:run_fix_prompt) { |*| nil }
     fix.define_singleton_method(:danger_claude_commit) { |*| nil }
     fix.define_singleton_method(:resolve_discussion) { |_mr_iid, id| bucket[:resolved] << id }
+    stub_git(fix, diff, git)
+  end
+
+  # A failing `git` reports the same way the real one does: a non-zero status and
+  # an empty stdout — which is exactly why an empty stdout on its own cannot be
+  # read as "the correction changed nothing".
+  def stub_git(fix, diff, git)
     fix.define_singleton_method(:run_cmd_status) do |cmd, **|
-      cmd.include?('rev-parse') ? ['sha-before', '', true] : [diff, '', true]
+      head = cmd.include?('rev-parse')
+      next ['', 'fatal: not a git repository', false] if head && git == :head_fails
+      next ['sha-before', '', true] if head
+      next ['', 'fatal: bad object sha-before', false] if git == :diff_fails
+
+      [diff, '', true]
     end
   end
 
@@ -165,9 +180,9 @@ class MrFixVerificationTest < Minitest::Test
 
     run_round(fix, discussions(1))
 
-    assert_empty sink[:resolved]
     assert_empty sink[:prompts], 'an empty diff is answered without spending a verification call'
     assert_includes sink[:activity].map(&:first), :discussion_unchanged
+    refute_includes sink[:activity].map(&:first), :discussion_unverifiable
   end
 
   # The #62 direction, applied to a danger-claude call instead of a GitLab read:
@@ -222,6 +237,96 @@ class MrFixVerificationTest < Minitest::Test
 
     assert_nil opts[:resume], 'the verifier may not resume the fixer session'
     assert_nil opts[:agent]
+  end
+end
+
+# --- 1b. a measurement that did not happen is not a measurement ------------
+
+# Autodev #79, round 2. The comment above `verify_fix` states the doctrine — the
+# neutral value here is `addressed`, so a check that could not be performed must
+# not produce it — and one path went round it, one level below where the doctrine
+# was written.
+#
+# `correction_diff` answered `nil` for two opposite things: "the correction
+# changed nothing", which is a **measured fact**, and "git did not answer", which
+# is a **measurement that did not happen**. `verify_fix` collapsed both into
+# `:unchanged`. The report was not merely imprecise, it was the wrong sentence:
+# "no change produced" sends a reader to danger-claude, and the fault is in git
+# or in the work directory.
+#
+# And it does not stop at the wording. Every thread of the round takes that same
+# path, so nothing is resolved, the round pushes with zero resolutions, the next
+# round finds the identical set of threads, `discussion_stagnated?` recognises
+# the signature, and `stagnation_threshold` rounds later the request is abandoned
+# — `label_attention`, ticket handed back to its author, a public comment. A
+# failure to measure produced a give-up.
+#
+# `:unverifiable` is the case the `cause` enumeration exists for, and this is
+# what it is for. The distinction is made in `correction_diff`, which no longer
+# has `nil` in its vocabulary at all: an empty String is the fact, a `GitError`
+# is the absence of one. Same shape as `GitlabHelpers.answer` (Autodev #62) —
+# a failed read raises instead of returning something a caller can misread.
+class MrFixVerificationDegradedGitTest < Minitest::Test
+  include FixVerificationHarness
+
+  def teardown
+    FileUtils.rm_rf(@tmp_dir) if @tmp_dir
+  end
+
+  def test_a_git_diff_that_failed_is_not_reported_as_an_empty_diff
+    fix = fixer(git: :diff_fails)
+
+    run_round(fix, discussions(1))
+
+    keys = sink[:activity].map(&:first)
+
+    assert_includes keys, :discussion_unverifiable
+    refute_includes keys, :discussion_unchanged, 'git declining to answer is not "the fix changed nothing"'
+  end
+
+  # `head_sha` runs before the fix rather than after it, so it fails for its own
+  # reasons — but the answer is the same one: this correction cannot be measured.
+  # Same cause, so the same sentence and the same open thread; only the detail
+  # differs, and the detail is what a reader needs.
+  def test_an_unreadable_head_is_not_reported_as_an_empty_diff
+    fix = fixer(git: :head_fails)
+
+    run_round(fix, discussions(1))
+
+    keys = sink[:activity].map(&:first)
+
+    assert_includes keys, :discussion_unverifiable
+    refute_includes keys, :discussion_unchanged
+  end
+
+  # The thread stays open either way — that half was never broken, and it must
+  # stay true now that the classification changed.
+  def test_a_correction_that_could_not_be_measured_never_resolves_its_thread
+    fix = fixer(git: :diff_fails)
+
+    run_round(fix, discussions(1))
+
+    assert_empty sink[:resolved]
+  end
+
+  # Nothing is spent asking Claude about a diff nobody could read.
+  def test_a_git_failure_spends_no_verification_call
+    fix = fixer(git: :diff_fails)
+
+    run_round(fix, discussions(1))
+
+    assert_empty sink[:prompts]
+  end
+
+  # The entry has to point at git. Naming the class is what separates "look at
+  # the work directory" from "look at what danger-claude wrote".
+  def test_the_entry_names_the_failure_that_actually_happened
+    fix = fixer(git: :diff_fails)
+    run_round(fix, discussions(1))
+
+    _key, vars = sink[:activity].find { |key, _| key == :discussion_unverifiable }
+
+    assert_match(/GitError/, vars[:error])
   end
 end
 
@@ -302,5 +407,82 @@ class MrFixVerificationMaxSettingTest < Minitest::Test
   # bound is what makes leaving it on affordable.
   def test_the_baked_default_leaves_the_check_on
     assert_operator MrFixer::DEFAULT_FIX_VERIFICATION_MAX, :>, 0
+  end
+end
+
+# --- 4. what a round that resolved nothing says ----------------------------
+
+# Autodev #79, round 2. `announce_fix_success` withheld the GitLab comment when
+# the round resolved nothing, with the reason written next to it: a public
+# "0 discussion(s) corrigee(s)" announces a delivery that did not happen. Three
+# lines below, `log_activity(:discussions_fixed, count: 0)` was called with no
+# condition at all — and `ActivityLogger.post` writes that entry **into the
+# activity note on the GitLab issue**. The guarded sentence was posted anyway, by
+# the other sink. Two guards were needed and only one was written, which is the
+# argument for having one decision instead of two.
+#
+# Silence is not the answer either: "this round could not resolve anything" is
+# worth reading, and it is the line that makes the run of identical rounds before
+# a `stagnation_discussions` give-up legible. It gets its own key, so it cannot
+# be mistaken for a success by a reader or by a counter.
+class MrFixRoundReportTest < Minitest::Test
+  FakeIssue = Struct.new(:issue_iid, :mr_iid, :mr_url) do
+    # The AASM event is not what this section is about; it must simply still fire.
+    def discussions_fixed! = nil
+  end
+
+  def setup
+    @sink = { activity: [], notify: [] }
+  end
+
+  def reporter
+    bucket = @sink
+    MrFixer.allocate.tap do |fix|
+      fix.define_singleton_method(:log) { |*| nil }
+      fix.define_singleton_method(:log_activity) { |_issue, key, **vars| bucket[:activity] << [key, vars] }
+      fix.define_singleton_method(:notify_localized) { |_iid, key, **vars| bucket[:notify] << [key, vars] }
+    end
+  end
+
+  def issue = FakeIssue.new(11, 42, 'http://gitlab/mr/42')
+
+  def report(count) = reporter.send(:complete_discussion_fix, issue, count, 3)
+
+  def test_a_round_that_resolved_nothing_writes_no_success_line
+    report(0)
+
+    refute_includes @sink[:activity].map(&:first), :discussions_fixed,
+                    'the activity note is posted on the GitLab issue too'
+  end
+
+  def test_a_round_that_resolved_nothing_posts_no_success_comment
+    report(0)
+
+    assert_empty @sink[:notify]
+  end
+
+  def test_a_round_that_resolved_nothing_still_says_so
+    report(0)
+
+    _key, vars = @sink[:activity].find { |key, _| key == :discussions_none_resolved }
+
+    assert_equal 3, vars[:round]
+  end
+
+  # Control: a round that did resolve something reports it on both sinks, exactly
+  # as before.
+  def test_a_round_that_resolved_something_reports_it
+    report(2)
+
+    assert_includes @sink[:activity].map(&:first), :discussions_fixed
+    assert_equal %i[mr_fix_success], @sink[:notify].map(&:first)
+  end
+
+  # The handover to the pipeline watch is a property of the round ending, not of
+  # what it achieved.
+  def test_the_pipeline_watch_line_is_written_either_way
+    report(0)
+
+    assert_includes @sink[:activity].map(&:first), :pipeline_watch
   end
 end

@@ -172,21 +172,30 @@ class MrFixer
 
     def complete_discussion_fix(issue, count, round)
       issue.discussions_fixed!
-      announce_fix_success(issue, count, round)
-      log_activity(issue, :discussions_fixed, count: count, round: round)
+      report_round(issue, count, round)
       log_activity(issue, :pipeline_watch)
       log "MR !#{issue.mr_iid}: resolved #{count} discussion(s) (round #{round})"
     end
 
-    # Nothing verified, nothing resolved: the threads are all still open and the
-    # next round re-reads them. A public "0 discussion(s) corrigee(s)" on the
-    # ticket would announce a delivery that did not happen — the per-thread
-    # reason is in the activity log, which is where autodev's account of a round
-    # already lives.
-    def announce_fix_success(issue, count, round)
-      return unless count.positive?
+    # What the round says about itself, decided **once** (Autodev #79, fix round
+    # 2). It used to be decided twice: `announce_fix_success` withheld the GitLab
+    # comment when nothing was resolved, and the `:discussions_fixed` activity
+    # entry was written three lines below with no condition at all — and
+    # `ActivityLogger.post` writes that entry into the activity note **on the
+    # same GitLab issue**. The sentence the guard existed to suppress was posted
+    # anyway, by the other sink. Two guards were needed for one rule, only one
+    # was written, and there is now one place where the rule can be read.
+    #
+    # A round that resolved nothing is not silent either. "This round could not
+    # resolve anything" is worth reading — it is what makes the run of identical
+    # rounds before a `stagnation_discussions` give-up legible instead of
+    # sudden — but it gets its own key, so neither a reader nor a counter can
+    # take it for a delivery.
+    def report_round(issue, count, round)
+      return log_activity(issue, :discussions_none_resolved, round: round) unless count.positive?
 
       notify_localized(issue.issue_iid, :mr_fix_success, count: count, mr_url: issue.mr_url, round: round)
+      log_activity(issue, :discussions_fixed, count: count, round: round)
     end
   end
 end
