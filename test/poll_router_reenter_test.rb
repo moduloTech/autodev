@@ -139,7 +139,44 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
     assert_equal 'checking_pipeline', issue.status
   end
 
-  def test_reenter_open_mr_resets_review_count_to_one
+  # The nominal reentry, and the case the cap exists for: a request that HAS been
+  # reviewed keeps its 1, so the next green pipeline runs `green_post_review`
+  # (check the discussions) rather than reviewing the same MR a second time.
+  # Nothing asserted this before Autodev #85 — the only test on this line started
+  # from 4, which said nothing about the value the nominal case actually carries.
+  def test_a_reviewed_request_keeps_its_review_count_through_a_reentry
+    issue = done_issue_with_mr(mr_iid: 42, review_count: 1)
+    client = StubClient.new(mr_state: 'opened')
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+    issue.reload
+
+    assert_equal 1, issue.review_count
+  end
+
+  # Autodev #85. `review_count = 0` is a fact — no review ever completed on this
+  # request — and the reentry used to write 1 over it. The next green pipeline
+  # then took `green_post_review`, found no unresolved thread (there had never
+  # been a review to open one) and finished the request with `label_done`, which
+  # is `Development::Awaiting Feature Review` on powerpanne: announced as
+  # reviewed with nothing having reviewed it. The counter is capped, never posed.
+  def test_a_request_that_was_never_reviewed_does_not_come_back_reviewed
+    issue = done_issue_with_mr(mr_iid: 42, review_count: 0)
+    client = StubClient.new(mr_state: 'opened')
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+    issue.reload
+
+    assert_equal 0, issue.review_count,
+                 'a reentry invented a review round on a request no reviewer had ever looked at'
+  end
+
+  # The other half of "cap, do not pose": an inherited value above 1 comes back
+  # down to 1, so it cannot re-arm `green_branch`'s `review_limit` short-circuit
+  # (which would give the request up without a single new review round). This is
+  # the pre-#85 test, kept verbatim on its assertion and renamed: it never said
+  # "force 1", it said "never more than 1".
+  def test_reenter_open_mr_caps_review_count_at_one
     issue = done_issue_with_mr(mr_iid: 42, review_count: 4)
     client = StubClient.new(mr_state: 'opened')
 
@@ -147,6 +184,23 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
     issue.reload
 
     assert_equal 1, issue.review_count
+  end
+
+  # The invariant sharing that line, which nothing covered either: the *failure*
+  # budget really is reset, not capped. A request abandoned on
+  # `REVIEW_FAILURE_THRESHOLD` consecutive review failures would otherwise
+  # re-enter at 5/5 and give itself up again on the first stumble. Asserted on
+  # both values of the counter above, since #85 makes them take different paths.
+  def test_a_reentry_clears_the_review_failure_budget
+    [[0, 5], [1, 5], [0, 30], [1, 30]].each do |review_count, failures|
+      issue = done_issue_with_mr(mr_iid: 42, review_count: review_count)
+      issue.update(review_failure_count: failures)
+
+      build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), StubClient.new(mr_state: 'opened'))
+
+      assert_equal 0, issue.reload.review_failure_count,
+                   "review_failure_count #{failures} survived a reentry (review_count #{review_count})"
+    end
   end
 
   def test_reenter_routes_to_pending_when_mr_closed

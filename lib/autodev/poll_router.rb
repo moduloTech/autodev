@@ -42,7 +42,15 @@ class PollRouter
   # stagnation whose CI has recovered re-enters the pipeline-check flow using
   # the exact same reset a human re-adding labels_todo triggers
   # (ResumeHandler#reenter_via_pipeline_check): back to `checking_pipeline`,
-  # `needs_attention` cleared, review/fix counters reset, label doing re-applied.
+  # `needs_attention` cleared, the fix counters reset, the *review* counter
+  # capped at 1 rather than reset to it, label doing re-applied.
+  #
+  # That distinction is this caller's, more than the human one's (Autodev #85).
+  # Nobody reposes a label here and nobody looks: the population is
+  # `stagnation_pipeline`, a request whose pipeline never recovered, which is
+  # overwhelmingly a request that stalled before any review round ran. Writing 1
+  # over its 0 made the first green pipeline after the recovery skip the review
+  # and finish the request under `label_done`.
   def resume_recovered_infra(issue, client)
     @client = @route_client = client
     reenter_via_pipeline_check(issue)
