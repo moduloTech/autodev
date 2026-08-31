@@ -17,6 +17,35 @@ class SkillReviewerTest < ActiveSupport::TestCase
     %i[info warn error debug].each { |level| define_method(level) { |*| nil } }
   end
 
+  # The declared skill as GitLab holds it on the branch that decides
+  # (Autodev #89). Which branch that is, and what is materialised from it, is the
+  # subject of `test/review_reads_the_skill_from_the_target_branch_test.rb`; here
+  # it only has to answer, so each failure mode below stays isolated.
+  class FakeGitlab
+    Blob = Struct.new(:type, :path)
+
+    def initialize(present:)
+      @present = present
+    end
+
+    def get_file(_path, file, _ref)
+      raise not_found unless @present && file.end_with?('SKILL.md')
+
+      Struct.new(:file_path).new(file)
+    end
+
+    def commit(_path, _ref) = Struct.new(:id).new('deadbeef')
+    def tree(_path, options) = [Blob.new('blob', "#{options[:path]}/SKILL.md")]
+    def file_contents(_path, file, _ref) = "# #{File.basename(File.dirname(file))}"
+
+    private
+
+    def not_found
+      request = Struct.new(:base_uri, :path).new('https://gitlab.example', '/api/v4')
+      Gitlab::Error::NotFound.new(Struct.new(:code, :parsed_response, :request).new(404, {}, request))
+    end
+  end
+
   # Full construction is covered by the integration test in Task 5; here the
   # collaborators are stubbed so each failure mode is isolated.
   #
@@ -25,14 +54,22 @@ class SkillReviewerTest < ActiveSupport::TestCase
   # behaviour is unchanged, every stub the brief specifies is still installed.
   def reviewer(contract_json:, dc_raises: false, skill: 'mr-review', skill_present: true)
     mon = PipelineMonitor.allocate
-    mon.instance_variable_set(:@project_path, 'g/a')
-    mon.instance_variable_set(:@project_config, { 'review_skill' => skill })
-    mon.instance_variable_set(:@logger, NullLogger.new)
+    configure!(mon, skill: skill, skill_present: skill_present)
     %i[log log_error].each { |m| mon.define_singleton_method(m) { |*| nil } }
     stub_collaborators!(mon, skill_present)
     stub_danger_claude_prompt!(mon, dc_raises: dc_raises, contract_json: contract_json)
     mon.define_singleton_method(:publish_review) { |*| { posted: 0, demoted: 0 } }
     mon
+  end
+
+  # `target_branch` is what decides the review since Autodev #89, so it has to be
+  # configured for the reviewer to have a ref at all.
+  def configure!(mon, skill:, skill_present:)
+    mon.instance_variable_set(:@project_path, 'g/a')
+    mon.instance_variable_set(:@client, FakeGitlab.new(present: skill_present))
+    mon.instance_variable_set(:@project_config,
+                              { 'path' => 'g/a', 'target_branch' => 'main', 'review_skill' => skill })
+    mon.instance_variable_set(:@logger, NullLogger.new)
   end
 
   def stub_collaborators!(mon, skill_present)
@@ -79,10 +116,13 @@ class SkillReviewerTest < ActiveSupport::TestCase
     assert_equal :inconclusive, subject.send(:review_with_skill, issue)
   end
 
-  def test_a_declared_skill_missing_from_the_clone_is_named_not_silently_replaced
+  # "Missing from the branch that decides", since Autodev #89 — the message names
+  # the ref, because "missing" without "from where" is what made the production
+  # give-up of 28/08 unreadable.
+  def test_a_declared_skill_missing_from_the_target_branch_is_named_not_silently_replaced
     subject = reviewer(contract_json: nil, skill_present: false)
     error = assert_raises(ConfigError) { subject.send(:review_with_skill, issue) }
-    assert_match(/mr-review/, error.message)
+    assert_match(/mr-review.*'main'/m, error.message)
   end
 
   # Fix round 1: `clone_and_checkout` raises `GitError` — a sibling of

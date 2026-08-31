@@ -654,19 +654,31 @@ ALLOWED_SWALLOWS = {
     'fetch_job_trace' => 'self-describing prose, not a verdict'
   },
   'lib/autodev/pipeline_monitor/skill_reviewer.rb' => {
-    # No GitLab read sits under this method at all: `clone_and_checkout` is a
-    # local `git clone` (raising `GitError` on failure) and `SkillsInjector.inject`
-    # never calls the API (an untyped `Errno::*` from its own `File.write` /
-    # `FileUtils.mkdir_p` is the failure being normalised here). The reclass to
-    # `ImplementationError` is deliberate, not a value standing in for an unread
-    # verdict: `review_with_skill`'s own rescue already treats that class as a
-    # review failure (Autodev #74) — judgment never started on a clone or
-    # injection failure, so there is nothing to retry differently. A GitLab error
-    # from `ReviewPublisher#publish`, called later in the same method chain, is a
-    # different class (`ApiUnavailableError`) and is untouched by this rescue —
-    # it keeps propagating past `review_with_skill`, exactly what this entry does
-    # not cover.
-    'clone_and_inject' => 'reclass to a review failure; no GitLab read underneath'
+    # This used to be one `clone_and_inject`, declared here as "no GitLab read
+    # sits under this method at all". Autodev #89 made that sentence false — the
+    # review now reads the declared skill off the target branch over the API —
+    # and the file's own warning applies ("two entries claiming 'no read inside'
+    # survived a review with an unprotected `client.issue` underneath them"), so
+    # the method was split along the line the claim can still be made about.
+    #
+    # `clone_and_checkout` is a local `git clone`, raising `GitError` on failure
+    # — a sibling of `ImplementationError` under `AutodevError`, not a subclass,
+    # so without this it would escape `review_with_skill`'s rescue instead of
+    # counting as a review failure (Autodev #74, fix round 1).
+    'clone_for_review' => 'local git clone; no GitLab read underneath',
+    # `SkillsInjector.inject` never calls the API. What is normalised here is an
+    # untyped `Errno::*` from its own `File.write` / `FileUtils.mkdir_p`.
+    'inject_skills' => 'local file writes; no GitLab read underneath',
+    # This one **does** sit above GitLab reads (`ReviewSkillSource.materialise`:
+    # one `tree`, one `file_contents` per blob), and that is exactly why its
+    # first clause is `rescue ApiUnavailableError; raise`. A failed read keeps
+    # travelling to `Reviewer#launch_review`, which returns the row to
+    # `checking_pipeline` and re-raises so the poll aborts at
+    # `PipelineMonitor#check`'s boundary; it can never become the terminal
+    # `MissingReviewSkillError`. The declared swallow underneath it is the local
+    # half only — the overlay writes the skill into the clone — and it is
+    # reclassed for the same reason the injection is: judgment never started.
+    'overlay_review_skill' => 'reclass of the local write half; the read half is re-raised untouched'
   }
 }.freeze
 
