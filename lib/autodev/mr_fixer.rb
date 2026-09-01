@@ -14,6 +14,7 @@ class MrFixer
   include ErrorHandler
   include FixCycle
   include MissingBaseBound
+  include InvalidRequestBound
 
   public :apply_label_done, :apply_label_doing
 
@@ -21,20 +22,16 @@ class MrFixer
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)
   end
 
+  # The boundary of one fix round, and only that — the round itself is
+  # `run_fix_round` below, split off the way `SkillReviewer` splits
+  # `review_with_skill` from `run_skill_review` and for the same reason: what a
+  # reader has to take in at a glance here is the four ways this ends.
   def fix(issue)
     @dc_issue = issue
-    log "Checking MR !#{issue.mr_iid} for unresolved discussions (round #{issue.fix_round + 1})..."
-    # Read before the activity note, and before anything else this round does
-    # (Autodev #62): an unreadable thread list aborts the round below with the row
-    # exactly as the previous cycle left it. `dispatch_discussions` re-enqueues it
-    # next cycle, and a note appended per poll would grow for as long as the outage
-    # lasts.
-    discussions = fetch_unresolved_discussions(issue.mr_iid).map { |d| build_discussion(d) }
-    log_activity(issue, :discussions_checking, round: issue.fix_round + 1)
-    process_discussions(issue, discussions)
-  # The boundary of one fix round. Without it the exception would reach ActiveJob
-  # and land the row in Solid Queue's failed executions, which needs a human —
-  # for something the next poll cycle retries on its own.
+    run_fix_round(issue)
+  # Without this clause the exception would reach ActiveJob and land the row in
+  # Solid Queue's failed executions, which needs a human — for something the next
+  # poll cycle retries on its own.
   #
   # `dispatch_discussions` re-enqueues every `fixing_discussions` row every cycle,
   # so "stay for the next cycle" is only an answer while there is something to come
@@ -42,11 +39,27 @@ class MrFixer
   # caught above with the same bound the pipeline watch applies (`MissingBaseBound`).
   rescue MissingTargetBranchError => e
     bound_missing_base(issue, e)
+  # Same seam, same reason (Autodev #95): a request GitLab refuses is refused
+  # identically every cycle, so there is nothing to come back for.
+  rescue InvalidRequestError => e
+    bound_invalid_request(issue, e)
   rescue ApiUnavailableError => e
     log_error "MR !#{issue.mr_iid}: #{e.message} — staying in fixing_discussions for the next cycle"
   end
 
   private
+
+  def run_fix_round(issue)
+    log "Checking MR !#{issue.mr_iid} for unresolved discussions (round #{issue.fix_round + 1})..."
+    # Read before the activity note, and before anything else this round does
+    # (Autodev #62): an unreadable thread list aborts the round at the boundary
+    # above with the row exactly as the previous cycle left it.
+    # `dispatch_discussions` re-enqueues it next cycle, and a note appended per
+    # poll would grow for as long as the outage lasts.
+    discussions = fetch_unresolved_discussions(issue.mr_iid).map { |d| build_discussion(d) }
+    log_activity(issue, :discussions_checking, round: issue.fix_round + 1)
+    process_discussions(issue, discussions)
+  end
 
   def process_discussions(issue, discussions)
     DiscussionSnapshot.capture(context: :pre_mr_fix, client: @client,

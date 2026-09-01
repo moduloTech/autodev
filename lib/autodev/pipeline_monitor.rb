@@ -34,6 +34,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include MrStateChecker
   include WatchBound
   include MissingBaseBound
+  include InvalidRequestBound
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)
@@ -62,6 +63,13 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   # `MissingBaseBound` for what is counted and, above all, for what is not.
   rescue MissingTargetBranchError => e
     bound_missing_base(issue, e)
+  # The second member of the family that is not that event, and the one this poll
+  # met in production (Autodev #95): GitLab answered, and it said the request
+  # cannot succeed as formed. Re-reading it next cycle produces the same answer,
+  # so `InvalidRequestBound` counts the identical refusals and gives the request
+  # up rather than paying for another eighteen-minute review to reach it again.
+  rescue InvalidRequestError => e
+    bound_invalid_request(issue, e)
   rescue ApiUnavailableError, Gitlab::Error::ResponseError => e
     log_error "Pipeline check for MR !#{issue.mr_iid} could not conclude: #{e.message}"
   rescue StandardError => e
