@@ -110,15 +110,6 @@ module TargetBranch
     GitlabHelpers.answer(:project) { client.project(project_path).default_branch }
   end
 
-  # Question 1 again, for a fleet scan: a pass that sweeps every project without
-  # holding a clone or a merge request — `ReviewSkillSource`'s probe. No merge
-  # request is in hand, so the configuration *is* the right answer, and the
-  # repository is only asked when the project declares nothing (one request per
-  # cycle saved on every project that does).
-  def for_fleet_scan(client, project_config, project_path)
-    declared(project_config) || repository_default(client, project_path)
-  end
-
   # Question 2 — the merge request that **carries this work**, or `nil` when none
   # does. GitLab holds both halves of that answer and nothing local may stand in
   # for either.

@@ -54,7 +54,7 @@ class PipelineMonitor
     # trap above does not apply to it is that the row does not come back: see
     # `give_up_on_missing_review_skill`.
     def launch_review(issue)
-      skill = @project_config['review_skill'].presence
+      skill = ReviewSkillSource.declared(@project_config)
       announce_review(issue, skill)
       dispatch_review_outcome(issue, skill ? review_with_skill(issue) : execute_mr_review(issue))
     # A GitLab outage while *we* publish is not a review failure and must not spend

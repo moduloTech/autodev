@@ -45,13 +45,15 @@ require 'autodev/pipeline_monitor'
 #     probe carrying its own copy of `declared`, with the module named only in
 #     tail comments and called nowhere, left green all seven tests this file then
 #     had — the two derived assertions included;
-#   * it proves that the askers share the *ref, layouts and derogation*. It does
-#     not prove they share the reading of `review_skill` itself: `SkillReviewer`
-#     spells `@project_config['review_skill']` raw where `declared` strips and
-#     blank-checks it, so a value with surrounding whitespace is a live
-#     divergence between the two. Naming `review_skill` in
-#     `OWNED_BY_THE_SHARED_MODULE` would fail on the tree as it stands, and
-#     changing the reviewer is a product change, not a guard's.
+#   * it proves that the askers share the ref, the layouts, the derogation and
+#     the reading of `review_skill` itself. That last one was the gap this guard
+#     declared until 01/09/2026: three spellings of "is a skill declared"
+#     coexisted — raw in `SkillReviewer`, raw in `MrReviewTokenProbe`, `.presence`
+#     in `Reviewer#launch_review` — and only the shared one trimmed, so a value
+#     with surrounding whitespace took the skill path on one side and counted as
+#     "no skill" on the other. All four now ask `ReviewSkillSource.declared`, and
+#     `review_skill` is named in `OWNED_BY_THE_SHARED_MODULE` so a fourth
+#     spelling fails here rather than being written down as a known limit.
 #
 # rubocop:disable Metrics/ClassLength -- the two directions only read together,
 # and half of these lines are the pair of harnesses that make "the same GitLab
@@ -71,12 +73,18 @@ class ReviewAndProbeReadTheSameThingTest < Minitest::Test
   PROBE_SOURCE = File.join(ROOT, 'app/services/autodev/review_skill_probe.rb')
   REVIEWER_SOURCE = File.join(ROOT, 'lib/autodev/pipeline_monitor/skill_reviewer.rb')
   # Spelling any of these in an asker is a second definition of the question.
-  OWNED_BY_THE_SHARED_MODULE = %w[target_branch default_branch skill_paths SKILL_NAMES get_file].freeze
-  # Of those, the ones the shared module answers itself: the layouts it looks for
-  # and the read it looks with. The other two are the *ref*, and the module does
-  # not answer that either — it asks `TargetBranch` (Autodev #91), which is why
-  # they are split rather than asserted as one set.
-  ANSWERED_BY_THE_SHARED_MODULE = %w[skill_paths SKILL_NAMES get_file].freeze
+  # `review_skill` is named by its *config read* and not by the bare word, because
+  # the bare word is also a legitimate `ActivityEvent` kind (`ReviewSkillProbe::KIND`)
+  # and the scan keeps string literals — it has to, since the config read is itself
+  # a literal, so blanking them would blind the guard to the very thing it looks for.
+  OWNED_BY_THE_SHARED_MODULE = ["['review_skill']", 'target_branch', 'default_branch',
+                                'skill_paths', 'SKILL_NAMES', 'get_file'].freeze
+  # Of those, the ones the shared module answers itself: whether a skill is
+  # declared at all, the layouts it looks for, and the read it looks with. The
+  # other two are the *ref*, and the module does not answer that either — it asks
+  # `TargetBranch` (Autodev #91), which is why they are split rather than asserted
+  # as one set.
+  ANSWERED_BY_THE_SHARED_MODULE = ["['review_skill']", 'skill_paths', 'SKILL_NAMES', 'get_file'].freeze
   ASKS_TARGET_BRANCH = /\bTargetBranch\.\w+/
   # Not a name, a **call**. The name on its own is what a comment carries.
   ROUTED_THROUGH = /\bReviewSkillSource\.\w+/

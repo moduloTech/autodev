@@ -83,12 +83,16 @@ module Autodev
       # Does any project still review through the `mr-review` binary?
       #
       # `bin/autodev`'s `any_project_relies_on_mr_review?` delegates here, so the
-      # boot warning and this probe cannot drift apart. A blank is not a
-      # declaration: `''` is truthy in Ruby and `Project#to_project_config` emits
-      # every column of the row, so it has to read as "no skill declared" exactly
-      # as `Reviewer#launch_review` reads it.
+      # boot warning and this probe cannot drift apart. And "is a skill declared"
+      # is asked of `ReviewSkillSource`, not spelled again: a blank is not a
+      # declaration (`''` is truthy in Ruby and `Project#to_project_config` emits
+      # every column of the row), and this population must be the exact complement
+      # of the one `Reviewer#launch_review` sends down the skill path. Three
+      # spellings of that question survived the alpha-50 review — raw here, raw in
+      # `SkillReviewer`, `.presence` in the reviewer — and only the shared one
+      # trimmed, which is a divergence on a value with spaces around it.
       def relied_upon_by_any?(project_configs)
-        Array(project_configs).any? { |project_config| project_config['review_skill'].to_s.strip.empty? }
+        Array(project_configs).any? { |project_config| ReviewSkillSource.declared(project_config).nil? }
       end
 
       # { status: 'alive'|'revoked'|'unknown', source: String|nil,

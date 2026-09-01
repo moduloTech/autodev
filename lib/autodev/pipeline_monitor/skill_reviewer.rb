@@ -39,14 +39,14 @@ class PipelineMonitor
       run_skill_review(work_dir, issue)
     rescue ImplementationError, ReviewContract::InvalidError => e
       log_error "MR !#{issue.mr_iid}: review via skill " \
-                "'#{@project_config['review_skill']}' failed: #{e.message}"
+                "'#{ReviewSkillSource.declared(@project_config)}' failed: #{e.message}"
       false
     ensure
       FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
     end
 
     def run_skill_review(work_dir, issue)
-      skill = @project_config['review_skill']
+      skill = ReviewSkillSource.declared(@project_config)
       path = review_contract_path(issue.mr_iid)
       FileUtils.rm_f(path)
       prepare_review_clone(work_dir, issue, skill)
