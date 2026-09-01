@@ -83,6 +83,24 @@ def autodev_recheck_clarifications
   Autodev::ClarificationSweep.new(config: Web.config, apply: ENV['APPLY'] == '1').run
 end
 
+# Autodev #88. The arrears of the revoked review token: the requests given up on
+# `review_failures_exhausted` that were never reviewed at all (`review_count` 0)
+# go back to the pipeline check, where the review they never got runs. Reports
+# unless APPLY=1; LIMIT caps how many one run re-arms (3 = max_workers) and the
+# manual re-run is the spacing; INCLUDE_AUTHOR_HANDBACK=1 widens the ownership
+# filter to the tickets autodev itself handed back to their author. Idempotent (a
+# re-armed row leaves the population, and one re-armed once is never re-armed
+# again).
+# `LIMIT` is read through the sweep's own declaration, which carries the range as
+# well as the type: `NumericSettings.integer` alone accepted `LIMIT=30` — one
+# keystroke from 3 — and re-armed the whole arrears in a single run. A rejected
+# value raises `ConfigError` and the task aborts before a row is examined.
+def autodev_recheck_review_arrears
+  Autodev::ReviewArrearsSweep.new(config: Web.config, apply: ENV['APPLY'] == '1',
+                                  limit: Autodev::ReviewArrearsSweep.limit_from(ENV.fetch('LIMIT', nil)),
+                                  include_author_handback: ENV['INCLUDE_AUTHOR_HANDBACK'] == '1').run
+end
+
 namespace :autodev do
   desc 'Import ~/.autodev/config.yml `projects:` block into projects + project_app_commands. ' \
        'DRY_RUN=1 logs the summary without writing. AUTODEV_CONFIG=path overrides the file path.'
@@ -111,4 +129,9 @@ namespace :autodev do
   desc 'Re-ask GitLab whether the requests parked in needs_clarification have been answered, ' \
        'and re-queue the ones that have. Reports only unless APPLY=1. Idempotent.'
   task(recheck_clarifications: :environment) { autodev_recheck_clarifications }
+
+  desc 'Send the requests given up on an exhausted review budget without ever having been reviewed ' \
+       'back to the pipeline check. Reports only unless APPLY=1. LIMIT=N per run (default 3, max 10), ' \
+       'INCLUDE_AUTHOR_HANDBACK=1 widens the ownership filter. Idempotent.'
+  task(recheck_review_arrears: :environment) { autodev_recheck_review_arrears }
 end

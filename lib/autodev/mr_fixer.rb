@@ -13,6 +13,7 @@ class MrFixer
   include DiscussionFormatter
   include ErrorHandler
   include FixCycle
+  include MissingBaseBound
 
   public :apply_label_done, :apply_label_doing
 
@@ -34,6 +35,13 @@ class MrFixer
   # The boundary of one fix round. Without it the exception would reach ActiveJob
   # and land the row in Solid Queue's failed executions, which needs a human —
   # for something the next poll cycle retries on its own.
+  #
+  # `dispatch_discussions` re-enqueues every `fixing_discussions` row every cycle,
+  # so "stay for the next cycle" is only an answer while there is something to come
+  # back for. A base the remote confirmed it does not have is not that, and it is
+  # caught above with the same bound the pipeline watch applies (`MissingBaseBound`).
+  rescue MissingTargetBranchError => e
+    bound_missing_base(issue, e)
   rescue ApiUnavailableError => e
     log_error "MR !#{issue.mr_iid}: #{e.message} — staying in fixing_discussions for the next cycle"
   end

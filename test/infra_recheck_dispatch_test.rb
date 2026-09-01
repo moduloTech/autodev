@@ -145,12 +145,28 @@ class InfraRecheckDispatchTest < Minitest::Test
     refute issue.needs_attention
   end
 
-  def test_resume_recovered_infra_resets_review_count_to_one
+  def test_resume_recovered_infra_caps_review_count_at_one
     issue = infra_stagnation_issue(review_count: 3)
 
     build_router.resume_recovered_infra(issue, StubClient.new)
 
     assert_equal 1, issue.reload.review_count
+  end
+
+  # Autodev #85. This pass is the *automatic* caller of the shared reentry —
+  # nobody reposes a label, nobody looks — and its population is a pipeline
+  # stagnation, which is overwhelmingly a request that stalled before any review
+  # ran. `infra_stagnation_issue` creates `review_count = 0` by default and no
+  # test here asserted the counter on such a row: writing 1 over the 0 made the
+  # first green pipeline after recovery skip the review and finish the request
+  # under `label_done`.
+  def test_resume_recovered_infra_does_not_invent_a_review_on_a_never_reviewed_row
+    issue = infra_stagnation_issue(review_count: 0)
+
+    build_router.resume_recovered_infra(issue, StubClient.new)
+
+    assert_equal 0, issue.reload.review_count,
+                 'the automatic infra recheck re-armed a never-reviewed request as if it had been reviewed'
   end
 
   private

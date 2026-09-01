@@ -83,6 +83,43 @@ class ProcessRunnerTest < Minitest::Test
     refute ok
   end
 
+  # Autodev #77. What the child's gem environment looks like, measured in the
+  # child rather than asserted on a hash — the property both callers of
+  # `run_with_timeout` (`danger-claude` and `mr-review`) depend on, pinned once
+  # here at the helper rather than twice at the call sites.
+  #
+  # autodev runs with `path: vendor/bundle` in deployment mode, and Bundler
+  # rewrites GEM_HOME / GEM_PATH in the process environment. Inherited, they make
+  # an external tool resolve — and, for a `bundler/inline` script such as
+  # `mr-review`, *install* — its gems inside autodev's vendored bundle, a
+  # directory `brew upgrade autodev` deletes. A production backtrace through
+  # `.../autodev/1.0.0-alpha.47/libexec/vendor/bundle/.../gems/gitlab-5.1.0/...`
+  # is the proof it happened.
+  #
+  # This is the third and last real spawn in this file (see the note above): a
+  # `sh` that prints its own environment is the only honest way to state
+  # "resolves its gems as if launched from a terminal".
+  GEM_ENV_SCRIPT = 'printf "GEM_HOME=%s GEM_PATH=%s" "${GEM_HOME-unset}" "${GEM_PATH-unset}"'
+  FAKE_BUNDLE = '/opt/homebrew/Cellar/autodev/1.0.0-alpha.49/libexec/vendor/bundle/ruby/4.0.0'
+
+  def with_gem_env(&)
+    previous = ENV.to_h.slice('GEM_HOME', 'GEM_PATH')
+    ENV['GEM_HOME'] = FAKE_BUNDLE
+    ENV['GEM_PATH'] = ''
+    yield
+  ensure
+    %w[GEM_HOME GEM_PATH].each { |var| ENV[var] = previous[var] }
+  end
+
+  def test_the_child_does_not_inherit_autodevs_vendored_gem_home
+    out = with_gem_env do
+      spawn_harness.send(:run_with_timeout, '/bin/sh', ['-c', GEM_ENV_SCRIPT], chdir: Dir.pwd, timeout: 30).first
+    end
+
+    assert_equal 'GEM_HOME=unset GEM_PATH=unset', out,
+                 'an external tool must resolve its gems as if launched from a terminal'
+  end
+
   # Autodev #59. `record_output` is the *only* writer of @dc_stdout / @dc_stderr,
   # and twelve persistence sites across the four workers copy those two ivars
   # straight into `issues.dc_stdout` / `issues.dc_stderr` — none of them scrubbed.

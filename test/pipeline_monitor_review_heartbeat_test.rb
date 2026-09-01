@@ -74,13 +74,16 @@ class PipelineMonitorReviewHeartbeatTest < Minitest::Test
   end
 
   # chdir is required by run_with_timeout and was implicit with Open3.capture3.
-  # mr-review works through the GitLab API, so the process's own cwd is correct —
-  # pinned so nobody "tidies" it into a work_dir that may not exist.
-  def test_the_wrapper_is_called_with_the_current_working_directory
+  # It was Dir.pwd — the worker's inherited cwd — until Autodev #77 made it a
+  # declared neutral directory; mr-review clones the MR itself and uses absolute
+  # paths for everything else, so the value only has to exist. The reasoning, and
+  # the pin that the worker's cwd is no longer an input, live in
+  # test/mr_review_runs_in_a_neutral_directory_test.rb.
+  def test_the_wrapper_is_called_with_a_neutral_directory
     calls = stub_timeout_wrapper(['', '', true])
     @harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
 
-    assert_equal Dir.pwd, calls.first[:opts][:chdir]
+    assert_equal Dir.tmpdir, calls.first[:opts][:chdir]
   end
 
   def test_the_success_path_returns_true

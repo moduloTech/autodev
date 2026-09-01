@@ -231,11 +231,13 @@ def warn_missing_mr_review(config, logger)
   logger.warn(Locales.t(:cli_mr_review_missing, locale: cli_locale(config)))
 end
 
-# A blank is not a declaration: `''` is truthy in Ruby and `to_project_config`
-# emits every column of the row, so this has to read a blank as "no skill" exactly
-# as `Reviewer#launch_review` does.
+# One definition, two readers (Autodev #80). This warning and
+# `Autodev::MrReviewTokenProbe` arm on the same population — "some project still
+# reviews through the binary" — and a second copy of the predicate is exactly
+# what Autodev #72 and #81 each had to undo once. The rule itself (a blank
+# `review_skill` is not a declaration) is stated where it lives.
 def any_project_relies_on_mr_review?(project_configs)
-  project_configs.any? { |project_config| project_config['review_skill'].to_s.strip.empty? }
+  Autodev::MrReviewTokenProbe.relied_upon_by_any?(project_configs)
 end
 
 def setup_database(config, logger)

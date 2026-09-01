@@ -6,9 +6,10 @@ require 'autodev/gitlab_helpers'
 require 'autodev/activity_logger'
 require 'autodev/pipeline_monitor'
 require 'autodev/poll_router'
+require 'stringio'
 
 # Autodev #72 — "does this merge request state carry a verdict" has one
-# definition, and four readers.
+# definition, and five readers since Autodev #88.
 #
 # Autodev #69 put the allow-list in one place on purpose, so that widening the
 # door would be a decision rather than an accident. Autodev #67, merged after it,
@@ -28,12 +29,13 @@ require 'autodev/poll_router'
 #     `post_completion` today.
 #
 # What is shared is the answer to "is `locked` a verdict", **not** the decision
-# that follows it: the four readers ask different questions (was this delivered,
+# that follows it: the five readers ask different questions (was this delivered,
 # does this need reimplementing, does this need re-arming, does this need
-# deploying) and each keeps its own answer. So this file has two halves: the four
-# readers all consult `MrState.transient?` — proved by widening that one
-# predicate and watching all four change behaviour — and each of them still takes
-# its own decision, on `locked` and on the states that do carry a verdict.
+# deploying, does this need reviewing at last) and each keeps its own answer. So
+# this file has two halves: the five readers all consult `MrState.transient?` —
+# proved by widening that one predicate and watching all five change behaviour —
+# and each of them still takes its own decision, on `locked` and on the states
+# that do carry a verdict.
 
 # A state nobody has to invent a meaning for: it is transient here only because
 # the single definition was stubbed to say so. If a reader has its own copy of
@@ -284,5 +286,86 @@ class MrStateInThePostCompletionHookTest < Minitest::Test
   def test_a_merged_or_closed_mr_still_skips_the_hook
     assert_empty enqueued_for('merged')
     assert_empty enqueued_for('closed')
+  end
+end
+
+# --- 5. the review arrears sweep (Autodev::ReviewArrearsSweep) -------------
+
+# Autodev #88's reader. It re-reads the merge request of a request given up
+# before any review ran, and `locked` there means "come back on the next run" —
+# a state that must cost the row nothing, exactly like the infra recheck's.
+class MrStateInTheReviewArrearsSweepTest < Minitest::Test
+  include DatabaseTestHelper
+  include MrStateFixtures
+
+  PATH = 'group/arrears'
+  AUTODEV_ID = 7
+  CONFIG = { 'gitlab_token' => 'x', 'gitlab_url' => 'https://gitlab.example',
+             'projects' => [{ 'path' => PATH, 'labels_todo' => ['To do'],
+                              'label_doing' => 'Development::Doing',
+                              'label_done' => 'Development::Awaiting Feature Review' }] }.freeze
+
+  FakeAssignee = Struct.new(:id)
+  FakeGlIssue = Struct.new(:state, :assignees, :labels)
+  # This reader looks at three merge request fields, not one: the state it sorts
+  # on, plus the two it reports without filtering on (Autodev #88).
+  FakeArrearsMr = Struct.new(:state, :detailed_merge_status, :has_conflicts)
+
+  # The tally key each state raises, in the order `outcome` looks for them.
+  OUTCOMES = %i[already_merged mr_closed unknown_state rearmed waiting].freeze
+
+  class StubClient
+    def initialize(state) = @state = state
+
+    def issue(_path, _iid)
+      MrStateInTheReviewArrearsSweepTest::FakeGlIssue.new(
+        'opened',
+        [MrStateInTheReviewArrearsSweepTest::FakeAssignee.new(AUTODEV_ID)],
+        ['Development::Doing']
+      )
+    end
+
+    def merge_request(_path, _iid)
+      MrStateInTheReviewArrearsSweepTest::FakeArrearsMr.new(@state, 'mergeable', false)
+    end
+
+    def edit_issue(_path, _iid, **_opts) = nil
+    def edit_issue_note(_path, _iid, _note_id, _body) = nil
+    def create_issue_note(_path, _iid, _body) = Struct.new(:id).new(1)
+  end
+
+  def setup
+    setup_database
+  end
+
+  def outcome(state)
+    wipe_business_tables
+    create_issue(project_path: PATH, status: 'done', mr_iid: 42, needs_attention: true,
+                 attention_reason: 'review_failures_exhausted', review_count: 0,
+                 finished_at: Time.parse('2026-08-05T09:00:00Z'))
+    tally = GitlabHelpers.stub(:build_gitlab_client, StubClient.new(state)) do
+      GitlabHelpers.stub(:current_user_id, AUTODEV_ID) do
+        Autodev::ReviewArrearsSweep.new(config: CONFIG, apply: true, out: StringIO.new).run
+      end
+    end
+    OUTCOMES.find { |key| tally[key] == 1 }
+  end
+
+  def test_a_locked_mr_waits
+    assert_equal :waiting, outcome('locked')
+  end
+
+  def test_a_state_added_to_the_one_list_waits_here_too
+    with_widened_list { assert_equal :waiting, outcome(FUTURE_TRANSIENT_STATE) }
+  end
+
+  # This reader's own decision, unchanged: a merged MR is delivered work nobody
+  # may relabel, a closed one keeps its `attention_reason`, an unknown state is
+  # for a human, and only an open MR goes back to the review it never got.
+  def test_the_states_that_carry_a_verdict_still_sort_where_they_did
+    states = %w[merged closed something_gitlab_added_later opened]
+
+    assert_equal(%i[already_merged mr_closed unknown_state rearmed],
+                 states.map { |state| outcome(state) })
   end
 end

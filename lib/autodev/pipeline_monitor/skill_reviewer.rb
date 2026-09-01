@@ -7,6 +7,17 @@ class PipelineMonitor
   # they write nothing without the developer's explicit go-ahead, and
   # `danger-claude` runs `claude -p`, so there is nobody to ask. That STOP is the
   # contract: autodev reads the findings back and posts them itself.
+  #
+  # **Which copy of the skill judges is not the clone's** (Autodev #89). The
+  # clone is of the MR's own branch, and `git clone --depth 1 --branch <b>` is
+  # single-branch, so until this fix the review looked for the declared skill on
+  # the branch it was judging — a different branch from the one
+  # `Autodev::ReviewSkillProbe` reads, and one an MR may modify. The skill is now
+  # read over the API from the branch that decides and written into the clone
+  # before the injection. `ReviewSkillSource` owns which branch that is, and why —
+  # and it is handed `issue.mr_iid`, because the branch that decides the review of
+  # a merge request is the one that merge request is going into (Autodev #91,
+  # applied here by the review round of this lot).
   module SkillReviewer
     private
 
@@ -20,21 +31,22 @@ class PipelineMonitor
     # the work directory disposable and named `prepare_work_dir` as the idiom; the
     # cleanup half was dropped, so one shallow clone per reviewed ticket accumulated
     # in /tmp until reboot. It has to be `ensure` rather than a trailing statement
-    # because two outcomes leave by exception: `ApiUnavailableError` from the publish
-    # and `MissingReviewSkillError` from a declared skill missing from the clone.
+    # because three outcomes leave by exception: `ApiUnavailableError` from the
+    # publish or from reading the declared skill off the target branch, and
+    # `MissingReviewSkillError` from a declared skill that branch does not carry.
     def review_with_skill(issue)
       work_dir = "/tmp/autodev_review_#{@project_path.tr('/', '_')}_#{issue.issue_iid}"
       run_skill_review(work_dir, issue)
     rescue ImplementationError, ReviewContract::InvalidError => e
       log_error "MR !#{issue.mr_iid}: review via skill " \
-                "'#{@project_config['review_skill']}' failed: #{e.message}"
+                "'#{ReviewSkillSource.declared(@project_config)}' failed: #{e.message}"
       false
     ensure
       FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
     end
 
     def run_skill_review(work_dir, issue)
-      skill = @project_config['review_skill']
+      skill = ReviewSkillSource.declared(@project_config)
       path = review_contract_path(issue.mr_iid)
       FileUtils.rm_f(path)
       prepare_review_clone(work_dir, issue, skill)
@@ -45,36 +57,73 @@ class PipelineMonitor
     # A clone failure is a review failure: unlike a GitLab error while posting,
     # here judgment never started.
     #
+    # The four steps are in this order for four separate reasons (Autodev #89).
+    # `ReviewSkillSource.locate` runs **first** so a read GitLab could not answer
+    # aborts before a clone is paid for. The overlay runs **after the clone**,
+    # because it writes into it, and **before the injection**, so
+    # `migrate_legacy_skills` still moves a flat `<name>.md` into `<name>/SKILL.md`
+    # before anything looks (the Autodev #81 fix round 2 invariant) and so a skill
+    # autodev supplies itself is still written after the overlay's drop. And
+    # `skill_available?` stays exactly what it was — one `File.exist?` on the
+    # clone, after both — which is what keeps
+    # `test/skill_layouts_are_one_definition_test.rb` true of the real review step.
+    #
+    # There is one raise, not two, and that is deliberate: the overlay drops the
+    # declared skill from the clone whatever the verdict, so a `missing` verdict
+    # arrives here as an empty directory. A branch carrying a stale copy cannot
+    # rescue itself.
+    #
     # The missing declared skill raises `MissingReviewSkillError` — still a
     # `ConfigError`, so the ruling that this must never fall back to the
     # `mr-review` binary is unchanged, but a class `launch_review` can recognise
-    # on its own (Autodev #81). It carries the skill name and the repository path
-    # that was looked for, because both end up in a GitLab comment an operator
-    # reads, and re-parsing them out of a message would be one more thing to keep
-    # in step.
+    # on its own (Autodev #81). It carries the skill name, the repository path
+    # that was looked for and the ref it was looked for on, because all three end
+    # up in a GitLab comment an operator reads.
     def prepare_review_clone(work_dir, issue, skill)
-      clone_and_inject(work_dir, issue)
+      source = ReviewSkillSource.locate(@client, @project_config, skill, mr_iid: issue.mr_iid)
+      clone_for_review(work_dir, issue)
+      overlay_review_skill(work_dir, skill, source)
+      inject_skills(work_dir)
       return if skill_available?(work_dir, skill)
 
-      raise MissingReviewSkillError.new(skill, work_dir)
+      raise MissingReviewSkillError.new(skill, source[:ref])
     end
 
-    # `clone_and_checkout` raises `GitError` (a sibling of `ImplementationError`
-    # under `AutodevError`, not a subclass — Autodev #74 fix round 1) and
-    # `SkillsInjector.inject` raises nothing of its own, so a `File.write` /
-    # `FileUtils.mkdir_p` failure underneath it would otherwise escape as a bare
-    # `Errno::*`. Both are normalised to `ImplementationError` here, and only
-    # here: `review_with_skill`'s rescue already treats that class as a review
-    # failure, and the scope stops at this pair on purpose — it must not also
-    # catch the `MissingReviewSkillError` raised two lines below, which is a
-    # distinct outcome (a declared skill missing from the clone), nor anything from
-    # `run_review_skill` or `publish_from_contract`, where an `ApiUnavailableError`
-    # must keep propagating untouched.
-    def clone_and_inject(work_dir, issue)
+    # `clone_and_checkout` raises `GitError` — a sibling of `ImplementationError`
+    # under `AutodevError`, not a subclass (Autodev #74 fix round 1) — so it would
+    # otherwise escape `review_with_skill`'s rescue instead of counting as a
+    # review failure.
+    def clone_for_review(work_dir, issue)
       clone_and_checkout(work_dir, issue.branch_name)
+    rescue StandardError => e
+      raise ImplementationError, "clone failed: #{e.message}"
+    end
+
+    # `SkillsInjector.inject` raises nothing of its own, so a `File.write` /
+    # `FileUtils.mkdir_p` failure underneath it would escape as a bare `Errno::*`.
+    #
+    # Split from the clone (it used to be one `clone_and_inject`) because the
+    # overlay now sits between them and makes GitLab reads: under a shared
+    # `rescue StandardError` those would be reclassed to `ImplementationError`,
+    # i.e. read as a review failure, which is precisely what Autodev #62 forbids.
+    def inject_skills(work_dir)
       SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
     rescue StandardError => e
-      raise ImplementationError, "clone or skill injection failed: #{e.message}"
+      raise ImplementationError, "skill injection failed: #{e.message}"
+    end
+
+    # The reads live in `ReviewSkillSource` (shared with the probe). What is here
+    # is the sorting: an `ApiUnavailableError` is re-raised untouched so
+    # `launch_review` can hand the row back to `checking_pipeline` and the poll
+    # abort at its own boundary, while a local file failure — the overlay writes
+    # into the clone — is normalised like the injection's, since judgment never
+    # started either way.
+    def overlay_review_skill(work_dir, skill, source)
+      ReviewSkillSource.materialise(@client, @project_path, work_dir, skill, source)
+    rescue ApiUnavailableError
+      raise
+    rescue StandardError => e
+      raise ImplementationError, "review skill overlay failed: #{e.message}"
     end
 
     def skill_available?(work_dir, skill)

@@ -15,11 +15,31 @@ require_relative 'repo_rebaser'
 #
 # Including classes must call `init_runner(...)` in their initialize.
 module DangerClaudeRunner
-  # Env hash that explicitly unsets all Bundler-related vars in child processes.
+  # Env hash that unsets, in every child process, what Bundler put in autodev's
+  # own environment. An external tool must resolve its dependencies as if it had
+  # been launched from a terminal — never inside autodev's vendored bundle.
+  #
+  # GEM_HOME / GEM_PATH are here for the same reason as the BUNDLE_* vars, and
+  # they were the ones missing (Autodev #77). autodev is installed in deployment
+  # mode with `path: vendor/bundle`, so Bundler rewrites those two *in the
+  # process environment* (measured in production: `GEM_HOME=<prefix>/libexec/
+  # vendor/bundle/ruby/4.0.0`, `GEM_PATH=""`). Every child inherited them.
+  #
+  # The proof it mattered: the dc_stderr of one production review carried a
+  # backtrace through
+  #
+  #   /opt/homebrew/Cellar/autodev/1.0.0-alpha.47/libexec/vendor/bundle/ruby/
+  #     4.0.0/gems/gitlab-5.1.0/lib/gitlab/request.rb:71
+  #
+  # — `mr-review` had loaded the `gitlab` gem out of autodev's bundle. It is a
+  # `bundler/inline` script with its own `gemfile(true)`, so resolving there also
+  # means *installing* its gems there: a directory `brew upgrade autodev` erases,
+  # under a Ruby autodev chose. Unsetting both sends it back to the default gem
+  # home of the Ruby on PATH.
   CLEAN_ENV = %w[
     BUNDLE_GEMFILE BUNDLE_PATH BUNDLE_BIN_PATH BUNDLE_APP_CONFIG
     BUNDLE_ORIG_GEMFILE BUNDLER_VERSION BUNDLER_ORIG_BUNDLER_VERSION
-    BUNDLER_SETUP RUBYOPT RUBYLIB
+    BUNDLER_SETUP RUBYOPT RUBYLIB GEM_HOME GEM_PATH
   ].to_h { |var| [var, nil] }.freeze
 
   include ShellHelpers

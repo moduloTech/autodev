@@ -7,7 +7,9 @@ class PollRouter
   # Four paths:
   # - MR open → route to `checking_pipeline` so the next pipeline check sends
   #   to `fixing_discussions` (MrFixer addresses unresolved threads instead of
-  #   triggering a full re-implementation).
+  #   triggering a full re-implementation). The review counter is **capped** at 1
+  #   on the way, not reset to it: a request that never got a review keeps its 0
+  #   and is reviewed before it can be delivered (Autodev #85).
   # - MR already merged → skip: the work is shipped, no point re-implementing.
   #   Clear the todo label and stay in `done`.
   # - MR in a transient state (`MrState::TRANSIENT_STATES` — `locked`) → wait:
@@ -92,19 +94,61 @@ class PollRouter
     end
 
     # Preserve mr_iid; reset only what would block the pipeline-fix flow.
-    # review_count is forced to 1 so green_post_review (not green_first_review)
-    # runs on the next pipeline tick — and to dodge the max_review_rounds
-    # short-circuit if the issue had reached the review cap before.
-    def reenter_via_pipeline_check(existing)
-      existing.reenter_to_check_pipeline!
-      existing.update(review_count: 1, review_failure_count: 0, stagnation_signatures: nil,
-                      fix_round: 0, pipeline_retrigger_count: 0, error_message: nil,
-                      finished_at: nil, activity_note_id: nil,
+    #
+    # `review_count` is **capped, never posed** (Autodev #85). This line used to
+    # write a flat 1 and say so as a decision, which is only true of the case it
+    # was written for: a *delivered* request whose todo label a human reposes has
+    # necessarily been reviewed (`finalize_green_done` is reachable through
+    # `green_post_review` alone), so the 1 it is handed is the 1 it already had.
+    # A request given up BEFORE any review carries 0, and 0 is a fact — nobody
+    # looked. Overwriting it makes `PipelineMonitor#green_branch` answer
+    # `:post_review` at the next green pipeline: the review is skipped, the
+    # thread list is empty because no review ever opened one, and the request
+    # ends `done` under `label_done` — `Development::Awaiting Feature Review` on
+    # powerpanne. Announced as reviewed to the very people whose job is to review
+    # it, which is the harm Autodev #63 removed from the six abandon paths.
+    #
+    # The cap stays, and is the whole of what the line ever bought: an inherited
+    # value at `MAX_REVIEW_ROUNDS` would send the next green pipeline into
+    # `green_branch`'s `:review_limit` short-circuit and give the request up
+    # again without a single new round.
+    #
+    # `review_failure_count: 0` beside it really is a reset, deliberately: a
+    # request abandoned on `REVIEW_FAILURE_THRESHOLD` consecutive review failures
+    # would otherwise re-enter at 5/5 and give itself up on the first stumble.
+    #
+    # `origin` travels to `Issue#emit_activity_event!` and is written on the
+    # `transition` row. Three callers fire this event and the row is the only
+    # record of which one did: a human reposing the todo label (nil — nobody to
+    # attribute it to), `resume_recovered_infra`, and `ReviewArrearsSweep`, whose
+    # idempotence depends on recognising its own re-arms and nobody else's.
+    def reenter_via_pipeline_check(existing, origin: nil)
+      existing.reenter_to_check_pipeline!(origin)
+      existing.update(review_count: reentry_review_count(existing), review_failure_count: 0,
+                      stagnation_signatures: nil, fix_round: 0, pipeline_retrigger_count: 0,
+                      error_message: nil, finished_at: nil, activity_note_id: nil,
                       needs_attention: false, attention_reason: nil, attention_detail: nil,
                       infra_recheck_count: 0, infra_recheck_at: nil)
       apply_label_doing(existing.issue_iid)
-      log_activity(existing, :reenter_to_fix)
-      log "Issue ##{existing.issue_iid}: MR open → checking_pipeline (will route to fixing_discussions)"
+      announce_reentry(existing)
+    end
+
+    # 0 → 0, 1 → 1, anything above → 1. A ceiling, not a value.
+    def reentry_review_count(existing)
+      [existing.review_count || 0, 1].min
+    end
+
+    # Both sinks say what actually happens next, so they decide it once.
+    # `reenter_to_fix` renders "→ verification des discussions a corriger", which
+    # describes `green_post_review` — the branch a reviewed request takes. On a
+    # request at 0 the next step is the review itself, and the line claiming
+    # otherwise is the same false statement as the label, one layer up
+    # (Autodev #85).
+    def announce_reentry(existing)
+      reviewed = existing.review_count.positive?
+      log_activity(existing, reviewed ? :reenter_to_fix : :reenter_to_review)
+      log "Issue ##{existing.issue_iid}: MR open → checking_pipeline " \
+          "(will route to #{reviewed ? 'fixing_discussions' : 'the review'})"
     end
 
     def reenter_via_reimplementation(gl_issue, existing)

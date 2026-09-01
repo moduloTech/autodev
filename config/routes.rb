@@ -155,8 +155,15 @@ Rails.application.routes.draw do # rubocop:disable Metrics/BlockLength
   # BetterStack can scrape them; an optional `monitoring.token` gates access.
   get '/up', to: 'rails/health#show'
   get '/healthz', to: 'monitoring#show', defaults: { format: :json }
+  # The segment is only shape-checked here. Naming the components in the route
+  # is what let the list rot: it still read `poller|workers|queue|claude_usage|
+  # issues_error|database` while `HealthReport::CHECKS` had grown four more, so
+  # `/healthz/mr_review`, `/healthz/review_skill`, `/healthz/stuck_issues` and
+  # `/healthz/migrations` answered a bare 404 (Autodev #80). `MonitoringController
+  # #component` already validates the name against CHECKS — the single list — and
+  # answers an unknown one with a JSON 404 that says which name was not known.
   get '/healthz/:check', to: 'monitoring#component', defaults: { format: :json },
-                         constraints: { check: /poller|workers|queue|claude_usage|issues_error|database/ }
+                         constraints: { check: /[a-z_]+/ }
 
   # === Admin =======================================================
   # /admin/users — read-only audit of users × memberships (PR2 of the

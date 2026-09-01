@@ -8,6 +8,13 @@ class PollRouter
   include LabelManager
   include ResumeHandler
 
+  # Who fired `reenter_to_check_pipeline`, written on the `transition` row by
+  # `Issue#emit_activity_event!`. It lives here rather than on the sweep because
+  # this class is what performs the write, and both sides have to read one name:
+  # `Autodev::ReviewArrearsSweep#swept_before?` asks the activity trail whether
+  # THIS value is already on the row before re-arming it a second time.
+  REVIEW_ARREARS_ORIGIN = 'review_arrears_sweep'
+
   def initialize(config:, project_config:, logger:, token:, pool:)
     @config         = config
     @project_config = project_config
@@ -42,13 +49,60 @@ class PollRouter
   # stagnation whose CI has recovered re-enters the pipeline-check flow using
   # the exact same reset a human re-adding labels_todo triggers
   # (ResumeHandler#reenter_via_pipeline_check): back to `checking_pipeline`,
-  # `needs_attention` cleared, review/fix counters reset, label doing re-applied.
+  # `needs_attention` cleared, the fix counters reset, the *review* counter
+  # capped at 1 rather than reset to it, label doing re-applied.
+  #
+  # That distinction is this caller's, more than the human one's (Autodev #85).
+  # Nobody reposes a label here and nobody looks: the population is
+  # `stagnation_pipeline`, a request whose pipeline never recovered, which is
+  # overwhelmingly a request that stalled before any review round ran. Writing 1
+  # over its 0 made the first green pipeline after the recovery skip the review
+  # and finish the request under `label_done`.
   def resume_recovered_infra(issue, client)
+    resume_via_pipeline_check(issue, client)
+  end
+
+  # Public entry for `Autodev::ReviewArrearsSweep` (Autodev #88). Same body as
+  # the one above, and a different name because the two callers are different
+  # facts: one re-arms a request whose CI recovered, the other re-arms a request
+  # no reviewer ever looked at. Neither is a short-circuit of the state machine —
+  # what Autodev #60 removed were the `update_all(status: 'done')` writes with no
+  # AASM event; this path fires `reenter_to_check_pipeline`, so the `transition`
+  # row, the audit log, `stamp_pipeline_watch!` and `persist_status_change!` all
+  # run.
+  #
+  # The caller owns the two things this method deliberately does not: reading
+  # whether the request is still autodev's, and putting autodev back on the
+  # ticket. The infra pass gets the first from its own dispatch query and does not
+  # need the second; the sweep needs both and has different answers.
+  def resume_never_reviewed(issue, client)
+    resume_via_pipeline_check(issue, client, origin: REVIEW_ARREARS_ORIGIN)
+  end
+
+  # Also the sweep's (Autodev #88 review round), and it is the *first* write of a
+  # re-arm rather than a step of the transition above.
+  #
+  # `reenter_via_pipeline_check` applies `label_doing` too, but after the AASM
+  # event has already been persisted, and `LabelManager#manage_labels` answers a
+  # GitLab error with a log line and `[]` — so a transient 500 on `edit_issue`
+  # left the row `checking_pipeline` in the database with its end label
+  # (`Awaiting Feature Review`, `StandBy`, `Awaiting CR`) untouched on GitLab, and
+  # `dispatch_unassignment` — which runs before `dispatch_pipelines` — read that
+  # as a `workflow_moved` handover, closed the row and posted a comment blaming a
+  # human for a move nobody made. The sweep therefore poses the label first and
+  # reads the ticket back before transitioning anything; the `apply_label_doing`
+  # inside the reentry then finds nothing to change and writes nothing.
+  def repose_working_label(issue, client)
     @client = @route_client = client
-    reenter_via_pipeline_check(issue)
+    apply_label_doing(issue.issue_iid)
   end
 
   private
+
+  def resume_via_pipeline_check(issue, client, origin: nil)
+    @client = @route_client = client
+    reenter_via_pipeline_check(issue, origin: origin)
+  end
 
   def init_project_settings(project_config)
     @project_path = project_config['path']

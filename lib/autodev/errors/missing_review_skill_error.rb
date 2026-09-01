@@ -17,21 +17,32 @@
 # reason that names it, without widening the rescue to `ConfigError` at large,
 # whose other members it would have no idea what to do with.
 #
-# `skill` is the declared name and `relative_path` the repository path the review
-# step looked for — the two things an operator needs in order to fix it, so they
-# travel as data rather than as prose to be re-parsed out of the message.
+# `skill` is the declared name, `relative_path` the repository path the review
+# step looked for and `ref` the branch it looked on — the three things an
+# operator needs in order to fix it, so they travel as data rather than as prose
+# to be re-parsed out of the message.
+#
+# `ref` arrived with Autodev #89, and it is the difference between a true message
+# and a misleading one. Until then this named the *work directory* of a clone of
+# the MR's own branch, because that is where the review looked; the branch that
+# decides is the project's `target_branch` (else the repository's default
+# branch), which is a different branch and, measured on production, usually the
+# one that actually carries the skill. Saying "missing" without saying "from
+# where" is how request powerpanne 15842 was given up on 28/08 under a reason
+# whose immediate cause was correct and whose reading was false.
 class MissingReviewSkillError < ConfigError
-  attr_reader :skill, :relative_path
+  attr_reader :skill, :relative_path, :ref
 
   # The canonical layout, which is what an operator should be told to add — the
   # flat one `SkillsInjector` still migrates is accepted, not recommended. Read
   # from the one list so this cannot name a path the review step does not use.
   def self.skill_path(skill) = ::SkillsInjector.skill_paths(skill).first
 
-  def initialize(skill, work_dir)
+  def initialize(skill, ref)
     @skill = skill.to_s
+    @ref = ref.to_s
     @relative_path = self.class.skill_path(skill)
-    super("project declares review_skill '#{@skill}' but #{File.join(work_dir.to_s, @relative_path)} " \
-          'is missing — refusing to fall back to the mr-review binary, which would run a different process')
+    super("project declares review_skill '#{@skill}' but #{@relative_path} is missing from " \
+          "'#{@ref}' — refusing to fall back to the mr-review binary, which would run a different process")
   end
 end

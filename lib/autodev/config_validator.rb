@@ -22,6 +22,7 @@ module ConfigValidator
 
   def self.validate_globals!(config)
     validate_gitlab_token!(config)
+    validate_mr_review_token!(config)
     validate_numeric_settings!(config)
     validate_log_level!(config)
     validate_web!(config)
@@ -39,6 +40,25 @@ module ConfigValidator
     raise ConfigError, 'gitlab_token is required. Set it in config.yml or via GITLAB_API_TOKEN env var.'
   end
   private_class_method :validate_gitlab_token!
+
+  # Optional, and refused when present-and-blank (Autodev #80): unset means
+  # "mr-review shares `gitlab_token`", so a blank would read as that fallback
+  # while looking like a separation. Same rule as the optional per-project
+  # strings above, applied to a global.
+  #
+  # No value check beyond that. Whether the token is *accepted* is not a question
+  # a validator can answer, and it is the question this ticket is actually about:
+  # `Autodev::MrReviewTokenProbe` asks GitLab once per cycle, but only while some
+  # project still reviews through the binary.
+  def self.validate_mr_review_token!(config)
+    value = config['mr_review_token']
+    return if value.nil?
+    return if value.is_a?(String) && !value.strip.empty?
+
+    raise ConfigError, "'mr_review_token', if set, must be a non-empty string. " \
+                       'Remove it to share gitlab_token with mr-review.'
+  end
+  private_class_method :validate_mr_review_token!
 
   # Every numeric global is checked against its NumericSettings declaration
   # (Autodev #58) rather than against one blanket "> 0" rule. The mandatory

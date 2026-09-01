@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'test_helper'
+require_relative 'ruby_source_helper'
 require 'autodev/danger_claude_runner'
 require 'autodev/mr_fixer'
 require 'autodev/pipeline_monitor'
@@ -569,7 +570,15 @@ ALLOWED_SWALLOWS = {
     # `ApiUnavailableError`, which this method re-raises above its two handlers
     # (Autodev #67 — it used to be swallowed here and imputed to the fix).
     #
-    # Audited, not assumed: the only GitLab traffic left under this method is
+    # Audited, not assumed, and re-audited for Autodev #91, which added a read
+    # under this method: `target_branch_for` → `TargetBranch.of_merge_request` →
+    # `client.merge_request`, asked between the clone and the rebase because the
+    # base the branch is rebased onto is the target that merge request carries.
+    # It goes through `GitlabHelpers.answer`, so it raises `ApiUnavailableError`
+    # and leaves through the same re-raise as the prompt-context read — nothing
+    # is rebased, nothing is force-pushed, and `fix_round` is not advanced.
+    #
+    # The rest of the GitLab traffic left under this method is
     # `resolve_discussion` (a write, declared below), `ScreenshotUploader.process`
     # (uploads, own rescues) and `log_activity` / `notify_localized`, which
     # swallow their own failures because a note that could not be edited is not
@@ -626,10 +635,17 @@ ALLOWED_SWALLOWS = {
     # selective outage on the issue endpoint spend the whole stagnation budget
     # without a single correction being attempted.
     #
-    # Audited, not assumed: the GitLab traffic left under this method is
-    # `retry_pipeline` and `fetch_job_trace` (both declared here) plus the label /
-    # assignee / note writes of `abandon_issue`, `log_activity` and
-    # `notify_localized`, each of which swallows its own failure.
+    # Audited, not assumed, and re-audited for Autodev #91, which added a read
+    # under this method too: `prepare_work_dir` asks `target_branch_for` for the
+    # base before it rebases, which reads `client.merge_request` through
+    # `GitlabHelpers.answer`. Same route out as the prompt-context read, and the
+    # stagnation signature is written after `clone_and_fix` returns, so the abort
+    # spends nothing.
+    #
+    # The rest of the GitLab traffic left under this method is `retry_pipeline`
+    # and `fetch_job_trace` (both declared here) plus the label / assignee / note
+    # writes of `abandon_issue`, `log_activity` and `notify_localized`, each of
+    # which swallows its own failure.
     'attempt_fix' => 'fix boundary: clone, danger-claude, push'
   },
   'lib/autodev/pipeline_monitor/reviewer.rb' => {
@@ -653,20 +669,96 @@ ALLOWED_SWALLOWS = {
     # unreadable trace must not abandon the fix of the jobs whose traces arrived.
     'fetch_job_trace' => 'self-describing prose, not a verdict'
   },
+  'lib/autodev/review_skill_source.rb' => {
+    # Three clauses, and they are the reason this file had to enter the perimeter:
+    # five GitLab reads sit under it, on the path that ends in a **terminal**
+    # abandon (`review_skill_missing`), which is what Autodev #89 exists to stop
+    # being reached by accident. `locate` — the one the review calls — carries no
+    # rescue at all, deliberately: a failed read raises `ApiUnavailableError`, and
+    # `Reviewer#launch_review` returns the row to `checking_pipeline` and re-raises
+    # so the poll aborts at `PipelineMonitor#check`'s boundary.
+    #
+    # `verdict` is the **probe's** entry point and nobody else's (one call site,
+    # `ReviewSkillProbe#verdict_for`). Its substitute is a third value, `UNKNOWN`,
+    # not `MISSING`: the health card renders "unknown", no request is given up on
+    # it, and it is `Autodev #62`'s rule applied to a read whose degraded answer
+    # would otherwise accuse the operator of a typo.
+    'verdict' => 'advisory probe only; the substitute is `unknown`, which is not `missing`',
+    # `rescue ::Gitlab::Error::NotFound; false` — GitLab *answering* the question,
+    # not failing to. The clause names `NotFound` alone, sits inside
+    # `GitlabHelpers.answer`, and every other response failure therefore leaves as
+    # `ApiUnavailableError`. The 404 that means "no such ref" is separated from the
+    # 404 that means "no such file" one level up, by `confirm_ref!`, which is
+    # called precisely when no layout was found.
+    'file_on_ref?' => 'a 404 on a file is the answer; the ref case is confirmed separately',
+    # Reported as a re-class, and it is one — deliberately, and it keeps
+    # travelling. `MissingTargetBranchError < ApiUnavailableError`, so the
+    # conversion lands at the same boundaries as the class it replaces; what it
+    # adds is `confirmed: true`, the evidence `MissingBaseBound` requires before it
+    # will count an occurrence towards giving the request up. The first clause is
+    # `raise unless e.cause.is_a?(NotFound)` — a real re-raise of the untouched
+    # exception, which `RERAISE` cannot see because the modifier follows the
+    # keyword, so the finding is also the scanner erring towards reporting.
+    'confirm_ref!' => 'converts one confirmed 404 into a bounded class of the same family; ' \
+                      'everything else is re-raised untouched'
+  },
+  'lib/autodev/target_branch.rb' => {
+    # `rescue ::Gitlab::Error::NotFound; nil`, inside `GitlabHelpers.answer`. In
+    # the perimeter because this one read decides the base of every rebase and
+    # every force-push. The substitute is not a base: `nil` means "no merge
+    # request carries this work", and `resolve` falls through to question 1, which
+    # is what the next merge request will be created with anyway
+    # (`MrManager#find_existing_mr` filters `state: 'opened'`). The reasoning is
+    # written out above the method, including why a 404 takes this route and every
+    # other response failure still refuses to answer.
+    'of_merge_request' => 'a 404 means no merge request carries the work; every other failure raises'
+  },
+  'app/services/autodev/review_arrears_sweep.rb' => {
+    # The boundary of **examining** one row, and only that. Its `:unreadable`
+    # tally means what it says because the writes are caught one level down, by
+    # `rearm`'s own clause: nothing has been written when this fires, no slot is
+    # spent, and the next run picks the row up. That separation is the review
+    # round's, and it is what makes this sentence true rather than the older
+    # "boundary for one row" reading, under which a failed write would have been
+    # reported as a row that could not be read.
+    'examine' => 'read boundary for one row: nothing written, no slot spent, re-examined next run',
+    # The boundary of **writing** one re-arm, and the opposite trade on purpose:
+    # the slot *is* spent, the row stays `done`, the assignment is handed back if
+    # it landed, and the line says a human has to look. No verdict is inferred —
+    # `:incomplete` is a distinct tally from `:unreadable` for exactly that
+    # reason.
+    'rearm' => 'write boundary: the slot is spent, the row is left done, and the line says so',
+    # The undo of one write. `false` means "the assignment could not be handed
+    # back", and `undo` prints that sentence instead of the reassuring one. It
+    # invents nothing.
+    'restore_assignees' => 'write, not a read: the failure is reported verbatim in the line'
+  },
   'lib/autodev/pipeline_monitor/skill_reviewer.rb' => {
-    # No GitLab read sits under this method at all: `clone_and_checkout` is a
-    # local `git clone` (raising `GitError` on failure) and `SkillsInjector.inject`
-    # never calls the API (an untyped `Errno::*` from its own `File.write` /
-    # `FileUtils.mkdir_p` is the failure being normalised here). The reclass to
-    # `ImplementationError` is deliberate, not a value standing in for an unread
-    # verdict: `review_with_skill`'s own rescue already treats that class as a
-    # review failure (Autodev #74) — judgment never started on a clone or
-    # injection failure, so there is nothing to retry differently. A GitLab error
-    # from `ReviewPublisher#publish`, called later in the same method chain, is a
-    # different class (`ApiUnavailableError`) and is untouched by this rescue —
-    # it keeps propagating past `review_with_skill`, exactly what this entry does
-    # not cover.
-    'clone_and_inject' => 'reclass to a review failure; no GitLab read underneath'
+    # This used to be one `clone_and_inject`, declared here as "no GitLab read
+    # sits under this method at all". Autodev #89 made that sentence false — the
+    # review now reads the declared skill off the target branch over the API —
+    # and the file's own warning applies ("two entries claiming 'no read inside'
+    # survived a review with an unprotected `client.issue` underneath them"), so
+    # the method was split along the line the claim can still be made about.
+    #
+    # `clone_and_checkout` is a local `git clone`, raising `GitError` on failure
+    # — a sibling of `ImplementationError` under `AutodevError`, not a subclass,
+    # so without this it would escape `review_with_skill`'s rescue instead of
+    # counting as a review failure (Autodev #74, fix round 1).
+    'clone_for_review' => 'local git clone; no GitLab read underneath',
+    # `SkillsInjector.inject` never calls the API. What is normalised here is an
+    # untyped `Errno::*` from its own `File.write` / `FileUtils.mkdir_p`.
+    'inject_skills' => 'local file writes; no GitLab read underneath',
+    # This one **does** sit above GitLab reads (`ReviewSkillSource.materialise`:
+    # one `tree`, one `file_contents` per blob), and that is exactly why its
+    # first clause is `rescue ApiUnavailableError; raise`. A failed read keeps
+    # travelling to `Reviewer#launch_review`, which returns the row to
+    # `checking_pipeline` and re-raises so the poll aborts at
+    # `PipelineMonitor#check`'s boundary; it can never become the terminal
+    # `MissingReviewSkillError`. The declared swallow underneath it is the local
+    # half only — the overlay writes the skill into the clone — and it is
+    # reclassed for the same reason the injection is: judgment never started.
+    'overlay_review_skill' => 'reclass of the local write half; the read half is re-raised untouched'
   }
 }.freeze
 
@@ -718,16 +810,19 @@ class SwallowScanner
   RECLASS = /\braise\s+(?:::)?[A-Z]\w*/
   RECLASS_NOTE = ' (re-raises a different class)'
   METHOD_DEF = /^\s*def\s+([a-z_][\w?!]*)/
-  # What the scanner reads is *code*. Strings go first (so removing comments
-  # cannot cut a `#` out of the middle of a literal), comments second. Both
-  # blind spots this handles are the same mistake in two directions: a log
+
+  # What the scanner reads is *code*, and what that means is `RubySource.blanked`
+  # (`test/ruby_source_helper.rb`) since the review round of this lot: literals
+  # blanked first, then the trailing comment cut. It moved out because a second
+  # guard needed the same split and had written a weaker one — its "both askers
+  # route through the shared module" assertion was satisfied by a comment. It is
+  # the *blanked* half because what this scanner looks for is keywords.
+  #
+  # The blind spots it handles are the same mistake in two directions: a log
   # message containing the word "raise" made a clause look like a re-raise —
   # `RERAISE` was applied after stripping comments but not strings — and the
   # same text could equally invent a `rescue` where the code has none.
-  STRING = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/
-  COMMENT = /#.*/
-
-  def self.code_of(line) = line.gsub(STRING, '""').sub(COMMENT, '')
+  def self.code_of(line) = RubySource.blanked(line)
 
   def initialize(lines)
     @lines = lines
@@ -827,14 +922,55 @@ class DegradedApiValueShapeTest < Minitest::Test
   #     design so it can never break what it is instrumenting.
   #
   # Widening the perimeter to those would make the list a catalogue of writes and
-  # drown the four entries that matter. Re-read this paragraph before adding a
-  # file, and add the file if the reason no longer holds.
+  # drown the entries that matter. Re-read this paragraph before adding a file, and
+  # add the file if the reason no longer holds.
+  #
+  # **Four files were added by the review round of the alpha-50 lot, because that
+  # instruction had not been followed by any of the five tickets in it** — each of
+  # them moved a GitLab read into a file this list did not name, and the guard
+  # stayed green over the whole lot. Demonstrated rather than supposed: a
+  # `rescue StandardError → nil` injected into `ReviewSkillSource#locate` — a
+  # failed read read as "the skill is absent", so as a *terminal* abandon, which is
+  # the entire subject of Autodev #89 — left every assertion here passing.
+  #
+  #   * `lib/autodev/review_skill_source.rb` — five reads on the path to
+  #     `review_skill_missing`, which is terminal;
+  #   * `lib/autodev/target_branch.rb` — the one read that decides the base of
+  #     every rebase and every force-push;
+  #   * `lib/autodev/missing_base_bound.rb` — a new boundary, and the decision that
+  #     ends a request on a base that is not there. It holds no swallow of a read
+  #     today (its only rescue is a local `JSON::ParserError`, which `NAMED` does
+  #     not match) and is scanned so the next one is not free;
+  #   * `app/services/autodev/review_arrears_sweep.rb` — the #88 arrears pass:
+  #     reads *and* writes on rows it re-arms, with two tallies that mean different
+  #     things.
   SCANNED = %w[
     lib/autodev/pipeline_monitor.rb lib/autodev/mr_fixer.rb lib/autodev/mr_discussions.rb
-    lib/autodev/poll_router.rb
+    lib/autodev/poll_router.rb lib/autodev/review_skill_source.rb lib/autodev/target_branch.rb
+    lib/autodev/missing_base_bound.rb app/services/autodev/review_arrears_sweep.rb
   ].freeze
 
   SCANNED_DIRS = %w[lib/autodev/pipeline_monitor lib/autodev/mr_fixer lib/autodev/poll_router].freeze
+
+  # A declaration for a method that no longer swallows anything reads like a live
+  # derogation and is one more sentence nobody re-checks (Autodev #73's rule for
+  # `DYNAMIC_KEY_SITES`, applied to this list). Every entry has to correspond to a
+  # finding in the file it names.
+  def test_no_declared_swallow_is_dead
+    declared = ALLOWED_SWALLOWS.flat_map { |rel, methods| methods.keys.map { |m| "#{rel}##{m}" } }
+    found = scanned_files.flat_map do |rel, abs|
+      SwallowScanner.new(File.readlines(abs)).swallowing_methods.map { |method, _kind| "#{rel}##{method}" }
+    end
+
+    assert_empty declared - found, <<~MSG
+      These entries declare a swallow that is not in the code any more:
+      #{(declared - found).join(', ')}.
+
+      Take them out. A derogation nobody can see is dead reads exactly like a live
+      one, and this file's whole warning is that its sentences are checked by
+      nobody.
+    MSG
+  end
 
   def test_every_swallowed_gitlab_error_in_the_delivery_path_is_declared
     undeclared = scanned_files.flat_map { |rel, abs| undeclared_swallows(rel, abs) }

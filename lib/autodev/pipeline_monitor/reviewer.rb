@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'tmpdir'
+
 class PipelineMonitor
   # Runs mr-review on the MR after a green pipeline.
   # Manages review_count and transitions via review_done!.
@@ -52,7 +54,7 @@ class PipelineMonitor
     # trap above does not apply to it is that the row does not come back: see
     # `give_up_on_missing_review_skill`.
     def launch_review(issue)
-      skill = @project_config['review_skill'].presence
+      skill = ReviewSkillSource.declared(@project_config)
       announce_review(issue, skill)
       dispatch_review_outcome(issue, skill ? review_with_skill(issue) : execute_mr_review(issue))
     # A GitLab outage while *we* publish is not a review failure and must not spend
@@ -184,11 +186,19 @@ class PipelineMonitor
     #
     # No `detail:`. It lands on `attention_detail`, which renders verbatim
     # through `web_errors_attention_detail` ("Job(s) en cause : …"), so it may
-    # only carry a failing job name; the skill and its expected path travel as
-    # ordinary template vars to the two sinks that can phrase them.
+    # only carry a failing job name; the skill, its expected path and the ref it
+    # was looked for on travel as ordinary template vars to the two sinks that
+    # can phrase them.
+    #
+    # `ref:` is Autodev #89's addition, and it is what makes the message
+    # actionable rather than misleading. All three sinks used to say "absent from
+    # the repository on the MR branch", which was both the wrong branch and a
+    # branch nobody should fix: the skill is read from the project's target
+    # branch (else the repository's default branch), which is where an operator
+    # has to add it.
     def give_up_on_missing_review_skill(issue, error)
       log_error "Issue ##{issue.issue_iid}: #{error.message}"
-      abandon_issue(issue, :review_skill_missing, skill: error.skill, path: error.relative_path)
+      abandon_issue(issue, :review_skill_missing, skill: error.skill, path: error.relative_path, ref: error.ref)
     end
 
     def reset_review_failure_count(issue)
@@ -221,9 +231,21 @@ class PipelineMonitor
     # ImplementationError, which execute_mr_review's rescue turns into `false`
     # — a review failure counted by launch_review, not a failed request.
     #
-    # chdir: Dir.pwd keeps the previous behaviour. Open3.capture3 inherited the
-    # process's cwd, and mr-review works through the GitLab API rather than in a
-    # local clone, so it has no repo to sit in.
+    # chdir: is Dir.tmpdir — neutral, declared, and always present (Autodev #77).
+    # It used to be Dir.pwd, "keeping the previous behaviour" of the Open3.capture3
+    # era: whatever cwd the worker happened to have (in production
+    # `/Users/modulotech`, the launchd plist's WorkingDirectory). That was an
+    # absence of decision, and it is what made #77's original diagnosis — that
+    # mr-review reads autodev's own CLAUDE.md as the project's conventions —
+    # plausible on reading.
+    #
+    # The directory is indifferent because mr-review sits in none of it: it clones
+    # the MR's source branch itself (/tmp/mr-review_<mr_iid>_<pid>) and runs every
+    # command it delegates with `chdir:` into that clone — which is the "repo root"
+    # its review prompt means when it asks for CLAUDE.md — and every other path it
+    # touches is absolute (~/.mr-review/mr-review.db, its tempfiles). All that is
+    # required of the value is that it exist: Process.spawn fails outright
+    # otherwise, and a review failure is what that would look like.
     #
     # Both streams and the exit status are reported on failure (Autodev #49).
     # Keeping stderr alone made every production failure log the same empty line,
@@ -231,11 +253,54 @@ class PipelineMonitor
     def run_mr_review_command(mr_url)
       log "Running mr-review on #{mr_url}..."
       dc_heartbeat!('mr-review')
-      out, err, ok, status = run_with_timeout('mr-review', ['-H', mr_url], chdir: Dir.pwd, timeout: mr_review_timeout)
+      out, err, ok, status = run_with_timeout(
+        'mr-review', ['-H', mr_url],
+        chdir: Dir.tmpdir, timeout: mr_review_timeout, env: mr_review_env
+      )
       return log('Review completed successfully') || true if ok
 
       log_error "mr-review failed (non-fatal): #{review_failure_diagnostic(out, err, status)}"
       false
+    end
+
+    # The GitLab credential `mr-review` authenticates with, handed over by autodev
+    # instead of left to the binary's own `~/.mr-review/config.yml` (Autodev #80).
+    #
+    # That file is how four months of silence happened: it lives in another tool's
+    # directory, it was last written on 14 April 2026, and the token in it was
+    # revoked that same month. Nothing in autodev's chain exported
+    # GITLAB_API_TOKEN — not the launchd plist, not a shell profile — so mr-review
+    # fell through to the file and every review through the binary failed with
+    # `401 Token was revoked`. Exporting it here makes autodev's configuration the
+    # one place a review credential is declared, and therefore the one place a
+    # probe can watch (`Autodev::MrReviewTokenProbe`).
+    #
+    # `env:`, never `-t`: the binary accepts the flag, but argv is readable via
+    # `ps` by every account on the machine for the entire run — up to
+    # `mr_review_timeout`, an hour by default. Autodev #10 is the precedent.
+    #
+    # An empty hash when autodev declares no credential at all. Exporting a blank
+    # would be worse than exporting nothing: mr-review's own resolution puts the
+    # environment *above* its configuration file, so a blank would override a
+    # credential that works.
+    #
+    # What this exposes, decided rather than discovered (neutral review, 01/09/2026).
+    # mr-review launches `claude` through `Bundler.with_unbundled_env`, which
+    # restores an environment captured *after* this spawn set the variable, so the
+    # review's Claude session and its Bash tool can read this credential. Nothing
+    # exported it before this ticket, so the exposure is new — and what changed is
+    # not that a secret sits on the machine (mr-review already kept one in a
+    # world-readable file of its own) but *which* one: with the credentials shared,
+    # that session receives a token able to write wherever autodev writes, where a
+    # dedicated one could be narrowed to reading the repository and posting notes.
+    # Kept deliberately: same machine, same user, same trust boundary, and sharing
+    # is what puts the review credential under the surveillance autodev's own token
+    # already gets from being validated at boot and used every cycle. `mr_review_token`
+    # exists for whoever wants to narrow it back down, and the probe watches
+    # whichever one is actually handed over.
+    def mr_review_env
+      token = ::Config.mr_review_token(@config)
+      token ? { 'GITLAB_API_TOKEN' => token } : {}
     end
 
     # Everything a reader needs to act on, in one message (Autodev #49). This

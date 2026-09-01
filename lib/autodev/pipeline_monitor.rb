@@ -33,19 +33,14 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include SkillReviewer
   include MrStateChecker
   include WatchBound
+  include MissingBaseBound
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)
   end
 
   def check(issue)
-    @dc_issue = issue
-    clear_poll_verdict
-    log "Checking pipeline for MR !#{issue.mr_iid} (issue ##{issue.issue_iid})..."
-    log_pipeline_poll(issue)
-    # After the seed above (so a row that arrived by `update_all` has a clock at
-    # all) and before any transition can restamp it — see `remember_watch_clock`.
-    remember_watch_clock(issue)
+    begin_poll(issue)
     poll_open_mr(issue)
   # The boundary of one poll (Autodev #62). A read GitLab could not answer aborts
   # here with the row exactly as the previous cycle left it, and
@@ -59,6 +54,14 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   # is a read whose failure was named at the call site, the bare
   # `Gitlab::Error::ResponseError` is one that was not (the `merge_request` read in
   # `poll_open_mr`). Neither concluded anything.
+  #
+  # The one member of the family that is **not** that event is caught above it: a
+  # base the remote confirmed it does not have has nothing to come back from, so
+  # waiting for it is a leak rather than a recovery — a full clone every cycle for
+  # ever, with none of the four guard-rails this rescue relies on reachable. See
+  # `MissingBaseBound` for what is counted and, above all, for what is not.
+  rescue MissingTargetBranchError => e
+    bound_missing_base(issue, e)
   rescue ApiUnavailableError, Gitlab::Error::ResponseError => e
     log_error "Pipeline check for MR !#{issue.mr_iid} could not conclude: #{e.message}"
   rescue StandardError => e
@@ -66,6 +69,18 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   end
 
   private
+
+  # Everything one poll has to have done before it reads anything: the row it is
+  # about, the per-poll verdict flag, the liveness line, and the watch clock — read
+  # after `log_pipeline_poll` has seeded a NULL column and before any transition
+  # can restamp it (see `remember_watch_clock`).
+  def begin_poll(issue)
+    @dc_issue = issue
+    clear_poll_verdict
+    log "Checking pipeline for MR !#{issue.mr_iid} (issue ##{issue.issue_iid})..."
+    log_pipeline_poll(issue)
+    remember_watch_clock(issue)
+  end
 
   def poll_open_mr(issue)
     mr = @client.merge_request(@project_path, issue.mr_iid)

@@ -60,9 +60,31 @@ module Autodev
     def verdict(gl_issue, issue_iid)
       suspicion = suspect(Array(::GitlabHelpers.field(gl_issue, :labels)))
       return unless suspicion
-      return unless by_someone_else?(issue_iid, suspicion)
+
+      event = decisive_event(issue_iid, suspicion)
+      return unless event && by_someone_else?(event)
 
       suspicion
+    end
+
+    # The same question as `verdict`, bounded in time (Autodev #88): did somebody
+    # else move this ticket on with its labels **after** `threshold`?
+    #
+    # `ReviewArrearsSweep` asks it of a request autodev abandoned and handed back
+    # to its author. There the current labels alone answer nothing: autodev itself
+    # posed `label_attention` on the way out, so `suspect` finds a candidate on
+    # every row of that population and `verdict` would decline all of them. What
+    # separates "autodev parked it there in July" from "a human moved it on since"
+    # is *when* the edit was made, and the author of an edit is read off the
+    # resource label events rather than inferred — the rule this class exists for.
+    def moved_since?(gl_issue, issue_iid, threshold)
+      return false if threshold.nil?
+
+      suspicion = suspect(Array(::GitlabHelpers.field(gl_issue, :labels)))
+      return false unless suspicion
+
+      event = decisive_event(issue_iid, suspicion)
+      !event.nil? && applied_after?(event, threshold) && by_someone_else?(event)
     end
 
     # Did somebody ask again *after* we stopped? Autodev #52 makes a stop
@@ -170,11 +192,19 @@ module Autodev
 
     # Stage 2 — one API call, spent only on a candidate, for a row that is about
     # to be closed. Not a recurring cost.
-    def by_someone_else?(issue_iid, suspicion)
+    #
+    # The edit that produced the state we read, or nil when the events disagree
+    # with it: an event carrying the other action means the labels are stale, not
+    # that a human acted.
+    def decisive_event(issue_iid, suspicion)
       event = last_event_for(issue_iid, suspicion.label)
-      return false unless event
-      return false unless ::GitlabHelpers.field(event, :action).to_s == EXPECTED_ACTION.fetch(suspicion.reason)
+      return unless event
+      return unless ::GitlabHelpers.field(event, :action).to_s == EXPECTED_ACTION.fetch(suspicion.reason)
 
+      event
+    end
+
+    def by_someone_else?(event)
       actor = ::GitlabHelpers.field(::GitlabHelpers.field(event, :user), :id)
       !actor.nil? && actor != ::GitlabHelpers.current_user_id(@client)
     end
