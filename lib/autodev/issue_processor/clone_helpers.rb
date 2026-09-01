@@ -14,7 +14,11 @@ class IssueProcessor
     def build_clone_cmd(clone_url, work_dir)
       depth = @project_config['clone_depth'] || 1
       sparse = @project_config['sparse_checkout']
-      target = @project_config['target_branch']
+      # Un-resolved on purpose: no `--branch` at all lets `git clone` take the
+      # remote's own HEAD, which is the same fallback `TargetBranch` names and one
+      # fewer round-trip than resolving it ourselves. There is no merge request to
+      # ask here in any case — the clone precedes everything (Autodev #91).
+      target = TargetBranch.declared(@project_config)
 
       cmd = %w[git clone]
       cmd += ['--depth', depth.to_s] if depth.positive?

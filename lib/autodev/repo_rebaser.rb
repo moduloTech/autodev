@@ -7,24 +7,54 @@
 # eventual MR merge and to MrFixer / PipelineFixer wrestling with thread positions
 # or test failures that wouldn't exist on a rebased branch.
 #
-# Mixin: expects @logger, @project_config, plus ShellHelpers (run_cmd_status),
-# RepoOperations (default_branch, push_with_lease_fallback), and DangerClaudeRunner
+# Mixin: expects @logger, plus ShellHelpers (run_cmd_status), RepoOperations
+# (push_with_lease_fallback), TargetBranch::Resolver (target_branch_for, which is
+# what the callers below hand in as `base:`), and DangerClaudeRunner
 # (danger_claude_prompt, log, log_error) to be available on the including class.
 module RepoRebaser
   private
 
+  # `base` is asked for rather than worked out here (Autodev #91): this module
+  # used to answer "which branch" itself, with
+  # `@project_config['target_branch'] || default_branch(work_dir)`, which is the
+  # right answer only while no merge request carries the branch. The one
+  # definition is `TargetBranch`, reached through `target_branch_for`, and it is a
+  # required keyword so that a new caller has to have asked.
+  #
   # Outcome symbols: :no_op (already up to date), :rebased (rebase applied and
   # pushed), :failed (clean rebase impossible, branch left untouched).
-  def rebase_branch_on_target(work_dir, branch)
-    target = @project_config['target_branch'] || default_branch(work_dir)
-    fetch_target_with_history(work_dir, target)
-    return :no_op unless target_has_new_commits?(work_dir, target)
+  def rebase_branch_on_target(work_dir, branch, base:)
+    fetch_target_with_history(work_dir, base)
+    ensure_base_available!(work_dir, base)
+    return :no_op unless target_has_new_commits?(work_dir, base)
 
-    log "Rebasing #{branch} on origin/#{target}..."
-    _, _, ok = run_cmd_status(['git', 'rebase', "origin/#{target}"], chdir: work_dir)
+    log "Rebasing #{branch} on origin/#{base}..."
+    _, _, ok = run_cmd_status(['git', 'rebase', "origin/#{base}"], chdir: work_dir)
     return finalize_rebase(work_dir, branch) if ok
 
-    resolve_conflicts_then_continue(work_dir, branch, target)
+    resolve_conflicts_then_continue(work_dir, branch, base)
+  end
+
+  # There is no such thing as rebasing onto a base that is not there (Autodev
+  # #91). Every git question below — `git log HEAD..origin/<base>`, `git rebase`,
+  # and the hunk `DiscussionFormatter` quotes — answers *nothing found* when the
+  # ref is missing, which is byte-for-byte what "already up to date" looks like:
+  # before this check a merge request whose target branch had been deleted was
+  # silently not rebased, and the fix ran on a tree measured against nothing.
+  #
+  # Checked here rather than by asking GitLab whether the branch exists, for two
+  # reasons. It covers every way the base can fail to arrive — deleted upstream,
+  # a fetch that did not complete, a configured branch that never existed — and it
+  # keeps `Gitlab::Error::NotFound` unambiguous: the only GitLab read on this path
+  # is the merge request's own, so a `NotFound` there means the merge request is
+  # gone and cannot be mistaken for a missing branch (the trap Autodev #89
+  # documented between `404 Commit Not Found` and `404 File Not Found`).
+  def ensure_base_available!(work_dir, base)
+    out, _err, ok = run_cmd_status(['git', 'rev-parse', '--verify', '--quiet',
+                                    "refs/remotes/origin/#{base}"], chdir: work_dir)
+    return if ok && !out.strip.empty?
+
+    raise MissingTargetBranchError.new(base, 'not on the remote after an explicit fetch')
   end
 
   # `--deepen` only works on shallow repos. Probe first; on a full clone, do a

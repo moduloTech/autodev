@@ -11,7 +11,12 @@ class IssueProcessor
       existing = find_existing_mr(branch_name)
       return existing if existing
 
-      target = @project_config['target_branch'] || default_branch(work_dir)
+      # `nil` because there is no merge request: `find_existing_mr` returned none
+      # one line above, so this is question 1 by construction — where do this
+      # project's *new* merge requests go — and the configuration is the right
+      # answer (Autodev #91). The value written here is what every later reader of
+      # this MR's target will get back from GitLab.
+      target = target_branch_for(work_dir, nil)
       mr_title = run_cmd(['git', 'log', '-1', '--format=%s'], chdir: work_dir)
       mr_body = "#{run_cmd(['git', 'log', '-1', '--format=%B'], chdir: work_dir)}\n\nFixes ##{iid}"
 

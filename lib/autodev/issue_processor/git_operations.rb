@@ -44,9 +44,22 @@ class IssueProcessor
       push_with_lease_fallback(work_dir, branch_name, upstream: true)
     end
 
-    def verify_changes(work_dir, branch_name)
-      target = @project_config['target_branch'] || default_branch(work_dir)
-      out, _err, ok = run_cmd_status(['git', 'log', "#{target}..#{branch_name}", '--oneline'], chdir: work_dir)
+    # "Did the implementation produce anything?" is the same question as the
+    # rebase's — commits on this branch that its base does not have — so it asks
+    # the one definition too (Autodev #91). `mr_iid` is nil on a first
+    # implementation and set on a re-implementation, where the branch's base is
+    # the target its merge request carries.
+    #
+    # Against `origin/<base>` rather than a bare `<base>`: the local branch of the
+    # base exists only when the clone happened to check it out, which is no longer
+    # true once the base is the merge request's rather than the configuration's.
+    # The remote-tracking ref always exists — from the clone on a first
+    # implementation, and from `fetch_target_with_history` on a re-implementation,
+    # which ran just before this in `resolve_branch`.
+    def verify_changes(work_dir, branch_name, mr_iid)
+      base = target_branch_for(work_dir, mr_iid)
+      out, _err, ok = run_cmd_status(['git', 'log', "origin/#{base}..#{branch_name}", '--oneline'],
+                                     chdir: work_dir)
       raise ImplementationError, 'No changes produced by implementation' unless ok && !out.strip.empty?
     end
 
@@ -87,11 +100,18 @@ class IssueProcessor
       branch
     end
 
+    # The one caller of the rebaser that can be in either case (Autodev #91): the
+    # branch is being reused, so a merge request may already carry it — a
+    # re-implementation of a delivered ticket — or may not, when the previous run
+    # stopped before `create_merge_request`. `issue.mr_iid` is the discriminator,
+    # and it is the same one `verify_changes` reads a few steps later, so the two
+    # cannot measure against different bases.
     def resolve_branch(work_dir, iid, issue, previous_branch, reuse)
       if reuse
         log "Reusing existing branch: #{previous_branch}"
         fetch_and_checkout(work_dir, previous_branch)
-        rebase_branch_on_target(work_dir, previous_branch)
+        rebase_branch_on_target(work_dir, previous_branch,
+                                base: target_branch_for(work_dir, issue.mr_iid))
         previous_branch
       else
         create_branch(work_dir, iid, issue.issue_title)
