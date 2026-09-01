@@ -733,6 +733,32 @@ ALLOWED_SWALLOWS = {
     # invents nothing.
     'restore_assignees' => 'write, not a read: the failure is reported verbatim in the line'
   },
+  'lib/autodev/review_publisher.rb' => {
+    # Autodev #95, and the one entry in this list whose substitute is a *better*
+    # answer than the exception it replaces rather than a lesser one.
+    #
+    # There are two ways GitLab declines a position on a merge request whose diff
+    # has no resolvable line codes — a conflicted one. It either accepts the
+    # discussion and hands back a note with a null `position`, which
+    # `post_inline` has always demoted into the summary comment, or it answers
+    # `400 Bad request - Note {:line_code=>[…]}`. Same fact; the clause makes the
+    # second read like the first, and the finding is published in the summary
+    # comment instead of being lost.
+    #
+    # The clause names `InvalidRequestError` and nothing else, and that class is
+    # only ever built by `GitlabHelpers.answer` for the statuses
+    # `INVALID_REQUEST_STATUSES` lists (400, 422). A 500, a timeout, a reset
+    # connection, a 401 and a 404 all leave as `ApiUnavailableError` and abort the
+    # publication exactly as before, so no failed *read* is swallowed here: this
+    # is a write whose refusal GitLab spelled out.
+    #
+    # Audited, not assumed. The rest of the GitLab traffic under `publish` is
+    # `already_published?` (`merge_request_notes`), `diff_refs`
+    # (`merge_request`) and `post_summary` (`create_merge_request_note`), all
+    # three wrapped in `answer` with no rescue of their own.
+    'post_finding' => 'a 400/422 on one position is GitLab declining to anchor it; ' \
+                      'the finding is demoted to the summary comment and every other failure raises'
+  },
   'lib/autodev/pipeline_monitor/skill_reviewer.rb' => {
     # This used to be one `clone_and_inject`, declared here as "no GitLab read
     # sits under this method at all". Autodev #89 made that sentence false — the
@@ -775,7 +801,13 @@ class SwallowScanner
   # `rescue => e` are StandardError spelled shorter. Clauses that name an
   # unrelated class (`RateLimitError`, `JSON::ParserError`) cannot catch a
   # failed read and are ignored.
-  NAMED = /^\s*rescue\s+.*(Gitlab::Error|ApiUnavailableError|AutodevError|StandardError)/
+  # `InvalidRequestError` and `MissingTargetBranchError` are named alongside their
+  # parent because a clause may catch either without the word `ApiUnavailableError`
+  # appearing on the line, and both *are* failed calls (Autodev #91, #95). Left out,
+  # the one derogation this rule exists to make visible — `ReviewPublisher#post_finding`
+  # — would have been invisible to the scanner that is supposed to demand it.
+  NAMED = /^\s*rescue\s+.*(Gitlab::Error|ApiUnavailableError|InvalidRequestError|
+                          MissingTargetBranchError|AutodevError|StandardError)/x
   CATCH_ALL = /^\s*rescue\s*(=>|$|#|\z)/
   # `expr rescue fallback` — the modifier form, and the second blind spot
   # Autodev #67 closed. It is `rescue StandardError` spelled with no `rescue`
@@ -938,16 +970,46 @@ class DegradedApiValueShapeTest < Minitest::Test
   #   * `lib/autodev/target_branch.rb` — the one read that decides the base of
   #     every rebase and every force-push;
   #   * `lib/autodev/missing_base_bound.rb` — a new boundary, and the decision that
-  #     ends a request on a base that is not there. It holds no swallow of a read
-  #     today (its only rescue is a local `JSON::ParserError`, which `NAMED` does
-  #     not match) and is scanned so the next one is not free;
+  #     ends a request on a base that is not there. It holds no swallow of any kind
+  #     today (since Autodev #95 its counting lives in `ConsecutiveOccurrences`,
+  #     which is now scanned in its own right, below) and is scanned so the next
+  #     one is not free;
   #   * `app/services/autodev/review_arrears_sweep.rb` — the #88 arrears pass:
   #     reads *and* writes on rows it re-arms, with two tallies that mean different
   #     things.
+  #
+  # **Two more by Autodev #95**, and the instruction above is what added them:
+  #
+  #   * `lib/autodev/review_publisher.rb` — four GitLab calls on the review path,
+  #     and now the one declared derogation of this ticket. The file had never
+  #     been in the perimeter, so the rescue that demotes a refused position would
+  #     have landed with nothing asking for a sentence;
+  #   * `lib/autodev/invalid_request_bound.rb` — the second decision that ends a
+  #     request, `missing_base_bound.rb`'s pendant, scanned for the same reason.
+  #
+  # **And two more by that ticket's neutral review, which is the third time in a
+  # week the perimeter did not follow the new code.** Autodev #95 applied the
+  # paragraph above to its two boundary files and not to the two files it added
+  # *underneath* `GitlabHelpers.answer` itself. Demonstrated rather than supposed,
+  # the way the alpha-50 four were: a `rescue StandardError` injected into
+  # `GitlabFailure.refusal_status` and into `ConsecutiveOccurrences.bump` left this
+  # file green — 17 runs, 0 failures — while the first turns every refusal back
+  # into an outage (unbounded retries, the whole ticket undone) and the second
+  # pins every bound's count at 1 (no give-up ever fires again).
+  #
+  #   * `lib/autodev/gitlab_failure.rb` — the classification point of the entire
+  #     family, and the one place an outage is told from a refusal;
+  #   * `lib/autodev/consecutive_occurrences.rb` — the counter behind both bounds.
+  #     Its one `rescue JSON::ParserError` is outside `NAMED`'s alternation by
+  #     construction, so it needs no declaration and gets none (a dead entry is
+  #     what `test_no_declared_swallow_is_dead` refuses); what the file buys is
+  #     that the next clause here is not free.
   SCANNED = %w[
     lib/autodev/pipeline_monitor.rb lib/autodev/mr_fixer.rb lib/autodev/mr_discussions.rb
     lib/autodev/poll_router.rb lib/autodev/review_skill_source.rb lib/autodev/target_branch.rb
-    lib/autodev/missing_base_bound.rb app/services/autodev/review_arrears_sweep.rb
+    lib/autodev/missing_base_bound.rb lib/autodev/invalid_request_bound.rb
+    lib/autodev/review_publisher.rb app/services/autodev/review_arrears_sweep.rb
+    lib/autodev/gitlab_failure.rb lib/autodev/consecutive_occurrences.rb
   ].freeze
 
   SCANNED_DIRS = %w[lib/autodev/pipeline_monitor lib/autodev/mr_fixer lib/autodev/poll_router].freeze

@@ -43,6 +43,11 @@ module Autodev
     # The only two answers that are a verdict on the credential itself. 401 is the
     # revoked/expired token; 403 is a token GitLab knows and refuses (scope
     # removed, user blocked). Everything else is the API's own weather.
+    #
+    # These are also the two Autodev #95 deliberately left out of
+    # `GitlabFailure::INVALID_REQUEST_STATUSES`: they are not a property of the
+    # request, they are a property of the credential, and this probe is the
+    # place that says so.
     REVOKED_STATUSES = [401, 403].freeze
 
     # `mr-review`'s own configuration file, consulted only when autodev's
@@ -133,17 +138,11 @@ module Autodev
         client.user
         { status: ALIVE, source: source, reason: nil }
       rescue ::Gitlab::Error::ResponseError => e
-        http = response_status(e)
+        http = ::GitlabFailure.response_status(e)
         { status: REVOKED_STATUSES.include?(http) ? REVOKED : UNKNOWN, source: source,
           reason: http ? "http_#{http}" : e.class.name }
       rescue StandardError => e
         { status: UNKNOWN, source: source, reason: e.class.name }
-      end
-
-      def response_status(error)
-        Integer(error.response_status)
-      rescue StandardError
-        nil
       end
 
       # Autodev's configuration first, in the order `Reviewer#mr_review_env`

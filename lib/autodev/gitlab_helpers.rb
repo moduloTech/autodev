@@ -72,10 +72,16 @@ module GitlabHelpers
   # are *not* HTTP into the same family as the ones that are: see
   # `TRANSPORT_ERRORS` for why a bare `Errno::ECONNRESET` was the more dangerous
   # half, and for what stays outside on purpose.
+  #
+  # *Which* failure it was is `GitlabFailure`'s question, not this one's (Autodev
+  # #95). This owns the rule — a failed call has no representation as data — and
+  # that owns the reading: an outage, or GitLab answering that the request cannot
+  # succeed as formed. The second is bounded rather than waited on, because
+  # re-sending it produces the same answer for ever.
   def answer(what)
     yield
   rescue *TRANSPORT_ERRORS => e
-    raise ApiUnavailableError.new(what, e)
+    raise GitlabFailure.classify(what, e)
   end
 
   def build_gitlab_client(gitlab_url, token)

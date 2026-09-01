@@ -35,6 +35,12 @@ class PipelineMonitor
     # anything must not re-arm the row, and — like `check_stagnation_and_fix` —
     # must not spend one of the bounded attempts either, or an outage burns the
     # whole budget without ever having looked at a pipeline.
+    #
+    # A 400 arrives here as an `InvalidRequestError`, i.e. deferred like an outage
+    # and re-asked every cycle. Left alone deliberately (neutral review of Autodev
+    # #95): the pass is one `merge_request` read, it is already capped at
+    # `infra_recheck_max` attempts on the paths that spend one, and no cause of a
+    # persistent 400 on that endpoint is known.
     rescue Gitlab::Error::ResponseError, ApiUnavailableError => e
       log_error "Failed to recheck infra recovery for MR !#{issue.mr_iid}: #{e.message}"
       false

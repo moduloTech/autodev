@@ -55,6 +55,8 @@ en:
   activity_mr_closed_unmerged: ":stop_sign: MR closed without being merged, nothing was delivered → done, needs attention"
   activity_review_skill_missing: ":wrench: Review skill `%{skill}` declared but `%{path}` is missing from target branch `%{ref}` → done, needs attention"
   activity_target_branch_missing: ":wrench: Target branch `%{branch}` is missing from the repository after %{count} attempts → done, needs attention"
+  activity_review_findings_unanchored: ":wrench: Review requested changes and no finding could be anchored on the merge request → done, needs attention"
+  activity_gitlab_refused_request: ":wrench: GitLab refused the `%{what}` call (HTTP %{status}) %{count} times with the same answer → done, needs attention"
   activity_unassigned_stop: ":stop_sign: Unassigned, stopping work in progress"
   activity_closed_externally: ":lock: Ticket closed on GitLab, stopping work in progress"
   activity_handover_doing_removed: ":stop_sign: _%{label}_ label removed by someone else, stopping work in progress"

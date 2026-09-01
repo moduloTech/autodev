@@ -90,14 +90,22 @@ class PipelineMonitor
       log_activity(issue, :reviewing)
     end
 
-    # Three outcomes, not two. `:inconclusive` means GitLab had not computed the
-    # MR's diff_refs yet, so nothing could be published: hand the row back to
-    # `checking_pipeline` WITHOUT touching either counter, and the next cycle runs
-    # the whole review again (review_count is still 0). Counting it as a success
-    # would deliver the MR unreviewed; counting it as a failure would spend a
-    # budget on a cycle that could not act (Autodev #71).
+    # Four outcomes, not two, and the two that are neither `true` nor `false` are
+    # both cases where the review ran and the *publication* is what did not end as
+    # it should.
+    #
+    # `:inconclusive` means GitLab had not computed the MR's diff_refs yet, so
+    # nothing could be published: hand the row back to `checking_pipeline` WITHOUT
+    # touching either counter, and the next cycle runs the whole review again
+    # (review_count is still 0). Counting it as a success would deliver the MR
+    # unreviewed; counting it as a failure would spend a budget on a cycle that
+    # could not act (Autodev #71).
+    #
+    # `:unanchored` means the opposite: the review was published in full, and what
+    # it published holds nothing back. See `give_up_on_unanchored_review`.
     def dispatch_review_outcome(issue, outcome)
       return finalize_review_success(issue) if outcome == true
+      return give_up_on_unanchored_review(issue) if outcome == :unanchored
       return finalize_review_failure(issue) unless outcome == :inconclusive
 
       log "MR !#{issue.mr_iid}: review not published this cycle, retrying next poll"
@@ -199,6 +207,39 @@ class PipelineMonitor
     def give_up_on_missing_review_skill(issue, error)
       log_error "Issue ##{issue.issue_iid}: #{error.message}"
       abandon_issue(issue, :review_skill_missing, skill: error.skill, path: error.relative_path, ref: error.ref)
+    end
+
+    # The give-up the neutral review of Autodev #95 required: a review whose
+    # verdict is `changes_requested` and whose findings all ended up in the
+    # summary comment.
+    #
+    # Nothing on the merge request holds that verdict. `green_post_review` decides
+    # the delivery on the unresolved discussion threads and on nothing else — a
+    # summary comment is a note, not a resolvable thread — so the next poll read
+    # the merge request as clean and reviewed and ended the request `done`,
+    # unflagged, under `label_done`, which on the project this was measured on is
+    # `Development::Awaiting Feature Review`. Findings of severity `error` and a
+    # `changes_requested` verdict, announced as ready for feature review, on a
+    # merge request that cannot even be merged. That is the shape Autodev #63
+    # undid during the 11/08/2026 incident and Autodev #85 undid again on the
+    # re-entry path, and the fix is theirs: the line stops, under a reason that
+    # names what happened.
+    #
+    # Not `review_failures_exhausted`, and not any other reason that blames the
+    # review: it ran, it judged, and its findings are on the merge request. What
+    # failed is that they could not be anchored. The case this was measured on is a
+    # merge request in conflict, whose diff has no resolvable line codes and which
+    # therefore refuses every position it is handed; the ticket goes back to its
+    # author because resolving that is the author's to do, and no cause is named
+    # to the operator that autodev has not established (see `InvalidRequestBound`
+    # for the same rule applied to the refusal itself).
+    #
+    # `MrFixer` is deliberately not asked to take it either: it works from the
+    # unresolved threads, and there are none.
+    def give_up_on_unanchored_review(issue)
+      log "Issue ##{issue.issue_iid}: the review requested changes but anchored no finding " \
+          'on the merge request → done'
+      abandon_issue(issue, :review_findings_unanchored)
     end
 
     def reset_review_failure_count(issue)

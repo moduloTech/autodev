@@ -12,7 +12,12 @@ require 'json'
 class ReviewContract
   class InvalidError < AutodevError; end
 
-  VERDICTS = %w[approve changes_requested].freeze
+  # The verdict that asks a human (or `MrFixer`) to act, and therefore the one
+  # `SkillReviewer#unanchored_verdict?` weighs the publication against. Named
+  # because it is now read outside this class, and a string literal in two files
+  # is how the two drift.
+  CHANGES_REQUESTED = 'changes_requested'
+  VERDICTS = ['approve', CHANGES_REQUESTED].freeze
   SEVERITIES = %w[error warning info nitpick].freeze
   # What both project skills call blocking-class.
   BLOCKING = %w[error warning].freeze

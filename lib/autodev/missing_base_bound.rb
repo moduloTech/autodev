@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-require 'digest'
-require 'json'
+require_relative 'consecutive_occurrences'
 
 # What a boundary does with a `MissingTargetBranchError` (Autodev #91, review
 # round, constat 3).
@@ -51,9 +50,12 @@ require 'json'
 # The bound is `stagnation_threshold` occurrences of the **same** branch, the
 # setting this repository already uses for "the same thing keeps happening and
 # nothing is moving". A different branch is a different fact and restarts the
-# count, exactly like a pipeline whose failing job set changes.
+# count, exactly like a pipeline whose failing job set changes; a cycle in which
+# the branch was found is not an occurrence at all, so it neither counts nor
+# clears (see `ConsecutiveOccurrences`, and the sinks below, which no longer say
+# "in a row").
 #
-# ## Why the counter is here rather than borrowed
+# ## Why the counter is not either stagnation module's
 #
 # `issues.stagnation_signatures` is a JSON map of `key → { signature, count }` and
 # two modules already bump entries in it — `StagnationDetector` for the pipeline,
@@ -62,8 +64,12 @@ require 'json'
 # `rescue` modifier declared by name in `test/api_failure_is_not_a_verdict_test.rb`
 # with a sentence about what it swallows. Borrowing either would mean either
 # including a module for one method or moving a declared derogation, so this keeps
-# its own entry under its own key: one bump, one read, and the one decision below
-# stays in one place for both callers, which is the property that matters.
+# its own entry under its own key: the decision below stays in one place for both
+# callers, which is the property that matters.
+#
+# The *counting* is `ConsecutiveOccurrences`, shared since Autodev #95 gave the
+# same shape a second bound (`InvalidRequestBound`): what those two agree on is
+# what "in a row" means, and nothing else. It used to be written out here.
 #
 # Expects `stagnation_threshold`, `abandon_issue`, `log`, `log_error`.
 module MissingBaseBound
@@ -80,31 +86,15 @@ module MissingBaseBound
     count = missing_base_occurrences(issue, error.branch)
     return log_missing_base_countdown(issue, error, count) if count < stagnation_threshold
 
-    log "Issue ##{issue.issue_iid}: base `#{error.branch}` missing on #{count} consecutive attempts → done"
+    log "Issue ##{issue.issue_iid}: base `#{error.branch}` found missing #{count} times → done"
     abandon_issue(issue, :target_branch_missing, branch: error.branch, count: count)
   end
 
-  # How many attempts in a row have now found *this* branch missing. The signature
-  # is the branch name, so a base that changes has not recurred and the count
-  # restarts — exactly like a pipeline whose failing job set changes.
+  # How many occurrences in a row have now found *this* branch missing. The
+  # signature is the branch name, so a base that changes has not recurred and the
+  # count restarts — exactly like a pipeline whose failing job set changes.
   def missing_base_occurrences(issue, branch)
-    data = missing_base_data(issue)
-    entry = bumped(data[MISSING_BASE_KEY] || {}, Digest::SHA256.hexdigest(branch.to_s))
-    data[MISSING_BASE_KEY] = entry
-    issue.update(stagnation_signatures: JSON.generate(data))
-    entry['count']
-  end
-
-  def bumped(entry, signature)
-    return { 'signature' => signature, 'count' => 1 } unless entry['signature'] == signature
-
-    entry.merge('count' => (entry['count'] || 0) + 1)
-  end
-
-  def missing_base_data(issue)
-    JSON.parse(issue.stagnation_signatures || '{}')
-  rescue JSON::ParserError
-    {}
+    ConsecutiveOccurrences.bump(issue, MISSING_BASE_KEY, branch)
   end
 
   def log_unestablished_base(issue, error)
@@ -114,6 +104,6 @@ module MissingBaseBound
 
   def log_missing_base_countdown(issue, error, count)
     log "Issue ##{issue.issue_iid}: base `#{error.branch}` is not on the remote " \
-        "(#{count}/#{stagnation_threshold} consecutive)"
+        "(#{count}/#{stagnation_threshold} occurrences for this branch)"
   end
 end
