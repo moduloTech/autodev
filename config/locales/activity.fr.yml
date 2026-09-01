@@ -46,6 +46,7 @@ fr:
   activity_retry: ":arrows_counterclockwise: Nouvelle tentative (%{attempt}/%{max})"
   activity_reenter: ":arrows_counterclockwise: Reentree (label todo detecte)"
   activity_reenter_to_fix: ":arrows_counterclockwise: Reentree (MR ouverte) → verification des discussions a corriger"
+  activity_reenter_to_review: ":arrows_counterclockwise: Reentree (MR ouverte) → revue de la MR (aucune n'a encore eu lieu)"
   activity_reenter_skipped_merged: ":checkered_flag: Reentree ignoree : MR deja mergee"
   activity_review_limit_reached: ":warning: Limite de review atteinte (3 tours) → termine"
   activity_stagnation_pipeline: ":warning: Stagnation pipeline detectee : %{detail} → termine"
