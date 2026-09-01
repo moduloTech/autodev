@@ -91,6 +91,24 @@ module TargetBranch
     declared(project_config) || repository_default
   end
 
+  # The repository's own default branch, read through the API rather than from a
+  # clone — the same answer as `Resolver#default_branch`, for the callers that
+  # have no work directory to read it in. One question, two mechanisms, and they
+  # live together on purpose: split apart, they are free to disagree about what an
+  # undeclared `target_branch` means.
+  def repository_default(client, project_path)
+    GitlabHelpers.answer(:project) { client.project(project_path).default_branch }
+  end
+
+  # Question 1 again, for a fleet scan: a pass that sweeps every project without
+  # holding a clone or a merge request — `ReviewSkillSource`'s probe. No merge
+  # request is in hand, so the configuration *is* the right answer, and the
+  # repository is only asked when the project declares nothing (one request per
+  # cycle saved on every project that does).
+  def for_fleet_scan(client, project_config, project_path)
+    declared(project_config) || repository_default(client, project_path)
+  end
+
   # Question 2 — a merge request that exists. GitLab holds the answer; nothing
   # local may stand in for it.
   def of_merge_request(client, project_path, mr_iid)

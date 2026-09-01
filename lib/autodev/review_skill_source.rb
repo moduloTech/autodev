@@ -93,10 +93,12 @@ module ReviewSkillSource
   # a failing review — today's defect exactly inverted.
   def self_injected?(skill) = ::SkillsInjector::SKILL_NAMES.include?(skill.to_s)
 
-  def configured_ref(project_config) = project_config['target_branch'].to_s.strip.presence
-
+  # The branch that decides. Asked of `TargetBranch`, never restated here
+  # (Autodev #91): a fleet scan holds no merge request, so it is that module's
+  # question 1 — but a hand-written copy of the answer could not say so, and this
+  # file used to carry one.
   def ref_for(client, project_config)
-    configured_ref(project_config) || default_branch(client, project_config['path'])
+    ::TargetBranch.for_fleet_scan(client, project_config, project_config['path'])
   end
 
   # `{ status:, ref:, layout: }`. `layout` is the repository path the skill was
@@ -123,7 +125,7 @@ module ReviewSkillSource
   def verdict(client, project_config, skill)
     locate(client, project_config, skill)
   rescue StandardError
-    { status: UNKNOWN, ref: configured_ref(project_config), layout: nil }
+    { status: UNKNOWN, ref: ::TargetBranch.declared(project_config), layout: nil }
   end
 
   # Canonical first, stopping on the first hit, so a fleet on the current layout
@@ -170,10 +172,6 @@ module ReviewSkillSource
   end
 
   # -- the reads ---------------------------------------------------------------
-
-  def default_branch(client, project_path)
-    ::GitlabHelpers.answer(:project) { client.project(project_path).default_branch }
-  end
 
   def file_on_ref?(client, project_path, file_path, ref)
     ::GitlabHelpers.answer(:review_skill_file) do
