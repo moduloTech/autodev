@@ -283,6 +283,21 @@ class PipelineMonitor
     # would be worse than exporting nothing: mr-review's own resolution puts the
     # environment *above* its configuration file, so a blank would override a
     # credential that works.
+    #
+    # What this exposes, decided rather than discovered (neutral review, 01/09/2026).
+    # mr-review launches `claude` through `Bundler.with_unbundled_env`, which
+    # restores an environment captured *after* this spawn set the variable, so the
+    # review's Claude session and its Bash tool can read this credential. Nothing
+    # exported it before this ticket, so the exposure is new — and what changed is
+    # not that a secret sits on the machine (mr-review already kept one in a
+    # world-readable file of its own) but *which* one: with the credentials shared,
+    # that session receives a token able to write wherever autodev writes, where a
+    # dedicated one could be narrowed to reading the repository and posting notes.
+    # Kept deliberately: same machine, same user, same trust boundary, and sharing
+    # is what puts the review credential under the surveillance autodev's own token
+    # already gets from being validated at boot and used every cycle. `mr_review_token`
+    # exists for whoever wants to narrow it back down, and the probe watches
+    # whichever one is actually handed over.
     def mr_review_env
       token = ::Config.mr_review_token(@config)
       token ? { 'GITLAB_API_TOKEN' => token } : {}
