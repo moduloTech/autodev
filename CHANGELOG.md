@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.51] - 2026-09-01
+
 ### Fixed
 
 - **A request GitLab refuses is not a request GitLab could not answer (Autodev #95 / #62).** `GitlabHelpers.answer` converted **every** `Gitlab::Error::ResponseError` into `ApiUnavailableError`. That is the right reading of a 500 or a timeout — nothing was read, come back next cycle — and the wrong reading of a 400: GitLab answered, promptly and precisely, that the request cannot succeed as it is formed, and re-sending it produces the same answer for ever. Production, 01/09/2026, request powerpanne 15205, five polls in eighty-seven minutes (18h15, 18h35, 18h49, 19h10, 19h42), the same line each time: `Pipeline check for MR !11258 could not conclude: GitLab did not answer the mr_discussion read: Server responded with code 400, message: 400 Bad request - Note {:line_code=>["can't be blank", "must be a valid line code"]}`. The chain: the merge request is **in conflict**, so its diff carries no resolvable line codes; the skill review runs correctly for eighteen minutes and produces its findings; `ReviewPublisher` posts them as **inline** discussions, each with a position; GitLab refuses every position; `answer` calls it an outage; `launch_review` returns the row to `checking_pipeline` with neither counter spent — correctly, for an outage — and re-raises, so the poll aborts at `PipelineMonitor#check` *before* `abandon_expired_watch`. The next cycle pays for the whole review again. Measured cost: close to 90% of a worker thread, continuously, with no bound reachable at all; the line had to be cut by hand to stop the quota being spent. Twelve of the twenty-three requests of the Autodev #88 arrears are in conflict, so this was the precondition for resuming that sweep.
