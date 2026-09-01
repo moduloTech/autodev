@@ -8,6 +8,13 @@ class PollRouter
   include LabelManager
   include ResumeHandler
 
+  # Who fired `reenter_to_check_pipeline`, written on the `transition` row by
+  # `Issue#emit_activity_event!`. It lives here rather than on the sweep because
+  # this class is what performs the write, and both sides have to read one name:
+  # `Autodev::ReviewArrearsSweep#swept_before?` asks the activity trail whether
+  # THIS value is already on the row before re-arming it a second time.
+  REVIEW_ARREARS_ORIGIN = 'review_arrears_sweep'
+
   def initialize(config:, project_config:, logger:, token:, pool:)
     @config         = config
     @project_config = project_config
@@ -69,14 +76,32 @@ class PollRouter
   # ticket. The infra pass gets the first from its own dispatch query and does not
   # need the second; the sweep needs both and has different answers.
   def resume_never_reviewed(issue, client)
-    resume_via_pipeline_check(issue, client)
+    resume_via_pipeline_check(issue, client, origin: REVIEW_ARREARS_ORIGIN)
+  end
+
+  # Also the sweep's (Autodev #88 review round), and it is the *first* write of a
+  # re-arm rather than a step of the transition above.
+  #
+  # `reenter_via_pipeline_check` applies `label_doing` too, but after the AASM
+  # event has already been persisted, and `LabelManager#manage_labels` answers a
+  # GitLab error with a log line and `[]` — so a transient 500 on `edit_issue`
+  # left the row `checking_pipeline` in the database with its end label
+  # (`Awaiting Feature Review`, `StandBy`, `Awaiting CR`) untouched on GitLab, and
+  # `dispatch_unassignment` — which runs before `dispatch_pipelines` — read that
+  # as a `workflow_moved` handover, closed the row and posted a comment blaming a
+  # human for a move nobody made. The sweep therefore poses the label first and
+  # reads the ticket back before transitioning anything; the `apply_label_doing`
+  # inside the reentry then finds nothing to change and writes nothing.
+  def repose_working_label(issue, client)
+    @client = @route_client = client
+    apply_label_doing(issue.issue_iid)
   end
 
   private
 
-  def resume_via_pipeline_check(issue, client)
+  def resume_via_pipeline_check(issue, client, origin: nil)
     @client = @route_client = client
-    reenter_via_pipeline_check(issue)
+    reenter_via_pipeline_check(issue, origin: origin)
   end
 
   def init_project_settings(project_config)

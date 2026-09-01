@@ -273,7 +273,7 @@ Des rattrapages, pas des passes : rien ici n'est planifié, chacune se lance à 
 | `bin/rails autodev:backfill_issue_author_names` | Renseigne `issue_author_name` sur les demandes antérieures à la colonne (un appel GitLab par demande). |
 | `bin/rails autodev:compact_activity_events` | Supprime les occurrences superseded des entrées d'activité collapsibles (`VACUUM=1` pour récupérer le fichier). Arriéré d'Autodev #53. |
 | `bin/rails autodev:recheck_clarifications` | Redemande à GitLab si les demandes garées en `needs_clarification` ont reçu une réponse, et remet en file celles qui en ont une. Arriéré d'Autodev #75. |
-| `bin/rails autodev:recheck_review_arrears` | Renvoie vers la vérification de pipeline les demandes abandonnées sur un budget de review épuisé **sans avoir jamais été relues** (`review_count` à 0). `LIMIT=N` borne le lot par exécution (défaut 3 = `max_workers`), `INCLUDE_AUTHOR_HANDBACK=1` élargit le filtre de propriété aux tickets qu'autodev a lui-même rendus à leur auteur. Arriéré d'Autodev #88. |
+| `bin/rails autodev:recheck_review_arrears` | Renvoie vers la vérification de pipeline les demandes abandonnées sur un budget de review épuisé **sans avoir jamais été relues** (`review_count` à 0). `LIMIT=N` borne le lot par exécution (défaut 3 = `max_workers`, plafond 10 ; une valeur hors bornes ou non entière fait échouer la tâche avant tout examen), `INCLUDE_AUTHOR_HANDBACK=1` élargit le filtre de propriété aux tickets qu'autodev a lui-même rendus à leur auteur. Arriéré d'Autodev #88. |
 
 ## Variables d'environnement
 

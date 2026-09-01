@@ -116,8 +116,14 @@ class PollRouter
     # `review_failure_count: 0` beside it really is a reset, deliberately: a
     # request abandoned on `REVIEW_FAILURE_THRESHOLD` consecutive review failures
     # would otherwise re-enter at 5/5 and give itself up on the first stumble.
-    def reenter_via_pipeline_check(existing)
-      existing.reenter_to_check_pipeline!
+    #
+    # `origin` travels to `Issue#emit_activity_event!` and is written on the
+    # `transition` row. Three callers fire this event and the row is the only
+    # record of which one did: a human reposing the todo label (nil — nobody to
+    # attribute it to), `resume_recovered_infra`, and `ReviewArrearsSweep`, whose
+    # idempotence depends on recognising its own re-arms and nobody else's.
+    def reenter_via_pipeline_check(existing, origin: nil)
+      existing.reenter_to_check_pipeline!(origin)
       existing.update(review_count: reentry_review_count(existing), review_failure_count: 0,
                       stagnation_signatures: nil, fix_round: 0, pipeline_retrigger_count: 0,
                       error_message: nil, finished_at: nil, activity_note_id: nil,
