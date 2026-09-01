@@ -1,8 +1,21 @@
 # frozen_string_literal: true
 
+require_relative 'target_branch'
+
 # Clone-and-push helpers used by IssueProcessor, MrFixer, and PipelineMonitor.
-# Mixin: expects @gitlab_url, @token, @project_path, @project_config, plus `log` and `log_error` helpers.
+# Mixin: expects @client, @gitlab_url, @token, @project_path, @project_config,
+# plus `log` and `log_error` helpers.
+#
+# `default_branch` moved out to `TargetBranch::Resolver` (Autodev #91): it is not
+# clone-and-push plumbing, it is half of the answer to "which branch is this work
+# targeting", and keeping it next to the other half is what stops it being read as
+# an answer of its own. That module is included back in here, so the mixin surface
+# every host of `RepoOperations` already had is unchanged — the clone command, the
+# rebase and the change verification all name a branch, and they name it by
+# asking.
 module RepoOperations
+  include TargetBranch::Resolver
+
   # GitLab rejects a push whose received pack exceeds this (its `receive.maxInputSize`,
   # 50 MiB by default). We size the objects a push would send *before* sending them,
   # so an oversized commit fails fast with an actionable message naming the culprit
@@ -26,11 +39,6 @@ module RepoOperations
     cmd += [clone_url, work_dir]
 
     run_cmd(cmd)
-  end
-
-  def default_branch(work_dir)
-    out, _err, ok = run_cmd_status(%w[git symbolic-ref refs/remotes/origin/HEAD --short], chdir: work_dir)
-    ok && !out.strip.empty? ? out.strip.sub('origin/', '') : 'main'
   end
 
   def push_with_lease_fallback(work_dir, branch, upstream: false)

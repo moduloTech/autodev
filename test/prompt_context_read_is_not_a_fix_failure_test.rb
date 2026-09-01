@@ -31,7 +31,9 @@ require 'autodev/issue_processor'
 # representation and `error` + a retry is the re-arming mechanism.
 module PromptContextFixtures
   FakePipeline = Struct.new(:id, :status)
-  FakeMr = Struct.new(:state, :head_pipeline)
+  # `target_branch` since Autodev #91: `run_fix_cycle` asks GitLab which branch
+  # this merge request targets before it rebases anything.
+  FakeMr = Struct.new(:state, :head_pipeline, :target_branch)
   # `author` / `created_at` / `position` are what `DiscussionFormatter` reads
   # when the same thread list is re-rendered into the prompt context.
   FakeNote = Struct.new(:resolvable, :resolved, :body, :author, :created_at, :position)
@@ -209,6 +211,10 @@ class MrFixPromptContextTest < Minitest::Test
 
     def issue_notes(_path, _iid, **_opts) = PromptContextFixtures::FakePaginated.new([])
     def issue_links(_path, _iid) = []
+
+    # The target read of Autodev #91. It answers here: this file is about the
+    # *prompt-context* read failing, and the two must not be conflated.
+    def merge_request(_path, _iid) = PromptContextFixtures::FakeMr.new('opened', nil, 'main')
   end
 
   def setup

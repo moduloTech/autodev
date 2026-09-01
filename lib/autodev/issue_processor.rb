@@ -92,7 +92,7 @@ class IssueProcessor
     issue.impl_complete!
     danger_claude_commit(work_dir, resume: @impl_session_id)
     issue.commit_complete!
-    verify_changes(work_dir, @current_branch_name)
+    verify_changes(work_dir, @current_branch_name, issue.mr_iid)
     push(work_dir, @current_branch_name)
     issue.push_complete!
     log_activity(issue, :changes_pushed, branch: @current_branch_name)

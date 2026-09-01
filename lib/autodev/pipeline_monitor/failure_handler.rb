@@ -179,9 +179,18 @@ class PipelineMonitor
       end
     end
 
+    # The target read sits here, inside `attempt_fix`'s reach, on purpose (Autodev
+    # #91): it is a GitLab read, so a failure raises `ApiUnavailableError`, which
+    # `attempt_fix` re-raises to `check` — the row stays in `checking_pipeline`,
+    # nothing is rebased or force-pushed, and the stagnation signature (written
+    # after `clone_and_fix` returns, Autodev #71) is left untouched. `poll_open_mr`
+    # read this merge request one call earlier; the target is read again rather
+    # than threaded down through six frames, each of which would then carry a
+    # value only the last of them uses.
     def prepare_work_dir(work_dir, issue)
       clone_and_checkout(work_dir, issue.branch_name)
-      rebase_branch_on_target(work_dir, issue.branch_name)
+      rebase_branch_on_target(work_dir, issue.branch_name,
+                              base: target_branch_for(work_dir, issue.mr_iid))
       @all_skills = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)[:all_skills]
     end
 

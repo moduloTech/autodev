@@ -32,12 +32,19 @@ class MrFixer
       FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
     end
 
+    # The base is resolved once and handed to both users of it (Autodev #91): the
+    # rebase, and the hunk `DiscussionFormatter` quotes to danger-claude. They used
+    # to disagree — the rebase took the configuration, the hunk took
+    # `default_branch(work_dir)` — so the correction was made on a tree rebased on
+    # one branch while the finding was illustrated with a diff against another.
+    # Resolved once, after the clone and before the rebase, they cannot.
     def run_fix_cycle(issue, discussions, work_dir)
       @fix_issue = issue
       branch = issue.branch_name
       clone_and_checkout(work_dir, branch)
-      rebase_branch_on_target(work_dir, branch)
-      env = prepare_fix_environment(work_dir, issue.issue_iid, issue.mr_iid)
+      base = target_branch_for(work_dir, issue.mr_iid)
+      rebase_branch_on_target(work_dir, branch, base: base)
+      env = prepare_fix_environment(work_dir, issue.issue_iid, issue.mr_iid, base)
 
       resolved = Array(fix_each_discussion(discussions, work_dir, branch, issue.mr_iid, env))
 
@@ -50,19 +57,19 @@ class MrFixer
     # The GitLab read first, the local work after: the read is the only step here
     # that can abort the round (Autodev #67), so there is no point writing skills
     # into a clone we are about to delete.
-    def prepare_fix_environment(work_dir, iid, mr_iid)
+    def prepare_fix_environment(work_dir, iid, mr_iid, base)
       full_context = GitlabHelpers.fetch_full_context(
         @client, @project_path, iid,
         mr_iid: mr_iid, gitlab_url: @gitlab_url, token: @token, work_dir: work_dir
       )
       skills_result = SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
-      build_fix_env(skills_result, full_context, work_dir, iid)
+      build_fix_env(skills_result, full_context, work_dir, iid, base)
     end
 
-    def build_fix_env(skills_result, full_context, work_dir, iid)
+    def build_fix_env(skills_result, full_context, work_dir, iid, base)
       ss_dir = ScreenshotUploader.screenshot_dir(@project_path, iid)
       { skills_line: SkillsInjector.skills_instruction(skills_result[:all_skills]),
-        target_branch: default_branch(work_dir), full_context: full_context,
+        target_branch: base, full_context: full_context,
         app_section: AppInstructions.prompt_section(
           @project_config, port_mappings: @port_mappings || [], screenshot_dir: ss_dir
         ),

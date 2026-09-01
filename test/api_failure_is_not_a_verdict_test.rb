@@ -569,7 +569,15 @@ ALLOWED_SWALLOWS = {
     # `ApiUnavailableError`, which this method re-raises above its two handlers
     # (Autodev #67 — it used to be swallowed here and imputed to the fix).
     #
-    # Audited, not assumed: the only GitLab traffic left under this method is
+    # Audited, not assumed, and re-audited for Autodev #91, which added a read
+    # under this method: `target_branch_for` → `TargetBranch.of_merge_request` →
+    # `client.merge_request`, asked between the clone and the rebase because the
+    # base the branch is rebased onto is the target that merge request carries.
+    # It goes through `GitlabHelpers.answer`, so it raises `ApiUnavailableError`
+    # and leaves through the same re-raise as the prompt-context read — nothing
+    # is rebased, nothing is force-pushed, and `fix_round` is not advanced.
+    #
+    # The rest of the GitLab traffic left under this method is
     # `resolve_discussion` (a write, declared below), `ScreenshotUploader.process`
     # (uploads, own rescues) and `log_activity` / `notify_localized`, which
     # swallow their own failures because a note that could not be edited is not
@@ -626,10 +634,17 @@ ALLOWED_SWALLOWS = {
     # selective outage on the issue endpoint spend the whole stagnation budget
     # without a single correction being attempted.
     #
-    # Audited, not assumed: the GitLab traffic left under this method is
-    # `retry_pipeline` and `fetch_job_trace` (both declared here) plus the label /
-    # assignee / note writes of `abandon_issue`, `log_activity` and
-    # `notify_localized`, each of which swallows its own failure.
+    # Audited, not assumed, and re-audited for Autodev #91, which added a read
+    # under this method too: `prepare_work_dir` asks `target_branch_for` for the
+    # base before it rebases, which reads `client.merge_request` through
+    # `GitlabHelpers.answer`. Same route out as the prompt-context read, and the
+    # stagnation signature is written after `clone_and_fix` returns, so the abort
+    # spends nothing.
+    #
+    # The rest of the GitLab traffic left under this method is `retry_pipeline`
+    # and `fetch_job_trace` (both declared here) plus the label / assignee / note
+    # writes of `abandon_issue`, `log_activity` and `notify_localized`, each of
+    # which swallows its own failure.
     'attempt_fix' => 'fix boundary: clone, danger-claude, push'
   },
   'lib/autodev/pipeline_monitor/reviewer.rb' => {
