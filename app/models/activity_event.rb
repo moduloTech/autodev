@@ -16,6 +16,11 @@ class ActivityEvent < ApplicationRecord
   # `review_skill` is the same shape as `usage`: the per-cycle verdict on whether
   # each project declaring a `review_skill` actually carries it, recorded once by
   # Autodev::ReviewSkillProbe and read passively by HealthReport (Autodev #81).
+  # `mr_review_token` is the same shape again (Autodev #80): the per-cycle verdict
+  # on whether GitLab still accepts the credential the `mr-review` binary runs
+  # with, recorded by Autodev::MrReviewTokenProbe — and only while some project
+  # still reviews through that binary. It carries the *name* of the configuration
+  # key the credential came from, never its value.
   # `discussions_snapshot` (DiscussionSnapshot.capture) is rendered in the issue
   # timeline and broadcast to /stream like any other row.
   #
@@ -25,7 +30,8 @@ class ActivityEvent < ApplicationRecord
   # ActivityEvent.create and swallows failures, so an inclusion validation
   # would silently stop logging the first time anyone introduces an unlisted
   # kind, which is strictly worse than this comment being stale.
-  KINDS = %w[transition danger_claude poller error usage heartbeat review_skill discussions_snapshot].freeze
+  KINDS = %w[transition danger_claude poller error usage heartbeat review_skill mr_review_token
+             discussions_snapshot].freeze
   LEVELS = %w[info warn error].freeze
 
   # The kinds that exist for the machinery, not for a reader: liveness and
@@ -36,7 +42,7 @@ class ActivityEvent < ApplicationRecord
   # both invisible (`user_visible` below) and disposable
   # (Autodev::ActivityEventJanitor, Autodev #57): a row nobody asked to see and
   # nobody will read again is a row we may delete.
-  MACHINERY_KINDS = %w[poller error usage heartbeat review_skill].freeze
+  MACHINERY_KINDS = %w[poller error usage heartbeat review_skill mr_review_token].freeze
 
   belongs_to :issue, optional: true
 

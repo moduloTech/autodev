@@ -13,10 +13,25 @@ module ProcessRunner
   # `timeout:` overrides the danger-claude cap for a caller that runs a different
   # program (Autodev #54: mr-review has its own, measured profile). Left nil, the
   # resolution is unchanged for the two danger-claude entry points.
-  def run_with_timeout(cmd, args, chdir:, label: nil, timeout: nil)
+  #
+  # `env:` adds variables to *this* child's environment, and only this one
+  # (Autodev #80). It is the counterpart of CLEAN_ENV rather than an extension of
+  # it: CLEAN_ENV unsets what Bundler put in autodev's own environment for every
+  # subprocess, whereas a value here is a credential or a setting one specific
+  # external tool needs. `mr-review` is the only caller — it reads
+  # GITLAB_API_TOKEN — and putting the token here rather than in `args` keeps it
+  # out of `ps`, which any account on the machine can read for the whole run.
+  #
+  # Six parameters, and the disable is the same call `danger_claude_prompt` makes
+  # one file over: every one of them is an independent property of *one* spawn
+  # (which program, which argv, from where, under which name, for how long, with
+  # what added to its environment). Bundling any of them into an options hash
+  # would hide from the reader what a caller is allowed to set.
+  # rubocop:disable Metrics/ParameterLists
+  def run_with_timeout(cmd, args, chdir:, label: nil, timeout: nil, env: nil)
     timeout = resolve_timeout(timeout)
     tag = label ? "#{cmd} #{label}" : cmd
-    pid, stdout_r, stderr_r = spawn_process(cmd, args, chdir)
+    pid, stdout_r, stderr_r = spawn_process(cmd, args, chdir, env)
     PortAllocator.release(@port_mappings) if @port_mappings
     out_thread = Thread.new { stdout_r.read }
     err_thread = Thread.new { stderr_r.read }
@@ -25,6 +40,7 @@ module ProcessRunner
     stdout_r&.close
     stderr_r&.close
   end
+  # rubocop:enable Metrics/ParameterLists
 
   # Extracted from run_with_timeout to keep its cyclomatic complexity under the
   # RuboCop threshold once the `timeout:` kwarg added a fourth fallback term.
@@ -32,11 +48,15 @@ module ProcessRunner
     (timeout || @project_config['dc_timeout'] || @config['dc_timeout'] || 600).to_i
   end
 
-  def spawn_process(cmd, args, chdir)
+  # The child's environment is CLEAN_ENV plus whatever this one call declared.
+  # Merged in that order on purpose: CLEAN_ENV's `nil`s unset, so a caller may
+  # deliberately *set* a variable the shared hash clears, and no caller can
+  # accidentally leak one into the children that did not ask for it.
+  def spawn_process(cmd, args, chdir, env = nil)
     stdout_r, stdout_w = IO.pipe
     stderr_r, stderr_w = IO.pipe
     pid = Process.spawn(
-      DangerClaudeRunner::CLEAN_ENV, cmd, *args,
+      DangerClaudeRunner::CLEAN_ENV.merge(env || {}), cmd, *args,
       chdir: chdir, in: :close, out: stdout_w, err: stderr_w, pgroup: true
     )
     stdout_w.close

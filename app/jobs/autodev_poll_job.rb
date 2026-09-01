@@ -49,6 +49,7 @@ class AutodevPollJob < ApplicationJob
     projects = ::Project.runtime_configs(config['projects'])
     wrapped_logger = ::Autodev::JobLogger.new(logger)
     probe_review_skills(config, projects)
+    probe_mr_review_token(config, projects)
     projects.each do |project_config|
       ::Autodev::PollDispatcher.new(config: config, project_config: project_config,
                                     logger: wrapped_logger, usage_ok: usage_ok).dispatch
@@ -70,6 +71,22 @@ class AutodevPollJob < ApplicationJob
     ::Autodev::ReviewSkillProbe.probe!(config: config, projects: projects, logger: logger)
   rescue StandardError => e
     logger.warn("[autodev_poll] review-skill probe failed: #{e.class}: #{e.message}")
+  end
+
+  # One check per cycle on the credential the `mr-review` binary runs with
+  # (Autodev #80), recorded for the health card to read. Same shape and same
+  # reason as the two probes above.
+  #
+  # It costs *nothing at all* while every project declares a `review_skill`: the
+  # probe filters the population first and returns before it asks GitLab, reads a
+  # file or writes a row. It arms itself on the first project onboarded without
+  # one — the moment a revoked credential starts breaking reviews again, which is
+  # what went unnoticed from April to August 2026. Advisory, so it never breaks a
+  # cycle: the probe rescues internally and this guards the call itself.
+  def probe_mr_review_token(config, projects)
+    ::Autodev::MrReviewTokenProbe.probe!(config: config, projects: projects, logger: logger)
+  rescue StandardError => e
+    logger.warn("[autodev_poll] mr-review token probe failed: #{e.class}: #{e.message}")
   end
 
   # Poller liveness heartbeat — the dashboard health surface (Autodev::HealthReport)

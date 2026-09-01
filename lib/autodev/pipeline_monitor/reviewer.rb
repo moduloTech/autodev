@@ -246,12 +246,38 @@ class PipelineMonitor
       log "Running mr-review on #{mr_url}..."
       dc_heartbeat!('mr-review')
       out, err, ok, status = run_with_timeout(
-        'mr-review', ['-H', mr_url], chdir: Dir.tmpdir, timeout: mr_review_timeout
+        'mr-review', ['-H', mr_url],
+        chdir: Dir.tmpdir, timeout: mr_review_timeout, env: mr_review_env
       )
       return log('Review completed successfully') || true if ok
 
       log_error "mr-review failed (non-fatal): #{review_failure_diagnostic(out, err, status)}"
       false
+    end
+
+    # The GitLab credential `mr-review` authenticates with, handed over by autodev
+    # instead of left to the binary's own `~/.mr-review/config.yml` (Autodev #80).
+    #
+    # That file is how four months of silence happened: it lives in another tool's
+    # directory, it was last written on 14 April 2026, and the token in it was
+    # revoked that same month. Nothing in autodev's chain exported
+    # GITLAB_API_TOKEN — not the launchd plist, not a shell profile — so mr-review
+    # fell through to the file and every review through the binary failed with
+    # `401 Token was revoked`. Exporting it here makes autodev's configuration the
+    # one place a review credential is declared, and therefore the one place a
+    # probe can watch (`Autodev::MrReviewTokenProbe`).
+    #
+    # `env:`, never `-t`: the binary accepts the flag, but argv is readable via
+    # `ps` by every account on the machine for the entire run — up to
+    # `mr_review_timeout`, an hour by default. Autodev #10 is the precedent.
+    #
+    # An empty hash when autodev declares no credential at all. Exporting a blank
+    # would be worse than exporting nothing: mr-review's own resolution puts the
+    # environment *above* its configuration file, so a blank would override a
+    # credential that works.
+    def mr_review_env
+      token = ::Config.mr_review_token(@config)
+      token ? { 'GITLAB_API_TOKEN' => token } : {}
     end
 
     # Everything a reader needs to act on, in one message (Autodev #49). This

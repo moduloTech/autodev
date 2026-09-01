@@ -15,7 +15,7 @@ module Autodev
   # where the top-level status is the worst severity across checks.
   class HealthReport # rubocop:disable Metrics/ClassLength
     CHECKS = %i[poller workers queue claude_usage issues_error mr_review review_skill
-                stuck_issues database migrations].freeze
+                mr_review_token stuck_issues database migrations].freeze
     SEVERITY = { ok: 0, warn: 1, down: 2 }.freeze
 
     DEFAULT_POLL_INTERVAL = 300
@@ -249,6 +249,32 @@ module Autodev
 
     def review_skill_fault(entry)
       "#{entry['path']}(#{entry['expected']}@#{entry['ref'] || '?'})"
+    end
+
+    # Does GitLab still accept the credential the `mr-review` binary runs with?
+    # (Autodev #80.) Passive like everything else here: the poll cycle runs the
+    # live check (Autodev::MrReviewTokenProbe) and this reads the recorded
+    # verdict, exactly as `check_claude_usage` reads UsageGate's.
+    #
+    # `warn`, not `down`, and the same tier as `mr_review` and `review_skill`: a
+    # review that cannot run does not stop delivery, so `/healthz` keeps
+    # answering 200 while the body carries the warn for a secondary alert.
+    #
+    # Only `revoked` raises it. Nothing on file is the *normal* state — no
+    # project reviews through the binary today, so the probe never runs — and an
+    # `unknown` is a read that failed, not a verdict on a credential (Autodev
+    # #62). Both are `ok`.
+    def check_mr_review_token
+      state = MrReviewTokenProbe.state(config: @config, now: @now)
+      return build(:ok, 'no mr-review credential probe on file') if state[:checked_at].nil?
+
+      meta = { source: state[:source], checked_at: iso(state[:checked_at]) }
+      if state[:status] == MrReviewTokenProbe::REVOKED
+        return build(:warn, 'GitLab rejected the credential mr-review runs with ' \
+                            "(`#{state[:source]}`) — every review on the binary path fails", meta)
+      end
+
+      build(:ok, "mr-review credential #{state[:status]} at last probe", meta)
     end
 
     def check_database

@@ -37,6 +37,7 @@ en:
   web_admin_health_check_issues_error: Issues in error
   web_admin_health_check_mr_review: Automated review
   web_admin_health_check_review_skill: Review skills
+  web_admin_health_check_mr_review_token: mr-review credential
   web_admin_health_check_stuck_issues: Stuck issues
   web_admin_health_check_database: Database
   web_admin_health_check_migrations: Migrations

@@ -12,6 +12,13 @@ module Config # rubocop:disable Metrics/ModuleLength
 
     gitlab_url: https://gitlab.example.com
     gitlab_token: glpat-xxxxxxxxxxxxxxxxxxxx   # or set GITLAB_API_TOKEN env var
+    # mr_review_token: glpat-yyyyyyyyyyyyyyyyyyyy
+    #   Optional. The GitLab credential autodev hands to the `mr-review` binary
+    #   (exported as GITLAB_API_TOKEN in that child process only, never in argv).
+    #   Unset, mr-review shares `gitlab_token` above. Set it only to keep the two
+    #   apart on purpose -- and then it is watched: the poll cycle probes it
+    #   whenever at least one project still reviews through the binary, and
+    #   /admin/health warns when GitLab rejects it (Autodev #80).
     poll_interval: 300                          # seconds between poll cycles
     max_workers: 3                              # concurrent worker threads
     log_dir: ~/.autodev/logs                       # log directory (default: ~/.autodev/logs)
@@ -43,6 +50,10 @@ module Config # rubocop:disable Metrics/ModuleLength
   DEFAULTS = {
     'gitlab_url' => nil,
     'gitlab_token' => nil,
+    # The credential `mr-review` runs with, when it is deliberately not
+    # autodev's own (Autodev #80). nil means "share `gitlab_token`", which is
+    # what `mr_review_credential` resolves and what the review step exports.
+    'mr_review_token' => nil,
     'poll_interval' => 300,
     'max_workers' => 3,
     'dc_timeout' => 1800,
@@ -85,6 +96,14 @@ module Config # rubocop:disable Metrics/ModuleLength
   # production data rather than symmetry with dc_timeout: the longest successful
   # mr-review on record took 2641s (Autodev #54).
   MR_REVIEW_TIMEOUT = 3600
+
+  # Where the credential `mr-review` runs with comes from, in the order autodev
+  # resolves it (Autodev #80). Sharing is the default: an operator who does
+  # nothing gets one token for both tools, and the separation the second key
+  # allows is a decision written into autodev's own configuration rather than a
+  # file left behind in another tool's directory -- which is how the revoked
+  # token of April 2026 went four months without being noticed.
+  MR_REVIEW_TOKEN_KEYS = %w[mr_review_token gitlab_token].freeze
 
   ENV_MAPPING = {
     'GITLAB_API_TOKEN' => 'gitlab_token',
@@ -147,6 +166,25 @@ module Config # rubocop:disable Metrics/ModuleLength
     value = project_config&.[]('max_retries') || config&.[]('max_retries') || DEFAULTS['max_retries']
     value.to_i
   end
+
+  # The credential `mr-review` runs with and the key that supplied it, as
+  # `[token, key]` -- nil when autodev's configuration declares neither
+  # (Autodev #80). One definition for both readers: the review step, which
+  # exports it into that child's environment, and `Autodev::MrReviewTokenProbe`,
+  # which asks GitLab whether it is still accepted and records the key's *name*.
+  #
+  # A present-and-blank value is a typo, not a separation, so it falls through --
+  # the same reading `review_skill` gets at every one of its call sites.
+  def self.mr_review_credential(config)
+    MR_REVIEW_TOKEN_KEYS.each do |key|
+      value = (config || {})[key].to_s.strip
+      return [value, key] unless value.empty?
+    end
+    nil
+  end
+
+  # The token alone, for the caller that only has to hand it over.
+  def self.mr_review_token(config) = mr_review_credential(config)&.first
 
   def self.load(cli_overrides = {})
     config_path = cli_overrides.delete('config_path') || CONFIG_PATH
