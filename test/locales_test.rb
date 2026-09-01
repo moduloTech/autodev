@@ -82,4 +82,90 @@ class LocalesTest < Minitest::Test
     assert_includes msg, '2'
     assert_includes msg, 'url'
   end
+
+  # --- the two tables autodev posts onto GitLab are ASCII -------------------
+  #
+  # The convention every locale entry written in this lot follows: no accented
+  # letter. It was held by nothing at all — no test in this file or in
+  # `test/i18n_derived_keys_test.rb` looked at a single character — so it held by
+  # habit, and a habit is not a guard.
+  #
+  # The perimeter is the two tables whose strings autodev **writes onto GitLab**:
+  # `notifications` (the issue comments) and `activity` (the activity note it
+  # edits in place). It is not every locale file, and the reason is measured, not
+  # assumed: `web.fr.yml` carries accented letters on 264 lines, `devise.fr.yml`
+  # on 3 and `cli.fr.yml` on 2, and `web.en.yml` carries typographic characters
+  # (an ellipsis, curly quotes, `⌘`) on 20 more. Those are rendered into the
+  # dashboard's HTML and the operator's terminal, never posted. Widening the rule
+  # to them would mean rewriting some three hundred existing labels, which is a
+  # product decision and not a guard's to take.
+  #
+  # That last sentence is the kind that goes stale silently — this lot produced
+  # five of them — so it is pinned rather than trusted:
+  # `test_the_limit_of_the_ascii_perimeter_is_still_the_reason_for_it` fails the
+  # day an excluded table stops carrying what this rule forbids, and says to
+  # widen the perimeter.
+  #
+  # Two non-ASCII characters are allowed by name. Both are typographic and
+  # neither is a letter: the em dash separates a message from the detail
+  # interpolated after it (`echec — %{error}`), and the arrow is how an activity
+  # label names the step it is moving to. An allow-list rather than "no accented
+  # letter", so a non-breaking space or a curly apostrophe pasted into a GitLab
+  # comment is caught too.
+  ASCII_TABLES = %w[notifications activity].freeze
+  NON_ASCII_TABLES = %w[web devise cli].freeze
+  ALLOWED_NON_ASCII = ['—', '→'].freeze
+
+  def locale_files(stems)
+    Dir[File.expand_path("../config/locales/{#{stems.join(',')}}.*.yml", __dir__)]
+  end
+
+  # `[path:line, character]` for every character outside the allow-list.
+  def non_ascii_in(path)
+    File.readlines(path, encoding: 'UTF-8').each_with_index.flat_map do |line, index|
+      offending = line.each_char.reject { |char| char.ascii_only? || ALLOWED_NON_ASCII.include?(char) }
+      offending.uniq.map { |char| "#{File.basename(path)}:#{index + 1} #{char.inspect}" }
+    end
+  end
+
+  def test_the_tables_autodev_posts_on_gitlab_are_ascii
+    files = locale_files(ASCII_TABLES)
+
+    assert_equal 4, files.size, "the ASCII perimeter is #{files.size} files, not the 4 expected"
+
+    offences = files.flat_map { |path| non_ascii_in(path) }
+
+    assert_empty offences, <<~MSG
+      A non-ASCII character sits in a string autodev posts onto GitLab: #{offences.join(', ')}.
+
+      These two tables are written without accents (`Reentree`, `deja mergee`,
+      `a corriger`), and every entry added by this lot follows that. Write the
+      new one the same way, or — if the convention is being dropped rather than
+      broken by accident — drop it here, in the same commit, with the reason.
+      #{ALLOWED_NON_ASCII.join(' and ')} are allowed; nothing else is.
+    MSG
+  end
+
+  # The reason the perimeter stops where it does, re-derived on every run instead
+  # of being believed: a table excluded for carrying characters this rule forbids
+  # and no longer carrying any is excluded for nothing, and the paragraph above
+  # has gone stale.
+  #
+  # `cli.en.yml` and `devise.en.yml` are clean and named here rather than counted
+  # as evidence — they are short English tables, so they say nothing either way
+  # about whether the convention is being kept.
+  ALREADY_CLEAN = %w[cli.en.yml devise.en.yml].freeze
+
+  def test_the_limit_of_the_ascii_perimeter_is_still_the_reason_for_it
+    clean = locale_files(NON_ASCII_TABLES).select { |path| non_ascii_in(path).empty? }
+                                          .map { |path| File.basename(path) }
+
+    assert_equal [], clean - ALREADY_CLEAN, <<~MSG
+      These tables are outside the rule because they carry characters it forbids,
+      and they no longer carry any: #{(clean - ALREADY_CLEAN).join(', ')}.
+
+      Move them into ASCII_TABLES and shorten the paragraph above, or say there
+      why they stay out.
+    MSG
+  end
 end

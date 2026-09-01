@@ -99,8 +99,14 @@ class ReentryDoesNotInventAReviewTest < Minitest::Test
     end
   end
 
+  # Records `info` because half of what Autodev #85 claims is a *log line*: the
+  # reentry says which branch it is sending the request down, and that sentence
+  # is the only trace an operator reading the worker log has of the decision.
   class NullLogger
-    def info(*, **) = nil
+    attr_reader :lines
+
+    def initialize = @lines = []
+    def info(msg, **) = @lines << msg.to_s
     def warn(*, **) = nil
     def error(*, **) = nil
     def debug(*, **) = nil
@@ -111,6 +117,7 @@ class ReentryDoesNotInventAReviewTest < Minitest::Test
   def setup
     setup_database
     @reviews = []
+    @logger = NullLogger.new
   end
 
   # Step 1: a request that reached `done` and whose todo label a human reposes,
@@ -146,13 +153,13 @@ class ReentryDoesNotInventAReviewTest < Minitest::Test
 
   def router
     PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,
-                   logger: NullLogger.new, token: 'tok', pool: nil)
+                   logger: @logger, token: 'tok', pool: nil)
   end
 
   def monitor
     PipelineMonitor.allocate.tap do |instance|
       instance.send(:init_runner, client: @client, config: CONFIG, project_config: PROJECT_CONFIG,
-                                  logger: NullLogger.new, token: 'tok')
+                                  logger: @logger, token: 'tok')
       # The one step this test does not run: `mr-review` is an external binary.
       # What it records is the only thing the test needs from it — that the
       # routing reached the review at all, and the state the row was in when it
@@ -208,5 +215,53 @@ class ReentryDoesNotInventAReviewTest < Minitest::Test
 
     assert_equal 'fixing_discussions', issue.status
     refute_includes labels_sent, PROJECT_CONFIG['label_done']
+  end
+
+  # The activity keys the run wrote, in order. Read off the `activity_events`
+  # rows rather than off the rendered French, because the key is what the
+  # decision *is*: `ActivityLogger.payload_for` stores it beside the rendered
+  # line, and both sinks (the GitLab note and this row) come from that one key.
+  def activity_keys
+    ActivityEvent.where(kind: 'danger_claude').order(:id).filter_map { |event| event.payload['key'] }
+  end
+
+  # --- the line the reentry writes about itself -----------------------------
+  #
+  # The other four tests here observe the *routing*: they let the next poll run
+  # and check where the row went. Nothing observed what the reentry **said**,
+  # and putting the pre-#85 line back (`:reenter_to_fix` in every case, "will
+  # route to fixing_discussions") left the whole suite green. A request at 0 is
+  # announced as going to have its review threads checked, on a request that has
+  # no threads because no review ever opened one — the same false statement as
+  # the `review_count: 1` write, one layer up, and the one Autodev #85 assertion
+  # nothing held.
+
+  def test_a_never_reviewed_reentry_announces_the_review
+    reenter(review_count: 0)
+
+    assert_includes activity_keys, 'reenter_to_review',
+                    'the reentry of a never-reviewed request did not announce the review'
+    refute_includes activity_keys, 'reenter_to_fix',
+                    'the reentry announced discussions to fix on a request that has none'
+  end
+
+  def test_a_reviewed_reentry_still_announces_the_discussion_check
+    reenter(review_count: 1)
+
+    assert_includes activity_keys, 'reenter_to_fix'
+    refute_includes activity_keys, 'reenter_to_review'
+  end
+
+  # Both sinks of the same decision: the activity key above and this line. They
+  # are chosen once, on the same term, so they cannot disagree — which is the
+  # property, not the wording.
+  def test_the_log_line_names_the_branch_the_reentry_took
+    { 0 => 'the review', 1 => 'fixing_discussions' }.each do |count, expected|
+      setup
+      reenter(review_count: count)
+
+      assert(@logger.lines.any? { |l| l.include?('checking_pipeline') && l.include?(expected) },
+             "at review_count #{count} no log line named #{expected}: #{@logger.lines.inspect}")
+    end
   end
 end
