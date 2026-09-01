@@ -14,7 +14,10 @@ class PipelineMonitor
   # the branch it was judging — a different branch from the one
   # `Autodev::ReviewSkillProbe` reads, and one an MR may modify. The skill is now
   # read over the API from the branch that decides and written into the clone
-  # before the injection. `ReviewSkillSource` owns which branch that is, and why.
+  # before the injection. `ReviewSkillSource` owns which branch that is, and why —
+  # and it is handed `issue.mr_iid`, because the branch that decides the review of
+  # a merge request is the one that merge request is going into (Autodev #91,
+  # applied here by the review round of this lot).
   module SkillReviewer
     private
 
@@ -77,7 +80,7 @@ class PipelineMonitor
     # that was looked for and the ref it was looked for on, because all three end
     # up in a GitLab comment an operator reads.
     def prepare_review_clone(work_dir, issue, skill)
-      source = ReviewSkillSource.locate(@client, @project_config, skill)
+      source = ReviewSkillSource.locate(@client, @project_config, skill, mr_iid: issue.mr_iid)
       clone_for_review(work_dir, issue)
       overlay_review_skill(work_dir, skill, source)
       inject_skills(work_dir)

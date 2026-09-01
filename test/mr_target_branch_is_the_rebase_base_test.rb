@@ -509,6 +509,40 @@ end
 class ImplementationSideStillWorksTest < Minitest::Test
   include RebaseBaseFixtures
 
+  # Answers question 2 and nothing else: `verify_changes` asks for the base, and
+  # the base of a re-implementation is the target its merge request carries.
+  class MergeRequestStub
+    def initialize(target) = @target = target
+
+    def merge_request(_path, iid)
+      RebaseBaseFixtures::FakeMr.new(iid, 'opened', @target, nil)
+    end
+  end
+
+  # The `reuse` question: does the remote still carry the previously-pushed
+  # branch. `exists: false` is the remote saying no (a 404); `error:` is it not
+  # saying anything.
+  class BranchStub
+    def initialize(exists: true, error: nil)
+      @exists = exists
+      @error = error
+    end
+
+    def branch(_path, name)
+      raise @error if @error
+      raise not_found unless @exists
+
+      Struct.new(:name).new(name)
+    end
+
+    private
+
+    def not_found
+      request = Struct.new(:base_uri, :path).new('https://gitlab.example', '/api/v4')
+      Gitlab::Error::NotFound.new(Struct.new(:code, :parsed_response, :request).new(404, {}, request))
+    end
+  end
+
   def setup
     @tmpdir = Dir.mktmpdir('rebase_base_impl_test')
     @bare = build_bare_origin(@tmpdir)
@@ -523,14 +557,44 @@ class ImplementationSideStillWorksTest < Minitest::Test
   def teardown = FileUtils.rm_rf(@tmpdir)
 
   def test_verify_changes_accepts_a_branch_that_moved_off_the_configured_target
-    system('git', 'clone', '--depth', '1', '--branch', CONFIG_TARGET, @bare, @work_dir,
-           out: File::NULL, err: File::NULL)
-    system('git', 'fetch', 'origin', "+refs/heads/#{BRANCH}:refs/remotes/origin/#{BRANCH}",
-           chdir: @work_dir, out: File::NULL, err: File::NULL)
-    system('git', 'checkout', '-b', BRANCH, "origin/#{BRANCH}", chdir: @work_dir,
-                                                                out: File::NULL, err: File::NULL)
+    clone_config_target_then_checkout_branch
 
     @processor.send(:verify_changes, @work_dir, BRANCH, nil) # nothing raised
+  end
+
+  # The scenario `verify_changes`' own comment describes, and which nothing in
+  # this file used to mount on a real repository (review round of Autodev #91):
+  # the base is the **merge request's** target, and it is not the branch the clone
+  # checked out. `git clone --depth 1 --branch <config>` is single-branch, so the
+  # only reason `origin/staging` resolves here is the explicit fetch
+  # `resolve_branch` performs one step earlier.
+  #
+  # Mutating `origin/#{base}` to a bare `#{base}` left this file entirely green
+  # before: the clone has no *local* `staging` branch, so the mutant asks git for
+  # `staging..autodev/…`, git declines, and the caller raised "No changes produced
+  # by implementation" on an implementation that produced plenty.
+  def test_verify_changes_measures_a_reimplementation_against_the_merge_requests_target
+    clone_config_target_then_checkout_branch
+    fetch_target_history(MR_TARGET)
+    @processor.instance_variable_set(:@client, MergeRequestStub.new(MR_TARGET))
+
+    @processor.send(:verify_changes, @work_dir, BRANCH, 42) # nothing raised
+  end
+
+  # The other half of the same defect. When the previous branch is gone from the
+  # remote, `resolve_branch` takes the `create_branch` arm — which fetches
+  # nothing — so `origin/<base>` need not exist at all. Git answers non-zero, and
+  # "no commits" and "no such ref" are the same non-zero: the caller announced an
+  # implementation that produced nothing, parked the row in `error` and spent a
+  # retry.
+  def test_verify_changes_does_not_blame_the_implementation_for_a_base_it_never_fetched
+    clone_config_target_then_checkout_branch
+    @processor.instance_variable_set(:@client, MergeRequestStub.new(MR_TARGET))
+
+    error = assert_raises(MissingTargetBranchError) { @processor.send(:verify_changes, @work_dir, BRANCH, 42) }
+
+    assert_equal MR_TARGET, error.branch
+    refute_includes error.message, 'No changes produced'
   end
 
   def test_verify_changes_still_refuses_a_branch_with_no_commit_of_its_own
@@ -555,5 +619,49 @@ class ImplementationSideStillWorksTest < Minitest::Test
     @processor.instance_variable_set(:@project_config, {})
 
     refute_includes @processor.send(:build_clone_cmd, 'https://example/repo.git', '/tmp/x'), '--branch'
+  end
+
+  # `branch_exists_on_remote?` decides `reuse`, and `reuse` decides between
+  # rebasing the existing branch and cutting a fresh one — so it is a read whose
+  # value the caller acts on, and it answered `false` for every
+  # `Gitlab::Error::ResponseError` (Autodev #62's shape, review round). A 502 on
+  # this endpoint read as "the branch is gone".
+  def test_a_branch_that_the_remote_carries_is_reused
+    @processor.instance_variable_set(:@client, BranchStub.new(exists: true))
+
+    assert @processor.send(:branch_exists_on_remote?, BRANCH)
+  end
+
+  def test_a_branch_the_remote_answered_it_does_not_have_is_not_reused
+    @processor.instance_variable_set(:@client, BranchStub.new(exists: false))
+
+    refute @processor.send(:branch_exists_on_remote?, BRANCH)
+  end
+
+  def test_a_read_that_failed_does_not_answer_that_the_branch_is_gone
+    @processor.instance_variable_set(:@client, BranchStub.new(error: api_error))
+
+    assert_raises(ApiUnavailableError) { @processor.send(:branch_exists_on_remote?, BRANCH) }
+  end
+
+  private
+
+  # What `clone_repo` + the `reuse` arm of `resolve_branch` leave on disk: a
+  # single-branch clone of the configured target, with the previously-pushed
+  # autodev branch fetched and checked out on top of it.
+  def clone_config_target_then_checkout_branch
+    system('git', 'clone', '--depth', '1', '--branch', CONFIG_TARGET, @bare, @work_dir,
+           out: File::NULL, err: File::NULL)
+    system('git', 'fetch', 'origin', "+refs/heads/#{BRANCH}:refs/remotes/origin/#{BRANCH}",
+           chdir: @work_dir, out: File::NULL, err: File::NULL)
+    system('git', 'checkout', '-b', BRANCH, "origin/#{BRANCH}", chdir: @work_dir,
+                                                                out: File::NULL, err: File::NULL)
+  end
+
+  # `RepoRebaser#fetch_target_with_history`, which `resolve_branch` runs between
+  # the checkout above and `verify_changes`.
+  def fetch_target_history(target)
+    system('git', 'fetch', '--deepen=500', 'origin', "+refs/heads/#{target}:refs/remotes/origin/#{target}",
+           chdir: @work_dir, out: File::NULL, err: File::NULL)
   end
 end

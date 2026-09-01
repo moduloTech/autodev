@@ -65,6 +65,26 @@
 module MrState
   TRANSIENT_STATES = %w[locked].freeze
 
+  # The two states in which a merge request is over — GitLab's own words for "this
+  # one is finished", whichever way it finished. A sixth reader joined the five
+  # above with the Autodev #91 review round: `TargetBranch.of_merge_request`, which
+  # asks "does a merge request still carry this work", because `mr_iid` alone does
+  # not answer it — `ResumeHandler#reenter_via_reimplementation` keeps the column
+  # when it re-arms a request whose merge request a human closed.
+  #
+  # This one is an allow-list of *endings* where `TRANSIENT_STATES` is an
+  # allow-list of *waits*, i.e. an unknown state answers "not over" here and "not
+  # transitional" there. That is not a slip and the two do not compete: they answer
+  # different questions, and the direction of each is chosen by which mistake is
+  # recoverable. For `transient?` the reader is deciding whether to end a watch, so
+  # an unknown state must fall to "a human should look". For `over?` the reader is
+  # deciding which branch to rebase onto and force-push, and the fallback if the
+  # merge request is read as over is the *configuration's* branch — so an unknown
+  # state must fall to "ask the merge request", whose target is by definition the
+  # one GitLab is diffing it against. `nil` — a shape with no `state` at all —
+  # takes the same route for the same reason.
+  CONCLUDED_STATES = %w[closed merged].freeze
+
   module_function
 
   # True when the state says "come back later" rather than naming an outcome.
@@ -72,5 +92,12 @@ module MrState
   # included: neither carries a verdict and neither may raise here.
   def transient?(state)
     TRANSIENT_STATES.include?(state.to_s)
+  end
+
+  # True when GitLab says this merge request is finished — merged, or closed
+  # without being merged. See `CONCLUDED_STATES` for why the unknown state answers
+  # false here and true at `mr_state_concluded?`.
+  def over?(state)
+    CONCLUDED_STATES.include?(state.to_s)
   end
 end

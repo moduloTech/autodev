@@ -60,13 +60,26 @@ class ReviewAndProbeReadTheSameThingTest < Minitest::Test
     Blob = Struct.new(:type, :path)
     Repo = Struct.new(:default_branch)
     Commit = Struct.new(:id)
+    Mr = Struct.new(:iid, :state, :target_branch)
 
-    attr_reader :calls
+    attr_reader :calls, :default_branch
+    # The target the merge request under review carries. The review asks question 2
+    # of `TargetBranch` since the round that followed Autodev #91, so the fake has
+    # to hold one; `review` below sets it to the configuration's own value, which
+    # is the situation this file is about — the two askers must agree wherever the
+    # two answers agree, and that is the whole fleet as measured.
+    attr_accessor :mr_target
 
     def initialize(files: {}, default_branch: 'master')
       @files = files
       @default_branch = default_branch
+      @mr_target = default_branch
       @calls = []
+    end
+
+    def merge_request(_path, iid)
+      @calls << [:merge_request, nil, nil]
+      Mr.new(iid, 'opened', @mr_target)
     end
 
     def project(path)
@@ -86,10 +99,13 @@ class ReviewAndProbeReadTheSameThingTest < Minitest::Test
       Commit.new('deadbeef')
     end
 
+    # `blobs_under` pairs `per_page: 100` with `.auto_paginate` like every other
+    # list read here, so the answer is the gem's own response object and not an
+    # Array.
     def tree(_path, options)
       @calls << [:tree, options[:path], options[:ref]]
-      @files.keys.select { |file| file.start_with?("#{options[:path]}/") }
-                 .map { |file| Blob.new('blob', file) }
+      Gitlab::PaginatedResponse.new(@files.keys.select { |f| f.start_with?("#{options[:path]}/") }
+                                         .map { |file| Blob.new('blob', file) })
     end
 
     def file_contents(_path, file, ref)
@@ -127,16 +143,21 @@ class ReviewAndProbeReadTheSameThingTest < Minitest::Test
   # Answers `:present` / `:missing` for the review step, in the probe's own
   # vocabulary, so the two are directly comparable.
   def review(config, client)
-    mon = PipelineMonitor.allocate
-    mon.instance_variable_set(:@client, client)
-    mon.instance_variable_set(:@project_path, config['path'])
-    mon.instance_variable_set(:@project_config, config)
-    mon.instance_variable_set(:@logger, NullLogger.new)
-    %i[log log_error].each { |m| mon.define_singleton_method(m) { |*| nil } }
-    mon.define_singleton_method(:mr_review_timeout) { 600 }
-    mon.define_singleton_method(:clone_and_checkout) { |dir, _| FileUtils.mkdir_p(dir) }
-    stub_review_run!(mon)
-    outcome(mon)
+    client.mr_target = config['target_branch'] || client.default_branch
+    outcome(review_monitor(config, client))
+  end
+
+  def review_monitor(config, client)
+    PipelineMonitor.allocate.tap do |mon|
+      mon.instance_variable_set(:@client, client)
+      mon.instance_variable_set(:@project_path, config['path'])
+      mon.instance_variable_set(:@project_config, config)
+      mon.instance_variable_set(:@logger, NullLogger.new)
+      %i[log log_error].each { |m| mon.define_singleton_method(m) { |*| nil } }
+      mon.define_singleton_method(:mr_review_timeout) { 600 }
+      mon.define_singleton_method(:clone_and_checkout) { |dir, _| FileUtils.mkdir_p(dir) }
+      stub_review_run!(mon)
+    end
   end
 
   def stub_review_run!(mon)

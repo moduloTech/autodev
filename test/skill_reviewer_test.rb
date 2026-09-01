@@ -35,8 +35,18 @@ class SkillReviewerTest < ActiveSupport::TestCase
     end
 
     def commit(_path, _ref) = Struct.new(:id).new('deadbeef')
-    def tree(_path, options) = [Blob.new('blob', "#{options[:path]}/SKILL.md")]
     def file_contents(_path, file, _ref) = "# #{File.basename(File.dirname(file))}"
+
+    # The ref the skill is read from is the target the merge request under review
+    # goes into (Autodev #91, applied to the review by the round that followed
+    # #89); which branch that is is the other file's subject, so this only has to
+    # answer.
+    def merge_request(_path, iid) = Struct.new(:iid, :state, :target_branch).new(iid, 'opened', 'main')
+
+    # `blobs_under` pairs `per_page: 100` with `.auto_paginate`, as every other
+    # list read in this repository does, so the answer is the gem's own response
+    # object rather than an Array.
+    def tree(_path, options) = Gitlab::PaginatedResponse.new([Blob.new('blob', "#{options[:path]}/SKILL.md")])
 
     private
 

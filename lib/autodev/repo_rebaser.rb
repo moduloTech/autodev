@@ -49,12 +49,39 @@ module RepoRebaser
   # is the merge request's own, so a `NotFound` there means the merge request is
   # gone and cannot be mistaken for a missing branch (the trap Autodev #89
   # documented between `404 Commit Not Found` and `404 File Not Found`).
+  #
+  # Covering every way the base can fail to arrive is also why the *reason* has to
+  # be established separately (review round, constat 3). "Deleted upstream" needs a
+  # human and will never resolve itself, so a boundary is entitled to bound the
+  # wait on it; "the fetch did not complete" is an outage, and bounding that would
+  # give a healthy request up over a flapping VPN. `git ls-remote` separates them
+  # for one round-trip, paid only on the path that is about to raise.
   def ensure_base_available!(work_dir, base)
-    out, _err, ok = run_cmd_status(['git', 'rev-parse', '--verify', '--quiet',
-                                    "refs/remotes/origin/#{base}"], chdir: work_dir)
-    return if ok && !out.strip.empty?
+    return if remote_tracking_ref?(work_dir, base)
 
-    raise MissingTargetBranchError.new(base, 'not on the remote after an explicit fetch')
+    raise missing_base_error(work_dir, base)
+  end
+
+  def remote_tracking_ref?(work_dir, base)
+    _out, _err, ok = run_cmd_status(['git', 'rev-parse', '--verify', '--quiet',
+                                     "refs/remotes/origin/#{base}"], chdir: work_dir)
+    ok
+  end
+
+  # Three outcomes, and only the first is evidence. `ls-remote` exiting 0 with no
+  # line is the remote stating that it has no such branch; exiting 0 with one is
+  # the remote stating that it does, so the fetch is what did not land; exiting
+  # non-zero is the remote not answering at all.
+  def missing_base_error(work_dir, base)
+    out, _err, ok = run_cmd_status(['git', 'ls-remote', '--heads', 'origin', "refs/heads/#{base}"],
+                                   chdir: work_dir)
+    return MissingTargetBranchError.new(base, 'the remote could not be asked whether it still has it') unless ok
+    unless out.strip.empty?
+      return MissingTargetBranchError.new(base,
+                                          'the fetch did not bring it, though the remote has it')
+    end
+
+    MissingTargetBranchError.new(base, 'the remote does not have it', confirmed: true)
   end
 
   # `--deepen` only works on shallow repos. Probe first; on a full clone, do a

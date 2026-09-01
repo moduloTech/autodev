@@ -32,8 +32,14 @@
 #
 # They are equal at birth — `create_merge_request` writes the config's value into
 # the MR — and they diverge the moment the configuration moves while merge
-# requests are open. So: **a new merge request takes the configuration, an
-# existing one takes the target it carries.**
+# requests are open. So: **a new merge request takes the configuration, a merge
+# request that still carries the work takes the target it carries.**
+#
+# "Still carries the work" and not "exists": the review round of this ticket found
+# that `mr_iid` being set is not the same statement, because
+# `ResumeHandler#reenter_via_reimplementation` keeps the column on a request whose
+# merge request a human closed. A merge request that is over carries nothing and
+# hands the question back to the configuration — see `of_merge_request`.
 #
 # Measured (PowerPanne, config moved from `staging` to `master` on 25/08/2026):
 # on 01/09, 83 open merge requests still targeted `staging`, 64 of them on an
@@ -65,10 +71,14 @@
 #
 # The only GitLab read here is the merge request's own, which matters for
 # `Gitlab::Error::NotFound`: a `NotFound` on this endpoint means *the merge
-# request* is gone, never that its target branch is. Whether the target branch
-# still exists is established from git, in `RepoRebaser#ensure_base_available!`,
-# after the explicit fetch — where the two cannot be conflated (Autodev #89 hit
-# the same trap between `404 Commit Not Found` and `404 File Not Found`).
+# request* is gone, never that its target branch is. A merge request that is gone
+# carries no work, so that one case is answered like a closed one — with question
+# 1 — rather than by an `ApiUnavailableError` that would repeat on every poll
+# forever. Every other response failure still refuses to answer. Whether the
+# target branch still exists is established from git, in
+# `RepoRebaser#ensure_base_available!`, after the explicit fetch — where the two
+# cannot be conflated (Autodev #89 hit the same trap between `404 Commit Not
+# Found` and `404 File Not Found`).
 module TargetBranch
   module_function
 
@@ -109,26 +119,68 @@ module TargetBranch
     declared(project_config) || repository_default(client, project_path)
   end
 
-  # Question 2 — a merge request that exists. GitLab holds the answer; nothing
-  # local may stand in for it.
+  # Question 2 — the merge request that **carries this work**, or `nil` when none
+  # does. GitLab holds both halves of that answer and nothing local may stand in
+  # for either.
+  #
+  # `mr_iid` being set is not the question, and the review round of this ticket is
+  # where that showed (see `test/only_an_open_merge_request_carries_the_work_test.rb`).
+  # `PollRouter::ResumeHandler#reenter_via_reimplementation` keeps `mr_iid` *and*
+  # `branch_name` when it re-arms a request whose merge request a human closed
+  # without merging, so the run that followed rebased the autodev branch onto the
+  # target of a closed merge request and force-pushed it — the damage this ticket
+  # exists to remove, reproduced by its own discriminant. It is also incoherent
+  # with the merge request that run then creates: `MrManager#find_existing_mr`
+  # filters `state: 'opened'`, finds none, and creates one targeting the
+  # *configuration*.
+  #
+  # So a merge request that is over carries nothing, and the caller falls back to
+  # question 1 — which is the right answer for exactly that reason: the next merge
+  # request will be created with the configuration's value. `MrState.over?` owns
+  # the vocabulary, as it does for the five other readers of `mr.state`.
+  #
+  # A `NotFound` takes the same route rather than the outage one. It inherits
+  # `ResponseError`, so it used to raise `ApiUnavailableError` on every poll of a
+  # merge request that will never come back — an unbounded wait on a request
+  # nothing can read, where the pre-#91 behaviour (fall back on the configuration)
+  # was right. Every other response failure still refuses to answer (Autodev #67):
+  # a 500 says nothing about whether the merge request is there.
   def of_merge_request(client, project_path, mr_iid)
-    mr = GitlabHelpers.answer(:merge_request_target) { client.merge_request(project_path, mr_iid) }
-    named = GitlabHelpers.field(mr, :target_branch).to_s.strip
-    raise MissingTargetBranchError.new(named, 'the merge request names no target branch') if named.empty?
+    mr = GitlabHelpers.answer(:merge_request_target) do
+      client.merge_request(project_path, mr_iid)
+    rescue Gitlab::Error::NotFound
+      nil
+    end
+    return nil if mr.nil? || MrState.over?(GitlabHelpers.field(mr, :state))
 
-    named
+    named_target(mr)
   end
 
   # Both questions in one place, for the callers that may be in either case —
   # `RepoRebaser`, which rebases both a branch whose merge request is open and one
   # that has none yet, and `verify_changes`, which runs on a first implementation
-  # and on a re-implementation alike. `mr_iid` nil means no merge request carries
-  # this work; the block resolves the repository default, and is not called when
-  # there is a merge request to ask.
+  # and on a re-implementation alike. `mr_iid` nil means no merge request was ever
+  # recorded for this work, and `of_merge_request` answering `nil` means the one
+  # that was is over — both are question 1. The block resolves the repository
+  # default, and is not called when a merge request answered.
   def resolve(mr_iid, client:, project_path:, project_config:)
-    return of_merge_request(client, project_path, mr_iid) if mr_iid
+    carried = of_merge_request(client, project_path, mr_iid) if mr_iid
+    return carried if carried
 
     for_new_merge_request(project_config, yield)
+  end
+
+  # The target GitLab recorded on the merge request, or an abort. A merge request
+  # that carries work and names no target is not a merge request whose target is
+  # the configuration's: `MissingTargetBranchError` says so without blaming GitLab,
+  # which answered perfectly well.
+  def named_target(merge_request)
+    named = GitlabHelpers.field(merge_request, :target_branch).to_s.strip
+    if named.empty?
+      raise MissingTargetBranchError.new(named, 'the merge request names no target branch', confirmed: true)
+    end
+
+    named
   end
 
   # The mixin half of the answer, for the workflow classes: the collaborators a

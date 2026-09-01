@@ -1,9 +1,43 @@
 # frozen_string_literal: true
 
 require 'time'
+require 'openssl'
+require 'socket'
+require 'timeout'
+require 'net/protocol'
 
 # Shared helpers for interacting with the GitLab API.
 module GitlabHelpers
+  # Every way a GitLab call can fail to produce an answer (Autodev #62, third
+  # round). The first entry is GitLab answering with a status it could not honour;
+  # the rest are the request never completing at all — and the point of the list is
+  # that they are the *same event* for every caller, while none of them is a
+  # `Gitlab::Error::ResponseError`.
+  #
+  # The gap was measured on this repository's own review path: a VPN hiccup during
+  # `SkillReviewer` reached `rescue StandardError => e; raise ImplementationError`,
+  # i.e. it was recorded as a review *failure*, five of which give the request up
+  # under `review_failures_exhausted` and hand the ticket back to its author. The
+  # comment above that rescue already said the split existed so an outage would not
+  # be reclassified; it only ever covered HTTP.
+  #
+  # What is deliberately **not** here is anything a caller could have caused:
+  # `NoMethodError`, `ArgumentError`, `NameError`, `TypeError` and every other
+  # programming error keeps travelling as itself, to a stack trace. Reading a bug
+  # in this repository as "GitLab is down" is the same lie in the other direction,
+  # and it is the one a `rescue StandardError` here would tell.
+  #
+  # `Timeout::Error` covers `Net::OpenTimeout` and `Net::ReadTimeout`, which
+  # subclass it; `EOFError` is the peer hanging up mid-response, which `net/http`
+  # raises rather than translating; and `SystemCallError` is the whole `Errno::*`
+  # family — `ECONNRESET`, `EHOSTUNREACH`, `EPIPE`, `ETIMEDOUT` and the rest — read
+  # as one entry rather than as a list somebody has to keep complete. It is broad,
+  # and it is exactly as broad as the block: `answer` wraps a GitLab client call
+  # and nothing else, so an operating-system error raised under it came from the
+  # socket.
+  TRANSPORT_ERRORS = [Gitlab::Error::ResponseError, SystemCallError, Timeout::Error,
+                      SocketError, OpenSSL::SSL::SSLError, EOFError].freeze
+
   module_function
 
   # Read a field from a GitLab API value whatever its shape: the gitlab gem
@@ -33,11 +67,14 @@ module GitlabHelpers
   # pipeline, resolve a thread) is a different case and does not belong here.
   #
   # A read left bare, with no rescue at all, already behaves correctly: the
-  # `Gitlab::Error::ResponseError` reaches the same boundary rescue. This wrapper
-  # only adds the name of the endpoint to the log line.
+  # failure reaches the same boundary rescue. This wrapper adds the name of the
+  # endpoint to the log line, and — since the third round — puts the failures that
+  # are *not* HTTP into the same family as the ones that are: see
+  # `TRANSPORT_ERRORS` for why a bare `Errno::ECONNRESET` was the more dangerous
+  # half, and for what stays outside on purpose.
   def answer(what)
     yield
-  rescue Gitlab::Error::ResponseError => e
+  rescue *TRANSPORT_ERRORS => e
     raise ApiUnavailableError.new(what, e)
   end
 

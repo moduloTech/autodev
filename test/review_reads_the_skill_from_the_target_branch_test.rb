@@ -25,7 +25,11 @@ require 'autodev/pipeline_monitor'
 #   * **the target wins, always** (the Autodev #79 argument one layer up: a
 #     branch may not supply the rules that judge it). An exception for "if the
 #     branch carries the skill, use the branch's" would reinstate the defect for
-#     the 13 branches that carry a stale `review` copy;
+#     the 13 branches that carry a stale `review` copy. Which target is the merge
+#     request's own since the review round of this lot — the branch it is going
+#     into, `TargetBranch`'s question 2 — because that ruling belongs to Autodev
+#     #91 and a merge request cannot modify its own target. The configuration
+#     answers where no merge request exists, which is the probe's case;
 #   * **a failed read is never a verdict** (Autodev #67). Every GitLab read here
 #     goes through `GitlabHelpers.answer`, so an outage raises
 #     `ApiUnavailableError` — already handled by `Reviewer#launch_review`, which
@@ -70,16 +74,31 @@ class ReviewReadsTheSkillFromTheTargetBranchTest < Minitest::Test
     # `files` is { ref => { repository path => contents } }; `refs` the branches
     # the repository has (defaults to the ones `files` names, plus the default
     # branch); `failing` the read kind that blows up.
+    # `mr_target` is set after construction rather than taken here: the review
+    # asks question 2, and for every case but one the merge request agrees with
+    # the configuration, which is the fleet's own situation.
+    attr_writer :mr_target
+
     def initialize(files: {}, refs: nil, default_branch: 'master', failing: nil,
                    error: Gitlab::Error::InternalServerError)
       @files = files
       @refs = refs || (files.keys + [default_branch]).uniq
       @default_branch = default_branch
       @failing = failing
+      @mr_target = 'master'
       @error = error
       @calls = []
       @notes = []
       @edits = []
+    end
+
+    # The review holds a merge request, so the ref it asks about is question 2's
+    # (Autodev #91). `mr_target` defaults to this file's configured target, which
+    # is the fleet's own situation: the two answers coincide, and every property
+    # below is about the *skill*, not about which of the two answered.
+    def merge_request(path, iid)
+      record(:merge_request, path, nil, nil)
+      Struct.new(:iid, :state, :target_branch).new(iid, 'opened', @mr_target)
     end
 
     def project(path)
@@ -106,7 +125,7 @@ class ReviewReadsTheSkillFromTheTargetBranchTest < Minitest::Test
       under = paths_on(options[:ref]).select { |file| file.start_with?("#{options[:path]}/") }
       raise not_found if under.empty?
 
-      under.map { |file| Blob.new('blob', file, File.basename(file)) }
+      Gitlab::PaginatedResponse.new(under.map { |file| Blob.new('blob', file, File.basename(file)) })
     end
 
     def file_contents(path, file, ref)
@@ -238,17 +257,21 @@ class ReviewReadsTheSkillFromTheTargetBranchTest < Minitest::Test
 
   # --- which ref decides ---------------------------------------------------
 
-  def test_the_ref_asked_about_is_the_configured_target_branch
+  # The ref is a target branch, and since the review round it is the one the merge
+  # request under review is going into (`TargetBranch`'s question 2). Here it and
+  # the configuration agree, which is the fleet's own situation.
+  def test_the_ref_asked_about_is_the_target_branch_the_merge_request_goes_into
     client = FakeGitlab.new(files: { 'master' => TARGET_SKILL })
     review(client: client, target_branch: 'master', branch_files: { CANONICAL => 'stale' })
 
     assert_equal ['master'], client.calls.filter_map { |call| call[:ref] }.uniq
   end
 
-  # Never the MR's own target: no reader of `mr.target_branch` exists anywhere in
-  # the tree, `MrManager#create_mr` and `RepoRebaser` both read the config, and
-  # the probe is per project once per cycle, so it structurally cannot read a
-  # per-MR value. One definition or the two diverge again.
+  # Never the branch under review — the MR's *source* branch, the one an MR can
+  # modify and therefore the one Autodev #79's ruling excludes. That is the whole
+  # of this file's subject, and it is untouched by the review round: what moved is
+  # only *which* target branch decides, and a merge request cannot modify its own
+  # target.
   def test_the_branch_under_review_is_never_the_ref
     client = FakeGitlab.new(files: { 'master' => TARGET_SKILL })
     review(client: client, branch_files: { CANONICAL => 'stale' })
@@ -256,13 +279,25 @@ class ReviewReadsTheSkillFromTheTargetBranchTest < Minitest::Test
     refute_includes client.calls.filter_map { |call| call[:ref] }, 'autodev/issue-4242'
   end
 
-  # Unset means "the repository's default branch", the fallback `MrManager` and
-  # `RepoRebaser` already take — and it is read once, not once per question.
-  def test_with_no_target_branch_configured_the_repository_default_branch_decides
-    client = FakeGitlab.new(files: { 'trunk' => TARGET_SKILL }, default_branch: 'trunk')
-    review(client: client, target_branch: nil)
+  # And where a merge request is what decides, the configuration is not read at
+  # all: a target that moved under an open merge request must not reach the review.
+  def test_a_configuration_that_moved_does_not_decide_for_an_open_merge_request
+    client = FakeGitlab.new(files: { 'staging' => TARGET_SKILL })
+    client.mr_target = 'staging'
+    review(client: client, target_branch: 'master')
 
-    assert_equal ['trunk'], client.calls.filter_map { |call| call[:ref] }.uniq
+    assert_equal ['staging'], client.calls.filter_map { |call| call[:ref] }.uniq
+  end
+
+  # Question 1's half of `ref_for`, which is the probe's — no merge request in
+  # hand. Unset means "the repository's default branch", the fallback `MrManager`
+  # and `RepoRebaser` already take, and it is read once rather than once per
+  # question.
+  def test_with_no_merge_request_and_no_target_branch_the_repository_default_decides
+    client = FakeGitlab.new(files: { 'trunk' => TARGET_SKILL }, default_branch: 'trunk')
+    source = ReviewSkillSource.locate(client, project_config(target_branch: nil, skill: SKILL), SKILL)
+
+    assert_equal 'trunk', source[:ref]
     assert_equal(1, client.calls.count { |call| call[:kind] == :project })
   end
 
@@ -335,13 +370,16 @@ class ReviewReadsTheSkillFromTheTargetBranchTest < Minitest::Test
 
   # --- the cost ------------------------------------------------------------
 
-  # One `get_file` locates the layout (the Autodev #81 question, shared with the
-  # probe), one `tree` enumerates the subtree, one `file_contents` per blob.
+  # One `merge_request` names the ref (question 2, Autodev #91 — the read
+  # `FailureHandler#prepare_work_dir` also makes rather than threading the value
+  # down through six frames), one `get_file` locates the layout (the Autodev #81
+  # question, shared with the probe), one `tree` enumerates the subtree, one
+  # `file_contents` per blob.
   def test_the_cost_is_one_locate_one_tree_and_one_read_per_blob
     client = FakeGitlab.new(files: { 'master' => TARGET_SKILL })
     review(client: client)
 
-    assert_equal([[:get_file, CANONICAL], [:tree, "#{SKILLS_DIR}/#{SKILL}"],
+    assert_equal([[:merge_request, nil], [:get_file, CANONICAL], [:tree, "#{SKILLS_DIR}/#{SKILL}"],
                   [:file_contents, CANONICAL], [:file_contents, REFERENCE]],
                  client.calls.map { |call| [call[:kind], call[:file]] })
   end
@@ -378,8 +416,8 @@ class ReviewReadsTheSkillFromTheTargetBranchTest < Minitest::Test
   # configured `target_branch` that has been deleted or renamed would therefore
   # read as "the skill is missing" and put the blame on the configuration.
   # Decision taken: abort, the line waits.
-  def test_a_configured_ref_that_does_not_exist_aborts_rather_than_accusing
-    client = FakeGitlab.new(files: {}, refs: ['staging'])
+  def test_a_ref_that_does_not_exist_aborts_rather_than_accusing
+    client = FakeGitlab.new(files: {}, refs: ['some-other-branch'])
 
     assert_raises(ApiUnavailableError) { review(client: client, target_branch: 'master') }
   end
@@ -409,10 +447,21 @@ class ReviewReadsTheSkillFromTheTargetBranchTest < Minitest::Test
     assert_raises(ApiUnavailableError) { review(client: client) }
   end
 
+  # The read that names the ref, on both halves of the question: the merge
+  # request's for the review, the repository's default for the probe. Neither may
+  # answer `missing`.
+  def test_a_merge_request_read_that_failed_aborts_instead_of_accusing
+    client = FakeGitlab.new(files: { 'master' => TARGET_SKILL }, failing: :merge_request)
+
+    assert_raises(ApiUnavailableError) { review(client: client) }
+  end
+
   def test_a_default_branch_read_that_failed_aborts_instead_of_accusing
     client = FakeGitlab.new(files: { 'master' => TARGET_SKILL }, failing: :project)
 
-    assert_raises(ApiUnavailableError) { review(client: client, target_branch: nil) }
+    assert_raises(ApiUnavailableError) do
+      ReviewSkillSource.locate(client, project_config(target_branch: nil, skill: SKILL), SKILL)
+    end
   end
 
   # `Reviewer#launch_review` already answers `ApiUnavailableError` (Autodev #74,
@@ -459,8 +508,8 @@ class ReviewReadsTheSkillFromTheTargetBranchTest < Minitest::Test
     refute_path_exists work_dir
   end
 
-  def test_the_review_clone_is_removed_when_the_configured_ref_does_not_exist
-    client = FakeGitlab.new(files: {}, refs: ['staging'])
+  def test_the_review_clone_is_removed_when_the_ref_does_not_exist
+    client = FakeGitlab.new(files: {}, refs: ['some-other-branch'])
     assert_raises(ApiUnavailableError) { review(client: client, target_branch: 'master') }
 
     refute_path_exists work_dir
