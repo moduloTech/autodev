@@ -67,6 +67,20 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
   # Everything the sweep may touch on GitLab, with per-iid overrides so one
   # client can serve a multi-row population — which is the shape production has.
+  #
+  # It **keeps state**: a write is visible to the next read. That is what makes
+  # the verification the sweep performs after reposing the working label testable
+  # at all, and two GitLab behaviours are modelled on purpose because the sweep
+  # now depends on both:
+  #
+  #   * a `labels=` write replaces the whole list, and GitLab keeps a single value
+  #     per scoped-label key — posing `Development::Doing` is what drops
+  #     `Development::Awaiting CR`, which is a label no autodev config names;
+  #   * `assignee_ids:` replaces the whole assignee list, humans included.
+  #
+  # `label_error_iids` / `assignee_error_iids` fail one write and nothing else:
+  # `LabelManager#manage_labels` answers a GitLab error with `[]`, so the failed
+  # label write is silent by construction and only the read-back finds it.
   class StubClient
     attr_reader :edits, :created_notes
 
@@ -74,12 +88,13 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
       @opts = opts
       @edits = []
       @created_notes = []
+      @issues = {}
     end
 
     def issue(_path, iid)
       raise Gitlab::Error::ResponseError, response if Array(@opts[:issue_error_iids]).include?(iid)
 
-      (@opts[:gl_issues] || {})[iid] || @opts[:gl_issue] || ReviewArrearsSweepTest.default_gl_issue
+      stored(iid)
     end
 
     def merge_request(_path, iid)
@@ -90,8 +105,15 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
     def issue_notes(_path, _iid, **_opts) = Paginated.new(Array(@opts[:notes]))
     def issue_label_events(_path, _iid) = Array(@opts[:label_events])
-    def edit_issue(path, iid, **opts) = @edits << [path, iid, opts]
     def edit_issue_note(_path, _iid, _note_id, _body) = nil
+
+    def edit_issue(path, iid, **opts)
+      refuse_write(opts, iid)
+      @edits << [path, iid, opts]
+      apply_labels(iid, opts[:labels]) if opts.key?(:labels)
+      apply_assignees(iid, opts[:assignee_ids]) if opts.key?(:assignee_ids)
+      stored(iid)
+    end
 
     def create_issue_note(path, iid, _body)
       @created_notes << [path, iid]
@@ -100,8 +122,39 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
     def label_edits = @edits.select { |_path, _iid, opts| opts.key?(:labels) }
     def assignee_edits = @edits.select { |_path, _iid, opts| opts.key?(:assignee_ids) }
+    def labels_of(iid) = stored(iid).labels
+    def assignees_of(iid) = Array(stored(iid).assignees).map(&:id)
 
     private
+
+    # Materialised once per iid, and copied, so a write on one row of a
+    # multi-row population is not a write on all of them.
+    def stored(iid)
+      @issues[iid] ||= copy((@opts[:gl_issues] || {})[iid] || @opts[:gl_issue] ||
+                            ReviewArrearsSweepTest.default_gl_issue)
+    end
+
+    def copy(src) = FakeGlIssue.new(src.state, Array(src.assignees).dup, Array(src.labels).dup)
+
+    def refuse_write(opts, iid)
+      failing = { labels: :label_error_iids, assignee_ids: :assignee_error_iids }
+                .any? { |key, option| opts.key?(key) && Array(@opts[option]).include?(iid) }
+      raise Gitlab::Error::ResponseError, response if failing
+    end
+
+    def apply_labels(iid, csv)
+      by_scope = csv.to_s.split(',').to_h { |name| [scope_of(name) || name, name] }
+      stored(iid).labels = by_scope.values
+    end
+
+    def scope_of(name)
+      key, separator, = name.rpartition('::')
+      separator.empty? ? nil : key
+    end
+
+    def apply_assignees(iid, ids)
+      stored(iid).assignees = Array(ids).map { |id| FakeAssignee.new(id) }
+    end
 
     def response = FakeResponse.new('boom', 500, FakeRequest.new('https://gitlab.example', '/api/v4/x'))
   end
@@ -223,9 +276,10 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
     assert_includes @out.string, 'APPLY=1'
   end
 
-  # The MR facts travel to the operator, and none of them is a filter: a review
-  # reads a diff, it does not need a mergeable MR, and a conflict is exactly what
-  # a human has to be told about.
+  # The MR facts travel to the operator, and none of them is a filter — the
+  # conflicts included, and deliberately (Matthieu, 01/09/2026): resolving a
+  # conflict is part of autodev's work, `RepoRebaser` already does it for any
+  # merge request, and 12 of these 23 are in conflict.
   def test_the_report_carries_the_merge_request_facts
     arrear
     sweep(StubClient.new(mr: FakeMr.new('opened', 'conflict', true)))
@@ -233,6 +287,9 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
     assert_includes @out.string, 'state opened, merge status conflict, conflicts yes'
   end
 
+  # Which also means: the first row a default run re-arms is the one most likely
+  # to reach a danger-claude conflict resolution and a force-push on a client
+  # branch, at the correction round after the review.
   def test_a_conflicted_merge_request_is_still_eligible
     issue = arrear
 
@@ -502,18 +559,21 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
   # Without this, `dispatch_unassignment` sweeps `checking_pipeline`, finds
   # autodev is not the assignee and CLOSES the row at the next cycle, with a
-  # GitLab comment on a human's ticket.
-  def test_a_rearmed_request_is_reassigned_to_autodev
+  # GitLab comment on a human's ticket. Autodev is *added* to the list, never
+  # substituted for it — see section 11.
+  def test_a_rearmed_request_is_assigned_to_autodev
     issue = arrear
-    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID)], [DOING]))
+    client = handed_back_client
 
     sweep(client, apply: true, include_author_handback: true)
 
-    assert_equal [[PATH, issue.issue_iid, { assignee_ids: [AUTODEV_USER_ID] }]], client.assignee_edits
+    assert_includes client.assignees_of(issue.issue_iid), AUTODEV_USER_ID
   end
 
-  # `apply_label_doing` is load-bearing, not decorative: it strips the end labels,
-  # and without it `stop_on_handover` reads a `workflow_moved` and closes the row.
+  # `apply_label_doing` is load-bearing, not decorative: without the working
+  # label `stop_on_handover` reads a handover and closes the row. This case is
+  # the configured one (`label_attention`, which `other_workflow_labels` names);
+  # section 10 covers the one it does not.
   def test_rearming_strips_the_end_label
     arrear
     client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTODEV_USER_ID)],
@@ -571,34 +631,335 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
   # --- 9. re-armed once, then given up again --------------------------------
 
-  # Without this marker the row comes back with `review_count` still at 0 and the
-  # sweep re-arms it every other run, forever.
-  def test_a_request_already_rearmed_once_is_not_rearmed_again
+  # Without a marker the row comes back with `review_count` still at 0 and the
+  # sweep re-arms it every other run, forever. What the marker has to answer is
+  # "did THIS sweep re-arm this row", and the run below is the only thing that
+  # can put it there.
+  def test_a_request_this_sweep_already_rearmed_is_not_rearmed_again
     issue = arrear
-    reentry_event(issue)
+    client = StubClient.new
+    sweep(client, apply: true)
+    abandon_again(issue)
+    @out = StringIO.new
 
-    tally = sweep(StubClient.new, apply: true)
+    tally = sweep(client, apply: true)
 
     assert_equal 'done', issue.reload.status
     assert_equal 1, tally[:already_swept]
   end
 
+  # The production shape, measured on the 01/09/2026 copy: 7 of the 23 rows
+  # already carry a `reenter_to_check_pipeline` transition, all of them dated
+  # June or July 2026 — BEFORE the August `finished_at` this sweep exists to
+  # correct. That event has three writers (a human reposing the todo label,
+  # `PollRouter#resume_recovered_infra`, and this sweep), and before Autodev #85
+  # the infra one wrote `review_count: 1`, which is what used to keep those rows
+  # out of the population. Reading the bare event name as "this sweep has re-armed
+  # it" discards 30% of the arrears, silently and for ever.
+  def test_a_reentry_this_sweep_did_not_write_is_not_its_marker
+    issue = arrear
+    reentry_event(issue, at: Time.parse('2026-07-06T13:58:07Z'))
+
+    tally = sweep(StubClient.new, apply: true)
+
+    assert_equal 'checking_pipeline', issue.reload.status
+    assert_equal [0, 1], [tally[:already_swept], tally[:rearmed]]
+  end
+
+  # Same fact from the other side: the marker is written by the transition
+  # itself, so it names its origin rather than its destination.
+  def test_the_rearm_records_its_origin_on_the_transition_row
+    issue = arrear
+
+    sweep(StubClient.new, apply: true)
+
+    payloads = ActivityEvent.where(issue_id: issue.id, kind: 'transition').map(&:payload)
+
+    assert_equal([PollRouter::REVIEW_ARREARS_ORIGIN], payloads.map { |p| p['origin'] })
+  end
+
+  # A human reposing the todo label must not leave the sweep's marker behind.
+  def test_a_human_reentry_records_no_origin
+    issue = arrear(status: 'done', needs_attention: false, attention_reason: nil)
+    router = PollRouter.new(config: CONFIG, project_config: PROJECT, logger: StubLogger.new,
+                            token: 'x', pool: nil)
+    GitlabHelpers.stub(:current_user_id, AUTODEV_USER_ID) do
+      router.send(:resume_via_pipeline_check, issue, StubClient.new)
+    end
+
+    payload = ActivityEvent.where(issue_id: issue.id, kind: 'transition').first.payload
+
+    refute payload.key?('origin'), "a reentry nobody attributed must carry no origin: #{payload.inspect}"
+  end
+
+  # --- 10. a re-arm that could not be finished ------------------------------
+
+  # The chain the sweep used to walk into: `rearm` transitions the row, and only
+  # then does `reenter_via_pipeline_check` call `apply_label_doing`, whose
+  # `manage_labels` answers a GitLab error with a log line and `[]`. A transient
+  # 500 therefore left `checking_pipeline` + `needs_attention: false` in the
+  # database and the end label untouched on GitLab — and `dispatch_unassignment`,
+  # which runs before `dispatch_pipelines`, reads that as a handover, closes the
+  # row and posts a comment blaming a human for a move nobody made.
+  def test_a_label_write_that_fails_stops_the_rearm
+    issue = arrear
+    client = failing_label_client(issue)
+
+    tally = sweep(client, apply: true)
+
+    assert_equal 'done', issue.reload.status
+    assert_equal 1, tally[:incomplete]
+    assert_empty client.assignee_edits
+  end
+
+  def test_a_label_write_that_fails_leaves_no_transition_behind
+    issue = arrear
+
+    sweep(failing_label_client(issue), apply: true)
+
+    assert_equal 0, ActivityEvent.where(issue_id: issue.id).count
+  end
+
+  # The end of the same chain, asked of the ticket the sweep actually leaves on
+  # GitLab: `LabelHandover#verdict` is the one definition of "somebody moved this
+  # on", and a successfully re-armed ticket must not answer it.
+  def test_a_rearmed_ticket_carries_no_handover_verdict
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTODEV_USER_ID)], [MOVED_ON]),
+                            label_events: [moved_on_by(OTHER_HUMAN_ID)])
+    sweep(client, apply: true)
+
+    GitlabHelpers.stub(:current_user_id, AUTODEV_USER_ID) do
+      assert_nil handover_for(client).verdict(client.issue(PATH, issue.issue_iid), issue.issue_iid)
+    end
+  end
+
+  # `other_workflow_labels` is `labels_todo + label_doing + label_done +
+  # label_attention` and knows nothing of `Development::Awaiting CR`, which five
+  # production rows carry: autodev asks for it to stay. What removes it is
+  # GitLab's own one-value-per-scope rule, applied to the `labels=` write that
+  # poses `Development::Doing` beside it — which is why the sweep verifies the
+  # result instead of trusting the request.
+  def test_an_unconfigured_end_label_is_dropped_by_gitlabs_scope_exclusivity
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTODEV_USER_ID)], [MOVED_ON]))
+
+    sweep(client, apply: true)
+
+    assert_equal([[MOVED_ON, DOING]], client.label_edits.map { |_p, _i, opts| opts[:labels].split(',') })
+    assert_equal [DOING], client.labels_of(issue.issue_iid)
+  end
+
+  # Two different natures, and the report has to tell them apart: nothing could
+  # be established about the row (no slot spent, nothing written) versus the
+  # re-arm started and stopped half-way (a slot spent, GitLab written to).
+  def test_a_write_failure_is_not_reported_as_a_read_failure
+    issue = arrear
+
+    tally = sweep(failing_label_client(issue), apply: true)
+
+    assert_equal 0, tally[:unreadable]
+    refute_includes @out.string, 'could not be examined'
+    assert_includes @out.string, 'incomplete'
+  end
+
+  # The mirror of `test_an_unreadable_row_does_not_consume_a_slot`: a row the
+  # sweep started writing to did consume its slot, whatever the outcome.
+  def test_a_rearm_that_started_and_failed_consumes_its_slot
+    failing = arrear(issue_iid: 860, mr_iid: 900)
+    eligible = arrear(issue_iid: 861, mr_iid: 901, finished_at: GIVEN_UP_AT + 3600)
+    client = StubClient.new(gl_issues: { 860 => end_labelled_issue }, label_error_iids: [860])
+
+    tally = sweep(client, apply: true, limit: 1)
+
+    assert_equal [0, 1, 1], [tally[:rearmed], tally[:incomplete], tally[:deferred]]
+    assert_equal %w[done done], [failing.reload.status, eligible.reload.status]
+  end
+
+  # `router_for` used to run AFTER `reclaim`, so a project missing from the
+  # configuration reassigned the ticket to autodev and then raised.
+  def test_a_row_whose_project_is_not_configured_writes_nothing
+    issue = arrear(project_path: 'group/not-in-the-config')
+    client = StubClient.new
+
+    tally = sweep(client, apply: true)
+
+    assert_equal [1, 0], [tally[:unreadable], tally[:rearmed]]
+    assert_empty client.edits
+    assert_equal 'done', issue.reload.status
+  end
+
+  # The only write left after the assignment is the local transition. If it goes,
+  # the ticket must not stay assigned to autodev: nothing sweeps a `done` row, so
+  # the human silently lost their assignment and — the part that matters — the
+  # next default run would accept the row on `assigned_to_autodev?` alone, which
+  # is exactly the widening `INCLUDE_AUTHOR_HANDBACK=1` is supposed to gate.
+  def test_a_rearm_that_fails_after_the_assignment_hands_the_ticket_back
+    issue = arrear
+    client = handed_back_client
+
+    tally = exploding_sweep(client, include_author_handback: true)
+
+    assert_equal 'done', issue.reload.status
+    assert_equal 1, tally[:incomplete]
+    assert_equal [AUTHOR_ID], client.assignees_of(issue.issue_iid)
+  end
+
+  def test_a_rearm_that_failed_does_not_widen_the_default_population
+    issue = arrear
+    client = handed_back_client
+    exploding_sweep(client, include_author_handback: true)
+    @out = StringIO.new
+
+    tally = sweep(client, apply: true)
+
+    assert_equal [1, 0], [tally[:not_ours], tally[:rearmed]]
+    assert_equal 'done', issue.reload.status
+  end
+
+  # --- 11. the assignee list is not autodev's to empty ----------------------
+
+  # `assigned_to_autodev?` is an `.any?`, so a ticket assigned to autodev AND to
+  # a human passes the strict filter — and `assignee_ids: [<autodev>]` then took
+  # the human off the ticket, without a word.
+  def test_reclaiming_keeps_the_humans_already_on_the_ticket
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID),
+                                                                 FakeAssignee.new(AUTODEV_USER_ID)], [DOING]))
+
+    sweep(client, apply: true)
+
+    assert_equal [OTHER_HUMAN_ID, AUTODEV_USER_ID], client.assignees_of(issue.issue_iid)
+  end
+
+  def test_reclaiming_adds_autodev_beside_the_author
+    issue = arrear
+    client = handed_back_client
+
+    sweep(client, apply: true, include_author_handback: true)
+
+    assert_equal [[PATH, issue.issue_iid, { assignee_ids: [AUTHOR_ID, AUTODEV_USER_ID] }]],
+                 client.assignee_edits
+  end
+
+  # The `manage_labels` rule applied to the assignee list: a write that would
+  # change nothing is not made.
+  def test_a_ticket_already_assigned_to_autodev_is_not_reassigned
+    arrear
+    client = StubClient.new
+
+    sweep(client, apply: true)
+
+    assert_empty client.assignee_edits
+  end
+
+  # --- 12. LIMIT is an operator-typed number --------------------------------
+
+  def test_an_absent_or_empty_limit_is_the_default
+    assert_equal([3, 3, 3], [nil, '', '  '].map { |raw| Autodev::ReviewArrearsSweep.limit_from(raw) })
+  end
+
+  def test_a_limit_inside_the_range_is_read_in_base_ten
+    assert_equal([5, 10], %w[5 010].map { |raw| Autodev::ReviewArrearsSweep.limit_from(raw) })
+  end
+
+  # `LIMIT=30`, one keystroke away from 3, re-armed the whole arrears in one run
+  # — the shape of the 11/08/2026 incident the default exists to prevent.
+  def test_a_limit_above_the_ceiling_is_refused
+    error = assert_raises(ConfigError) { Autodev::ReviewArrearsSweep.limit_from('30') }
+
+    assert_includes error.message, 'LIMIT'
+    assert_includes error.message, Autodev::ReviewArrearsSweep::LIMIT_SPEC.max.to_s
+  end
+
+  def test_a_limit_at_or_below_zero_is_refused
+    %w[0 -1].each do |raw|
+      assert_raises(ConfigError, "LIMIT=#{raw} must be refused") { Autodev::ReviewArrearsSweep.limit_from(raw) }
+    end
+  end
+
+  def test_a_limit_that_is_not_an_integer_is_refused
+    %w[abc 3.7].each do |raw|
+      assert_raises(ConfigError, "LIMIT=#{raw} must be refused") { Autodev::ReviewArrearsSweep.limit_from(raw) }
+    end
+  end
+
   def test_the_report_tells_a_never_swept_request_from_a_re_abandoned_one
     never = arrear(issue_iid: 850)
     again = arrear(issue_iid: 851)
-    reentry_event(again)
+    sweep_marker_event(again)
 
     sweep(StubClient.new)
 
     assert_match(/##{never.issue_iid} .*never re-armed/, @out.string)
-    assert_match(/##{again.issue_iid} .*re-armed once already/, @out.string)
+    assert_match(/##{again.issue_iid} .*already re-armed by this sweep/, @out.string)
   end
 
   private
 
-  def reentry_event(issue)
-    ActivityEvent.create!(issue_id: issue.id, kind: 'transition', level: 'info',
+  # A router whose transition raises and whose every other method is the real
+  # one: the local write is the last step of a re-arm, and this is what the row
+  # and the ticket look like if it goes. Delegation rather than inheritance,
+  # because `PollRouter.new` is what the test stubs and a subclass would inherit
+  # the stub.
+  class ExplodingRouter
+    def initialize(real) = @real = real
+
+    def repose_working_label(issue, client) = @real.repose_working_label(issue, client)
+
+    def resume_never_reviewed(_issue, _client)
+      raise ActiveRecord::StatementInvalid, 'database is locked'
+    end
+  end
+
+  def end_labelled_issue = FakeGlIssue.new('opened', [FakeAssignee.new(AUTODEV_USER_ID)], [ATTENTION])
+
+  def handed_back_client
+    StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID)], [DOING]))
+  end
+
+  def failing_label_client(issue)
+    StubClient.new(gl_issue: end_labelled_issue, label_error_iids: [issue.issue_iid])
+  end
+
+  def exploding_sweep(client, **)
+    real = PollRouter.new(config: CONFIG, project_config: PROJECT, logger: StubLogger.new,
+                          token: 'x', pool: nil)
+    PollRouter.stub(:new, ExplodingRouter.new(real)) do
+      sweep(client, apply: true, **)
+    end
+  end
+
+  def handover_for(client)
+    Autodev::LabelHandover.new(client: client, path: PATH, project_config: PROJECT, logger: StubLogger.new)
+  end
+
+  def moved_on_by(user_id)
+    FakeLabelEvent.new('add', FakeLabel.new(MOVED_ON), '2026-07-01T10:00:00Z', FakeUser.new(user_id))
+  end
+
+  # A `reenter_to_check_pipeline` transition with no origin — a human reposing
+  # the todo label, or the infra recheck.
+  def reentry_event(issue, at: Time.current)
+    ActivityEvent.create!(issue_id: issue.id, kind: 'transition', level: 'info', created_at: at,
                           payload_json: JSON.generate(from: 'done', to: 'checking_pipeline',
                                                       event: 'reenter_to_check_pipeline'))
+  end
+
+  # The same transition, written by this sweep.
+  def sweep_marker_event(issue)
+    ActivityEvent.create!(issue_id: issue.id, kind: 'transition', level: 'info',
+                          payload_json: JSON.generate(from: 'done', to: 'checking_pipeline',
+                                                      event: 'reenter_to_check_pipeline',
+                                                      origin: PollRouter::REVIEW_ARREARS_ORIGIN))
+  end
+
+  # What `Reviewer#give_up_reviewing` does to a row it abandons a second time,
+  # `update_all` so the AASM trail stays exactly what the first run left.
+  def abandon_again(issue)
+    Issue.where(id: issue.id).update_all(status: 'done', needs_attention: true,
+                                         attention_reason: 'review_failures_exhausted',
+                                         review_count: 0, review_failure_count: 5,
+                                         finished_at: Time.current)
   end
 end

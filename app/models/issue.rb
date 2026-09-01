@@ -258,9 +258,27 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
   # Best-effort: record every AASM transition as an `activity_events` row.
   # Failures must never break the state machine, so any error is swallowed.
-  def emit_activity_event!
-    payload = JSON.generate(from: aasm.from_state.to_s, to: aasm.to_state.to_s,
-                            event: aasm.current_event.to_s.delete_suffix('!'))
+  #
+  # `origin` is the *caller* of the event, and it is recorded only when the
+  # caller names one (Autodev #88 review round). The event name alone answers
+  # "which move was made", never "who made it", and one event with several
+  # writers cannot be read as one of them: `reenter_to_check_pipeline` is fired
+  # by a human reposing the todo label, by `PollRouter#resume_recovered_infra`
+  # and by `Autodev::ReviewArrearsSweep`, and reading its bare presence as the
+  # sweep's own idempotence marker discarded 7 of the 23 rows the sweep exists
+  # to rescue — each of them carrying a June/July reentry from one of the other
+  # two writers, months before the August give-up being corrected.
+  #
+  # Recorded here rather than in a column of its own because this row is the
+  # write the transition already makes: the marker then exists if and only if
+  # the move happened, with no second write to fail on its own. `transition` is
+  # not an `ActivityEvent::MACHINERY_KINDS` member, so the janitor never prunes
+  # it. AASM 5.5 invokes a zero-arity callback without arguments, so the three
+  # sibling callbacks on `after_all_transitions` are untouched.
+  def emit_activity_event!(origin = nil)
+    payload = JSON.generate({ from: aasm.from_state.to_s, to: aasm.to_state.to_s,
+                              event: aasm.current_event.to_s.delete_suffix('!'),
+                              origin: origin&.to_s }.compact)
     ActivityEvent.create(issue_id: id, kind: 'transition', level: 'info', payload_json: payload)
   rescue StandardError
     nil

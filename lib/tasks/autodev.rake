@@ -91,9 +91,13 @@ end
 # filter to the tickets autodev itself handed back to their author. Idempotent (a
 # re-armed row leaves the population, and one re-armed once is never re-armed
 # again).
+# `LIMIT` is read through the sweep's own declaration, which carries the range as
+# well as the type: `NumericSettings.integer` alone accepted `LIMIT=30` — one
+# keystroke from 3 — and re-armed the whole arrears in a single run. A rejected
+# value raises `ConfigError` and the task aborts before a row is examined.
 def autodev_recheck_review_arrears
-  limit = NumericSettings.integer(ENV.fetch('LIMIT', nil)) || Autodev::ReviewArrearsSweep::DEFAULT_LIMIT
-  Autodev::ReviewArrearsSweep.new(config: Web.config, apply: ENV['APPLY'] == '1', limit: limit,
+  Autodev::ReviewArrearsSweep.new(config: Web.config, apply: ENV['APPLY'] == '1',
+                                  limit: Autodev::ReviewArrearsSweep.limit_from(ENV.fetch('LIMIT', nil)),
                                   include_author_handback: ENV['INCLUDE_AUTHOR_HANDBACK'] == '1').run
 end
 
@@ -127,7 +131,7 @@ namespace :autodev do
   task(recheck_clarifications: :environment) { autodev_recheck_clarifications }
 
   desc 'Send the requests given up on an exhausted review budget without ever having been reviewed ' \
-       'back to the pipeline check. Reports only unless APPLY=1. LIMIT=N per run (default 3), ' \
+       'back to the pipeline check. Reports only unless APPLY=1. LIMIT=N per run (default 3, max 10), ' \
        'INCLUDE_AUTHOR_HANDBACK=1 widens the ownership filter. Idempotent.'
   task(recheck_review_arrears: :environment) { autodev_recheck_review_arrears }
 end
