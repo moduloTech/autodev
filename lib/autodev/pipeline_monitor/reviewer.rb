@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'tmpdir'
+
 class PipelineMonitor
   # Runs mr-review on the MR after a green pipeline.
   # Manages review_count and transitions via review_done!.
@@ -221,9 +223,21 @@ class PipelineMonitor
     # ImplementationError, which execute_mr_review's rescue turns into `false`
     # — a review failure counted by launch_review, not a failed request.
     #
-    # chdir: Dir.pwd keeps the previous behaviour. Open3.capture3 inherited the
-    # process's cwd, and mr-review works through the GitLab API rather than in a
-    # local clone, so it has no repo to sit in.
+    # chdir: is Dir.tmpdir — neutral, declared, and always present (Autodev #77).
+    # It used to be Dir.pwd, "keeping the previous behaviour" of the Open3.capture3
+    # era: whatever cwd the worker happened to have (in production
+    # `/Users/modulotech`, the launchd plist's WorkingDirectory). That was an
+    # absence of decision, and it is what made #77's original diagnosis — that
+    # mr-review reads autodev's own CLAUDE.md as the project's conventions —
+    # plausible on reading.
+    #
+    # The directory is indifferent because mr-review sits in none of it: it clones
+    # the MR's source branch itself (/tmp/mr-review_<mr_iid>_<pid>) and runs every
+    # command it delegates with `chdir:` into that clone — which is the "repo root"
+    # its review prompt means when it asks for CLAUDE.md — and every other path it
+    # touches is absolute (~/.mr-review/mr-review.db, its tempfiles). All that is
+    # required of the value is that it exist: Process.spawn fails outright
+    # otherwise, and a review failure is what that would look like.
     #
     # Both streams and the exit status are reported on failure (Autodev #49).
     # Keeping stderr alone made every production failure log the same empty line,
@@ -231,7 +245,9 @@ class PipelineMonitor
     def run_mr_review_command(mr_url)
       log "Running mr-review on #{mr_url}..."
       dc_heartbeat!('mr-review')
-      out, err, ok, status = run_with_timeout('mr-review', ['-H', mr_url], chdir: Dir.pwd, timeout: mr_review_timeout)
+      out, err, ok, status = run_with_timeout(
+        'mr-review', ['-H', mr_url], chdir: Dir.tmpdir, timeout: mr_review_timeout
+      )
       return log('Review completed successfully') || true if ok
 
       log_error "mr-review failed (non-fatal): #{review_failure_diagnostic(out, err, status)}"
