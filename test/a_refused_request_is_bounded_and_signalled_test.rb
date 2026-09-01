@@ -146,6 +146,41 @@ class ARefusedRequestIsBoundedAndSignalledTest < Minitest::Test
     assert_includes client.notes.join("\n"), 'mr_note'
   end
 
+  # Constat 2 of the neutral review. Nothing on this path reads `has_conflicts`,
+  # `merge_status` or `detailed_merge_status` — `ReviewArrearsSweep` does, this
+  # does not — so the only cause autodev can name is the one GitLab handed it.
+  # It used to supply one anyway ("the commonest cause is a merge request in
+  # conflict"), on a client's ticket, for a call that may have nothing to do with
+  # a review: a refused `mr_discussions` read is the same diagnosis with no
+  # finding in play at all.
+  def test_the_give_up_quotes_gitlab_instead_of_supposing_a_cause
+    row = fixing_issue
+    client = nil
+    threshold.times do
+      client = fix(row, error: refusal(what: :mr_discussions, message: 'Scope must be one of: all, resolved'))
+    end
+    comment = client.notes.join("\n")
+
+    assert_includes comment, 'mr_discussions'
+    assert_includes comment, 'Scope must be one of'
+    refute_match(/conflict|conflit|finding|constat/i, comment)
+  end
+
+  # Constat 3. `ConsecutiveOccurrences` restarts a count when the *signature*
+  # changes and on nothing else: a cycle that refused nothing writes no occurrence,
+  # so it neither adds to the count nor clears it, and outside a human re-arm
+  # nothing empties `stagnation_signatures`. The behaviour is #91's and is kept —
+  # five refusals of the same call are five refusals of the same call, whenever
+  # they happened — but the sentence a human reads may not turn that into "five
+  # polls in a row", which is a different and false claim.
+  def test_a_poll_that_refused_nothing_neither_clears_nor_counts
+    row = watched_issue
+    client = refuse_across_a_healthy_poll(row)
+
+    assert_equal %w[done gitlab_refused_request], [row.reload.status, row.attention_reason]
+    refute_match(/de suite|in a row|running|consecutive/i, client.notes.join("\n"))
+  end
+
   def test_the_give_up_hands_the_ticket_back_to_its_author
     row = watched_issue
     client = nil
@@ -224,6 +259,17 @@ class ARefusedRequestIsBoundedAndSignalledTest < Minitest::Test
   end
 
   private
+
+  # `threshold` refusals with one poll that refused nothing sitting in the middle
+  # of them. The intermediate assertion is here rather than in the test so the
+  # test reads as the one claim it makes.
+  def refuse_across_a_healthy_poll(row)
+    (threshold - 1).times { poll(row) }
+    poll(row, outcome: :inconclusive)
+
+    assert_equal 'checking_pipeline', row.reload.status, 'a poll with no refusal was counted as one'
+    poll(row)
+  end
 
   def watched_issue
     issue = Issue.create!(project_path: PROJECT_PATH, issue_iid: 15_205, mr_iid: 11_258,

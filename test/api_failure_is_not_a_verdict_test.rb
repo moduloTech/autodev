@@ -972,8 +972,8 @@ class DegradedApiValueShapeTest < Minitest::Test
   #   * `lib/autodev/missing_base_bound.rb` — a new boundary, and the decision that
   #     ends a request on a base that is not there. It holds no swallow of any kind
   #     today (since Autodev #95 its counting lives in `ConsecutiveOccurrences`,
-  #     which carries the local `JSON::ParserError` rescue `NAMED` does not match)
-  #     and is scanned so the next one is not free;
+  #     which is now scanned in its own right, below) and is scanned so the next
+  #     one is not free;
   #   * `app/services/autodev/review_arrears_sweep.rb` — the #88 arrears pass:
   #     reads *and* writes on rows it re-arms, with two tallies that mean different
   #     things.
@@ -986,11 +986,30 @@ class DegradedApiValueShapeTest < Minitest::Test
   #     have landed with nothing asking for a sentence;
   #   * `lib/autodev/invalid_request_bound.rb` — the second decision that ends a
   #     request, `missing_base_bound.rb`'s pendant, scanned for the same reason.
+  #
+  # **And two more by that ticket's neutral review, which is the third time in a
+  # week the perimeter did not follow the new code.** Autodev #95 applied the
+  # paragraph above to its two boundary files and not to the two files it added
+  # *underneath* `GitlabHelpers.answer` itself. Demonstrated rather than supposed,
+  # the way the alpha-50 four were: a `rescue StandardError` injected into
+  # `GitlabFailure.refusal_status` and into `ConsecutiveOccurrences.bump` left this
+  # file green — 17 runs, 0 failures — while the first turns every refusal back
+  # into an outage (unbounded retries, the whole ticket undone) and the second
+  # pins every bound's count at 1 (no give-up ever fires again).
+  #
+  #   * `lib/autodev/gitlab_failure.rb` — the classification point of the entire
+  #     family, and the one place an outage is told from a refusal;
+  #   * `lib/autodev/consecutive_occurrences.rb` — the counter behind both bounds.
+  #     Its one `rescue JSON::ParserError` is outside `NAMED`'s alternation by
+  #     construction, so it needs no declaration and gets none (a dead entry is
+  #     what `test_no_declared_swallow_is_dead` refuses); what the file buys is
+  #     that the next clause here is not free.
   SCANNED = %w[
     lib/autodev/pipeline_monitor.rb lib/autodev/mr_fixer.rb lib/autodev/mr_discussions.rb
     lib/autodev/poll_router.rb lib/autodev/review_skill_source.rb lib/autodev/target_branch.rb
     lib/autodev/missing_base_bound.rb lib/autodev/invalid_request_bound.rb
     lib/autodev/review_publisher.rb app/services/autodev/review_arrears_sweep.rb
+    lib/autodev/gitlab_failure.rb lib/autodev/consecutive_occurrences.rb
   ].freeze
 
   SCANNED_DIRS = %w[lib/autodev/pipeline_monitor lib/autodev/mr_fixer lib/autodev/poll_router].freeze

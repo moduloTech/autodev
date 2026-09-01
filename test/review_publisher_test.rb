@@ -142,6 +142,12 @@ class ReviewPublisherTest < Minitest::Test
   # turns into another full clone plus another skill run, forever. An
   # already-published review is a success. Mutating the early return to `nil`
   # survived the whole suite before this (Autodev #74, fix round 2).
+  #
+  # `already_published: true` is carried in the answer since the neutral review of
+  # Autodev #95, and it is load-bearing rather than informational: the delivery
+  # rule added there refuses a `changes_requested` review that anchored nothing,
+  # and without this key that rule could not tell "this call anchored nothing"
+  # from "an earlier cycle anchored it and died before the counter moved".
   def test_an_already_published_review_answers_success_not_inconclusive
     client = StubClient.new
     published = publisher(client)
@@ -150,7 +156,7 @@ class ReviewPublisherTest < Minitest::Test
     second = published.publish(mr_iid: 7, contract: contract(finding))
 
     refute_nil second
-    assert_equal({ posted: 0, demoted: 0 }, second)
+    assert_equal({ posted: 0, demoted: 0, already_published: true }, second)
   end
 
   # `Gitlab::ObjectifiedHash#method_missing` calls `super` for a key the response

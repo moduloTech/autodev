@@ -139,15 +139,58 @@ class PipelineMonitor
                            label: "-p (review via #{skill})", timeout: mr_review_timeout)
     end
 
+    # Three outcomes, and each one is a different thing to have happened.
+    #
+    # `nil` from the publisher = no diff_refs yet, so nothing could be posted at
+    # all. NOT a success: returning true here would increment review_count, and
+    # the next poll would take the post-review branch, find no discussion and
+    # deliver the MR without the review ever having been posted — the exact shape
+    # Autodev #62 exists to remove.
+    #
+    # `:unanchored` is the same family of mistake one step further in, and it is
+    # what the neutral review of Autodev #95 measured on the fallback this ticket
+    # added: see `unanchored_verdict?`.
     def publish_from_contract(issue, path)
       raise ReviewContract::InvalidError, "contract file #{path} was not written" unless File.exist?(path)
 
       contract = ReviewContract.parse(File.read(path))
-      # nil = no diff_refs yet. NOT a success: returning true here would increment
-      # review_count, and the next poll would take the post-review branch, find no
-      # discussion and deliver the MR without the review ever having been posted —
-      # the exact shape Autodev #62 exists to remove.
-      publish_review(issue, contract).nil? ? :inconclusive : true
+      published = publish_review(issue, contract)
+      return :inconclusive if published.nil?
+
+      unanchored_verdict?(contract, published) ? :unanchored : true
+    end
+
+    # Does this review leave anything on the merge request that holds its verdict?
+    #
+    # Until this method existed, `contract.verdict` was read in exactly one place
+    # — the heading of the summary comment — and the delivery was held by the
+    # unresolved discussion threads instead. That worked only for as long as every
+    # blocking finding could be anchored: `green_post_review` asks GitLab for the
+    # threads and never for the contract, a summary comment is a note rather than
+    # a resolvable thread, so a `changes_requested` review whose findings all
+    # became prose left the next poll reading a clean, reviewed merge request and
+    # delivering it under `label_done`. Measured 01/09/2026 on powerpanne 15205,
+    # where the merge request was in conflict and every position came back 400 —
+    # but the conflict is only what revealed it. A review that requests changes on
+    # findings the contract itself makes summary-only (a blocking finding with no
+    # line, an `info`) had the same hole with no refusal in sight.
+    #
+    # So the verdict holds the delivery now, and `posted` is the whole question:
+    # it counts the findings that became unresolved threads, i.e. the only thing
+    # the delivery gate can read. `approve` is deliberately not touched — a review
+    # that approves asks nobody to address anything, and findings it could not
+    # anchor are advice on an approved merge request, which the summary comment
+    # carries honestly.
+    #
+    # `already_published:` is the one exemption, and it is a fact rather than a
+    # guess: an earlier cycle posted this review and died before `review_count`
+    # moved, so this call anchored nothing while the merge request may well carry
+    # threads that earlier one anchored. They are unresolved, and the delivery gate
+    # reads them.
+    def unanchored_verdict?(contract, published)
+      return false if published[:already_published]
+
+      contract.verdict == ReviewContract::CHANGES_REQUESTED && published[:posted].zero?
     end
 
     def review_contract_path(mr_iid)

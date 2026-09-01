@@ -225,6 +225,11 @@ module Autodev
 
       resumer.resume!(existing)
       true
+    #
+    # A 400 is an `InvalidRequestError`, so it is deferred here like an outage and
+    # re-asked every cycle. Left as it is by the neutral review of Autodev #95:
+    # this reads the ticket's own comments, costs nothing per cycle, and a request
+    # parked in `needs_clarification` is waiting on a human anyway.
     rescue ::ApiUnavailableError => e
       @logger.error("Issue ##{gl_issue.iid}: #{e.message} — clarification check deferred", project: @path)
       false

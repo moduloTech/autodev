@@ -40,6 +40,13 @@ class PollRouter
     @client = @route_client = client
     existing = Issue.where(project_path: @project_path, issue_iid: gl_issue.iid).first
     route_by_state(gl_issue, existing)
+  #
+  # `InvalidRequestError` is a member of that family, so a 400 is deferred here
+  # like an outage and would be re-asked for ever. Weighed and left as it is by the
+  # neutral review of Autodev #95: what this wraps is one `client.merge_request`
+  # and one read of the issue's comments, no clone and no model time, and no cause
+  # of a *persistent* 400 on either is known. Nothing here is a unit of work a
+  # bound could give up on, so `InvalidRequestBound` is not extended to it.
   rescue ApiUnavailableError => e
     log_error "Issue ##{gl_issue.iid}: #{e.message} — routing deferred to the next cycle"
     :next

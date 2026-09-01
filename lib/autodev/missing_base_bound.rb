@@ -50,7 +50,10 @@ require_relative 'consecutive_occurrences'
 # The bound is `stagnation_threshold` occurrences of the **same** branch, the
 # setting this repository already uses for "the same thing keeps happening and
 # nothing is moving". A different branch is a different fact and restarts the
-# count, exactly like a pipeline whose failing job set changes.
+# count, exactly like a pipeline whose failing job set changes; a cycle in which
+# the branch was found is not an occurrence at all, so it neither counts nor
+# clears (see `ConsecutiveOccurrences`, and the sinks below, which no longer say
+# "in a row").
 #
 # ## Why the counter is not either stagnation module's
 #
@@ -83,13 +86,13 @@ module MissingBaseBound
     count = missing_base_occurrences(issue, error.branch)
     return log_missing_base_countdown(issue, error, count) if count < stagnation_threshold
 
-    log "Issue ##{issue.issue_iid}: base `#{error.branch}` missing on #{count} consecutive attempts → done"
+    log "Issue ##{issue.issue_iid}: base `#{error.branch}` found missing #{count} times → done"
     abandon_issue(issue, :target_branch_missing, branch: error.branch, count: count)
   end
 
-  # How many attempts in a row have now found *this* branch missing. The signature
-  # is the branch name, so a base that changes has not recurred and the count
-  # restarts — exactly like a pipeline whose failing job set changes.
+  # How many occurrences in a row have now found *this* branch missing. The
+  # signature is the branch name, so a base that changes has not recurred and the
+  # count restarts — exactly like a pipeline whose failing job set changes.
   def missing_base_occurrences(issue, branch)
     ConsecutiveOccurrences.bump(issue, MISSING_BASE_KEY, branch)
   end
@@ -101,6 +104,6 @@ module MissingBaseBound
 
   def log_missing_base_countdown(issue, error, count)
     log "Issue ##{issue.issue_iid}: base `#{error.branch}` is not on the remote " \
-        "(#{count}/#{stagnation_threshold} consecutive)"
+        "(#{count}/#{stagnation_threshold} occurrences for this branch)"
   end
 end

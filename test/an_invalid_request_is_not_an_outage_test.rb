@@ -136,7 +136,7 @@ class AnInvalidRequestIsNotAnOutageTest < Minitest::Test
 
   # 404 has to stay in the family, and not only because several callers read it as
   # a full answer *inside* the block (`ReviewSkillSource#file_on_ref?`,
-  # `TargetBranch#of_merge_request`, `IssueProcessor#branch_exists_on_remote?`).
+  # `TargetBranch.of_merge_request`, `GitOperations#branch_exists_on_remote?`).
   # `ReviewSkillSource#confirm_ref!` reads it back off the converted exception —
   # `raise unless e.cause.is_a?(NotFound)` — so reclassifying it here would break
   # the one place that turns a 404 into `target_branch_missing`.

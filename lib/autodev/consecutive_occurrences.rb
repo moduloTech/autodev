@@ -17,13 +17,29 @@ require 'json'
 #
 # What is shared is the counting, never the decision — the same division
 # `MrState` and `TargetBranch` draw. Each bound owns its key, its threshold, its
-# log lines and its give-up reason; all four agree only on what "in a row" means:
-# a signature that changes is a different fact, and it restarts the count.
+# log lines and its give-up reason; the two agree only on what "in a row" means.
+#
+# ## What "in a row" counts, exactly (neutral review of Autodev #95, constat 3)
+#
+# A run of **occurrences**, not of polls. Only `bump` writes here, so a cycle in
+# which the fact was not true writes nothing: it neither adds to the count nor
+# clears it, and nothing else empties `stagnation_signatures` outside a human
+# re-arm. Five occurrences of the same signature spread over months, with healthy
+# cycles between them, therefore reach the bound.
+#
+# That is deliberate and it is #91's behaviour, kept: the two facts these bounds
+# count — a branch the remote does not have, a request GitLab refuses — are
+# deterministic, each occurrence costs a clone or a full review, and clearing the
+# count on a good cycle would let a fact that alternates with success cost that for
+# ever. What it forbids is a *sentence* built on the other reading: the number this
+# returns may not be handed to a human as "n polls in a row", and neither bound's
+# sinks say it is.
 module ConsecutiveOccurrences
   module_function
 
   # Records one occurrence of `signature` under `key` and returns how many
-  # consecutive ones there have now been.
+  # consecutive ones there have now been — consecutive among the occurrences
+  # recorded under that key, which is the only sequence this module sees.
   def bump(issue, key, signature)
     data = read(issue)
     entry = bumped(data[key] || {}, Digest::SHA256.hexdigest(signature.to_s))

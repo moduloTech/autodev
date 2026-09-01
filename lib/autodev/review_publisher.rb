@@ -16,10 +16,18 @@ class ReviewPublisher
   # nil = this poll could not conclude (no diff_refs yet). Not a verdict, and not
   # a review failure: the row is left where it is and the next cycle re-reads
   # (Autodev #62).
+  #
+  # Otherwise a Hash of what this call left on the merge request, which
+  # `SkillReviewer#unanchored_verdict?` weighs against the contract's verdict. The
+  # already-published arm carries `already_published:` rather than being inferred
+  # from its two zeroes, because it is the one case where "this call anchored
+  # nothing" does not mean "nothing anchors this verdict": an earlier cycle posted
+  # the review and died before the counter moved, so whatever it anchored is on the
+  # merge request, unresolved, and the delivery gate is the right reader of it.
   def publish(mr_iid:, contract:)
     if already_published?(mr_iid)
       @logger.info("MR !#{mr_iid}: review already published, not posting again")
-      return { posted: 0, demoted: 0 }
+      return { posted: 0, demoted: 0, already_published: true }
     end
 
     refs = diff_refs(mr_iid)
@@ -69,7 +77,7 @@ class ReviewPublisher
   # reads a note GitLab returned with a null position (Autodev #95).
   #
   # The rescue is narrow by construction: `InvalidRequestError` is only ever built
-  # for the statuses `GitlabHelpers::INVALID_REQUEST_STATUSES` names, so a 500, a
+  # for the statuses `GitlabFailure::INVALID_REQUEST_STATUSES` names, so a 500, a
   # timeout, a reset connection and a dead credential all leave as
   # `ApiUnavailableError` and abort the publication — an outage must not be
   # answered by silently downgrading a review that could have been posted
@@ -78,8 +86,13 @@ class ReviewPublisher
   # The fallback is this class's rather than its caller's because this is the only
   # object that knows what it was trying to post. A review that produced its
   # findings must not lose them because it cannot pin them to a line: the human
-  # reviewer reads them in the summary comment, and the review counts as the
-  # success it was.
+  # reviewer reads them in the summary comment.
+  #
+  # What that does **not** settle is whether the request may then be delivered,
+  # and the first round of this ticket assumed it did — a review with every
+  # finding demoted went out under `label_done`. `publish` reports `posted` and
+  # `demoted` separately for that reason, and `SkillReviewer#unanchored_verdict?`
+  # is where the verdict is weighed against them.
   def post_finding(mr_iid, refs, finding)
     GitlabHelpers.answer(:mr_discussion) do
       @client.create_merge_request_discussion(@project_path, mr_iid,

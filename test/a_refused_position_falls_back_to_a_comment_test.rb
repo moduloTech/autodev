@@ -16,7 +16,13 @@ require 'autodev/review_publisher'
 # The fallback belongs here rather than to the caller: this is the only object
 # that knows what it was trying to post, and a review that produced its findings
 # must not lose them because it cannot pin them to a line. The human reviewer
-# reads them either way, and the review counts as the success it was.
+# reads them either way.
+#
+# Where the fallback stops is the *delivery*, and this file deliberately does not
+# reach it. `publish` reports `posted` and `demoted` apart so the caller can weigh
+# them against the contract's verdict; that a review with every finding demoted
+# must not go out as reviewed is `a_demoted_review_is_not_a_delivery_test.rb`,
+# added by this ticket's neutral review after the first round delivered one.
 class TheReviewFallsBackToAnUnanchoredCommentTest < Minitest::Test
   class NullLogger
     %i[info warn error debug].each { |level| define_method(level) { |*| nil } }
@@ -95,10 +101,15 @@ class TheReviewFallsBackToAnUnanchoredCommentTest < Minitest::Test
     assert_includes client.notes.first, 'the finding body'
   end
 
-  # The review succeeded. `publish` answering a Hash is what
-  # `publish_from_contract` turns into `true`, i.e. `review_count` moves and the
-  # request carries on its normal course — which is the honest reading, since the
-  # findings are on the merge request.
+  # The review ran, judged and published: `publish` answers a Hash, never nil, so
+  # nothing here reads as "this poll could not conclude".
+  #
+  # What that Hash means for the *delivery* is not decided here, and the first
+  # round of this ticket let it be: `publish_from_contract` read any Hash as
+  # `true`, `review_count` moved, and a `changes_requested` review with every
+  # finding demoted was delivered under `label_done` two polls later. `posted` and
+  # `demoted` are reported apart precisely so that decision can be taken with the
+  # verdict — see `a_demoted_review_is_not_a_delivery_test.rb`.
   def test_the_review_still_counts_as_published
     client = StubClient.new(raise_on_discussion: conflicted_mr_error)
 
