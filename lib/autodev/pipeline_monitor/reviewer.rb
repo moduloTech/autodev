@@ -186,11 +186,19 @@ class PipelineMonitor
     #
     # No `detail:`. It lands on `attention_detail`, which renders verbatim
     # through `web_errors_attention_detail` ("Job(s) en cause : …"), so it may
-    # only carry a failing job name; the skill and its expected path travel as
-    # ordinary template vars to the two sinks that can phrase them.
+    # only carry a failing job name; the skill, its expected path and the ref it
+    # was looked for on travel as ordinary template vars to the two sinks that
+    # can phrase them.
+    #
+    # `ref:` is Autodev #89's addition, and it is what makes the message
+    # actionable rather than misleading. All three sinks used to say "absent from
+    # the repository on the MR branch", which was both the wrong branch and a
+    # branch nobody should fix: the skill is read from the project's target
+    # branch (else the repository's default branch), which is where an operator
+    # has to add it.
     def give_up_on_missing_review_skill(issue, error)
       log_error "Issue ##{issue.issue_iid}: #{error.message}"
-      abandon_issue(issue, :review_skill_missing, skill: error.skill, path: error.relative_path)
+      abandon_issue(issue, :review_skill_missing, skill: error.skill, path: error.relative_path, ref: error.ref)
     end
 
     def reset_review_failure_count(issue)

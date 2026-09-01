@@ -28,15 +28,20 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
   # tripwire: nothing in this path may shell out to git.
   class FakeClient
     Project = Struct.new(:default_branch)
+    Commit = Struct.new(:id)
 
-    attr_reader :asked
+    attr_reader :asked, :confirmed
 
-    def initialize(present: [], raising: nil, raising_on: nil, default_branch: 'main')
+    def initialize(present: [], raising: nil, raising_on: nil, default_branch: 'main', refs: nil)
       @present = present
       @raising = raising
       @raising_on = raising_on
       @default_branch = default_branch
+      # Every ref the repository has. Defaults to "all of them", so a test that
+      # is not about a deleted branch does not have to say so.
+      @refs = refs
       @asked = []
+      @confirmed = []
     end
 
     def project(_path) = Project.new(@default_branch)
@@ -48,6 +53,16 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
       raise Gitlab::Error::NotFound, fake_response(404) unless @present.include?([path, file_path, ref])
 
       Struct.new(:file_path).new(file_path)
+    end
+
+    # The Autodev #89 half: `404 Commit Not Found` and `404 File Not Found` are
+    # both a `Gitlab::Error::NotFound`, so the ref itself is confirmed before the
+    # configuration is accused.
+    def commit(path, ref)
+      @confirmed << [path, ref]
+      raise Gitlab::Error::NotFound, fake_response(404) unless @refs.nil? || @refs.include?(ref)
+
+      Commit.new('deadbeef')
     end
 
     private
@@ -203,6 +218,31 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
     client = FakeClient.new
 
     assert_equal [['modulosource/ff/fast/core', 'missing']], statuses(probe([fast], client))
+  end
+
+  # Before `missing` may be concluded, the ref itself is confirmed — and only
+  # then, so the healthy case pays nothing (Autodev #89).
+  def test_the_ref_is_confirmed_only_when_the_configuration_is_about_to_be_accused
+    present = FakeClient.new(present: [['modulosource/ff/fast/core', SKILL_PATH, 'staging']])
+    probe([fast], present)
+    absent = FakeClient.new
+    probe([fast], absent)
+
+    assert_empty present.confirmed
+    assert_equal [['modulosource/ff/fast/core', 'staging']], absent.confirmed
+  end
+
+  # The trap this shares with the review step (Autodev #89): GitLab answers
+  # `404 Commit Not Found` for a ref that does not exist and `404 File Not Found`
+  # for a file that does not, and both arrive as `Gitlab::Error::NotFound`. A
+  # `target_branch` that has been deleted or renamed therefore looked exactly
+  # like a missing skill, and the health card would have accused a configuration
+  # whose skill is perfectly present on the branch that does exist.
+  def test_a_configured_branch_the_repository_does_not_have_is_unknown_not_missing
+    client = FakeClient.new(refs: ['staging'])
+
+    assert_equal [['modulosource/ff/fast/core', 'unknown']],
+                 statuses(probe([fast('target_branch' => 'gone')], client))
   end
 
   # And the fail-open rule survives the second question: a GitLab error on the

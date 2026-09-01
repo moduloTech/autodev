@@ -5,13 +5,19 @@ module Autodev
   # (Autodev #81, the ticket's option 2.)
   #
   # The tension the ticket states is real: a `SKILL.md` lives in the project's
-  # repository, at the revision of the MR's branch, so the configuration form can
-  # only ever check the *shape* of the name. But "at the revision of the MR
-  # branch" is not the same as "unknowable until the clone". Autodev creates that
-  # branch off the project's target branch, so the target branch is a faithful
-  # proxy, and it is knowable from outside — which turns the check into one
+  # repository, so the configuration form can only ever check the *shape* of the
+  # name. But it is knowable from outside, which turns the check into one
   # question ("does this path exist on this ref") that GitLab's repository-files
   # endpoint answers in a single request.
+  #
+  # This class used to justify its ref by calling the target branch "a faithful
+  # proxy" for the MR branch, on the grounds that autodev cuts the one from the
+  # other. That was true at the cut and false from the first commit after it —
+  # measured on 31/08/2026, 13 of 23 live branches carried no review skill at all
+  # while their target branch did — and the review step meanwhile read the MR
+  # branch, so the two disagreed in production (Autodev #89). There is no proxy
+  # any more: the target branch is the branch that **decides**, for both readers,
+  # and the reason is written down once in `ReviewSkillSource`.
   #
   # So the ticket's estimate of "one clone per project" is not the price. It is
   # one API call per *declaring* project per cycle — two calls at the current
@@ -28,12 +34,6 @@ module Autodev
   # cycle probes once, everyone downstream reads the recorded state.
   class ReviewSkillProbe
     KIND = 'review_skill'
-
-    # A skill *directory* name. Anything else cannot be a path segment under
-    # `.claude/skills/`, so it is answered without asking GitLab — which is also
-    # where the ticket's option 3 (a shape check on the form) ends up, in the one
-    # place where it produces a verdict rather than a second opinion.
-    NAME = /\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
 
     DEFAULT_POLL_INTERVAL = 300
     # Same reasoning as UsageGate's: a verdict is trusted for two poll intervals,
@@ -83,74 +83,23 @@ module Autodev
 
       def unknown = { missing: [], checked: 0, checked_at: nil }
 
-      # `.presence`, the same reading `Reviewer#launch_review` gives it: `''` is
-      # truthy in Ruby and `to_project_config` emits every column of the row, so a
-      # blank has to read as "no skill declared" here too, or the card reports a
-      # fault on a project that takes the `mr-review` binary path.
-      def skill_of(project) = project['review_skill'].to_s.strip.presence
+      def skill_of(project) = ::ReviewSkillSource.declared(project)
 
+      # The question is not asked here (Autodev #89). It is
+      # `ReviewSkillSource`'s, shared with the review step itself, because
+      # asking it twice is what produced the defect that fix is about: this
+      # class asked about the project's target branch, the review step looked in
+      # a clone of the MR's *source* branch, and nothing said so — the probe
+      # answered "present" and was right while the review gave the request up as
+      # `review_skill_missing`.
+      #
+      # What stays here is the *shape* of a recorded fault: the project path, the
+      # declared skill and the canonical path an operator should be told to add,
+      # which are what the health card renders.
       def verdict_for(client, project)
-        path = project['path']
         skill = skill_of(project)
-        base = { path: path, skill: skill, expected: MissingReviewSkillError.skill_path(skill) }
-        return base.merge(ref: nil, status: 'missing') unless skill.match?(NAME)
-        # SkillsInjector writes these into every clone whatever the repository
-        # holds, so the review step will find them regardless.
-        return base.merge(ref: nil, status: 'present') if ::SkillsInjector::SKILL_NAMES.include?(skill)
-
-        resolve(client, base, project)
-      end
-
-      def resolve(client, base, project)
-        ref = ref_for(client, project)
-        return base.merge(ref: nil, status: 'unknown') if ref.nil?
-
-        base.merge(ref: ref, status: layouts_status(client, base, ref))
-      end
-
-      # The same question the review step ends up asking, not an approximation of
-      # it (Autodev #81, fix round 2). `SkillsInjector.skill_paths` lists every
-      # layout a declared skill may take in the repository — the canonical
-      # `<name>/SKILL.md` and the flat `<name>.md` that `migrate_legacy_skills`
-      # moves into it inside the clone, before `skill_available?` looks. Asking
-      # only about the first recorded a project that reviews perfectly well as
-      # `missing`, which is the false accusation this class exists not to make.
-      #
-      # Canonical first, and the loop stops on the first hit, so the sobriety the
-      # ticket asked for is kept where it counts: a fleet on the current layout —
-      # which is both configured projects today — still costs one request per
-      # declaring project per cycle. Only a repository that does not carry it pays
-      # for the second question.
-      #
-      # `NotFound` on *every* layout is the only thing that may read as `missing`;
-      # any other error on any of them is `unknown`, because a read that failed
-      # answers nothing about the configuration (Autodev #62).
-      def layouts_status(client, base, ref)
-        ::SkillsInjector.skill_paths(base[:skill]).each do |path|
-          return 'present' if file_on_ref?(client, base[:path], path, ref)
-        rescue ::Gitlab::Error::NotFound
-          next
-        rescue StandardError
-          return 'unknown'
-        end
-        'missing'
-      end
-
-      def file_on_ref?(client, project_path, file_path, ref)
-        client.get_file(project_path, file_path, ref)
-        true
-      end
-
-      # The branch autodev cuts its MR branch from, hence the revision the review
-      # clone will carry. Unset means "the repository's default branch", the same
-      # fallback `MrManager#create_mr` and `RepoRebaser` take.
-      def ref_for(client, project)
-        configured = project['target_branch'].to_s.strip
-        return configured unless configured.empty?
-
-        client.project(project['path']).default_branch
-      rescue StandardError
-        nil
+        base = { path: project['path'], skill: skill, expected: MissingReviewSkillError.skill_path(skill) }
+        base.merge(::ReviewSkillSource.verdict(client, project, skill).slice(:ref, :status))
       end
 
       # Only the faults are stored. The rest of the fleet is a count: nobody reads

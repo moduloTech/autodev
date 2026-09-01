@@ -26,6 +26,10 @@ class ReviewSkillMissingStopsTheLineTest < Minitest::Test
   include DatabaseTestHelper
 
   SKILL = 'prepare-mr'
+  # The branch that decides the review since Autodev #89 — the project's
+  # `target_branch`, not the MR's own branch. It is part of what the operator is
+  # told, because "missing" without "missing from where" is unactionable.
+  TARGET_BRANCH = 'master'
   PROJECT_CONFIG = { 'path' => 'group/project', 'labels_todo' => ['To do'],
                      'label_doing' => 'Doing', 'label_done' => 'Done',
                      'label_attention' => 'StandBy', 'review_skill' => SKILL }.freeze
@@ -84,7 +88,7 @@ class ReviewSkillMissingStopsTheLineTest < Minitest::Test
     PipelineMonitor.allocate.tap do |mon|
       mon.send(:init_runner, client: @client, config: {}, project_config: PROJECT_CONFIG,
                              logger: NullLogger.new, token: 'tok')
-      error = raising || MissingReviewSkillError.new(SKILL, '/tmp/work')
+      error = raising || MissingReviewSkillError.new(SKILL, TARGET_BRANCH)
       mon.define_singleton_method(:review_with_skill) { |_| raise error }
     end
   end
@@ -123,6 +127,26 @@ class ReviewSkillMissingStopsTheLineTest < Minitest::Test
 
     assert_includes posted, SKILL
     assert_includes posted, ".claude/skills/#{SKILL}/SKILL.md"
+  end
+
+  # Autodev #89: and the branch it was looked for on. Both sinks say it, because
+  # the previous wording ("absent du depot sur la branche de la MR") named a
+  # branch that is neither the one read nor the one to fix.
+  def test_the_gitlab_comment_names_the_branch_it_looked_on
+    row = reviewing_issue
+    monitor.send(:launch_review, row)
+
+    assert_includes @client.notes.join("\n"), TARGET_BRANCH
+  end
+
+  def test_the_activity_line_names_the_branch_it_looked_on
+    row = reviewing_issue
+    monitor.send(:launch_review, row)
+
+    rendered = ActivityEvent.where(issue_id: row.id, kind: 'danger_claude')
+                            .map { |event| JSON.parse(event.payload_json).to_s }.join(' ')
+
+    assert_includes rendered, TARGET_BRANCH
   end
 
   def test_the_activity_line_records_the_cause
