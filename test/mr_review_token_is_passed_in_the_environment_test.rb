@@ -40,8 +40,16 @@ class MrReviewTokenIsPassedInTheEnvironmentTest < Minitest::Test
     end
   end
 
-  AUTODEV_TOKEN = 'glpat-AutodevSharedToken80'
-  SEPARATE_TOKEN = 'glpat-MrReviewOnlyToken80'
+  # Deliberately not shaped like a real credential. Nothing here asserts the
+  # shape — these two only have to be followed from a config key to a spawn's
+  # environment, and to be absent from its argv — and a `glpat-`-shaped literal
+  # costs a permanent argument with every secret scanner that reads this repo.
+  # GitHub's push protection blocked the alpha-50 release over the previous
+  # value, correctly: it matched the pattern, and no scanner can know it was
+  # invented. `Redactor::GITLAB_TOKEN` is what covers the real prefixes, and it
+  # is exercised where scrubbing is the subject, not here.
+  AUTODEV_TOKEN = 'autodev-credential-for-this-test'
+  SEPARATE_TOKEN = 'mr-review-credential-for-this-test'
   MR_URL = 'https://gitlab.example/group/project/-/merge_requests/1'
   ENV_VAR = 'GITLAB_API_TOKEN'
 
