@@ -421,6 +421,23 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
     assert_equal 0, client.label_event_calls
   end
 
+  # Autodev #88 gave the review-arrears sweep its own public entry rather than
+  # borrowing the infra pass's name: the same body, and a name that says which
+  # fact re-armed the row. It is not a short-circuit of the state machine — what
+  # Autodev #60 removed were the `update_all(status: 'done')` writes with no AASM
+  # event, and this one fires `reenter_to_check_pipeline`, so the `transition`
+  # row, the audit log and `stamp_pipeline_watch!` all run.
+  def test_the_review_arrears_entry_reenters_through_the_state_machine
+    issue = done_issue_with_mr(mr_iid: 42, review_count: 0)
+
+    build_router.resume_never_reviewed(issue, StubClient.new(mr_state: 'opened'))
+    issue.reload
+
+    assert_equal 'checking_pipeline', issue.status
+    assert_equal 0, issue.review_count
+    assert_predicate issue.checking_pipeline_since, :present?
+  end
+
   private
 
   def build_router

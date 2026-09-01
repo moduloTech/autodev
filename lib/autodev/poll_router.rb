@@ -52,11 +52,32 @@ class PollRouter
   # over its 0 made the first green pipeline after the recovery skip the review
   # and finish the request under `label_done`.
   def resume_recovered_infra(issue, client)
-    @client = @route_client = client
-    reenter_via_pipeline_check(issue)
+    resume_via_pipeline_check(issue, client)
+  end
+
+  # Public entry for `Autodev::ReviewArrearsSweep` (Autodev #88). Same body as
+  # the one above, and a different name because the two callers are different
+  # facts: one re-arms a request whose CI recovered, the other re-arms a request
+  # no reviewer ever looked at. Neither is a short-circuit of the state machine —
+  # what Autodev #60 removed were the `update_all(status: 'done')` writes with no
+  # AASM event; this path fires `reenter_to_check_pipeline`, so the `transition`
+  # row, the audit log, `stamp_pipeline_watch!` and `persist_status_change!` all
+  # run.
+  #
+  # The caller owns the two things this method deliberately does not: reading
+  # whether the request is still autodev's, and putting autodev back on the
+  # ticket. The infra pass gets the first from its own dispatch query and does not
+  # need the second; the sweep needs both and has different answers.
+  def resume_never_reviewed(issue, client)
+    resume_via_pipeline_check(issue, client)
   end
 
   private
+
+  def resume_via_pipeline_check(issue, client)
+    @client = @route_client = client
+    reenter_via_pipeline_check(issue)
+  end
 
   def init_project_settings(project_config)
     @project_path = project_config['path']

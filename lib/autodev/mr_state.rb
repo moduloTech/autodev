@@ -40,13 +40,20 @@
 #     and let the `post_completion` hook (a deploy) through while GitLab was
 #     performing the merge.
 #
-# What is shared is this predicate and nothing else. The four readers ask
-# different questions — was this delivered, does this need reimplementing, does
-# this need re-arming, does this need deploying — and each keeps its own answer;
-# uniformising the *decisions* would be a different and much worse ticket. What
-# they may not disagree on is whether GitLab said anything at all.
+# A fifth reader joined them with Autodev #88: `ReviewArrearsSweep` re-reads the
+# merge request of a request that was given up before any review ran, and a
+# `locked` MR there means "come back on the next run", not "this one is not
+# re-armable". Its `when 'locked' then :wait` would have been the sixth hand-
+# written copy — the exact fault Autodev #72 repaired in the reentry decision.
 #
-# Four is the whole population, checked rather than assumed. The rest of the
+# What is shared is this predicate and nothing else. The five readers ask
+# different questions — was this delivered, does this need reimplementing, does
+# this need re-arming, does this need deploying, does this need reviewing at last
+# — and each keeps its own answer; uniformising the *decisions* would be a
+# different and much worse ticket. What they may not disagree on is whether
+# GitLab said anything at all.
+#
+# Five is the whole population, checked rather than assumed. The rest of the
 # codebase reads a `state` field that is not a merge request's — `IssueProcessor`'s
 # `issue_closed?` and `ExternalState`'s closed check read the *issue*'s
 # (`opened` / `closed`, no transitional state to speak of) — with one deliberate
