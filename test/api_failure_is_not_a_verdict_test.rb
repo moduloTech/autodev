@@ -468,6 +468,12 @@ class MrFixerApiFailureTest < Minitest::Test
       fixer.instance_variable_set(:@client, client)
       fixer.instance_variable_set(:@project_path, 'group/project')
       fixer.instance_variable_set(:@logger, StubLogger.new)
+      # `init_runner` always sets both in production; the fixture left them out
+      # while nothing on this path read them. `run_fix_round`'s ceiling does
+      # (Autodev #99), and it reads them before the GitLab call these tests are
+      # about — so the omission was the fixture's, not the code's.
+      fixer.instance_variable_set(:@project_config, {})
+      fixer.instance_variable_set(:@config, {})
       %i[log log_error].each { |noop| fixer.define_singleton_method(noop) { |*| nil } }
       fixer.define_singleton_method(:log_activity) { |_issue, key, **vars| activity << [key, vars] }
       fixer.define_singleton_method(:execute_fix_cycle) { |*| nil }

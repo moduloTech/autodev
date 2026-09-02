@@ -51,6 +51,8 @@ class MrFixer
   private
 
   def run_fix_round(issue)
+    return bail_on_fix_rounds(issue) if issue.fix_round >= fix_round_ceiling
+
     log "Checking MR !#{issue.mr_iid} for unresolved discussions (round #{issue.fix_round + 1})..."
     # Read before the activity note, and before anything else this round does
     # (Autodev #62): an unreadable thread list aborts the round at the boundary
@@ -60,6 +62,38 @@ class MrFixer
     discussions = fetch_unresolved_discussions(issue.mr_iid).map { |d| build_discussion(d) }
     log_activity(issue, :discussions_checking, round: issue.fix_round + 1)
     process_discussions(issue, discussions)
+  end
+
+  # A ceiling nothing can neutralise (Autodev #99).
+  #
+  # `discussion_stagnated?` is a *computation*: it builds a signature, compares it
+  # and counts. On 02/09/2026 that computation was simply not reached by the
+  # rounds that mattered — a round producing no commit returned before it — and
+  # powerpanne 15205 reached round 18 over sixteen hours, exhausting the Claude
+  # quota twice. The guard was configured, tested, and had counted to one.
+  #
+  # So this is deliberately NOT a second guard of the same kind. It reads one
+  # integer off the row and compares it, before the thread list is fetched, before
+  # the clone, before any model call — a row past the ceiling spends nothing at
+  # all. What it protects against is not a stagnation (the guard does that) but
+  # the guard itself being unreachable, which is a thing that has now happened.
+  #
+  # Derived from `stagnation_threshold` rather than configured on its own: it is
+  # not a policy an operator tunes, it is the sentence "the guard should have
+  # fired long before here", and three times the threshold is what makes that
+  # unambiguous when it does fire. A project that raises its threshold raises this
+  # with it, for free.
+  def fix_round_ceiling = stagnation_threshold * 3
+
+  # Its own `attention_reason`, never `stagnation_discussions`: reaching here
+  # means the ordinary bound did not do its job, and a give-up that says
+  # "stagnation" would hide exactly the fact worth seeing. `dispatch_infra_recheck`
+  # selects `stagnation_pipeline` alone, so a new reason re-arms nothing.
+  def bail_on_fix_rounds(issue)
+    log "Issue ##{issue.issue_iid}: #{issue.fix_round} fix rounds reached the ceiling " \
+        "of #{fix_round_ceiling} → done"
+    abandon_issue(issue, :fix_rounds_exhausted, detail: issue.fix_round.to_s,
+                                                rounds: issue.fix_round, ceiling: fix_round_ceiling)
   end
 
   def process_discussions(issue, discussions)
