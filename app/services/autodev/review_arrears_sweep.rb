@@ -604,11 +604,20 @@ module Autodev
 
     # The protection that survives every tier, and the reason a username list is
     # not needed on top of it: what makes a row safe to re-arm is that NOBODY has
-    # touched it since autodev gave it up — no human comment, no workflow label
-    # moved by somebody else. A person actively working the ticket fails both.
+    # touched it since autodev gave it up. A person actively working the ticket
+    # fails one of the three.
+    #
+    # The **merge request** is the third, and it was missing (Autodev #98). The
+    # other two ask the ticket — its comments, its workflow label — and reviewing
+    # the merge request is the gesture a reviewer actually makes. While the strict
+    # filter only took rows already assigned to autodev that gap cost nothing;
+    # widening to human-held rows is what makes it matter, so it is closed in the
+    # same ticket that opens the filter.
     def untouched_since_giveup?(issue, gl_issue)
       return false if ::GitlabHelpers.human_comment_since?(@client, issue.project_path,
                                                            issue.issue_iid, issue.finished_at)
+      return false if ::GitlabHelpers.human_mr_comment_since?(@client, issue.project_path,
+                                                              issue.mr_iid, issue.finished_at)
 
       !handover(issue).moved_since?(gl_issue, issue.issue_iid, issue.finished_at)
     end

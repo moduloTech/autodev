@@ -106,6 +106,7 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
     end
 
     def issue_notes(_path, _iid, **_opts) = Paginated.new(Array(@opts[:notes]))
+    def merge_request_notes(_path, _iid, **_opts) = Paginated.new(Array(@opts[:mr_notes]))
     def issue_label_events(_path, _iid) = Array(@opts[:label_events])
     def edit_issue_note(_path, _iid, _note_id, _body) = nil
 
@@ -502,6 +503,62 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
     assert_equal 1, tally[:not_ours]
     assert_equal 'done', issue.reload.status
+  end
+
+  # `human_comment_since?` asks the TICKET, and `moved_since?` asks the ticket's
+  # labels. Neither looks at the merge request — and reviewing the merge request
+  # is the gesture by which somebody says "I have this" (Autodev #98).
+  #
+  # It mattered little while the strict filter only accepted rows already assigned
+  # to autodev. It matters now, because this ticket opens the filter to rows a
+  # human holds: without it the sweep takes the ticket from the very person who
+  # picked the work back up, and posts a notice announcing it.
+  def test_a_human_note_on_the_merge_request_since_the_give_up_declines_the_row
+    issue = arrear
+    client = StubClient.new(
+      gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID, 'someone')], [DOING]),
+      mr_notes: [FakeNote.new(false, '2026-08-06T10:00:00Z', 'Je reprends la relecture de cette MR.')]
+    )
+
+    tally = sweep(client, apply: true, include_human_held: true)
+
+    assert_equal 1, tally[:not_ours]
+    assert_equal 'done', issue.reload.status
+    assert_empty client.edits
+  end
+
+  # Autodev's own review sits on every merge request of this population — it is
+  # the review that never happened's *absence* that defines them, but the fix
+  # rounds and notices are there. Its own voice is not somebody taking the work
+  # back, and reading it as one would decline all twenty.
+  def test_autodevs_own_note_on_the_merge_request_does_not_decline_the_row
+    issue = arrear
+    client = StubClient.new(
+      gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID, 'someone')], [DOING]),
+      mr_notes: [FakeNote.new(false, '2026-08-06T10:00:00Z', ':mag: **autodev** — revue automatique')]
+    )
+
+    tally = sweep(client, apply: true, include_human_held: true)
+
+    assert_equal 1, tally[:rearmed]
+    assert_equal 'checking_pipeline', issue.reload.status
+  end
+
+  # The shape powerpanne MR 10946 actually has: an unresolved human review thread
+  # from 28/07, four days BEFORE the 11/08 give-up. Nobody has come back since, so
+  # the row is still ours — and the guard must not read an old thread as a fresh
+  # gesture, or it declines the rows this sweep exists for.
+  def test_a_human_note_predating_the_give_up_does_not_decline_the_row
+    issue = arrear
+    client = StubClient.new(
+      gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID, 'someone')], [DOING]),
+      mr_notes: [FakeNote.new(false, '2026-07-28T15:27:00Z', 'Et tu n as pas reduit le nombre de colonnes.')]
+    )
+
+    tally = sweep(client, apply: true, include_human_held: true)
+
+    assert_equal 1, tally[:rearmed]
+    assert_equal 'checking_pipeline', issue.reload.status
   end
 
   def test_a_ticket_handed_back_to_its_author_is_declined_without_the_flag
