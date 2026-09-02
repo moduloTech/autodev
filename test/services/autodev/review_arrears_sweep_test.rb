@@ -93,8 +93,13 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
       @issues = {}
     end
 
+    # `issue_error_after_assignment` fails every read taken once the takeover has
+    # been written, which is the read-back's seam and nothing else's — a read
+    # counter would have pinned the number of reads the sweep happens to make
+    # today instead of the moment that matters.
     def issue(_path, iid)
       raise Gitlab::Error::ResponseError, response if Array(@opts[:issue_error_iids]).include?(iid)
+      raise Gitlab::Error::ResponseError, response if @opts[:issue_error_after_assignment] && assignee_edits.any?
 
       stored(iid)
     end
@@ -118,7 +123,12 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
       stored(iid)
     end
 
+    # `announce_takeover` rescues `Gitlab::Error::ResponseError` only, so a
+    # `Net::ReadTimeout` is what gets past it — the third way out of `reclaim`
+    # after the write has landed.
     def create_issue_note(path, iid, body)
+      raise Net::ReadTimeout if @opts[:note_error]
+
       @created_notes << [path, iid, body]
       Struct.new(:id).new(1)
     end
@@ -467,6 +477,21 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
     assert_equal 'checking_pipeline', issue.reload.status
   end
 
+  # The report has to name the reason it actually declined on: a row turned away
+  # because somebody touched the ticket since the give-up is not a row turned away
+  # on ownership, and saying "assigned to user X" sends the reader to the wrong
+  # question (review of the alpha-52 lot).
+  def test_a_row_declined_for_a_human_gesture_does_not_report_an_ownership_reason
+    arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID)], [DOING]),
+                            notes: [FakeNote.new(false, '2026-08-06T10:00:00Z', 'On reprend a la main.')])
+
+    sweep(client, apply: true, include_human_held: true)
+
+    assert_includes @out.string, 'touched the ticket or its merge request since the give-up'
+    refute_includes @out.string, "assigned to user #{OTHER_HUMAN_ID}"
+  end
+
   # The widest tier, and the one the arrears actually need (Autodev #98): 4 of the
   # 20 rows are held by somebody who is not the author, so the tier above declines
   # them however untouched they are.
@@ -695,6 +720,65 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
     assert_includes client.assignees_of(issue.issue_iid), AUTODEV_USER_ID
     assert_equal 'checking_pipeline', issue.reload.status
+  end
+
+  # The takeover has landed on GitLab the moment `edit_issue` returns, and three
+  # things can still raise after it: the read-back (a transport incident on any
+  # `GitlabHelpers.answer` read), the `displaced_assignee_id` write, and the
+  # notice (`announce_takeover` rescues `Gitlab::Error::ResponseError` only).
+  #
+  # `landed` used to record the assignment on `reclaim`'s **return value**, so any
+  # of the three left it unrecorded, `undo` did not restore, and the human was off
+  # the ticket with no notice, no trace and no handback — the silent theft the
+  # comment above `reclaim` says this design prevents. Worse, the row then carried
+  # autodev as its only assignee, so the next **default** run accepted it on
+  # `assigned_to_autodev?` alone: the widening flags leaking through the gate.
+  #
+  # The fix records the fact where it becomes true. These two tests pin the two
+  # seams that are cheap to reach; the `issue.update` one shares the same line.
+  def test_a_takeover_whose_read_back_cannot_run_is_handed_back
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID, 'the-author')], [DOING]),
+                            issue_error_after_assignment: true)
+
+    sweep(client, apply: true, include_author_handback: true)
+
+    assert_equal [AUTHOR_ID], client.assignees_of(issue.issue_iid)
+  end
+
+  def test_a_takeover_whose_notice_cannot_be_posted_is_handed_back
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID, 'the-author')], [DOING]),
+                            note_error: true)
+
+    sweep(client, apply: true, include_author_handback: true)
+
+    assert_equal [AUTHOR_ID], client.assignees_of(issue.issue_iid)
+  end
+
+  # And the report says so, rather than leaving an operator to infer it from the
+  # absence of a sentence.
+  def test_an_interrupted_takeover_reports_the_handback
+    arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID, 'the-author')], [DOING]),
+                            note_error: true)
+
+    sweep(client, apply: true, include_author_handback: true)
+
+    assert_includes @out.string, 'the assignment has been handed back'
+  end
+
+  # A takeover that was undone must not leave the row pointing at the person it
+  # no longer displaced: `IssueNotifier#handback_target` reads that column, and it
+  # would send a later give-up to somebody who is holding the ticket already.
+  def test_an_undone_takeover_forgets_who_it_displaced
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID, 'the-author')], [DOING]),
+                            note_error: true)
+
+    sweep(client, apply: true, include_author_handback: true)
+
+    assert_nil issue.reload.displaced_assignee_id
   end
 
   # The assignment write is the one GitLab Community accepts and ignores, so an

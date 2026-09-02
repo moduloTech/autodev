@@ -7,6 +7,7 @@ require_relative 'poll_router/resume_handler'
 class PollRouter
   include LabelManager
   include ResumeHandler
+  include StaleTransitionBound
 
   # Who fired `reenter_to_check_pipeline`, written on the `transition` row by
   # `Issue#emit_activity_event!`. It lives here rather than on the sweep because
@@ -47,6 +48,14 @@ class PollRouter
   # and one read of the issue's comments, no clone and no model time, and no cause
   # of a *persistent* 400 on either is known. Nothing here is a unit of work a
   # bound could give up on, so `InvalidRequestBound` is not extended to it.
+  # A human moved the row while this cycle was reading (Autodev #97, review of the
+  # alpha-52 lot). Same answer as an unreadable read and for the comment's own
+  # reason: the boundary is per issue so one row does not take the project's cycle
+  # down. Nothing is written and nothing is retried — the row is where somebody
+  # put it.
+  rescue StaleTransitionError => e
+    stop_on_stale_transition(e)
+    :next
   rescue ApiUnavailableError => e
     log_error "Issue ##{gl_issue.iid}: #{e.message} — routing deferred to the next cycle"
     :next
@@ -99,9 +108,13 @@ class PollRouter
   # human for a move nobody made. The sweep therefore poses the label first and
   # reads the ticket back before transitioning anything; the `apply_label_doing`
   # inside the reentry then finds nothing to change and writes nothing.
+  # `clear_scope: true` here and nowhere else (review of the alpha-52 lot): this is
+  # the sweep's entry, and the sweep has already asked `untouched_since_giveup?`
+  # whether a human moved this ticket on. Clearing the scope destroys the evidence
+  # of that question, so it may only happen where the question has been answered.
   def repose_working_label(issue, client)
     @client = @route_client = client
-    apply_label_doing(issue.issue_iid)
+    apply_label_doing(issue.issue_iid, clear_scope: true)
   end
 
   private

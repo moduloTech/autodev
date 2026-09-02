@@ -428,12 +428,16 @@ class MrFixerApiFailureTest < Minitest::Test
   include ApiFailureFixtures
 
   class FakeIssue
-    attr_reader :issue_iid, :mr_iid, :fix_round, :attrs
+    # `discussion_fix_round` alongside `fix_round`: the ceiling in `run_fix_round`
+    # counts the discussion loop alone (review of the alpha-52 lot), and this fake
+    # stands in for a real row, which carries both.
+    attr_reader :issue_iid, :mr_iid, :fix_round, :discussion_fix_round, :attrs
 
     def initialize
       @issue_iid = 11_859
       @mr_iid = 42
       @fix_round = 0
+      @discussion_fix_round = 0
       @attrs = { status: 'fixing_discussions' }
     end
 

@@ -227,7 +227,8 @@ module Autodev
 
       router = router_for(issue.project_path)
       gl_issue = read_issue(issue)
-      return decline(tally, :not_ours, "#{label(issue)} — #{ownership(gl_issue)}") unless still_ours?(issue, gl_issue)
+      verdict = ownership_verdict(issue, gl_issue)
+      return decline(tally, :not_ours, "#{label(issue)} — #{ownership(gl_issue, verdict)}") unless verdict == :ours
 
       consider(Row.new(issue, gl_issue, assignee_ids(gl_issue), usernames_of(gl_issue), router),
                tally, read_mr(issue))
@@ -331,7 +332,7 @@ module Autodev
     def write_rearm(row, landed)
       repose_working_label(row)
       landed << WORKING_LABEL
-      landed << ASSIGNMENT if reclaim(row)
+      reclaim(row, landed)
       row.router.resume_never_reviewed(row.issue, @client)
     end
 
@@ -358,8 +359,12 @@ module Autodev
 
     # The assignee list exactly as `examine` read it, from `Row` rather than from
     # `gl_issue`: the ticket has been written to since.
+    # The column goes with the assignment: a takeover that was undone displaced
+    # nobody, and leaving it set would send a later give-up's handback to somebody
+    # who is holding the ticket already (`IssueNotifier#handback_target`).
     def restore_assignees(row)
       @client.edit_issue(row.issue.project_path, row.issue.issue_iid, assignee_ids: row.assignees)
+      row.issue.update(displaced_assignee_id: nil)
       true
     rescue StandardError => e
       @logger.error("Failed to hand ##{row.issue.issue_iid} back to its assignees: #{e.message}",
@@ -424,11 +429,27 @@ module Autodev
     # shape of `manage_labels`, and for the same reason: a write that would change
     # nothing is not made, and a row already assigned to autodev alone is exactly
     # that case.
-    def reclaim(row)
+    # `landed` is pushed by the write, not by this method's return value
+    # (Autodev #97/#98 review). Three things can still raise after `edit_issue`
+    # has landed — the read-back below, the `displaced_assignee_id` write, and the
+    # notice — and every one of them used to leave the fact unrecorded, so `undo`
+    # did not restore and the human was off the ticket with no notice, no trace
+    # and no handback. The row then carried autodev alone, which the next
+    # **default** run accepts on `assigned_to_autodev?`: the widening flags
+    # leaking through the gate they exist to be.
+    #
+    # `landed` therefore records what was **written**, which is the question
+    # `undo` asks. The one case where that over-records is `AssignmentNotLanded`
+    # — GitLab accepted the call and ignored it — and the restore is then a write
+    # of the list the ticket already carries: no change, no system note, measured
+    # on powerpanne/core#16224. Harmless, and cheaper than a second vocabulary for
+    # "written but not confirmed".
+    def reclaim(row, landed)
       autodev = ::GitlabHelpers.current_user_id(@client)
       return nil if row.assignees == [autodev]
 
       @client.edit_issue(row.issue.project_path, row.issue.issue_iid, assignee_ids: [autodev])
+      landed << ASSIGNMENT
       unless assignees_now(row).include?(autodev)
         raise AssignmentNotLanded, 'autodev is not among the assignees after the assignment write'
       end
@@ -570,12 +591,18 @@ module Autodev
     # outage declines nothing into a verdict. `LabelHandover#moved_since?` keeps
     # that class's own rule instead — an unreadable event list reads as "nobody
     # moved it" — which is worth knowing when running with the flag on.
-    def still_ours?(issue, gl_issue)
-      return false if externally_closed?(gl_issue)
-      return true if assigned_to_autodev?(gl_issue)
-      return false unless widened_to?(issue, gl_issue)
+    # Why a row is or is not ours, not merely whether — because the report says it
+    # out loud, and "assigned to user X, left untouched" on a row declined because
+    # somebody commented on the ticket since the give-up names the wrong reason
+    # (review of the alpha-52 lot). Each answer costs what it costs exactly once:
+    # the reads happen here, and `ownership` only puts the verdict into words.
+    def ownership_verdict(issue, gl_issue)
+      return :externally_closed if externally_closed?(gl_issue)
+      return :ours if assigned_to_autodev?(gl_issue)
+      return :not_widened unless widened_to?(issue, gl_issue)
+      return :touched_since unless untouched_since_giveup?(issue, gl_issue)
 
-      untouched_since_giveup?(issue, gl_issue)
+      :ours
     end
 
     # Which rows *beyond* the ones autodev still holds this run was told to
@@ -655,10 +682,18 @@ module Autodev
       assignee.username if assignee.respond_to?(:username)
     end
 
-    def ownership(gl_issue)
-      return 'the ticket is closed on GitLab, left untouched' if externally_closed?(gl_issue)
+    def ownership(gl_issue, verdict)
+      case verdict
+      when :externally_closed then 'the ticket is closed on GitLab, left untouched'
+      when :touched_since
+        'somebody has touched the ticket or its merge request since the give-up, left untouched'
+      else not_widened(assignee_ids(gl_issue))
+      end
+    end
 
-      ids = assignee_ids(gl_issue)
+    # Only reached for `:not_widened`, so every sentence here is about ownership
+    # and nothing else.
+    def not_widened(ids)
       return 'nobody is assigned on GitLab, left untouched' if ids.empty?
       return "assigned to users #{ids.join(', ')}, left untouched" unless ids.one?
 

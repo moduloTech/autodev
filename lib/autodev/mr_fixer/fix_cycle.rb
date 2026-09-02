@@ -165,7 +165,8 @@ class MrFixer
     # produced nothing, which is the fact the signature records.
     def finalize_no_commits(issue, discussions)
       log 'No new commits after fixing, skipping push'
-      issue.update(fix_round: issue.fix_round + 1, pipeline_retrigger_count: 0)
+      issue.update(fix_round: issue.fix_round + 1, pipeline_retrigger_count: 0,
+                   discussion_fix_round: issue.discussion_fix_round + 1)
       return if discussion_stagnated?(issue, discussions)
 
       issue.discussions_fixed!
@@ -184,6 +185,7 @@ class MrFixer
                                  iid: issue.issue_iid, logger: @logger)
       round = issue.fix_round + 1
       issue.update(fix_round: round, pipeline_retrigger_count: 0,
+                   discussion_fix_round: issue.discussion_fix_round + 1,
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
       return if discussion_stagnated?(issue, discussions)
 

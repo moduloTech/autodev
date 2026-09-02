@@ -118,20 +118,30 @@ module Autodev
     # `Awaiting CR` beside `Awaiting Feature Review` with no autodev in the story,
     # which is the same fact without autodev's help.
     #
-    # Only when `applied` is itself in the scope: autodev owns that scope while it
-    # writes a value into it, and nowhere else. Reposing the entry label — which on
-    # powerpanne is GitLab's unscoped `To do` — is not a claim over
-    # `Development::*` and must not silently clear somebody else's column.
+    # Only for a label autodev **owns** — `label_doing`, `label_done`,
+    # `label_attention`. The first version of this guard tested the *scope* instead,
+    # justified by "reposing the entry label, which on powerpanne is GitLab's
+    # unscoped `To do`, is not a claim over `Development::*`". That assumed the
+    # entry label sits outside the scope, and it does not: ff/fast/core declares
+    # `Development::ToDo` and nothing else, and on powerpanne `entry_todo_label`
+    # answers whichever value the request arrived under. So a scope test wiped a
+    # reviewer's column while autodev parked the request in `needs_clarification` —
+    # waiting on that very reviewer (review of the alpha-52 lot).
     #
     # Deliberately NOT a second definition of the scope: `label_attention` is
     # excluded from the derivation and included in `configured_labels`, and both
     # of those are decisions with reasons above. A copy in `LabelManager` would be
     # free to drift from them.
     def scope_residue(labels, applied)
-      return [] unless applied && scope && scope_of(applied) == scope
+      return [] unless applied && owned_label?(applied)
 
       foreign_scoped(labels)
     end
+
+    # The three autodev writes into its own scope. `labels_todo` is deliberately
+    # absent: it is the human entry point, and posing it is autodev standing down
+    # rather than taking the scope.
+    def owned_label?(label) = [label_doing, label_done, label_attention].compact.include?(label)
 
     private
 

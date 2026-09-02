@@ -124,7 +124,7 @@ class DiscussionStagnationIsReachableTest < Minitest::Test # rubocop:disable Met
   def issue_in_fixing(overrides = {})
     create_issue({ project_path: PATH, issue_iid: 700, mr_iid: 800, status: 'fixing_discussions',
                    branch_name: 'autodev/700', issue_author_id: AUTHOR_ID,
-                   review_count: 1, fix_round: 0 }.merge(overrides))
+                   review_count: 1, fix_round: 0, discussion_fix_round: 0 }.merge(overrides))
   end
 
   def run_round(fix, issue)
@@ -193,13 +193,40 @@ class DiscussionStagnationIsReachableTest < Minitest::Test # rubocop:disable Met
     assert_equal 1, signature_count(issue)
   end
 
+  # The ceiling counts the loop it bounds, and nothing else (review of the
+  # alpha-52 lot). `fix_round` is shared with `PipelineMonitor::PipelineFixer` and
+  # is never reset between the two, so a request that needed thirteen pipeline
+  # rounds — each on a different failing job, so the pipeline's own guard never
+  # counted to its threshold — arrived in the discussion loop two rounds from a
+  # ceiling that then blamed a guard which had counted twice.
+  def test_pipeline_rounds_do_not_push_a_request_towards_the_discussion_ceiling
+    issue = issue_in_fixing(fix_round: THRESHOLD * 3, discussion_fix_round: 0)
+    fix = fixer
+    read = []
+    fix.define_singleton_method(:fetch_unresolved_discussions) { |*| read << :called and [] }
+
+    fix.send(:run_fix_round, issue)
+
+    assert_equal [:called], read
+    refute_equal 'fix_rounds_exhausted', issue.reload.attention_reason
+  end
+
+  # And a discussion round advances the column the ceiling reads.
+  def test_a_discussion_round_counts_towards_the_discussion_ceiling
+    issue = issue_in_fixing
+
+    run_round(fixer, issue)
+
+    assert_equal 1, issue.reload.discussion_fix_round
+  end
+
   # The ceiling, and the reason it is not a second guard of the same kind: it
   # reads one integer off the row. A signature that changes every round — which
   # is what the #99 investigation first suspected, and what any future change to
   # the thread set would produce — leaves the counter at 1 for ever, and the
   # ceiling is what still ends the loop.
   def test_the_ceiling_ends_a_loop_whose_signature_never_repeats
-    issue = issue_in_fixing(fix_round: THRESHOLD * 3)
+    issue = issue_in_fixing(discussion_fix_round: THRESHOLD * 3)
     fix = fixer
 
     fix.send(:run_fix_round, issue)
@@ -210,7 +237,7 @@ class DiscussionStagnationIsReachableTest < Minitest::Test # rubocop:disable Met
 
   # It is a ceiling, not a threshold: one round below it the work carries on.
   def test_a_round_below_the_ceiling_is_not_stopped
-    issue = issue_in_fixing(fix_round: (THRESHOLD * 3) - 1)
+    issue = issue_in_fixing(discussion_fix_round: (THRESHOLD * 3) - 1)
     fix = fixer
 
     fix.send(:run_fix_round, issue)
@@ -221,7 +248,7 @@ class DiscussionStagnationIsReachableTest < Minitest::Test # rubocop:disable Met
   # And it costs nothing to check: no GitLab read, no clone, no model call. The
   # thread list is fetched *after* it, so a row past the ceiling spends nothing.
   def test_the_ceiling_is_checked_before_any_gitlab_read
-    issue = issue_in_fixing(fix_round: THRESHOLD * 3)
+    issue = issue_in_fixing(discussion_fix_round: THRESHOLD * 3)
     fix = fixer
     read = []
     fix.define_singleton_method(:fetch_unresolved_discussions) { |*| read << :called and [] }
