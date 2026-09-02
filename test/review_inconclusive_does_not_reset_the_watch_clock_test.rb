@@ -57,7 +57,7 @@ class ReviewInconclusiveDoesNotResetTheWatchClockTest < ActiveSupport::TestCase
   def stub_abandon_sinks(mon, sink)
     mon.define_singleton_method(:apply_label_attention) { |*| nil }
     mon.define_singleton_method(:apply_label_done) { |*| nil }
-    mon.define_singleton_method(:reassign_to_author) { |*| true }
+    mon.define_singleton_method(:hand_ticket_back) { |*| true }
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
     mon.define_singleton_method(:snapshot) { |*| nil }
   end

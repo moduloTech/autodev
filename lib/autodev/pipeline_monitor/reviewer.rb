@@ -153,7 +153,7 @@ class PipelineMonitor
     def give_up_reviewing(issue)
       issue.review_giveup!
       apply_label_attention(issue.issue_iid)
-      reassign_to_author(issue)
+      hand_ticket_back(issue)
       # The diagnostic outlives log rotation, in the same columns every other
       # failure in the product uses (Autodev #49), and the issue detail page
       # renders them for exactly this shape of row — `done` + `needs_attention`

@@ -15,7 +15,7 @@ require 'autodev/activity_logger'
 #
 # The population it exists for is untouched, and that is the half of this file
 # that matters most. `finalize_green_done` reaches `done` first and *then* calls
-# `reassign_to_author`, and `dispatch_unassignment` only ever sweeps active rows —
+# `hand_ticket_back`, and `dispatch_unassignment` only ever sweeps active rows —
 # so a delivered ticket is still `done` and still unassigned when the next cycle
 # looks at it.
 #

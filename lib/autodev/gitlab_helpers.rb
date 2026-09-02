@@ -40,6 +40,11 @@ module GitlabHelpers
 
   module_function
 
+  # Delegated to `HumanActivity`, which owns the question — see that file. Kept
+  # reachable here because `GitlabHelpers` is where every caller already asks.
+  def human_comment_since?(...) = HumanActivity.human_comment_since?(...)
+  def human_mr_comment_since?(...) = HumanActivity.human_mr_comment_since?(...)
+
   # Read a field from a GitLab API value whatever its shape: the gitlab gem
   # returns objects with attribute readers, while tests and some paths pass raw
   # Hashes (string- or symbol-keyed). Reader wins, then a string key, then a
@@ -203,21 +208,6 @@ module GitlabHelpers
   # never seen — the exact bug #32 this predicate exists to prevent. `false` is
   # returned only for a question that was not asked (`since` nil); a question
   # GitLab did not answer raises, and each caller decides at its own boundary.
-  def human_comment_since?(client, project_path, issue_iid, since)
-    return false unless since
-
-    threshold = since.is_a?(Time) ? since : Time.parse(since.to_s)
-    notes = answer(:issue_notes) do
-      client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
-    end
-    notes.any? { |note| human_note_after?(note, threshold) }
-  end
-
-  def human_note_after?(note, threshold)
-    !note.system &&
-      Time.parse(note.created_at.to_s) > threshold &&
-      !note.body.to_s.include?('**autodev**')
-  end
 
   # Image downloading helpers.
   module ImageDownloader

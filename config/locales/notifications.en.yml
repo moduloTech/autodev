@@ -49,3 +49,11 @@ en:
 
     :arrow_right: **Want to dig deeper or move on to an implementation?** Leave a comment to guide me, put the _%{label_todo}_ label back, reassign me, and I'm on it.
   review_summary: "<!-- autodev:review -->\n:mag: **autodev** — automated review (verdict: %{verdict})\n\n%{summary}"
+  arrears_takeover: |-
+    :arrows_counterclockwise: %{tag}: I'm taking this ticket back.
+
+    Its merge request %{mr_url} was never reviewed — the review token was dead from April to August 2026, and the request was given up without a single review taking place.
+
+    Our GitLab holds only one assignee per ticket, so I cannot add myself next to you: I'm taking the ticket. **@%{user} I will hand it back to you** as soon as I'm done, or if I stop.
+
+    :arrow_right: **Would you rather keep it?** Assign it back to yourself and I'll stop at the next cycle.

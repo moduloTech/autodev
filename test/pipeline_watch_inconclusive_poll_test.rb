@@ -150,7 +150,7 @@ class PipelineWatchInconclusivePollTest < Minitest::Test
     mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
     stub_label_writers(mon, sink)
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
-    mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
+    mon.define_singleton_method(:hand_ticket_back) { |issue| sink[:reassigned] << issue.issue_iid }
   end
 
   # `label_attention` since Autodev #63; both land in the same sink because what

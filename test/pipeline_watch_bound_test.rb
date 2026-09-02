@@ -78,7 +78,7 @@ class PipelineWatchBoundTest < Minitest::Test
     mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
     stub_label_writers(mon, sink)
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
-    mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
+    mon.define_singleton_method(:hand_ticket_back) { |issue| sink[:reassigned] << issue.issue_iid }
   end
 
   # Both end labels, in separate sinks. The end label of a give-up is

@@ -70,7 +70,7 @@ class PipelineMonitorInfraStagnationTest < Minitest::Test
     mon.define_singleton_method(:apply_label_attention) { |*| nil }
     mon.define_singleton_method(:apply_label_done) { |*| nil }
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
-    mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
+    mon.define_singleton_method(:hand_ticket_back) { |issue| sink[:reassigned] << issue.issue_iid }
   end
 
   # deploy job carrying a concrete failure_reason + GitLab URL, the shape the

@@ -106,6 +106,33 @@ module Autodev
       end
     end
 
+    # The removal side of the definition this class already owns (Autodev #98).
+    #
+    # `foreign_scoped` answers "in my scope but not mine", and until now it only
+    # ever *detected* a handover. It has to *remove* too, because GitLab does not:
+    # scoped-label exclusivity is a Premium feature and source.modulotech.fr
+    # answers `enterprise: false`, so `LabelManager#manage_labels` — which sends
+    # the whole list — has `Development::Awaiting CR` travel right back in beside
+    # the `Development::Doing` it poses, and the ticket shows two states of one
+    # scope. Measured on powerpanne/core#16224 on 02/09/2026; and #11339 carries
+    # `Awaiting CR` beside `Awaiting Feature Review` with no autodev in the story,
+    # which is the same fact without autodev's help.
+    #
+    # Only when `applied` is itself in the scope: autodev owns that scope while it
+    # writes a value into it, and nowhere else. Reposing the entry label — which on
+    # powerpanne is GitLab's unscoped `To do` — is not a claim over
+    # `Development::*` and must not silently clear somebody else's column.
+    #
+    # Deliberately NOT a second definition of the scope: `label_attention` is
+    # excluded from the derivation and included in `configured_labels`, and both
+    # of those are decisions with reasons above. A copy in `LabelManager` would be
+    # free to drift from them.
+    def scope_residue(labels, applied)
+      return [] unless applied && scope && scope_of(applied) == scope
+
+      foreign_scoped(labels)
+    end
+
     private
 
     def applied_after?(event, threshold)
@@ -119,9 +146,14 @@ module Autodev
     # fetched.
     #
     # Ordered by informativeness, and the order matters because the three
-    # overlap: applying a scoped label makes GitLab drop `label_doing` in the
-    # same edit, so `workflow_moved` and `doing_removed` both hold and only the
-    # first can name where the ticket went.
+    # overlap: whoever moves the ticket on removes `label_doing` and adds the new
+    # value in the same edit, so `workflow_moved` and `doing_removed` both hold
+    # and only the first can name where the ticket went.
+    #
+    # The overlap comes from the *actor* — GitLab's board issues both changes in
+    # one request, and `LabelManager#other_workflow_labels` lists `label_doing`
+    # for the same reason — never from GitLab dropping the old value by itself.
+    # It does not: scoped-label exclusivity is Premium (Autodev #98).
     def suspect(labels)
       return Verdict.new(:done_added, label_done) if label_done && labels.include?(label_done)
 
@@ -134,11 +166,14 @@ module Autodev
 
     # `label_doing` being gone is the weakest of the three signals: an absence,
     # not an edit naming where the ticket went. A todo label sitting on the row
-    # explains that absence differently. GitLab allows one label per scope, so
-    # on a project whose todo shares the workflow scope — ff/fast/core configures
-    # `Development::ToDo` against `Development::Doing` — the documented "repose
-    # the todo label and reassign me" gesture drops `label_doing` in the same
-    # edit and arrives here looking exactly like a handover. Stopping on it
+    # explains that absence differently. The documented "repose the todo label and
+    # reassign me" gesture drops `label_doing` in the same edit — because the
+    # person doing it removes it, or because `apply_label_todo` does
+    # (`other_workflow_labels` lists it), not because GitLab enforces one value
+    # per scope; it does not, that is Premium (Autodev #98). On a project whose
+    # todo shares the workflow scope — ff/fast/core configures `Development::ToDo`
+    # against `Development::Doing` — that gesture therefore arrives here looking
+    # exactly like a handover. Stopping on it
     # would park the ticket for good: the row goes to `closed`, and
     # `todo_reapplied_after?` gates reentry on a todo applied *after*
     # `finished_at`, which this one precedes. Somebody asking for work is never

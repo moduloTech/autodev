@@ -20,17 +20,37 @@ module IssueNotifier
   end
 
   # Returns whether the ticket actually changed hands (Autodev #60): the abandon
-  # notification only claims a handback when there was an author to hand it to and
+  # notification only claims a handback when there was somebody to hand it to and
   # GitLab accepted the edit. Existing callers ignore the value.
-  def reassign_to_author(issue)
-    return false unless issue.issue_author_id
+  #
+  # Named for the gesture rather than for the recipient since Autodev #98, because
+  # the recipient is no longer always the author — see `handback_target`.
+  def hand_ticket_back(issue)
+    target = handback_target(issue)
+    return false unless target
 
-    @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [issue.issue_author_id])
-    log "Reassigned issue ##{issue.issue_iid} to author (user #{issue.issue_author_id})"
+    @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [target])
+    log "Handed issue ##{issue.issue_iid} back to user #{target}"
     true
   rescue Gitlab::Error::ResponseError => e
-    log_error "Failed to reassign issue ##{issue.issue_iid} to author: #{e.message}"
+    log_error "Failed to hand issue ##{issue.issue_iid} back: #{e.message}"
     false
+  end
+
+  # Whoever autodev took the ticket from, and the author otherwise (Autodev #98).
+  #
+  # GitLab Community holds one assignee, so `ReviewArrearsSweep` cannot add
+  # autodev beside a human — it replaces them, and records who in
+  # `displaced_assignee_id`. Handing such a ticket to its *author* would move it
+  # to somebody who never had it: on the 20 rows of the #88 arrears that is a
+  # different person 4 times, and one of those authors is a deactivated account,
+  # so the ticket would come to rest on nobody.
+  #
+  # The author stays the answer everywhere else, which is every row autodev was
+  # assigned to in the ordinary way — the column is NULL there and nothing about
+  # those paths changes.
+  def handback_target(issue)
+    issue.displaced_assignee_id || issue.issue_author_id
   end
 
   def autodev_tag

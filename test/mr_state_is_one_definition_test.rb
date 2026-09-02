@@ -305,7 +305,7 @@ class MrStateInTheReviewArrearsSweepTest < Minitest::Test
                               'label_doing' => 'Development::Doing',
                               'label_done' => 'Development::Awaiting Feature Review' }] }.freeze
 
-  FakeAssignee = Struct.new(:id)
+  FakeAssignee = Struct.new(:id, :username)
   FakeGlIssue = Struct.new(:state, :assignees, :labels)
   # This reader looks at three merge request fields, not one: the state it sorts
   # on, plus the two it reports without filtering on (Autodev #88).

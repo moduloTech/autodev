@@ -146,7 +146,7 @@ class PipelineFixPromptContextTest < Minitest::Test
     mon.define_singleton_method(:log_activity) { |_i, key, **vars| sink[:activity] << [key, vars] }
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
     mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
-    mon.define_singleton_method(:reassign_to_author) { |*| nil }
+    mon.define_singleton_method(:hand_ticket_back) { |*| nil }
   end
 
   # The bug: the ticket read failed, and the correction was blamed for it.

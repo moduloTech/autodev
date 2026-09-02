@@ -381,7 +381,7 @@ class PipelineFixRebasesOnTheMrsTargetTest < Minitest::Test
     mon.define_singleton_method(:log_activity) { |*, **| nil }
     mon.define_singleton_method(:notify_localized) { |*, **| nil }
     mon.define_singleton_method(:apply_label_done) { |*| nil }
-    mon.define_singleton_method(:reassign_to_author) { |*| nil }
+    mon.define_singleton_method(:hand_ticket_back) { |*| nil }
   end
 
   def stub_fix_path(mon)
