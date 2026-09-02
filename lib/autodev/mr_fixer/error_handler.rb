@@ -31,6 +31,8 @@ class MrFixer
 
     def handle_fix_error(issue, error)
       return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
+      # Before every write below — the row belongs to a human now (Autodev #97).
+      return stop_on_stale_transition(error) if error.is_a?(StaleTransitionError)
 
       bt = error.backtrace&.first(10)&.join("\n  ")
       safe_mark_failed!(issue)

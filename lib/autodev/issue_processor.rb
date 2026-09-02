@@ -10,6 +10,7 @@ require_relative 'issue_processor/error_handler'
 # Processes a single GitLab issue through the full implementation lifecycle.
 class IssueProcessor
   include DangerClaudeRunner
+  include StaleTransitionBound
   include GitOperations
   include SpecChecker
   include Implementer
