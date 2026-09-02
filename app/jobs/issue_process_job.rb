@@ -184,7 +184,7 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     has_mr = !issue.mr_iid.nil?
     has_mr ? issue.retry_pipeline! : issue.retry_processing!
     issue.update(error_message: nil, started_at: nil)
-    restore_labels(issue, config, project_config, has_mr)
+    restore_working_label(issue, config, project_config)
     log_retry_activity(issue, config, project_config)
   end
 
@@ -196,13 +196,29 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
   private
 
-  def restore_labels(issue, config, project_config, has_mr)
+  # A retry resumes the work; it does not deliver it (Autodev #100).
+  #
+  # This used to fork on whether the request carried a merge request and pose
+  # `label_done` when it did — but both destinations are working states,
+  # `retry_pipeline!` → `checking_pipeline` and `retry_processing!` → `pending`,
+  # so the fork announced the work as finished while autodev carried on. On
+  # powerpanne that label is `Development::Awaiting Feature Review`, the review
+  # column: request 15205 sat in it for ten hours on 02/09/2026 while rounds 5 to
+  # 18 of discussion fixing ran underneath.
+  #
+  # The fork was right when it was written. "Label-driven workflow with resume
+  # from over" declared five labels, `label_mr` ("set after MR creation, enables
+  # discussion monitoring") among them, and this restored exactly the one
+  # matching the destination. `label_mr` was later **renamed** `label_done`,
+  # taking over the meaning of a different label, and the call site kept its
+  # method name. There is no question left for the fork to answer, so it is gone
+  # rather than corrected.
+  def restore_working_label(issue, config, project_config)
     return unless ::Config.label_workflow?(project_config)
 
-    helper = ::MrFixer.new(**worker_kwargs(config, project_config))
-    has_mr ? helper.apply_label_done(issue.issue_iid) : helper.apply_label_doing(issue.issue_iid)
+    ::MrFixer.new(**worker_kwargs(config, project_config)).apply_label_doing(issue.issue_iid)
   rescue StandardError => e
-    logger.error("Failed to restore labels for ##{issue.issue_iid}: #{e.class}: #{e.message}")
+    logger.error("Failed to restore the working label on ##{issue.issue_iid}: #{e.class}: #{e.message}")
   end
 
   def log_retry_activity(issue, config, project_config)
