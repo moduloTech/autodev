@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.52] - 2026-09-02
+
 ### Fixed
 
 - **A stop decided by a human now holds against work already in flight (Autodev #97).** Observed in production on 01/09/2026: a request in `reviewing` was closed from the dashboard — `reviewing` → `closed`, verified in the database — and eight minutes later a `reviewing` → `checking_pipeline` transition arrived, written by the danger-claude call that was still running. It had been decided on the in-memory copy of the row, which still said `reviewing`, and `save!` wrote every dirty attribute over the top. The request resumed as if nothing had happened: green pipeline, seventeen discussions, twenty more minutes of work. The close had not closed anything.
@@ -63,6 +65,11 @@
   **A last one the review raised without ranking it: the report named the wrong reason.** A row declined because somebody had touched the ticket since the give-up was printed as `assigned to user 42, left untouched`, sending the reader to a question about ownership that was not the one. `ownership_verdict` answers *why* rather than *whether*, each read still paid for exactly once, and `ownership` only puts the verdict into words.
 
 - **The cause written down for Autodev #95 was wrong, and the correction makes the fix stronger.** Shipped in alpha 51, the error catalogue and the technical guide both said a merge request in conflict has no resolvable diff, so no position yields a line code, so the refusal was permanent. Measured the same evening: the same merge request, still `has_conflicts: true`, published seventeen anchored discussions four hours later, once GitLab had computed its `diff_refs` — on alpha 50, without the fallback. The condition was **transient**, which is what Autodev #82 said in August and what this correction had declared mistaken. What a refusal does not carry is whether it will ever succeed, and that is exactly why bounding it is the right remedy rather than diagnosing it: the bound is safe under both readings. Documentation only; the code was never predicated on the permanence.
+
+### Changed
+
+- **Both usage guides synced with the lot.** The technical guide gains what an operator has to be able to look up: the arrears sweep's third ownership tier and the fact that a re-arm now takes the ticket and hands it back, the discussion-fix section's account of a guard that was only reachable from the rounds that converged and of the ceiling above it, the `fix_rounds_exhausted` give-up, the two catalogue rows for a human's stop against work in flight and for what a retry poses, and the reason clearing autodev's label scope is opt-in. The functional guide gains one sentence, in the answer that already told a reader how to take a ticket back: the gesture now holds while a long job is still running, where before a closed request could restart on its own a few minutes later with nothing to say so.
+
 
 ## [1.0.0-alpha.51] - 2026-09-01
 

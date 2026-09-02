@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-08-24
+date: 2026-09-02
 lang: fr
 documentclass: article
 papersize: a4
@@ -438,7 +438,7 @@ Répondez directement sur le ticket GitLab en commentaire, comme à n'importe qu
 Relancez-la d'abord avec **Réessayer maintenant** (l'erreur est peut-être passagère). Si elle échoue de nouveau, c'est probablement un bug d'Autodev : **prévenez l'équipe autodev** et transmettez les *détails techniques* dépliés sur la carte. Rien à corriger de votre côté sur le ticket.
 
 **Autodev s'est trompé ou a fait n'importe quoi, je peux annuler ?**
-Oui, de trois façons. **Déplacez le label de suivi** du ticket sur GitLab (passez-le en revue, en recette, où vous voulez) : Autodev s'en aperçoit au tour suivant, arrête le travail en cours et vous laisse un commentaire sur le ticket pour confirmer qu'il a bien lâché la main. **Désassignez-le** du ticket : même effet, même commentaire. Ou ouvrez le détail de la demande et cliquez sur **Clôturer** pour la mettre de côté depuis le tableau de bord. Dans tous les cas vous pouvez ensuite assigner le ticket à un humain, et la MR déjà créée reste disponible — vous pouvez la fermer ou la modifier librement.
+Oui, de trois façons. **Déplacez le label de suivi** du ticket sur GitLab (passez-le en revue, en recette, où vous voulez) : Autodev s'en aperçoit au tour suivant, arrête le travail en cours et vous laisse un commentaire sur le ticket pour confirmer qu'il a bien lâché la main. **Désassignez-le** du ticket : même effet, même commentaire. Ou ouvrez le détail de la demande et cliquez sur **Clôturer** pour la mettre de côté depuis le tableau de bord. Dans tous les cas vous pouvez ensuite assigner le ticket à un humain, et la MR déjà créée reste disponible — vous pouvez la fermer ou la modifier librement. Depuis cette version, votre geste tient même si Autodev est en plein milieu d'un travail long : ce travail peut mettre jusqu'à une heure à se terminer, et il ne réveille plus la demande en se terminant. Auparavant, une demande clôturée pouvait repartir toute seule quelques minutes plus tard, sans que rien ne le signale.
 
 Une précision utile : remettre le label *{{label_todo|à traiter}}* n'arrête **pas** Autodev, c'est au contraire la façon de lui redemander du travail (voir plus bas).
 
