@@ -48,7 +48,7 @@ class MrFixer
 
       resolved = Array(fix_each_discussion(discussions, work_dir, branch, issue.mr_iid, env))
 
-      return finalize_no_commits(issue) unless new_commits?(work_dir, branch)
+      return finalize_no_commits(issue, discussions) unless new_commits?(work_dir, branch)
 
       push_fixes(work_dir, branch)
       finalize_success(issue, discussions, resolved)
@@ -152,9 +152,22 @@ class MrFixer
       ok && !out.empty?
     end
 
-    def finalize_no_commits(issue)
+    # The round that changed nothing, and the one the stagnation guard exists for
+    # (Autodev #99). It used to return here without going near
+    # `discussion_stagnated?`, which lives in `finalize_success` — so the guard was
+    # only ever reached by the rounds that had converged, and a loop producing no
+    # commit at all was unbounded. Powerpanne 15205 ran eighteen such rounds over
+    # sixteen hours with `count` stuck at 1.
+    #
+    # `discussion_stagnated?` both counts and decides, so both halves were missing.
+    # Autodev #71's rule is untouched: this IS a completed attempt — the threads
+    # were read, the corrections were attempted, danger-claude answered — it simply
+    # produced nothing, which is the fact the signature records.
+    def finalize_no_commits(issue, discussions)
       log 'No new commits after fixing, skipping push'
       issue.update(fix_round: issue.fix_round + 1, pipeline_retrigger_count: 0)
+      return if discussion_stagnated?(issue, discussions)
+
       issue.discussions_fixed!
     end
 

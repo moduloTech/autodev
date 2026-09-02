@@ -51,6 +51,7 @@ en:
   activity_review_limit_reached: ":warning: Review limit reached (3 rounds) → done"
   activity_stagnation_pipeline: ":warning: Pipeline stagnation detected: %{detail} → done"
   activity_stagnation_discussions: ":warning: Discussion stagnation detected → done"
+  activity_fix_rounds_exhausted: ":octagonal_sign: Fix-round ceiling of %{ceiling} reached (%{rounds}) → done"
   activity_pipeline_watch_expired: ":hourglass: Pipeline watch stopped after more than %{days} days without a verdict → done"
   activity_mr_closed_unmerged: ":stop_sign: MR closed without being merged, nothing was delivered → done, needs attention"
   activity_review_skill_missing: ":wrench: Review skill `%{skill}` declared but `%{path}` is missing from target branch `%{ref}` → done, needs attention"
