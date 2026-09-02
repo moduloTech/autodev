@@ -376,18 +376,52 @@ module Autodev
     # strict filter is `assigned_to_autodev?`, an `.any?`, so a ticket assigned to
     # autodev *and* to a human passes it — and `assignee_ids: [<autodev>]` then
     # took that human off the ticket with no comment and no trace anywhere autodev
-    # writes. No production row is co-assigned today; the write was wrong anyway.
+    # writes.
+    #
+    # **The union does not work on our instance** (Autodev #98). Multiple
+    # assignees are a Premium feature and source.modulotech.fr answers
+    # `enterprise: false`: `assignee_ids: [human, autodev]` is accepted — 200, no
+    # exception — and only the first survives, with no system note at all when
+    # that first one was already there. The observation that "no production row is
+    # co-assigned today" was not a coincidence to note: no row *can* be, so this
+    # correction has never corrected anything.
+    #
+    # Measured on powerpanne/core#16224, 02/09/2026: labels written, transition
+    # fired, no assignment event anywhere, and `dispatch_unassignment` closed the
+    # row 94 seconds later with a comment telling a human he had unassigned
+    # autodev. He had not. That is, word for word, the harm the paragraph above
+    # says this method prevents.
+    #
+    # So the write is **read back**, exactly as the label write below is, and the
+    # re-arm stops rather than transitioning a row that cannot hold. What it
+    # deliberately does NOT do is pick the policy: substituting autodev for the
+    # human is defensible and so is never entering a ticket a human holds, but
+    # that decision belongs to whoever lifts the ownership filter — and until
+    # then this path is unreachable in the product anyway, because `ownership`
+    # declines every human-held row. Failing loudly is what makes the choice
+    # visible when someone does lift it.
     #
     # Returns the assignee list it wrote, or nil when it wrote nothing — the
     # shape of `manage_labels`, and for the same reason: a write that would change
     # nothing is not made, and the one row of the 23 still assigned to autodev is
     # exactly that case.
     def reclaim(row)
-      wanted = row.assignees | [::GitlabHelpers.current_user_id(@client)]
+      autodev = ::GitlabHelpers.current_user_id(@client)
+      wanted = row.assignees | [autodev]
       return nil if wanted == row.assignees
 
       @client.edit_issue(row.issue.project_path, row.issue.issue_iid, assignee_ids: wanted)
+      raise AssignmentNotLanded, 'autodev is not among the assignees after the assignment write' \
+        unless assignees_now(row).include?(autodev)
+
       wanted
+    end
+
+    # Read back from GitLab rather than from `row.assignees`, which is what
+    # `examine` saw before any write.
+    def assignees_now(row)
+      Array(::GitlabHelpers.field(read_issue(row.issue), :assignees))
+        .map { |assignee| ::GitlabHelpers.field(assignee, :id) }
     end
 
     # `apply_label_doing` → `LabelManager#manage_labels` answers a GitLab error
@@ -396,13 +430,21 @@ module Autodev
     # the Autodev #79 rule ("autodev never resolves a discussion it has not
     # verified") applied to a label.
     #
-    # `label_doing` sitting on the ticket is the whole of what has to be true, and
-    # it covers more than what autodev asks to be removed. `other_workflow_labels`
-    # is `labels_todo + label_doing + label_done + label_attention` and knows
-    # nothing of `Development::Awaiting CR`, which five production rows carry: what
-    # drops it is GitLab keeping a single value per scoped-label key, on the write
-    # that poses `Development::Doing` beside it. So the removal is GitLab's
-    # behaviour and not autodev's request, which is precisely why it is verified.
+    # Two facts have to be true, not one.
+    #
+    # `label_doing` sitting on the ticket is the first. The second is that no
+    # foreign value is left beside it in autodev's own scope — `Development::
+    # Awaiting CR`, which five production rows carry. This used to be read as
+    # GitLab's doing: one value per scoped-label key, applied to the write that
+    # poses `Development::Doing` beside it. **GitLab does not do that** — it is a
+    # Premium feature and source.modulotech.fr answers `enterprise: false`, so the
+    # two values coexisted on powerpanne/core#16224 on 02/09/2026 (Autodev #98).
+    #
+    # `LabelManager#manage_labels` now clears the scope itself, via
+    # `LabelHandover#scope_residue`. Which is exactly why the residue is verified
+    # here too rather than assumed: the ticket showing two states of one scope is
+    # what makes `LabelHandover#suspect` answer `workflow_moved` on the row this
+    # sweep just re-armed, and the next cycle closes it as a handover.
     #
     # Two configurations have nothing to read back and are let through: a project
     # that declares no `labels_todo` (`apply_label_doing` returns before writing
@@ -412,9 +454,15 @@ module Autodev
     def repose_working_label(row)
       row.router.repose_working_label(row.issue, @client)
       doing = verifiable_working_label(row)
-      return if doing.nil? || carried_labels(row).include?(doing)
+      return if doing.nil?
 
-      raise LabelNotPosed, "#{doing} is not on the ticket after the label write"
+      carried = carried_labels(row)
+      raise LabelNotPosed, "#{doing} is not on the ticket after the label write" unless carried.include?(doing)
+
+      residue = handover(row.issue).scope_residue(carried, doing)
+      return if residue.empty?
+
+      raise LabelNotPosed, "#{residue.join(', ')} still sits beside #{doing} in autodev's scope"
     end
 
     def verifiable_working_label(row)
@@ -617,6 +665,13 @@ module Autodev
     # never leaves this class: `rearm` catches it, reports the re-arm as
     # incomplete, and the row waits for a human.
     class LabelNotPosed < ::AutodevError; end
+
+    # Autodev is not among the assignees after the write that was supposed to put
+    # it there. Nested for `LabelNotPosed`'s reason, and raised for the same one:
+    # on GitLab Community the assignment write is the one that can be accepted and
+    # ignored, so an exception is not what its failure looks like either
+    # (Autodev #98).
+    class AssignmentNotLanded < ::AutodevError; end
 
     # `PollRouter` and `LabelHandover` log through the poller's logger; a rake run
     # has none and its report is the `out` stream.

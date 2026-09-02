@@ -80,8 +80,10 @@ module LabelManager
   # Every workflow label autodev owns and writes, except the one being applied.
   # `label_attention` belongs in here as much as the others: a re-armed row
   # (`dispatch_infra_recheck` → `resume_recovered_infra` → `apply_label_doing`)
-  # must not keep a stale attention label beside its new one, since GitLab allows
-  # a single value per scope and the two would collide.
+  # must not keep a stale attention label beside its new one — and nothing else
+  # would remove it, because GitLab does not enforce one value per scope on a
+  # `labels=` write (Autodev #98). That is what `scope_residue` now covers for
+  # the values autodev does *not* own.
   def other_workflow_labels(applied)
     (Array(@project_config['labels_todo']) +
       [@project_config['label_doing'], @project_config['label_done'], label_attention])
@@ -159,13 +161,15 @@ module LabelManager
   # anyway.
   def manage_labels(iid, remove:, add:)
     current = @client.issue(@project_path, iid).labels || []
-    wanted = target_labels(current, remove, add)
+    dropped = remove + scope_residue(current, add)
+    wanted = target_labels(current, dropped, add)
     return [] if wanted.sort == current.sort
 
     @client.edit_issue(@project_path, iid, labels: wanted.join(','))
-    removed = current & remove.compact
-    log "Labels updated on ##{iid}: removed #{removed}, added #{add}"
-    removed
+    log "Labels updated on ##{iid}: dropped #{current & dropped.compact}, added #{add}"
+    # The workflow labels autodev OWNS and removed — never the scope residue,
+    # which `remember_entry_label` must not mistake for an entry label.
+    current & remove.compact
   rescue Gitlab::Error::ResponseError => e
     # `[]`, not the value of `log_error` — which is `Logger#error`'s `true`. The
     # method's contract is "the workflow labels it removed", and a failed write
@@ -179,5 +183,27 @@ module LabelManager
   def target_labels(current, remove, add)
     kept = current - remove.compact
     add && !kept.include?(add) ? kept + [add] : kept
+  end
+
+  # Values sitting in autodev's own workflow scope that autodev does not own, to
+  # be dropped from the same write that poses its own (Autodev #98).
+  #
+  # Autodev believed GitLab did this: the four configured labels were removed by
+  # name and the rest of `current` was sent straight back, on the reading that
+  # scoped-label exclusivity would drop the old value. It does not —
+  # source.modulotech.fr answers `enterprise: false` and exclusivity is Premium —
+  # so `Development::Awaiting CR` travelled back in beside the
+  # `Development::Doing` being posed and the ticket showed two states at once
+  # (powerpanne/core#16224, 02/09/2026).
+  #
+  # The definition of "in my scope but not mine" is `LabelHandover`'s, and it stays
+  # there: it already answers exactly this question for the *detection* side, with
+  # decisions about `label_attention` and about the derivation that a copy here
+  # would be free to drift from. Construction is free — `scope_residue` reads the
+  # project config and touches no API.
+  def scope_residue(current, add)
+    ::Autodev::LabelHandover
+      .new(client: @client, path: @project_path, project_config: @project_config, logger: @logger)
+      .scope_residue(current, add)
   end
 end

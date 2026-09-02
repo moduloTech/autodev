@@ -142,18 +142,31 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
       raise Gitlab::Error::ResponseError, response if failing
     end
 
+    # GitLab keeps the list exactly as it is sent. It does NOT enforce
+    # one-value-per-scope on a `labels=` write: scoped-label exclusivity is a
+    # Premium feature, source.modulotech.fr answers `enterprise: false`, and
+    # powerpanne/core#11339 carries `Development::Awaiting CR` beside
+    # `Development::Awaiting Feature Review` with no autodev involvement.
+    #
+    # This stub used to model the exclusivity, which made
+    # `test_an_unconfigured_end_label_is_dropped_by_gitlabs_scope_exclusivity`
+    # pass against a fiction on the exact mechanism the removal depended on
+    # (Autodev #98).
     def apply_labels(iid, csv)
-      by_scope = csv.to_s.split(',').to_h { |name| [scope_of(name) || name, name] }
-      stored(iid).labels = by_scope.values
+      stored(iid).labels = csv.to_s.split(',')
     end
 
-    def scope_of(name)
-      key, separator, = name.rpartition('::')
-      separator.empty? ? nil : key
-    end
-
+    # GitLab Community holds ONE assignee per issue. `assignee_ids` with more
+    # than one is accepted — 200, no exception — and only the first survives,
+    # with no system note when that first one was already there. Multiple
+    # assignees are Premium (Autodev #98).
+    #
+    # Measured on powerpanne/core#16224, 02/09/2026: the sweep wrote
+    # `[human, autodev]`, GitLab kept `[human]`, `reclaim` reported success, and
+    # `dispatch_unassignment` closed the row 94 seconds later with a comment
+    # blaming the human for an unassignment nobody made.
     def apply_assignees(iid, ids)
-      stored(iid).assignees = Array(ids).map { |id| FakeAssignee.new(id) }
+      stored(iid).assignees = Array(ids).compact.first(1).map { |id| FakeAssignee.new(id) }
     end
 
     def response = FakeResponse.new('boom', 500, FakeRequest.new('https://gitlab.example', '/api/v4/x'))
@@ -431,13 +444,26 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   # The permissive half, and it is always a written gesture: here the
   # unassignment is autodev's OWN write (`abandon_issue` → `reassign_to_author`),
   # so the strict rule declines 22 of the 23 rows it was meant to rescue.
+  #
+  # The flag still makes the row ELIGIBLE — it is no longer counted `not_ours`.
+  # What it can no longer do is COMPLETE, and that is the whole subject of
+  # Autodev #98: the ticket is held by a human, GitLab Community holds one
+  # assignee, the union write is accepted and ignored, and the re-arm stops at
+  # the read-back rather than transitioning a row `dispatch_unassignment` would
+  # close at the next cycle.
+  #
+  # So this flag — the documented way to rescue 22 of the 23 rows — is
+  # unavailable until the assignment policy is decided. That is a finding, not a
+  # regression: it was never doing what it claimed.
   def test_a_ticket_handed_back_to_its_author_is_eligible_behind_the_flag
     issue = arrear
     client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID)], [DOING]))
 
-    sweep(client, apply: true, include_author_handback: true)
+    tally = sweep(client, apply: true, include_author_handback: true)
 
-    assert_equal 'checking_pipeline', issue.reload.status
+    assert_equal 0, tally[:not_ours]
+    assert_equal 1, tally[:incomplete]
+    assert_equal 'done', issue.reload.status
   end
 
   def test_a_ticket_handed_back_to_its_author_is_declined_without_the_flag
@@ -561,13 +587,38 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   # autodev is not the assignee and CLOSES the row at the next cycle, with a
   # GitLab comment on a human's ticket. Autodev is *added* to the list, never
   # substituted for it — see section 11.
+  #
+  # The case that can actually satisfy the invariant on GitLab Community is the
+  # row autodev still holds: the write is skipped because it would change
+  # nothing, and the assignment is right for free. The human-held row is the one
+  # the union was written for and it is the next test (Autodev #98).
   def test_a_rearmed_request_is_assigned_to_autodev
+    issue = arrear
+    client = StubClient.new
+
+    sweep(client, apply: true)
+
+    assert_includes client.assignees_of(issue.issue_iid), AUTODEV_USER_ID
+    assert_equal 'checking_pipeline', issue.reload.status
+  end
+
+  # The assignment write is the one GitLab Community accepts and ignores, so an
+  # exception is not what its failure looks like — the same shape `manage_labels`
+  # has for labels, and the reason both are now read back.
+  #
+  # Measured on powerpanne/core#16224, 02/09/2026: the row transitioned with no
+  # assignment event anywhere, and 94 seconds later `dispatch_unassignment`
+  # closed it with a comment telling a human he had unassigned autodev. He had
+  # not. The re-arm must stop instead, leaving the human on the ticket.
+  def test_a_rearm_that_cannot_assign_autodev_does_not_transition
     issue = arrear
     client = handed_back_client
 
-    sweep(client, apply: true, include_author_handback: true)
+    tally = sweep(client, apply: true, include_author_handback: true)
 
-    assert_includes client.assignees_of(issue.issue_iid), AUTODEV_USER_ID
+    assert_equal 'done', issue.reload.status
+    assert_equal 1, tally[:incomplete]
+    assert_equal [AUTHOR_ID], client.assignees_of(issue.issue_iid)
   end
 
   # `apply_label_doing` is load-bearing, not decorative: without the working
@@ -736,17 +787,26 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
   # `other_workflow_labels` is `labels_todo + label_doing + label_done +
   # label_attention` and knows nothing of `Development::Awaiting CR`, which five
-  # production rows carry: autodev asks for it to stay. What removes it is
-  # GitLab's own one-value-per-scope rule, applied to the `labels=` write that
-  # poses `Development::Doing` beside it — which is why the sweep verifies the
-  # result instead of trusting the request.
-  def test_an_unconfigured_end_label_is_dropped_by_gitlabs_scope_exclusivity
+  # production rows carry.
+  #
+  # This test used to assert that GitLab's own one-value-per-scope rule dropped it
+  # from the `labels=` write that poses `Development::Doing` beside it — against a
+  # stub that modelled the exclusivity. GitLab does not: it is a Premium feature,
+  # source.modulotech.fr answers `enterprise: false`, and powerpanne/core#16224
+  # carried both values at once on 02/09/2026. The test proved the false on the
+  # exact mechanism the removal depended on (Autodev #98).
+  #
+  # What removes it is autodev, via `LabelHandover#scope_residue` — the same
+  # definition of "in my scope but not mine" that detects a handover. So the
+  # assertion is on the REQUEST as much as the result: the foreign value must not
+  # be in the list autodev sends, because nothing downstream would take it out.
+  def test_an_unconfigured_end_label_is_cleared_by_autodev_not_by_gitlab
     issue = arrear
     client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTODEV_USER_ID)], [MOVED_ON]))
 
     sweep(client, apply: true)
 
-    assert_equal([[MOVED_ON, DOING]], client.label_edits.map { |_p, _i, opts| opts[:labels].split(',') })
+    assert_equal([[DOING]], client.label_edits.map { |_p, _i, opts| opts[:labels].split(',') })
     assert_equal [DOING], client.labels_of(issue.issue_iid)
   end
 
