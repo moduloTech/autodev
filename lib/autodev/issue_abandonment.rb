@@ -78,7 +78,7 @@ module IssueAbandonment
   # The two user-facing sinks, and the reassignment one of them reports on. The
   # GitLab comment only claims a handback when the ticket actually changed hands.
   def announce_abandonment(issue, reason, template_vars)
-    handed_back = reassign_to_author(issue)
+    handed_back = hand_ticket_back(issue)
     notify_localized(issue.issue_iid, reason, mr_url: issue.mr_url,
                                               suffix: (:abandon_reassigned if handed_back),
                                               **template_vars)

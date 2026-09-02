@@ -12,7 +12,7 @@ module Autodev
   # (Autodev #53: an abandon is never re-armed automatically). Reposing the entry
   # label by hand does not work either, because `dispatch_new_issues` filters on
   # `assignee_id: <autodev>` and 22 of the 23 tickets were handed back to a human
-  # by autodev's own `abandon_issue` → `reassign_to_author`.
+  # by autodev's own `abandon_issue` → `hand_ticket_back`.
   #
   # ## This is not a recurring pass, and here is why
   #
@@ -47,8 +47,9 @@ module Autodev
   #     batch never queues behind itself; ceiling 10, see `LIMIT_SPEC`). Applied
   #     after every filter, on the oldest-first order, and **only** under
   #     `apply:`; a report shows everything.
-  #   * `include_author_handback:` — the ownership filter is `assigned_to_autodev?`
-  #     verbatim unless the operator writes the flag. See `still_ours?`.
+  #   * `include_author_handback:` / `include_human_held:` — the ownership filter
+  #     is `assigned_to_autodev?` verbatim unless the operator writes one of the
+  #     two flags, which widen it in that order. See `widened_to?`.
   # ClassLength / ParameterLists: one class per sweep, the shape `ClarificationSweep`
   # and `ActivityEventCompaction` already have — the selection, the four filters and
   # the report are one decision, and splitting them would hide the ranking between
@@ -101,10 +102,15 @@ module Autodev
 
     # One row's established facts, gathered before anything is written: the DB
     # row, the ticket as GitLab has it, the assignee ids it had *before* the sweep
-    # touched it (what a half-finished re-arm has to be able to restore), and the
-    # router — built up front so a project missing from the configuration raises
-    # while the row is still untouched.
-    Row = Struct.new(:issue, :gl_issue, :assignees, :router)
+    # touched it (what a half-finished re-arm has to be able to restore), those
+    # assignees' usernames, and the router — built up front so a project missing
+    # from the configuration raises while the row is still untouched.
+    #
+    # The usernames are captured here rather than read back off `gl_issue` when
+    # the notice is written, because by then the assignment has been replaced:
+    # what a takeover has to name is who held the ticket BEFORE it, and that is a
+    # fact of the same vintage as `assignees`.
+    Row = Struct.new(:issue, :gl_issue, :assignees, :usernames, :router)
 
     # The two GitLab facts a re-arm establishes, named for the report. The third
     # write is the AASM event, and it is local.
@@ -134,11 +140,13 @@ module Autodev
     }.freeze
 
     def initialize(config:, apply: false, limit: DEFAULT_LIMIT, # rubocop:disable Metrics/ParameterLists
-                   include_author_handback: false, out: $stdout, logger: nil)
+                   include_author_handback: false, include_human_held: false,
+                   out: $stdout, logger: nil)
       @config = config
       @apply = apply
       @limit = limit
       @include_author_handback = include_author_handback
+      @include_human_held = include_human_held
       @out = out
       @logger = logger || NullLogger.new
     end
@@ -221,7 +229,8 @@ module Autodev
       gl_issue = read_issue(issue)
       return decline(tally, :not_ours, "#{label(issue)} — #{ownership(gl_issue)}") unless still_ours?(issue, gl_issue)
 
-      consider(Row.new(issue, gl_issue, assignee_ids(gl_issue), router), tally, read_mr(issue))
+      consider(Row.new(issue, gl_issue, assignee_ids(gl_issue), usernames_of(gl_issue), router),
+               tally, read_mr(issue))
     rescue StandardError => e
       unexaminable(issue, tally, e)
     end
@@ -294,8 +303,8 @@ module Autodev
     #   2. **the assignment**, which is what stops that same pass from closing the
     #      row for being unassigned. Undone if the third write fails: a `done` row
     #      assigned to autodev is swept by nothing, and the next default run would
-    #      accept it on `assigned_to_autodev?` alone — the widening
-    #      `INCLUDE_AUTHOR_HANDBACK=1` exists to gate, leaking through the gate.
+    #      accept it on `assigned_to_autodev?` alone — the widenings the two flags
+    #      exist to gate, leaking through the gate.
     #   3. **the AASM event**, local, and the only one after which the row is in
     #      `checking_pipeline`.
     #
@@ -392,29 +401,81 @@ module Autodev
     # autodev. He had not. That is, word for word, the harm the paragraph above
     # says this method prevents.
     #
-    # So the write is **read back**, exactly as the label write below is, and the
-    # re-arm stops rather than transitioning a row that cannot hold. What it
-    # deliberately does NOT do is pick the policy: substituting autodev for the
-    # human is defensible and so is never entering a ticket a human holds, but
-    # that decision belongs to whoever lifts the ownership filter — and until
-    # then this path is unreachable in the product anyway, because `ownership`
-    # declines every human-held row. Failing loudly is what makes the choice
-    # visible when someone does lift it.
+    # So autodev **takes** the ticket instead, and three things make that
+    # defensible rather than the silent theft the paragraph above rejects:
+    #
+    #   * it only happens on a row the ownership filter accepted, and the filter
+    #     that accepts a human-held row is `include_human_held:` — an explicit
+    #     flag, off by default, whose report says whose ticket would be taken
+    #     before anything is written;
+    #   * it is **said**, on the ticket, naming the person it was taken from and
+    #     why (`announce_takeover`). What made the old substitution wrong was that
+    #     it happened "with no comment and no trace anywhere autodev writes", not
+    #     that it happened;
+    #   * it is **given back to them** and not to the ticket's author, which is a
+    #     different person on 4 of the 20 rows of this population and, on one of
+    #     them, a deactivated account. `displaced_assignee_id` records who, and
+    #     `IssueNotifier#handback_target` reads it.
+    #
+    # And the write is **read back**, exactly as the label write below is, because
+    # it is the one write GitLab Community can accept and ignore.
     #
     # Returns the assignee list it wrote, or nil when it wrote nothing — the
     # shape of `manage_labels`, and for the same reason: a write that would change
-    # nothing is not made, and the one row of the 23 still assigned to autodev is
-    # exactly that case.
+    # nothing is not made, and a row already assigned to autodev alone is exactly
+    # that case.
     def reclaim(row)
       autodev = ::GitlabHelpers.current_user_id(@client)
-      wanted = row.assignees | [autodev]
-      return nil if wanted == row.assignees
+      return nil if row.assignees == [autodev]
 
-      @client.edit_issue(row.issue.project_path, row.issue.issue_iid, assignee_ids: wanted)
-      raise AssignmentNotLanded, 'autodev is not among the assignees after the assignment write' \
-        unless assignees_now(row).include?(autodev)
+      @client.edit_issue(row.issue.project_path, row.issue.issue_iid, assignee_ids: [autodev])
+      unless assignees_now(row).include?(autodev)
+        raise AssignmentNotLanded, 'autodev is not among the assignees after the assignment write'
+      end
 
-      wanted
+      record_takeover(row, autodev)
+      [autodev]
+    end
+
+    # Written after the read-back, so nothing is recorded about a takeover that
+    # did not happen. `displaced_assignee_id` stays NULL when autodev displaced
+    # nobody (an unassigned ticket), and the handback then falls back to the
+    # author exactly as it always did.
+    def record_takeover(row, autodev)
+      displaced = (row.assignees - [autodev]).first
+      return unless displaced
+
+      row.issue.update(displaced_assignee_id: displaced)
+      announce_takeover(row, displaced)
+    end
+
+    # The comment is the whole difference between taking a ticket and quietly
+    # removing somebody from it. Posted as a plain note rather than through
+    # `IssueNotifier`, which is a mixin of the danger-claude runner this sweep is
+    # not; the locale is the row's, like every other message autodev writes.
+    #
+    # Addressed by `username` — a GitLab mention is `@handle`, and `@42` names
+    # nobody — read off the payload `examine` already fetched. It falls back to
+    # the numeric id rather than dropping the address, because a message that
+    # cannot name its reader is still owed to them.
+    def announce_takeover(row, displaced)
+      @client.create_issue_note(row.issue.project_path, row.issue.issue_iid,
+                                takeover_notice(row, displaced))
+    rescue ::Gitlab::Error::ResponseError => e
+      # The takeover itself has landed and been read back; failing to announce it
+      # must not undo it. It is reported instead, and loudly, because a ticket
+      # that changed hands in silence is the defect this method exists to avoid.
+      @logger.error("Failed to announce the takeover of ##{row.issue.issue_iid}: #{e.message}",
+                    project: row.issue.project_path)
+      say("#{label(row.issue)} — TAKEN OVER WITHOUT A NOTICE (#{e.message}); tell user #{displaced} by hand")
+    end
+
+    def takeover_notice(row, displaced)
+      ::Locales.t(:arrears_takeover,
+                  locale: (row.issue.locale || 'fr').to_sym,
+                  tag: "**autodev** (v#{::Autodev::VERSION})",
+                  user: row.usernames[displaced] || displaced,
+                  mr_url: row.issue.mr_url)
     end
 
     # Read back from GitLab rather than from `row.assignees`, which is what
@@ -496,12 +557,12 @@ module Autodev
     # does not transfer). There the population was still assigned to autodev, so
     # `assigned_to_autodev?` restored a true ownership. Here the unassignment is
     # AUTODEV's own write — `abandon_issue` → `announce_abandonment` →
-    # `reassign_to_author` — so the strict rule declines 22 of the 23 rows it was
+    # `hand_ticket_back` — so the strict rule declines 22 of the 23 rows it was
     # written to rescue. One is eligible today, which makes the pilot batch free.
     #
     # The permissive rule is therefore behind a flag, and it is narrow: the ticket
     # must be assigned to its author and to nobody else — exactly where
-    # `reassign_to_author` put it — with no human comment and no workflow-label
+    # `hand_ticket_back` put it — with no human comment and no workflow-label
     # move by somebody else since `finished_at`. A permissive gesture is always a
     # written one.
     #
@@ -512,12 +573,40 @@ module Autodev
     def still_ours?(issue, gl_issue)
       return false if externally_closed?(gl_issue)
       return true if assigned_to_autodev?(gl_issue)
+      return false unless widened_to?(issue, gl_issue)
 
-      @include_author_handback && untouched_handback?(issue, gl_issue)
+      untouched_since_giveup?(issue, gl_issue)
     end
 
-    def untouched_handback?(issue, gl_issue)
-      return false unless handed_back_to_author?(issue, gl_issue)
+    # Which rows *beyond* the ones autodev still holds this run was told to
+    # consider. Three tiers, each a superset of the one above it, and each written
+    # by the operator rather than inferred:
+    #
+    #   * nothing — `assigned_to_autodev?` verbatim, one row of the 23;
+    #   * `include_author_handback:` — the ticket went back to its author, and the
+    #     author is who autodev's own `abandon_issue` handed it to, so the gesture
+    #     that put it there is autodev's and not a human's;
+    #   * `include_human_held:` — the ticket is held by ONE person, whoever they
+    #     are. This is the tier the arrears need (Autodev #98): 4 of the 20 rows
+    #     are held by somebody who is not the author, so the tier above declines
+    #     them, and on GitLab Community autodev cannot join a ticket anyway — it
+    #     takes it. What makes that acceptable is not the tier but what `reclaim`
+    #     does with it: it says so on the ticket and it gives it back.
+    #
+    # A ticket held by NOBODY is deliberately in no tier: `dispatch_new_issues`
+    # filters on assignment, so an unassigned ticket is one nobody is waiting on,
+    # and the sweep's population is requests a human asked for.
+    def widened_to?(issue, gl_issue)
+      return assignee_ids(gl_issue).one? if @include_human_held
+
+      @include_author_handback && handed_back_to_author?(issue, gl_issue)
+    end
+
+    # The protection that survives every tier, and the reason a username list is
+    # not needed on top of it: what makes a row safe to re-arm is that NOBODY has
+    # touched it since autodev gave it up — no human comment, no workflow label
+    # moved by somebody else. A person actively working the ticket fails both.
+    def untouched_since_giveup?(issue, gl_issue)
       return false if ::GitlabHelpers.human_comment_since?(@client, issue.project_path,
                                                            issue.issue_iid, issue.finished_at)
 
@@ -538,13 +627,34 @@ module Autodev
       Array(::GitlabHelpers.field(gl_issue, :assignees)).map { |a| ::GitlabHelpers.field(a, :id) }
     end
 
+    # A GitLab mention is `@handle`; `@42` names nobody. Missing usernames are
+    # simply absent from the map and the notice falls back to the id, because a
+    # message that cannot name its reader is still owed to them.
+    def usernames_of(gl_issue)
+      Array(::GitlabHelpers.field(gl_issue, :assignees)).filter_map do |assignee|
+        handle = handle_of(assignee)
+        [::GitlabHelpers.field(assignee, :id), handle] if handle
+      end.to_h
+    end
+
+    # Deliberately NOT `GitlabHelpers.field`: it falls back to `obj['username']`
+    # for an object that does not answer the reader, and a Struct answers that
+    # with a `NameError` — which `examine`'s boundary would report as a row that
+    # could not be read. A handle is cosmetic (the notice falls back to the id),
+    # so its absence must never cost a row its re-arm.
+    def handle_of(assignee)
+      assignee.username if assignee.respond_to?(:username)
+    end
+
     def ownership(gl_issue)
       return 'the ticket is closed on GitLab, left untouched' if externally_closed?(gl_issue)
 
       ids = assignee_ids(gl_issue)
       return 'nobody is assigned on GitLab, left untouched' if ids.empty?
+      return "assigned to users #{ids.join(', ')}, left untouched" unless ids.one?
 
-      "assigned to user #{ids.join(', ')}, left untouched"
+      "assigned to user #{ids.first}, left untouched#{'; INCLUDE_HUMAN_HELD=1 would take it over' unless
+        @include_human_held}"
     end
 
     # Has **this sweep** already re-armed this request? Read from `activity_events`

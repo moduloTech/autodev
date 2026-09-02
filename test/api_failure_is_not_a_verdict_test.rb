@@ -189,7 +189,7 @@ class ApiFailureNeverDeliversTest < Minitest::Test
     mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
     mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
-    mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
+    mon.define_singleton_method(:hand_ticket_back) { |issue| sink[:reassigned] << issue.issue_iid }
   end
 
   # The bug, end to end.
@@ -395,7 +395,7 @@ class FailedEvaluationIsInconclusiveTest < Minitest::Test
   def stub_give_up_sinks(mon, sink)
     mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
-    mon.define_singleton_method(:reassign_to_author) { |*| nil }
+    mon.define_singleton_method(:hand_ticket_back) { |*| nil }
   end
 
   def test_a_crashed_evaluation_does_not_expire_the_watch
@@ -731,7 +731,19 @@ ALLOWED_SWALLOWS = {
     # The undo of one write. `false` means "the assignment could not be handed
     # back", and `undo` prints that sentence instead of the reassuring one. It
     # invents nothing.
-    'restore_assignees' => 'write, not a read: the failure is reported verbatim in the line'
+    'restore_assignees' => 'write, not a read: the failure is reported verbatim in the line',
+    # A write, and one that happens **after** the fact it announces has already
+    # landed and been read back (Autodev #98). `reclaim` has taken the ticket and
+    # confirmed it on GitLab before this runs, so raising here would undo nothing
+    # — it would only turn a completed takeover into an `:incomplete` line and
+    # send a human to look at a row that is correct.
+    #
+    # Nothing reads the return value: the substitute is not an answer, it is the
+    # absence of a comment. What replaces the exception is a report line naming
+    # the person who has to be told by hand, at the same volume as a failure,
+    # because a ticket that changed hands in silence is the whole defect this
+    # notice exists to prevent.
+    'announce_takeover' => 'write after the fact it announces: the takeover has landed and been read back'
   },
   'lib/autodev/review_publisher.rb' => {
     # Autodev #95, and the one entry in this list whose substitute is a *better*

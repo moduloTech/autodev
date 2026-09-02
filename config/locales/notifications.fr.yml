@@ -49,3 +49,11 @@ fr:
 
     :arrow_right: **Vous souhaitez creuser davantage ou passer a une implementation ?** Laissez un commentaire pour me guider, remettez le label _%{label_todo}_, reassignez-moi, et c'est parti.
   review_summary: "<!-- autodev:review -->\n:mag: **autodev** — revue automatique (verdict : %{verdict})\n\n%{summary}"
+  arrears_takeover: |-
+    :arrows_counterclockwise: %{tag} : je reprends ce ticket.
+
+    Sa merge request %{mr_url} n'a jamais ete relue — le jeton de revue etait hors service d'avril a aout 2026, et la demande a ete abandonnee sans qu'aucune relecture n'ait lieu.
+
+    Notre GitLab n'accepte qu'un seul assigne par ticket, donc je ne peux pas m'ajouter a cote de toi : je prends le ticket. **@%{user} je te le rendrai** des que j'aurai termine ou si je m'arrete.
+
+    :arrow_right: **Tu preferes le garder ?** Reassigne-toi le ticket, je m'arreterai au cycle suivant.

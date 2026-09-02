@@ -52,7 +52,7 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
   FakeMr = Struct.new(:state, :detailed_merge_status, :has_conflicts)
   FakeGlIssue = Struct.new(:state, :assignees, :labels)
-  FakeAssignee = Struct.new(:id)
+  FakeAssignee = Struct.new(:id, :username)
   FakeNote = Struct.new(:system, :created_at, :body)
   FakeLabel = Struct.new(:name)
   FakeUser = Struct.new(:id)
@@ -69,14 +69,16 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   # client can serve a multi-row population — which is the shape production has.
   #
   # It **keeps state**: a write is visible to the next read. That is what makes
-  # the verification the sweep performs after reposing the working label testable
-  # at all, and two GitLab behaviours are modelled on purpose because the sweep
-  # now depends on both:
+  # the verification the sweep performs after its writes testable at all, and two
+  # GitLab **Community** behaviours are modelled on purpose, because both of them
+  # are what the sweep gets wrong when it assumes Premium (Autodev #98):
   #
-  #   * a `labels=` write replaces the whole list, and GitLab keeps a single value
-  #     per scoped-label key — posing `Development::Doing` is what drops
-  #     `Development::Awaiting CR`, which is a label no autodev config names;
-  #   * `assignee_ids:` replaces the whole assignee list, humans included.
+  #   * a `labels=` write replaces the whole list and GitLab keeps it exactly as
+  #     sent — there is NO one-value-per-scope rule, so `Development::Awaiting CR`
+  #     survives beside a `Development::Doing` posed next to it unless autodev
+  #     removes it itself;
+  #   * `assignee_ids:` holds ONE assignee, so a list of two is accepted and only
+  #     the first survives.
   #
   # `label_error_iids` / `assignee_error_iids` fail one write and nothing else:
   # `LabelManager#manage_labels` answers a GitLab error with `[]`, so the failed
@@ -115,8 +117,8 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
       stored(iid)
     end
 
-    def create_issue_note(path, iid, _body)
-      @created_notes << [path, iid]
+    def create_issue_note(path, iid, body)
+      @created_notes << [path, iid, body]
       Struct.new(:id).new(1)
     end
 
@@ -166,6 +168,8 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
     # `dispatch_unassignment` closed the row 94 seconds later with a comment
     # blaming the human for an unassignment nobody made.
     def apply_assignees(iid, ids)
+      return if Array(@opts[:assignee_noop_iids]).include?(iid)
+
       stored(iid).assignees = Array(ids).compact.first(1).map { |id| FakeAssignee.new(id) }
     end
 
@@ -189,11 +193,12 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
                    finished_at: GIVEN_UP_AT }.merge(overrides))
   end
 
-  def sweep(client, apply: false, limit: 3, include_author_handback: false)
+  def sweep(client, apply: false, limit: 3, include_author_handback: false, include_human_held: false)
     GitlabHelpers.stub(:build_gitlab_client, client) do
       GitlabHelpers.stub(:current_user_id, AUTODEV_USER_ID) do
         Autodev::ReviewArrearsSweep.new(config: CONFIG, apply: apply, limit: limit,
                                         include_author_handback: include_author_handback,
+                                        include_human_held: include_human_held,
                                         out: @out).run
       end
     end
@@ -442,19 +447,14 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   end
 
   # The permissive half, and it is always a written gesture: here the
-  # unassignment is autodev's OWN write (`abandon_issue` → `reassign_to_author`),
+  # unassignment is autodev's OWN write (`abandon_issue` → `hand_ticket_back`),
   # so the strict rule declines 22 of the 23 rows it was meant to rescue.
   #
-  # The flag still makes the row ELIGIBLE — it is no longer counted `not_ours`.
-  # What it can no longer do is COMPLETE, and that is the whole subject of
-  # Autodev #98: the ticket is held by a human, GitLab Community holds one
-  # assignee, the union write is accepted and ignored, and the re-arm stops at
-  # the read-back rather than transitioning a row `dispatch_unassignment` would
-  # close at the next cycle.
-  #
-  # So this flag — the documented way to rescue 22 of the 23 rows — is
-  # unavailable until the assignment policy is decided. That is a finding, not a
-  # regression: it was never doing what it claimed.
+  # It re-arms for real since Autodev #98, which is what the flag always claimed
+  # and never did: the union write it relied on is ignored by GitLab Community,
+  # so every row it accepted was transitioned unassigned and closed at the next
+  # cycle. `reclaim` takes the ticket instead — announced, and recorded so the
+  # handback finds its way back to the same person.
   def test_a_ticket_handed_back_to_its_author_is_eligible_behind_the_flag
     issue = arrear
     client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID)], [DOING]))
@@ -462,7 +462,45 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
     tally = sweep(client, apply: true, include_author_handback: true)
 
     assert_equal 0, tally[:not_ours]
-    assert_equal 1, tally[:incomplete]
+    assert_equal 1, tally[:rearmed]
+    assert_equal 'checking_pipeline', issue.reload.status
+  end
+
+  # The widest tier, and the one the arrears actually need (Autodev #98): 4 of the
+  # 20 rows are held by somebody who is not the author, so the tier above declines
+  # them however untouched they are.
+  def test_a_ticket_held_by_a_non_author_is_eligible_behind_the_widest_flag
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID)], [DOING]))
+
+    tally = sweep(client, apply: true, include_human_held: true)
+
+    assert_equal 1, tally[:rearmed]
+    assert_equal 'checking_pipeline', issue.reload.status
+    assert_equal OTHER_HUMAN_ID, issue.reload.displaced_assignee_id
+  end
+
+  # And the tier below still declines it, so the widening has to be written.
+  def test_a_ticket_held_by_a_non_author_is_declined_by_the_author_flag
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID)], [DOING]))
+
+    tally = sweep(client, apply: true, include_author_handback: true)
+
+    assert_equal 1, tally[:not_ours]
+    assert_equal 'done', issue.reload.status
+  end
+
+  # A person who touched the ticket since the give-up is working it, whoever they
+  # are — that check survives every tier, and is why no username list is needed.
+  def test_a_human_comment_since_the_give_up_declines_the_widest_flag_too
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID)], [DOING]),
+                            notes: [FakeNote.new(false, '2026-08-06T10:00:00Z', 'On reprend a la main.')])
+
+    tally = sweep(client, apply: true, include_human_held: true)
+
+    assert_equal 1, tally[:not_ours]
     assert_equal 'done', issue.reload.status
   end
 
@@ -612,7 +650,8 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   # not. The re-arm must stop instead, leaving the human on the ticket.
   def test_a_rearm_that_cannot_assign_autodev_does_not_transition
     issue = arrear
-    client = handed_back_client
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID)], [DOING]),
+                            assignee_noop_iids: [issue.issue_iid])
 
     tally = sweep(client, apply: true, include_author_handback: true)
 
@@ -879,27 +918,62 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
   # --- 11. the assignee list is not autodev's to empty ----------------------
 
-  # `assigned_to_autodev?` is an `.any?`, so a ticket assigned to autodev AND to
-  # a human passes the strict filter — and `assignee_ids: [<autodev>]` then took
-  # the human off the ticket, without a word.
-  def test_reclaiming_keeps_the_humans_already_on_the_ticket
-    issue = arrear
-    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID),
-                                                                 FakeAssignee.new(AUTODEV_USER_ID)], [DOING]))
-
-    sweep(client, apply: true)
-
-    assert_equal [OTHER_HUMAN_ID, AUTODEV_USER_ID], client.assignees_of(issue.issue_iid)
-  end
-
-  def test_reclaiming_adds_autodev_beside_the_author
+  # Autodev takes the ticket, because on GitLab Community it cannot join one
+  # (Autodev #98). What makes that different from the silent removal the union
+  # was introduced to stop is the next two tests: it is said, and it is recorded
+  # so the ticket goes back to the right person.
+  def test_reclaiming_takes_the_ticket_from_the_human
     issue = arrear
     client = handed_back_client
 
     sweep(client, apply: true, include_author_handback: true)
 
-    assert_equal [[PATH, issue.issue_iid, { assignee_ids: [AUTHOR_ID, AUTODEV_USER_ID] }]],
-                 client.assignee_edits
+    assert_equal [[PATH, issue.issue_iid, { assignee_ids: [AUTODEV_USER_ID] }]], client.assignee_edits
+    assert_equal [AUTODEV_USER_ID], client.assignees_of(issue.issue_iid)
+  end
+
+  # "With no comment and no trace anywhere autodev writes" is what made the old
+  # substitution wrong. The taking is not.
+  #
+  # The reentry posts its own activity journal on the same ticket, so the notice
+  # is looked for rather than counted — and it is looked for by the thing that
+  # makes it a notice: it names the person whose ticket was taken. `@42` mentions
+  # nobody on GitLab, which is why the address is a username.
+  def test_a_takeover_is_announced_on_the_ticket
+    arrear
+    client = handed_back_client
+
+    sweep(client, apply: true, include_author_handback: true)
+
+    notice = client.created_notes.map(&:last).find { |body| body.include?('@the-author') }
+
+    refute_nil notice, "no takeover notice among #{client.created_notes.size} note(s)"
+  end
+
+  # So the handback goes to whoever autodev took it from, and not to the ticket's
+  # author — a different person on 4 of the 20 rows, and a deactivated account on
+  # one of them.
+  def test_a_takeover_records_who_it_displaced
+    issue = arrear
+    client = handed_back_client
+
+    sweep(client, apply: true, include_author_handback: true)
+
+    assert_equal AUTHOR_ID, issue.reload.displaced_assignee_id
+  end
+
+  # An unassigned ticket is in no tier, not even the widest: `dispatch_new_issues`
+  # filters on assignment, so a ticket nobody holds is a ticket nobody is waiting
+  # on, and this sweep's population is requests a human asked for.
+  def test_an_unassigned_ticket_is_declined_by_every_tier
+    issue = arrear
+    client = StubClient.new(gl_issue: FakeGlIssue.new('opened', [], [DOING]))
+
+    tally = sweep(client, apply: true, include_human_held: true)
+
+    assert_equal 1, tally[:not_ours]
+    assert_equal 'done', issue.reload.status
+    assert_empty client.edits
   end
 
   # The `manage_labels` rule applied to the assignee list: a write that would
@@ -975,7 +1049,7 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   def end_labelled_issue = FakeGlIssue.new('opened', [FakeAssignee.new(AUTODEV_USER_ID)], [ATTENTION])
 
   def handed_back_client
-    StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID)], [DOING]))
+    StubClient.new(gl_issue: FakeGlIssue.new('opened', [FakeAssignee.new(AUTHOR_ID, 'the-author')], [DOING]))
   end
 
   def failing_label_client(issue)
