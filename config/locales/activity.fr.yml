@@ -51,6 +51,7 @@ fr:
   activity_review_limit_reached: ":warning: Limite de review atteinte (3 tours) → termine"
   activity_stagnation_pipeline: ":warning: Stagnation pipeline detectee : %{detail} → termine"
   activity_stagnation_discussions: ":warning: Stagnation discussions detectee → termine"
+  activity_fix_rounds_exhausted: ":octagonal_sign: Plafond de %{ceiling} tours de correction atteint (%{rounds}) → termine"
   activity_pipeline_watch_expired: ":hourglass: Surveillance de la pipeline arretee apres plus de %{days} jours sans conclusion → termine"
   activity_mr_closed_unmerged: ":stop_sign: MR fermee sans etre fusionnee, rien n'a ete livre → termine, intervention requise"
   activity_review_skill_missing: ":wrench: Skill de revue `%{skill}` declare mais `%{path}` absent de la branche cible `%{ref}` → termine, intervention requise"

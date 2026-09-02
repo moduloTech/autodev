@@ -35,6 +35,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include WatchBound
   include MissingBaseBound
   include InvalidRequestBound
+  include StaleTransitionBound
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)
@@ -257,7 +258,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   def finalize_green_done(issue, discussions)
     iid = issue.issue_iid
     apply_label_done(iid)
-    reassign_to_author(issue)
+    hand_ticket_back(issue)
     Issue.where(id: issue.id).update_all(finished_at: Time.current)
     notify_localized(iid, :done_nominal, label_todo: @project_config['labels_todo']&.first)
     log_activity(issue, discussions.empty? ? :pipeline_green_done : :done, count: discussions.size)
@@ -272,6 +273,10 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   end
 
   def log_check_error(issue, error)
+    # This boundary only logs, but the line an operator reads must name the cause
+    # rather than show a stack trace for something that is not a fault.
+    return stop_on_stale_transition(error) if error.is_a?(StaleTransitionError)
+
     bt = error.backtrace&.first(5)&.join("\n  ")
     log_error "Pipeline check failed for issue ##{issue.issue_iid}: #{error.class}: #{error.message}"
     log_error "  #{bt}" if bt

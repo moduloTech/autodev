@@ -253,7 +253,46 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # We use `save!` so a validation failure surfaces — the state machine
   # cannot silently drop a transition.
   def persist_status_change!
+    refuse_stale_transition!
     save!
+  end
+
+  # A transition decided on a state the database no longer holds is a lost update
+  # (Autodev #97), and this is the one place it can be caught for every one of
+  # them: `after_all_transitions` runs on every event, so the rule is written once
+  # instead of at each long-running exit — a list whose first entry nobody thought
+  # to write.
+  #
+  # `aasm.from_state` is what this object believed when it decided, and the column
+  # is what the row holds now. They disagree exactly when somebody moved it in
+  # between: the dashboard's close or forced transition, a `reset`, a startup
+  # recovery — and, in production on 01/09/2026, eight minutes of a danger-claude
+  # call standing between a close and a `save!` that undid it.
+  #
+  # One `SELECT status` per transition, and it buys the property that a human
+  # gesture holds. A row that has been deleted answers `nil`, which is not the
+  # state we left either, so it is refused for the same reason.
+  #
+  # Deliberately an exception rather than a silent skip: the caller is in the
+  # middle of a method that goes on to post comments and move labels, and "write
+  # nothing" has to mean the whole sequence, not just this row.
+  #
+  # And what it is NOT: atomic. The read and the save are two statements, so a row
+  # moved in the microseconds between them is still overwritten. That is worth
+  # stating rather than papering over — but the window this closes is the one that
+  # actually existed, ten to sixty minutes of a danger-claude call, and the one
+  # left is not reachable by a human clicking a button. Making it atomic means
+  # optimistic locking on every write path, `update_all` included, which is a much
+  # larger change than the defect asks for.
+  def refuse_stale_transition!
+    return unless persisted?
+
+    held = self.class.where(id: id).pick(:status)
+    return if held == aasm.from_state.to_s
+
+    raise StaleTransitionError,
+          "issue ##{issue_iid}: decided #{aasm.from_state} → #{aasm.to_state}, " \
+          "but the row now holds #{held.inspect} — refusing to overwrite it"
   end
 
   # Best-effort: record every AASM transition as an `activity_events` row.

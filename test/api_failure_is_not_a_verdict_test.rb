@@ -189,7 +189,7 @@ class ApiFailureNeverDeliversTest < Minitest::Test
     mon.define_singleton_method(:log_activity) { |_issue, key, **vars| sink[:activity] << [key, vars] }
     mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
-    mon.define_singleton_method(:reassign_to_author) { |issue| sink[:reassigned] << issue.issue_iid }
+    mon.define_singleton_method(:hand_ticket_back) { |issue| sink[:reassigned] << issue.issue_iid }
   end
 
   # The bug, end to end.
@@ -395,7 +395,7 @@ class FailedEvaluationIsInconclusiveTest < Minitest::Test
   def stub_give_up_sinks(mon, sink)
     mon.define_singleton_method(:apply_label_done) { |iid| sink[:labels] << iid }
     mon.define_singleton_method(:notify_localized) { |_iid, key, **vars| sink[:notify] << [key, vars] }
-    mon.define_singleton_method(:reassign_to_author) { |*| nil }
+    mon.define_singleton_method(:hand_ticket_back) { |*| nil }
   end
 
   def test_a_crashed_evaluation_does_not_expire_the_watch
@@ -428,12 +428,16 @@ class MrFixerApiFailureTest < Minitest::Test
   include ApiFailureFixtures
 
   class FakeIssue
-    attr_reader :issue_iid, :mr_iid, :fix_round, :attrs
+    # `discussion_fix_round` alongside `fix_round`: the ceiling in `run_fix_round`
+    # counts the discussion loop alone (review of the alpha-52 lot), and this fake
+    # stands in for a real row, which carries both.
+    attr_reader :issue_iid, :mr_iid, :fix_round, :discussion_fix_round, :attrs
 
     def initialize
       @issue_iid = 11_859
       @mr_iid = 42
       @fix_round = 0
+      @discussion_fix_round = 0
       @attrs = { status: 'fixing_discussions' }
     end
 
@@ -468,6 +472,12 @@ class MrFixerApiFailureTest < Minitest::Test
       fixer.instance_variable_set(:@client, client)
       fixer.instance_variable_set(:@project_path, 'group/project')
       fixer.instance_variable_set(:@logger, StubLogger.new)
+      # `init_runner` always sets both in production; the fixture left them out
+      # while nothing on this path read them. `run_fix_round`'s ceiling does
+      # (Autodev #99), and it reads them before the GitLab call these tests are
+      # about — so the omission was the fixture's, not the code's.
+      fixer.instance_variable_set(:@project_config, {})
+      fixer.instance_variable_set(:@config, {})
       %i[log log_error].each { |noop| fixer.define_singleton_method(noop) { |*| nil } }
       fixer.define_singleton_method(:log_activity) { |_issue, key, **vars| activity << [key, vars] }
       fixer.define_singleton_method(:execute_fix_cycle) { |*| nil }
@@ -731,7 +741,19 @@ ALLOWED_SWALLOWS = {
     # The undo of one write. `false` means "the assignment could not be handed
     # back", and `undo` prints that sentence instead of the reassuring one. It
     # invents nothing.
-    'restore_assignees' => 'write, not a read: the failure is reported verbatim in the line'
+    'restore_assignees' => 'write, not a read: the failure is reported verbatim in the line',
+    # A write, and one that happens **after** the fact it announces has already
+    # landed and been read back (Autodev #98). `reclaim` has taken the ticket and
+    # confirmed it on GitLab before this runs, so raising here would undo nothing
+    # — it would only turn a completed takeover into an `:incomplete` line and
+    # send a human to look at a row that is correct.
+    #
+    # Nothing reads the return value: the substitute is not an answer, it is the
+    # absence of a comment. What replaces the exception is a report line naming
+    # the person who has to be told by hand, at the same volume as a failure,
+    # because a ticket that changed hands in silence is the whole defect this
+    # notice exists to prevent.
+    'announce_takeover' => 'write after the fact it announces: the takeover has landed and been read back'
   },
   'lib/autodev/review_publisher.rb' => {
     # Autodev #95, and the one entry in this list whose substitute is a *better*

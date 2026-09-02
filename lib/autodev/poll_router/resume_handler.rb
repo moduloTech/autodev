@@ -125,7 +125,8 @@ class PollRouter
     def reenter_via_pipeline_check(existing, origin: nil)
       existing.reenter_to_check_pipeline!(origin)
       existing.update(review_count: reentry_review_count(existing), review_failure_count: 0,
-                      stagnation_signatures: nil, fix_round: 0, pipeline_retrigger_count: 0,
+                      stagnation_signatures: nil, fix_round: 0, discussion_fix_round: 0,
+                      pipeline_retrigger_count: 0,
                       error_message: nil, finished_at: nil, activity_note_id: nil,
                       needs_attention: false, attention_reason: nil, attention_detail: nil,
                       infra_recheck_count: 0, infra_recheck_at: nil)
@@ -154,7 +155,8 @@ class PollRouter
     def reenter_via_reimplementation(gl_issue, existing)
       existing.reenter!
       existing.update(review_count: 0, review_failure_count: 0, stagnation_signatures: nil,
-                      fix_round: 0, error_message: nil, finished_at: nil, started_at: nil,
+                      fix_round: 0, discussion_fix_round: 0, error_message: nil,
+                      finished_at: nil, started_at: nil,
                       pipeline_retrigger_count: 0, activity_note_id: nil,
                       needs_attention: false, attention_reason: nil, attention_detail: nil)
       log_activity(existing, :reenter)

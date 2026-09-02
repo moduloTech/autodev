@@ -18,6 +18,7 @@ module Autodev
   # legacy handlers do.
   class PollDispatcher # rubocop:disable Metrics/ClassLength
     include ExternalState
+    include StaleTransitionBound
 
     ACTIVE_STATUSES = %w[cloning checking_spec implementing committing pushing creating_mr
                          checking_pipeline reviewing fixing_discussions fixing_pipeline].freeze
@@ -291,9 +292,23 @@ module Autodev
       return stop_unassigned(issue) unless assigned_to_autodev?(gl_issue)
 
       stop_on_handover(issue, gl_issue)
+    # This pass transitions rows in line, so it reaches the refusal the three
+    # workers already name (Autodev #97, review of the alpha-52 lot). Without the
+    # clause it escaped to `dispatch`'s `rescue StandardError`, which logs and
+    # returns — taking the six passes that had not run yet down with it, for the
+    # whole project, that cycle. The stop has to be local to the row, as it is in
+    # the workers.
+    rescue StaleTransitionError => e
+      stop_on_stale_transition(e)
     rescue ::Gitlab::Error::ResponseError => e
       @logger.error("Failed to check external state for ##{issue.issue_iid}: #{e.message}",
                     project: @path)
+    end
+
+    # The one line `StaleTransitionBound` asks of an including class, spelled here
+    # the way `PollRouter` and `DangerClaudeRunner` already spell it.
+    def log_error(msg)
+      @logger.error(msg, project: @path)
     end
 
     # `needs_attention: false` is the delivered-vs-given-up discriminator (Autodev

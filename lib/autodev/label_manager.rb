@@ -11,11 +11,14 @@ module LabelManager
     Config.label_workflow?(@project_config)
   end
 
-  def apply_label_doing(iid)
+  # `clear_scope:` is opt-in and exactly one caller opts in — see `manage_labels`
+  # and `PollRouter#repose_working_label`.
+  def apply_label_doing(iid, clear_scope: false)
     return unless label_workflow?
 
     doing = @project_config['label_doing']
-    remember_entry_label(manage_labels(iid, remove: other_workflow_labels(doing), add: doing))
+    remember_entry_label(manage_labels(iid, remove: other_workflow_labels(doing), add: doing,
+                                            clear_scope: clear_scope))
   end
 
   # The entry label, put back while autodev waits on a human (Autodev #75).
@@ -80,8 +83,10 @@ module LabelManager
   # Every workflow label autodev owns and writes, except the one being applied.
   # `label_attention` belongs in here as much as the others: a re-armed row
   # (`dispatch_infra_recheck` → `resume_recovered_infra` → `apply_label_doing`)
-  # must not keep a stale attention label beside its new one, since GitLab allows
-  # a single value per scope and the two would collide.
+  # must not keep a stale attention label beside its new one — and nothing else
+  # would remove it, because GitLab does not enforce one value per scope on a
+  # `labels=` write (Autodev #98). That is what `scope_residue` now covers for
+  # the values autodev does *not* own.
   def other_workflow_labels(applied)
     (Array(@project_config['labels_todo']) +
       [@project_config['label_doing'], @project_config['label_done'], label_attention])
@@ -157,15 +162,14 @@ module LabelManager
   # `label_done` on a row that already carries it, which is the #61 shape:
   # `whiny_transitions: false` no-ops the transition and the side effects run
   # anyway.
-  def manage_labels(iid, remove:, add:)
+  def manage_labels(iid, remove:, add:, clear_scope: false)
     current = @client.issue(@project_path, iid).labels || []
-    wanted = target_labels(current, remove, add)
-    return [] if wanted.sort == current.sort
+    dropped = remove + (clear_scope ? scope_residue(current, add) : [])
+    return [] unless rewrite_labels(iid, current, target_labels(current, dropped, add), dropped, add)
 
-    @client.edit_issue(@project_path, iid, labels: wanted.join(','))
-    removed = current & remove.compact
-    log "Labels updated on ##{iid}: removed #{removed}, added #{add}"
-    removed
+    # The workflow labels autodev OWNS and removed — never the scope residue,
+    # which `remember_entry_label` must not mistake for an entry label.
+    current & remove.compact
   rescue Gitlab::Error::ResponseError => e
     # `[]`, not the value of `log_error` — which is `Logger#error`'s `true`. The
     # method's contract is "the workflow labels it removed", and a failed write
@@ -176,8 +180,56 @@ module LabelManager
     []
   end
 
+  # The labels written, or nil when the ticket already carries exactly the ones
+  # wanted: writing then would be an edit that changes nothing, and GitLab records
+  # it as a label event like any other — which `LabelHandover` reads to date a
+  # human's gesture.
+  def rewrite_labels(iid, current, wanted, dropped, add)
+    return nil if wanted.sort == current.sort
+
+    @client.edit_issue(@project_path, iid, labels: wanted.join(','))
+    log "Labels updated on ##{iid}: dropped #{current & dropped.compact}, added #{add}"
+    wanted
+  end
+
   def target_labels(current, remove, add)
     kept = current - remove.compact
     add && !kept.include?(add) ? kept + [add] : kept
+  end
+
+  # Values sitting in autodev's own workflow scope that autodev does not own, to
+  # be dropped from the same write that poses its own (Autodev #98) — and only
+  # when the caller asks, because clearing them **destroys evidence**.
+  #
+  # `LabelHandover#suspect` reads exactly that value to answer "somebody moved this
+  # ticket on". Clearing it on every write erased the answer before anyone asked:
+  # a request in `error` whose ticket a human had moved to `Development::Awaiting
+  # CR` had the label removed by its own retry, went back to `checking_pipeline`,
+  # and the handover was never detected — `error` rows are not in
+  # `ACTIVE_STATUSES`, so nothing had asked before the write either (review of the
+  # alpha-52 lot).
+  #
+  # So the one caller that opts in is `PollRouter#repose_working_label`, whose only
+  # caller is `ReviewArrearsSweep`: the one path that asks
+  # `untouched_since_giveup?` *before* it writes. There the question has been put
+  # and answered; everywhere else it has not been asked.
+  #
+  # Autodev believed GitLab did this: the four configured labels were removed by
+  # name and the rest of `current` was sent straight back, on the reading that
+  # scoped-label exclusivity would drop the old value. It does not —
+  # source.modulotech.fr answers `enterprise: false` and exclusivity is Premium —
+  # so `Development::Awaiting CR` travelled back in beside the
+  # `Development::Doing` being posed and the ticket showed two states at once
+  # (powerpanne/core#16224, 02/09/2026).
+  #
+  # The definition of "in my scope but not mine" is `LabelHandover`'s, and it stays
+  # there: it already answers exactly this question for the *detection* side, with
+  # decisions about `label_attention` and about the derivation that a copy here
+  # would be free to drift from. Construction is free — `scope_residue` reads the
+  # project config and touches no API.
+  def scope_residue(current, add)
+    ::Autodev::LabelHandover
+      .new(client: @client, path: @project_path, project_config: @project_config, logger: @logger)
+      .scope_residue(current, add)
   end
 end

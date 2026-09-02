@@ -33,6 +33,8 @@ class IssueProcessor
 
     def handle_process_error(issue, error)
       return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
+      # Same seam, same reason: everything below this line writes (Autodev #97).
+      return stop_on_stale_transition(error) if error.is_a?(StaleTransitionError)
 
       bt = error.backtrace&.first(10)&.join("\n  ")
       safe_mark_failed!(issue)

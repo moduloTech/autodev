@@ -98,7 +98,8 @@ end
 def autodev_recheck_review_arrears
   Autodev::ReviewArrearsSweep.new(config: Web.config, apply: ENV['APPLY'] == '1',
                                   limit: Autodev::ReviewArrearsSweep.limit_from(ENV.fetch('LIMIT', nil)),
-                                  include_author_handback: ENV['INCLUDE_AUTHOR_HANDBACK'] == '1').run
+                                  include_author_handback: ENV['INCLUDE_AUTHOR_HANDBACK'] == '1',
+                                  include_human_held: ENV['INCLUDE_HUMAN_HELD'] == '1').run
 end
 
 namespace :autodev do
