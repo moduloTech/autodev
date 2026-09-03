@@ -534,7 +534,7 @@ module Autodev
     # labels it knows and poses none, so there is no label whose presence is the
     # fact). Neither describes the project this sweep's population comes from.
     def repose_working_label(row)
-      row.router.repose_working_label(row.issue, @client)
+      row.router.repose_working_label(row.issue, @client, clear_scope: true)
       doing = verifiable_working_label(row)
       return if doing.nil?
 

@@ -16,26 +16,88 @@ require 'autodev/pipeline_monitor'
 #      discussion stagnation, review-limit give-up, or capped/backed-off row).
 #   2. PollRouter#resume_recovered_infra re-enters `checking_pipeline` with
 #      needs_attention cleared — reusing ResumeHandler#reenter_via_pipeline_check.
-class InfraRecheckDispatchTest < Minitest::Test
+#   3. Autodev #93/#106: every `stagnation_pipeline` row reached `done` through
+#      `abandon_issue`, which hands the ticket back to a human — so the recheck
+#      must reclaim the assignment before re-entering, or the row is found
+#      unassigned and falsely closed at the next `dispatch_unassignment` sweep.
+class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
   PROJECT_CONFIG = {
     'path' => 'group/project',
     'labels_todo' => ['To do'],
     'label_doing' => 'Doing',
-    'label_done' => 'Done'
+    'label_done' => 'Done',
+    'label_attention' => 'Attention'
   }.freeze
   CONFIG = { 'gitlab_token' => 'x', 'gitlab_url' => 'https://gitlab.example' }.freeze
 
+  AUTODEV_ID = 7
+  AUTHOR_ID = 42
+
   FakeMr = Struct.new(:state)
   FakeGlIssue = Struct.new(:iid, :title)
+  FakeAssignee = Struct.new(:id, :username)
+  FakeIssue = Struct.new(:labels, :assignees, :state) do
+    def initialize(labels, assignees, state = 'opened') = super
+  end
 
-  # Label + activity no-op client (mirrors poll_router_reenter_test).
+  # Stateful stub: a write is visible to the next read, which is what makes
+  # the reclaim's read-back (and the regression's "not closed next cycle"
+  # assertion) testable at all. Mirrors ReviewArrearsSweepTest::StubClient.
   class StubClient
+    attr_reader :edits, :notes
+
+    def initialize(assignee_ids: [AUTHOR_ID], labels: [])
+      @labels = labels.dup
+      @assignees = assignee_ids.map { |id| FakeAssignee.new(id, "user#{id}") }
+      @edits = []
+      @notes = []
+    end
+
+    def user = FakeAssignee.new(AUTODEV_ID, 'autodev')
     def merge_request(_project, _iid) = FakeMr.new('opened')
-    def issue(_project, _iid) = Struct.new(:labels).new([])
-    def edit_issue(_project, _iid, **_opts) = nil
-    def create_issue_note(_project, _iid, _body) = Struct.new(:id).new(123)
+    def issue(_project, _iid) = FakeIssue.new(@labels.dup, @assignees.dup)
+
+    def edit_issue(_project, _iid, **opts)
+      @edits << opts
+      @labels = opts[:labels].to_s.split(',') if opts.key?(:labels)
+      return unless opts.key?(:assignee_ids)
+
+      # GitLab Community: one assignee per issue, so a list of more than one
+      # is accepted and only the first survives (Autodev #98).
+      @assignees = Array(opts[:assignee_ids]).compact.first(1).map { |id| FakeAssignee.new(id, "user#{id}") }
+    end
+
+    def create_issue_note(_project, _iid, body)
+      @notes << body
+      Struct.new(:id).new(123)
+    end
+
+    def assignee_ids = @assignees.map(&:id)
+  end
+
+  # Models Community silently ignoring an assignee write it cannot honour
+  # (Autodev #98): the edit call succeeds (no exception) but changes nothing.
+  class SilentlyIgnoringClient < StubClient
+    def edit_issue(_project, _iid, **opts)
+      @edits << opts
+      @labels = opts[:labels].to_s.split(',') if opts.key?(:labels)
+    end
+  end
+
+  # Minimal `Autodev::ExternalState` includer, mirroring `ExternalStateTest::Host` —
+  # used to replay `PollDispatcher#check_external_state`'s three questions
+  # without building a whole dispatcher (and its own GitLab client).
+  class ExternalStateHost
+    include Autodev::ExternalState
+
+    def initialize(client, logger)
+      @client = client
+      @path = PROJECT_CONFIG['path']
+      @project_config = PROJECT_CONFIG
+      @logger = logger
+    end
   end
 
   def setup
@@ -134,10 +196,15 @@ class InfraRecheckDispatchTest < Minitest::Test
 
   # -- recovery re-entry --
 
+  def resumed(issue, client = StubClient.new)
+    GitlabHelpers.stub(:current_user_id, AUTODEV_ID) { build_router.resume_recovered_infra(issue, client) }
+    client
+  end
+
   def test_resume_recovered_infra_reenters_checking_pipeline_and_clears_attention
     issue = infra_stagnation_issue(review_count: 3, infra_recheck_count: 2)
 
-    build_router.resume_recovered_infra(issue, StubClient.new)
+    resumed(issue)
     issue.reload
 
     assert_equal 'checking_pipeline', issue.status
@@ -148,7 +215,7 @@ class InfraRecheckDispatchTest < Minitest::Test
   def test_resume_recovered_infra_caps_review_count_at_one
     issue = infra_stagnation_issue(review_count: 3)
 
-    build_router.resume_recovered_infra(issue, StubClient.new)
+    resumed(issue)
 
     assert_equal 1, issue.reload.review_count
   end
@@ -163,13 +230,96 @@ class InfraRecheckDispatchTest < Minitest::Test
   def test_resume_recovered_infra_does_not_invent_a_review_on_a_never_reviewed_row
     issue = infra_stagnation_issue(review_count: 0)
 
-    build_router.resume_recovered_infra(issue, StubClient.new)
+    resumed(issue)
 
     assert_equal 0, issue.reload.review_count,
                  'the automatic infra recheck re-armed a never-reviewed request as if it had been reviewed'
   end
 
+  # -- reclaim (Autodev #93/#106) --
+
+  def test_resume_recovered_infra_reclaims_the_assignment
+    issue = infra_stagnation_issue
+    client = resumed(issue)
+
+    assert_equal [AUTODEV_ID], client.assignee_ids
+  end
+
+  def test_resume_recovered_infra_records_the_displaced_assignee
+    issue = infra_stagnation_issue
+
+    resumed(issue)
+
+    assert_equal AUTHOR_ID, issue.reload.displaced_assignee_id
+  end
+
+  def test_resume_recovered_infra_announces_the_reclaim_by_name
+    issue = infra_stagnation_issue
+    client = resumed(issue)
+
+    reclaim_notes = client.notes.select { |body| body.include?('je reprends ce ticket') }
+
+    assert_equal 1, reclaim_notes.size
+    assert_includes reclaim_notes.first, "@user#{AUTHOR_ID}"
+  end
+
+  def test_resume_recovered_infra_reposes_the_label_without_clearing_scope
+    issue = infra_stagnation_issue
+    client = StubClient.new(labels: ['PM::Evolution'])
+
+    resumed(issue, client)
+
+    assert_includes client.issue(PROJECT_CONFIG['path'], issue.issue_iid).labels, 'PM::Evolution',
+                    'clear_scope must stay off this path (design §3) — only the sweep has asked ' \
+                    'untouched_since_giveup? before it writes'
+  end
+
+  # A read GitLab accepted and then silently ignored (Community edition: one
+  # assignee per issue) must not be read as a landed reclaim.
+  def test_resume_recovered_infra_leaves_the_row_untransitioned_when_the_assignment_does_not_land
+    issue = infra_stagnation_issue
+    client = resumed(issue, SilentlyIgnoringClient.new)
+
+    refute_equal 'checking_pipeline', issue.reload.status, 'a reclaim that did not land must not be transitioned'
+    assert issue.needs_attention
+    refute_includes client.issue(PROJECT_CONFIG['path'], issue.issue_iid).labels, PROJECT_CONFIG['label_doing'],
+                    'the label must be put back when the assignment could not be landed'
+  end
+
+  # Regression (design's Testing section, path 1 of 2, Autodev #93/#106): a row
+  # abandoned on pipeline stagnation whose infrastructure recovers must not be
+  # found unassigned and closed at the next cycle, with a false "autodev was
+  # unassigned" comment posted on the client's ticket.
+  def test_a_recovered_row_is_not_closed_as_unassigned_at_the_next_cycle
+    issue = infra_stagnation_issue
+    client = resumed(issue)
+    issue.reload
+
+    assert_equal 'checking_pipeline', issue.status, 'precondition: the row re-entered'
+
+    sweep_dispatch_unassignment(issue, client)
+    issue.reload
+
+    refute_equal 'closed', issue.status
+    assert_empty client.notes.grep(/j'arrete le travail en cours/),
+                 'a false "unassigned" comment was posted on the client ticket'
+  end
+
   private
+
+  # `PollDispatcher#check_external_state`'s own three questions, replayed
+  # directly against `Autodev::ExternalState` so this test does not have to
+  # build a whole dispatcher (and its own GitLab client) just to ask them.
+  def sweep_dispatch_unassignment(issue, client)
+    host = ExternalStateHost.new(client, @logger)
+    gl_issue = client.issue(PROJECT_CONFIG['path'], issue.issue_iid)
+    GitlabHelpers.stub(:current_user_id, AUTODEV_ID) do
+      return host.close_externally(issue) if host.externally_closed?(gl_issue)
+      return host.stop_unassigned(issue) unless host.assigned_to_autodev?(gl_issue)
+
+      host.stop_on_handover(issue, gl_issue)
+    end
+  end
 
   def build_router
     PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,

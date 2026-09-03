@@ -140,4 +140,36 @@ class ResetForRetryTest < ActiveSupport::TestCase
 
     assert_equal 1, issue.reload.retry_count
   end
+
+  # --- Autodev #93/#106: the reclaim is not this method's ------------
+
+  # `revive_stalled!` and `recover_on_startup!` are automatic recoveries of a
+  # row that was never handed back — no GitLab client is stubbed anywhere in
+  # this test, and none of these calls need one: `reset_for_retry!` never
+  # touches `GitlabHelpers`, `Autodev::TicketReclaim` or `Autodev::ResetReclaim`.
+  # The reclaim is deliberately a separate collaborator invoked only by the two
+  # operator entry points (`IssuesController#reset`, the `--reset` CLI), design
+  # §6 — precisely so these automatic paths cannot reach it by accident.
+  def abandoned_active_row(overrides = {})
+    Issue.create!({ project_path: 'group/proj', issue_iid: rand(10_000..99_999),
+                    status: 'fixing_discussions', mr_iid: 42, needs_attention: false }.merge(overrides))
+  end
+
+  def test_revive_stalled_reclaims_nothing
+    issue = abandoned_active_row
+
+    Issue.revive_stalled!(Issue.where(id: issue.id))
+    issue.reload
+
+    assert_equal 'checking_pipeline', issue.status
+  end
+
+  def test_recover_on_startup_reclaims_nothing
+    issue = errored(retry_count: 1, next_retry_at: nil, mr_iid: nil, needs_attention: true,
+                    attention_reason: 'stagnation_pipeline')
+
+    Issue.recover_on_startup!(max_retries: 1)
+
+    assert_equal 'pending', issue.reload.status
+  end
 end
