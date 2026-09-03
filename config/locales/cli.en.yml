@@ -3,3 +3,5 @@ en:
   cli_numeric_setting_out_of_range: "%{project}: '%{field}' = %{value} is out of bounds (expected an integer between %{min} and %{max})."
   cli_numeric_setting_not_a_number: "%{project}: '%{field}' = %{value} is not an integer (expected between %{min} and %{max})."
   cli_mr_review_missing: "mr-review is not installed: the review step will be skipped for the projects that declare no `review_skill`."
+  cli_boot_guard_reaped_orphan: "Found an orphaned process at boot: %{name} (pid=%{pid}), a child of a previous supervisor, reparented to pid 1, holding %{db_path} open for writing. Stopping it (TERM)."
+  cli_boot_guard_unrecognized_holder: "An unrecognised process is holding %{db_path} open for writing (pid=%{pid}, command: %{command}). Refusing to start — check and stop that process by hand before restarting autodev."

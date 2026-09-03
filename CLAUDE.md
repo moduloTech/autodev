@@ -195,7 +195,7 @@ bin/autodev (supervisor parent)
     └── solid-queue-scheduler   (fires config/recurring.yml entries)
 ```
 
-`lib/autodev/supervisor.rb` owns the parent. SIGINT/SIGTERM trap → flag → `wait_loop` exits → TERM all children, 10s graceful grace, KILL stragglers. If any child crashes the supervisor tears the rest down.
+`lib/autodev/supervisor.rb` owns the parent. All children run in the supervisor's own process group (no `pgroup:` on `Process.spawn` — that option is `ProcessRunner`'s, for the danger-claude/mr-review subprocess trees, a different concern). SIGINT/SIGTERM trap → flag → `wait_loop` exits → TERM all children, 10s graceful grace, KILL stragglers. If any child crashes the supervisor tears the rest down. `run` wraps `spawn_all` + `wait_loop` in an `ensure` around `shutdown_children` (Autodev #92): any abrupt end — an exception mid-`spawn_all`, an exception out of `wait_loop`, a signal the trap does not cover — still tears down every already-spawned child, which `KeepAlive: Crashed` in the LaunchAgent plist makes essential (launchd restarts a crashed supervisor without stopping its process group, so an unreaped child is reparented to pid 1 and keeps the SQLite file + WAL + SHM open for writing). A `SIGKILL` leaves nothing to run, so `Autodev::BootGuard` (`lib/autodev/boot_guard.rb`) runs once before `bin/autodev` spawns anything: it reaps a process it can positively identify as a rails-server/solid-queue orphan (holding the database file, reparented to pid 1) and logs it, and refuses to start naming anything else holding the file — nothing holding it is a silent pass.
 
 ### State Machine (AASM)
 

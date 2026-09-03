@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A dying supervisor now takes its children with it (Autodev #92).** `bin/autodev` spawns `bin/rails server` and `bin/jobs start` in the *same* process group — the ticket's own hypothesis, that a new process group left them unreachable, does not hold; production's `ps -o pid,ppid,pgid` shows one group for the whole tree. The real gap was that `Supervisor#run` had no `ensure` around `shutdown_children`, so any abrupt end of the method — an exception out of `spawn_all` after the first child, an exception out of `wait_loop`, a signal the trap does not cover — left every already-spawned child running. `KeepAlive: Crashed` in the LaunchAgent plist made that permanent: launchd restarts the supervisor on a crash without stopping the process group, so the orphaned puma (and, whenever the death landed after both spawns, the Solid Queue supervisor and its three forks) got reparented to pid 1 and kept the SQLite file, its WAL and its shared-memory file open for writing. Measured on the production log: 39 of the last 63 boots ended with a `rails-server` spawn and no further supervisor line at all — one more ghost process and ~60 MB every time.
+
+  `run` now wraps `spawn_all` + `wait_loop` in an `ensure` that calls `shutdown_children` — idempotent already (`send_term` skips a child that is not `alive?`, `force_kill_stragglers` rescues `ESRCH`/`ECHILD`), so running it on every exit path, including a partial `spawn_all`, is harmless and tears down exactly the children that exist.
+
+  A `SIGKILL` leaves nothing to run, so no in-process fix can reach a child that is already orphaned when a *new* supervisor boots — it belongs to a different, already-dead process by then. `Autodev::BootGuard` (`lib/autodev/boot_guard.rb`) runs once before `bin/autodev` spawns anything: it looks for a process holding our database file open **and** reparented to pid 1, and only for one it can positively identify as a rails-server or solid-queue child of a previous supervisor — reaping it and logging that it did. Anything else holding the file (an unrecognised process, or a recognised command that is *not* an orphan) refuses the boot and names what was found, rather than reaping blindly; a blanket refusal on every restart would itself be a boot loop under `KeepAlive: Crashed`. Nothing holding the file is a silent pass.
+
+  The supervisor's own lifecycle log (`AppLogger#print_console`) was block-buffered — `$stdout.puts` with no `sync`, so a boot that died right after logging one line could lose it, which is exactly what left those 39 boots with no account of themselves at all. `AppLogger.new` now sets `$stdout.sync = true`.
+
+  `AbandonProcessGroup` needed no change: the plist leaves it at its default `false`, so launchd already kills the process group on a deliberate stop (`brew services stop`) — the leak is a crash-restart property, not a deploy property.
+
 ## [1.0.0-alpha.52] - 2026-09-02
 
 ### Fixed

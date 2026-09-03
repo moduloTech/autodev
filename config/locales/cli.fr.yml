@@ -3,3 +3,5 @@ fr:
   cli_numeric_setting_out_of_range: "%{project} : '%{field}' = %{value} est hors bornes (entier attendu entre %{min} et %{max})."
   cli_numeric_setting_not_a_number: "%{project} : '%{field}' = %{value} n'est pas un entier (attendu entre %{min} et %{max})."
   cli_mr_review_missing: "mr-review n'est pas installé : l'étape de revue sera ignorée pour les projets qui ne déclarent pas de `review_skill`."
+  cli_boot_guard_reaped_orphan: "Processus orphelin détecté au démarrage : %{name} (pid=%{pid}), enfant d'un superviseur précédent, rattaché au pid 1, gardant %{db_path} ouvert en écriture. Arrêt en cours (TERM)."
+  cli_boot_guard_unrecognized_holder: "Un processus non reconnu retient %{db_path} en écriture (pid=%{pid}, commande : %{command}). Démarrage refusé — vérifiez et arrêtez ce processus manuellement avant de relancer autodev."

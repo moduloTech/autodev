@@ -126,4 +126,20 @@ class LoggerTest < Minitest::Test
 
     assert_includes out, 'msg'
   end
+
+  # Autodev #92: the supervisor's own lifecycle line ("spawned rails-server",
+  # "stopping solid-queue", …) went through $stdout.puts with no sync flag —
+  # block-buffered whenever stdout isn't a TTY, which launchd's captured
+  # stdout/stderr never is. A boot that died right after logging one line
+  # could lose it, which is exactly what left 39 of 63 production boots that
+  # ended short with no account of themselves in the log at all.
+  def test_syncs_stdout_so_a_lifecycle_line_survives_an_abrupt_death
+    $stdout.sync = false
+
+    AppLogger.new(pastel: FakePastel.new)
+
+    assert $stdout.sync, 'AppLogger.new must sync $stdout — buffered output is lost if the process dies mid-line'
+  ensure
+    $stdout.sync = true
+  end
 end

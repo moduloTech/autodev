@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'autodev_test_helper'
+require 'autodev/boot_guard'
 
 # Tests for parse_args (bin/autodev CLI argument parsing).
 class ParseArgsTest < Minitest::Test
@@ -96,5 +97,55 @@ class ParseArgsTest < Minitest::Test
     assert config['link_user']
     assert_equal 'marc@modulotech.fr',     config['link_user_email']
     assert_equal 'mleclercq',              config['link_user_username']
+  end
+end
+
+# Autodev #92 design §5: `run_boot_guard` is the wiring between bin/autodev
+# and Autodev::BootGuard — the db path (AUTODEV_DB, or the same default
+# config/database.yml falls back to) and the CLI locale, then `.call`. The
+# guard's own classification logic (recognised orphan vs. unrecognised
+# holder vs. nothing) is covered end to end in test/boot_guard_test.rb; this
+# only pins that bin/autodev actually invokes it with the right arguments.
+class RunBootGuardTest < Minitest::Test
+  def teardown
+    ENV.delete('AUTODEV_DB')
+  end
+
+  def test_wires_the_db_path_and_locale_and_calls_the_guard
+    ENV['AUTODEV_DB'] = '/tmp/fixture-autodev/autodev.db'
+    config = parse_args([])
+    logger = Object.new
+    captured = {}
+
+    Autodev::BootGuard.stub(:new, capturing_new(captured)) { run_boot_guard(config, logger) }
+
+    assert_equal '/tmp/fixture-autodev/autodev.db', captured[:kwargs][:db_path]
+    assert_equal logger, captured[:kwargs][:logger]
+    assert captured[:called], 'run_boot_guard must call the guard it builds'
+  end
+
+  def test_defaults_the_db_path_when_autodev_db_is_unset
+    config = parse_args([])
+    logger = Object.new
+    captured = {}
+
+    Autodev::BootGuard.stub(:new, capturing_new(captured)) { run_boot_guard(config, logger) }
+
+    assert_equal File.expand_path('~/.autodev/autodev.db'), captured[:kwargs][:db_path]
+  end
+
+  private
+
+  # A stand-in for Autodev::BootGuard.new: records the kwargs it was built
+  # with into `captured[:kwargs]`, and returns a double whose #call flips
+  # `captured[:called]` — enough to assert both the wiring and that
+  # run_boot_guard actually invokes the guard it builds.
+  def capturing_new(captured)
+    fake_guard = Object.new
+    fake_guard.define_singleton_method(:call) { captured[:called] = true }
+    lambda do |**kwargs|
+      captured[:kwargs] = kwargs
+      fake_guard
+    end
   end
 end
