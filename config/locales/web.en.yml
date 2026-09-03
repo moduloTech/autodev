@@ -34,6 +34,7 @@ en:
   web_admin_health_check_workers: Workers
   web_admin_health_check_queue: Job queue
   web_admin_health_check_claude_usage: Claude quota
+  web_admin_health_check_danger_claude: danger-claude
   web_admin_health_check_issues_error: Issues in error
   web_admin_health_check_mr_review: Automated review
   web_admin_health_check_review_skill: Review skills
@@ -502,6 +503,8 @@ en:
   web_dashboard_anthropic_missing_hint: AutoSpec chat is disabled. Set ANTHROPIC_API_KEY or add `anthropic.api_key` to ~/.autodev/config.yml then restart autodev.
   web_dashboard_usage_paused_title: Claude quota exhausted
   web_dashboard_usage_paused_hint: Implementing new requests is paused. Pipeline tracking, closures and deliveries keep running as usual. Last checked %{checked_at}.
+  web_dashboard_danger_claude_broken_title: danger-claude is broken
+  web_dashboard_danger_claude_broken_hint: Implementation, review and discussion fixing are paused — this is not an exhausted quota, the tool cannot run at all. Human intervention is required. Last checked %{checked_at}.
   web_dashboard_drafts_to_vote: Drafts to vote on
   web_dashboard_drafts_to_vote_author: "author: %{email}"
   web_dashboard_drafts_to_vote_cta: Vote

@@ -577,7 +577,10 @@ class LiteralI18nKeysTest < Minitest::Test
   # of interpolated symbols this codebase builds for other purposes.
   NOT_LOCALE_NAMESPACES = {
     'has_' => "StackDetector's per-gem flags (`:\"has_\#{gem}\"`), a stack fingerprint",
-    'pending_' => "HealthReport's per-migration meta keys on the `migrations` card"
+    'pending_' => "HealthReport's per-migration meta keys on the `migrations` card",
+    'claude_usage_' => 'PipelineMonitor#claude_unavailable_reason (Autodev #108): the ' \
+                       '`poll_inconclusive!` flag and its log line name the recorded UsageChecker ' \
+                       'verdict for an operator reading the log, never rendered through Locales.t/t_web'
   }.freeze
 
   # Widened from `(?:web|activity|cli|notify|handover)` to any stem (Autodev #73).

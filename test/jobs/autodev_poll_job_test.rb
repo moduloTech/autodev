@@ -167,10 +167,18 @@ class AutodevPollJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cla
     dispatched
   end
 
+  # `available:` is a boolean (or a proc) rather than a full verdict hash — the
+  # tests in this file exercise orchestration (which project got dispatched,
+  # what the heartbeat says), not the verdict vocabulary itself, so the fake
+  # answers the two statuses that matter here: `available` / `quota_exhausted`.
+  # `UsageChecker#verdict` replaced `#available?` in Autodev #108.
   def build_fake_checker(available)
     Object.new.tap do |obj|
       block = available.respond_to?(:call) ? available : ->(*) { available }
-      obj.define_singleton_method(:available?) { instance_exec(&block) }
+      obj.define_singleton_method(:verdict) do
+        ok = instance_exec(&block)
+        { status: ok ? :available : :quota_exhausted, diagnostic: nil }
+      end
     end
   end
 

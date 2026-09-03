@@ -311,8 +311,11 @@ class MrReviewTokenProbeTest < ActiveSupport::TestCase
     dispatched
   end
 
+  # `UsageChecker#verdict` replaced `#available?` in Autodev #108.
   def quota_available
-    Object.new.tap { |checker| checker.define_singleton_method(:available?) { true } }
+    Object.new.tap do |checker|
+      checker.define_singleton_method(:verdict) { { status: :available, diagnostic: nil } }
+    end
   end
 
   def recording_dispatcher(dispatched)
