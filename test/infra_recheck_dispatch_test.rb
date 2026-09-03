@@ -48,11 +48,15 @@ class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassL
   class StubClient
     attr_reader :edits, :notes
 
-    def initialize(assignee_ids: [AUTHOR_ID], labels: [])
+    def initialize(assignee_ids: [AUTHOR_ID], labels: [], issue_notes: [], mr_notes: [],
+                   label_events: [])
       @labels = labels.dup
       @assignees = assignee_ids.map { |id| FakeAssignee.new(id, "user#{id}") }
       @edits = []
       @notes = []
+      @issue_notes = issue_notes
+      @mr_notes = mr_notes
+      @label_events = label_events
     end
 
     def user = FakeAssignee.new(AUTODEV_ID, 'autodev')
@@ -75,6 +79,31 @@ class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassL
     end
 
     def assignee_ids = @assignees.map(&:id)
+
+    # Autodev #93/#106 + alpha-53 review G2: the reclaim is now gated on
+    # `UntouchedSinceGiveup`, which asks the ticket's notes, the merge
+    # request's notes and the workflow label. `human_comment_since?` goes
+    # through `.auto_paginate`, so the stub answers a paginated-looking list.
+    def issue_notes(_project, _iid, **) = Paginated.new(@issue_notes)
+    def merge_request_notes(_project, _iid, **) = Paginated.new(@mr_notes)
+
+    # `LabelHandover#moved_since?` reads the label events whenever the current
+    # labels look suspicious, and an issue carrying no `label_doing` is the
+    # weakest of its three signals (`doing_removed`) — so this is reached on
+    # an ordinary re-arm, not only on a handover. No event means nobody moved
+    # anything, which is what an untouched row looks like.
+    def issue_label_events(_project, _iid) = @label_events
+  end
+
+  # Minimal stand-in for `Gitlab::PaginatedResponse`.
+  Paginated = Struct.new(:rows) do
+    def auto_paginate = rows
+  end
+
+  FakeNote = Struct.new(:system, :created_at, :body)
+
+  def human_note(at:, body: 'I have this one, fixing the CI myself')
+    FakeNote.new(system: false, created_at: at, body: body)
   end
 
   # Models Community silently ignoring an assignee write it cannot honour
@@ -272,6 +301,82 @@ class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassL
     assert_includes client.issue(PROJECT_CONFIG['path'], issue.issue_iid).labels, 'PM::Evolution',
                     'clear_scope must stay off this path (design §3) — only the sweep has asked ' \
                     'untouched_since_giveup? before it writes'
+  end
+
+  # -- the human-activity gate (alpha-53 neutral review, G2) ---------------
+  #
+  # `fetch_infra_recheck_candidates` asks nothing about what a person did — it
+  # filters on status, flag, reason, MR and clocks. Since Autodev #93/#106 this
+  # path *takes the ticket*, so re-arming a row a human picked back up removes
+  # their assignment (GitLab Community: one assignee) and tells them on their
+  # own ticket that the CI recovered. `UntouchedSinceGiveup` is the sweep's own
+  # protection, and the infra pass has to ask it too.
+
+  def test_a_row_a_human_commented_on_since_the_giveup_is_not_reclaimed
+    issue = infra_stagnation_issue(finished_at: 2.hours.ago)
+    client = StubClient.new(issue_notes: [human_note(at: 1.hour.ago)])
+
+    resumed(issue, client)
+
+    assert_equal [AUTHOR_ID], client.assignee_ids, "the human's assignment must survive"
+    assert_empty client.notes, 'nothing may be posted on a ticket a human has taken back'
+  end
+
+  def test_a_row_a_human_commented_on_since_the_giveup_is_not_transitioned
+    issue = infra_stagnation_issue(finished_at: 2.hours.ago)
+
+    resumed(issue, StubClient.new(issue_notes: [human_note(at: 1.hour.ago)]))
+
+    refute_equal 'checking_pipeline', issue.reload.status, 'a row a human holds must not be re-armed'
+    assert issue.needs_attention, 'the give-up flag must stay up'
+  end
+
+  def test_a_row_a_human_commented_on_since_the_giveup_keeps_its_giveup_label
+    issue = infra_stagnation_issue(finished_at: 2.hours.ago)
+    client = StubClient.new(labels: [PROJECT_CONFIG['label_attention']],
+                            issue_notes: [human_note(at: 1.hour.ago)])
+
+    resumed(issue, client)
+
+    labels = client.issue(PROJECT_CONFIG['path'], issue.issue_iid).labels
+
+    refute_includes labels, PROJECT_CONFIG['label_doing'],
+                    'no working label may be posed on a ticket a human has taken back'
+  end
+
+  def test_a_human_comment_on_the_merge_request_also_blocks_the_reclaim
+    # Autodev #98's lesson: reviewing the merge request is the gesture a
+    # reviewer actually makes, and it used to be invisible to this question.
+    issue = infra_stagnation_issue(finished_at: 2.hours.ago)
+    client = StubClient.new(mr_notes: [human_note(at: 1.hour.ago, body: 'left you two comments')])
+
+    resumed(issue, client)
+
+    assert_equal [AUTHOR_ID], client.assignee_ids
+    refute_equal 'checking_pipeline', issue.reload.status
+  end
+
+  def test_autodevs_own_comment_after_the_giveup_does_not_block_the_reclaim
+    # The give-up comment itself is autodev's, posted at `finished_at` or just
+    # after. Reading it as human activity would freeze every abandoned row.
+    issue = infra_stagnation_issue(finished_at: 2.hours.ago)
+    own = FakeNote.new(system: false, created_at: 1.hour.ago,
+                       body: ':stop_sign: **autodev** : abandon sur stagnation de pipeline')
+    client = StubClient.new(issue_notes: [own])
+
+    resumed(issue, client)
+
+    assert_equal [AUTODEV_ID], client.assignee_ids, "autodev's own note must not count as a human's"
+    assert_equal 'checking_pipeline', issue.reload.status
+  end
+
+  def test_a_comment_predating_the_giveup_does_not_block_the_reclaim
+    issue = infra_stagnation_issue(finished_at: 1.hour.ago)
+    client = StubClient.new(issue_notes: [human_note(at: 3.hours.ago)])
+
+    resumed(issue, client)
+
+    assert_equal [AUTODEV_ID], client.assignee_ids, 'only activity *since* the give-up counts'
   end
 
   # A read GitLab accepted and then silently ignored (Community edition: one

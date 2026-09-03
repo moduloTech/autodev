@@ -24,6 +24,21 @@ module Autodev
     # bucket mean the tool cannot run at all, and everything the product does
     # (implementation, review, discussion fixing) depends on it.
     DANGER_CLAUDE_DOWN_STATUSES = %w[auth_refused binary_missing broken].freeze
+    # `auth_refused` and `binary_missing` are deterministic: the credential is
+    # refused or the binary is absent, and one observation is the whole story,
+    # so they page at once.
+    #
+    # `broken` is not — it is the catch-all for any non-zero exit whose output
+    # matches neither signature, so a single container hiccup or an MCP error
+    # would take `/healthz` to 503 and wake somebody (alpha-53 review, G5).
+    # This repository's own precedent is against that: `mr_review`'s
+    # thresholds were calibrated on production data (#60) precisely so an
+    # isolated incident does not page. A `broken` verdict therefore warns
+    # first and pages on the second consecutive one — the nine-hour Docker
+    # outage of 02-03/09 produced 262 in a row, so nothing real is missed by
+    # waiting for two.
+    DANGER_CLAUDE_DEBOUNCED_STATUSES = %w[broken].freeze
+    DANGER_CLAUDE_DEBOUNCE = 2
     DANGER_CLAUDE_FAULT_DETAIL = {
       'auth_refused' => 'danger-claude can no longer authenticate against Claude (API 401)',
       'binary_missing' => 'the danger-claude binary was not found on PATH',
@@ -249,7 +264,24 @@ module Autodev
       end
 
       meta[:diagnostic] = state[:diagnostic] if state[:diagnostic]
-      build(:down, danger_claude_fault_detail(status, state[:diagnostic]), meta)
+      danger_claude_fault(status, state, meta)
+    end
+
+    # A recognised cause pages at once; the `broken` catch-all waits for a
+    # second consecutive probe (see `DANGER_CLAUDE_DEBOUNCED_STATUSES`).
+    def danger_claude_fault(status, state, meta)
+      detail = danger_claude_fault_detail(status, state[:diagnostic])
+      return build(:down, detail, meta) unless danger_claude_debounced?(status)
+
+      streak = UsageGate.consecutive(status, config: @config, now: @now)
+      meta[:consecutive] = streak
+      return build(:warn, "#{detail} (1 probe so far)", meta) if streak < DANGER_CLAUDE_DEBOUNCE
+
+      build(:down, "#{detail} (#{streak} probes in a row)", meta)
+    end
+
+    def danger_claude_debounced?(status)
+      DANGER_CLAUDE_DEBOUNCED_STATUSES.include?(status.to_s)
     end
 
     def danger_claude_fault_detail(status, diagnostic)

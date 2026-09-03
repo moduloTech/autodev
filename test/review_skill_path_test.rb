@@ -13,6 +13,7 @@ class ReviewSkillPathTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
     mon = PipelineMonitor.allocate
     mon.instance_variable_set(:@project_path, 'g/a')
     mon.instance_variable_set(:@project_config, review_skill ? { 'review_skill' => review_skill } : {})
+    mon.instance_variable_set(:@config, {})
     %i[log log_error].each { |m| mon.define_singleton_method(m) { |*| nil } }
     mon.define_singleton_method(:log_activity) { |*| nil }
     mon.define_singleton_method(:snapshot) { |*| nil }
@@ -65,7 +66,7 @@ class ReviewSkillPathTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
   # `:tool_unavailable` and `:clone_failed` (Autodev #107) join `:inconclusive`
   # on the side that spends nothing — neither is a statement about the merge
   # request, only about a tool or a clone that could not run at all.
-  def test_a_tool_unavailable_review_touches_neither_counter_and_returns_to_the_watch
+  def test_one_tool_unavailable_review_touches_neither_counter_and_returns_to_the_watch
     row = issue
     monitor(review_skill: 'mr-review', skill_result: :tool_unavailable).send(:launch_review, row)
 
@@ -74,7 +75,7 @@ class ReviewSkillPathTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
     assert_equal 'checking_pipeline', row.reload.status
   end
 
-  def test_a_clone_failed_review_touches_neither_counter_and_returns_to_the_watch
+  def test_one_clone_failed_review_touches_neither_counter_and_returns_to_the_watch
     row = issue
     monitor(review_skill: 'mr-review', skill_result: :clone_failed).send(:launch_review, row)
 

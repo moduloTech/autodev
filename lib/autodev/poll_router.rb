@@ -82,14 +82,25 @@ class PollRouter
   # The comment that used to sit here said the opposite and is corrected in
   # the same pass, on `resume_never_reviewed` below.
   #
-  # Order follows the design's §5, the sweep's own reason: the label first (no
-  # `clear_scope:` — nobody has asked `untouched_since_giveup?` on this path,
-  # so clearing the scope would destroy the evidence `LabelHandover` reads),
-  # then the assignment with its read-back, then the transition. If the
-  # assignment cannot be landed, the label is put back and nothing is
-  # transitioned — a half-applied resume is exactly what this ticket is about.
+  # Order follows the design's §5: ask whether the request is still autodev's
+  # to take, then the label, then the assignment with its read-back, then the
+  # transition. If the assignment cannot be landed, the label is put back and
+  # nothing is transitioned — a half-applied resume is exactly what this
+  # ticket is about.
+  #
+  # The first question is the alpha-53 neutral review's G2, and it comes
+  # first because every write after it is one this path used to make blind.
+  # `fetch_infra_recheck_candidates` selects on status, flag, reason, MR and
+  # clocks — nothing a person did. Since Autodev #93/#106 gave this path a
+  # reclaim, re-arming a row a human had picked back up would take the ticket
+  # off them (GitLab Community: one assignee) and post that their CI had
+  # recovered, on their own ticket. `clear_scope:` stays off even so: the
+  # scope residue is the evidence `LabelHandover` reads, and the question
+  # above is asked per re-arm rather than banked.
   def resume_recovered_infra(issue, client)
     @client = @route_client = client
+    return unless infra_recheck_still_ours?(issue, client)
+
     apply_label_doing(issue.issue_iid)
     return unless reclaim_infra_recheck(issue, client)
 
@@ -162,19 +173,6 @@ class PollRouter
   def resume_via_pipeline_check(issue, client, origin: nil)
     @client = @route_client = client
     reenter_via_pipeline_check(issue, origin: origin)
-  end
-
-  # Returns whether the reclaim landed. On failure the label is put back
-  # (design §5) and the caller must not go on to transition the row.
-  def reclaim_infra_recheck(issue, client)
-    Autodev::TicketReclaim.new(client: client, logger: @logger)
-                          .reclaim!(issue, message_key: :reclaim_infra_recovered)
-    true
-  rescue StandardError => e
-    apply_label_attention(issue.issue_iid)
-    log_error "Issue ##{issue.issue_iid}: could not reclaim the assignment after the infra " \
-              "recheck (#{e.class}: #{e.message}) — left in its handed-back state, the label restored"
-    false
   end
 
   def init_project_settings(project_config)

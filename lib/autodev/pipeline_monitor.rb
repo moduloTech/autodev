@@ -35,6 +35,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include WatchBound
   include MissingBaseBound
   include InvalidRequestBound
+  include ReviewOutageBound
   include StaleTransitionBound
 
   def initialize(client:, config:, project_config:, logger:, token:)

@@ -670,13 +670,25 @@ ALLOWED_SWALLOWS = {
     # `PollDispatcher#dispatch`'s own `rescue StandardError` and one unreadable
     # MR takes the whole project's cycle down with it — pipeline checks,
     # discussion fixes and retries included.
-    'route' => 'routing boundary for one issue',
+    'route' => 'routing boundary for one issue'
+  },
+  'lib/autodev/poll_router/resume_handler.rb' => {
     # Autodev #93/#106's write boundary, the same shape as the sweep's `rearm`:
-    # the label is put back and `false` is returned, which the caller (`resume_
-    # recovered_infra`) reads as "do not transition" — not as a verdict on the
-    # request, which stays `done` + `needs_attention` for a human or the next
-    # recheck to look at again.
-    'reclaim_infra_recheck' => 'write boundary: the label is restored and the row is left untransitioned'
+    # the label is put back and `false` is returned, which the caller
+    # (`resume_recovered_infra`) reads as "do not transition" — not as a
+    # verdict on the request, which stays `done` + `needs_attention` for a
+    # human or the next recheck to look at again.
+    'reclaim_infra_recheck' => 'write boundary: the label is restored and the row is left untransitioned',
+    # The human-activity gate added by the alpha-53 review (G2). Its `false`
+    # is the **declining** answer, which is the safe direction here and the
+    # opposite of the substitutes Autodev #62 removed: those returned the good
+    # news (`[]` threads = delivered, `[]` failed jobs = recovered), whereas an
+    # unreadable ticket here means "do not take this ticket from anybody this
+    # cycle". Nothing is written, the row keeps its give-up state, and
+    # `dispatch_infra_recheck` re-selects it next cycle to ask again. Reading
+    # the failure as permission — the only other option — is what the gate
+    # exists to prevent.
+    'infra_recheck_still_ours?' => 'declines the re-arm: an unreadable ticket is never permission to take it'
   },
   'lib/autodev/pipeline_monitor/api_helpers.rb' => {
     # The one read still allowed to substitute. The substitute names itself in the

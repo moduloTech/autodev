@@ -4,6 +4,17 @@
 # answers any route not declared above the catch-all `mount Web::Server`
 # in config/routes.rb.
 class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLength
+  # The rescue names the failures a reclaim can actually have, and lets a bug
+  # in this repository travel as itself (alpha-53 review, G8): a blanket
+  # `StandardError` presented a `NoMethodError` to the operator as
+  # "Réinitialisation refusée : undefined method …" and refused the gesture,
+  # which is the reverse of the rule `GitlabHelpers::TRANSPORT_ERRORS` states
+  # — an outage is data, a bug is a stack trace. The message is scrubbed
+  # because a GitLab error can carry a token in its URI, and `Redactor` is
+  # what the rest of this controller already uses for that.
+  RECLAIM_FAILURES = [*GitlabHelpers::TRANSPORT_ERRORS, ApiUnavailableError,
+                      Autodev::TicketReclaim::AssignmentNotLanded, ConfigError].freeze
+
   # Web::Helpers is the same module Sinatra mixes into Web::Server via
   # `helpers Web::Helpers`. Pulled in here so we can call find_issue,
   # activity_events_dataset, dashboard_kpis, web_locale, etc. with
@@ -135,8 +146,8 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
     # plain `Logger`, which raises `ArgumentError` on it otherwise.
     Autodev::ResetReclaim.perform(issue, config: app_config, logger: Autodev::JobLogger.new(Rails.logger))
     nil
-  rescue StandardError => e
-    t_web(:web_issue_reset_refused, error: e.message)
+  rescue *RECLAIM_FAILURES => e
+    t_web(:web_issue_reset_refused, error: Redactor.scrub(e.message))
   end
 
   def redirect_to_reset_refusal(message)

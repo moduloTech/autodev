@@ -105,8 +105,15 @@ module Web
             ::Project.find_by(gitlab_path: project_path)&.to_project_config || {}
         end
 
+        # The only absolute time on the card — everything else goes through
+        # `relative_time` — so a UTC rendering had nothing on screen to be
+        # compared against and read two hours early in Paris (alpha-53 review,
+        # G6). `activity_time_zone` is the convention this application already
+        # has for exactly this: it reads `web.timezone` so an operator can
+        # align a display to their working day without changing how
+        # ActiveRecord stores the column.
         def format_retry_time(timestamp)
-          Time.parse(timestamp.to_s).strftime('%d/%m %H:%M')
+          Time.parse(timestamp.to_s).in_time_zone(activity_time_zone).strftime('%d/%m %H:%M')
         rescue ArgumentError, TypeError
           timestamp.to_s
         end

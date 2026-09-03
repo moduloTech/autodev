@@ -138,6 +138,7 @@ class PipelineMonitor
     def dispatch_review_outcome(issue, outcome)
       return finalize_review_success(issue) if outcome == true
       return give_up_on_unanchored_review(issue) if outcome == :unanchored
+      return give_up_on_missing_mr_review(issue) if outcome == :tool_missing
       return finalize_review_failure(issue) if outcome == :unusable_output
       return resume_after_non_spending_outcome(issue, outcome) if NON_SPENDING_REVIEW_OUTCOMES.include?(outcome)
 
@@ -146,24 +147,47 @@ class PipelineMonitor
     end
 
     # `:tool_unavailable` and `:clone_failed` join `:inconclusive` on the
-    # non-spending side, but unlike it they still get their own line in the
-    # activity trail (Autodev #107, design §4): a review failure writes
-    # `:review_failed` with its count, and a non-spending outcome must never
-    # write that — the count did not move, and a line claiming otherwise is
-    # the defect this lot exists to end. `log_activity_warn` is DB-only (no
-    # GitLab note update), the same precedent `:inconclusive` already set —
-    # nothing is being asked of anyone, and a note appended on every poll of a
-    # nine-hour outage is the growth Autodev #53 went to some trouble to
-    # bound. An operator reading the issue timeline can still tell "the tool
-    # could not run" from "the clone failed" from "GitLab had not computed
-    # diff_refs yet" without opening a log.
+    # non-spending side: none of the three is evidence about the request, so
+    # none of them may spend `review_failure_count` (Autodev #107).
+    #
+    # Two things the alpha-53 neutral review (G3) corrected here.
+    #
+    # **They are bounded.** #107 left the age bound as the only thing stopping
+    # a row on either outcome — fourteen days, ending under
+    # `pipeline_watch_expired`, which says the watch stopped moving and is not
+    # what happened. `ReviewOutageBound` counts the cause and stops the
+    # request under a reason that names it, on `stagnation_threshold`
+    # occurrences, the way `InvalidRequestBound` and `MissingBaseBound`
+    # already do. When it gives up it has already transitioned the row, so
+    # there is no watch left to resume.
+    #
+    # **They no longer write an activity row per poll.** `log_activity_warn`
+    # is DB-only, which is why it looked free; but
+    # `Issue.without_activity_since` is the clause common to all three of
+    # `DormantAudit`'s arms, so a row writing one every poll leaves the safety
+    # net Autodev #103 had just widened, for as long as the outage lasts. This
+    # file already said so five methods above, in `launch_review`, as its
+    # reason for not rescuing `ConfigError` and resuming. The countdown is
+    # logged instead — `WatchBound#log_bound_withheld`'s precedent for
+    # exactly this situation — and the give-up, which happens once, is what
+    # reaches the journal and the ticket.
     def resume_after_non_spending_outcome(issue, outcome)
       log "MR !#{issue.mr_iid}: review outcome #{outcome}, retrying next poll without spending the review budget"
-      case outcome
-      when :tool_unavailable then log_activity_warn(:review_tool_unavailable)
-      when :clone_failed then log_activity_warn(:review_clone_failed)
-      end
+      return if bound_review_outage(issue, outcome, @review_outage_diagnostic)
+
       resume_watch(issue)
+    end
+
+    # `mr-review` is not on PATH. Deterministic, known on the first poll, and
+    # fixable only by whoever installs the binary or declares a `review_skill`
+    # for the project — so it is Autodev #81's answer, not a wait:
+    # `give_up_on_missing_review_skill`'s twin for the binary path, which had
+    # no equivalent and used to burn fourteen days before ending under a
+    # reason that named the wrong thing (alpha-53 review, G3a).
+    def give_up_on_missing_mr_review(issue)
+      log_error "Issue ##{issue.issue_iid}: mr-review is not installed and the project declares " \
+                'no review_skill — nothing can review this merge request'
+      abandon_issue(issue, :review_tool_missing)
     end
 
     # The three ways the row goes back to the watch having done nothing: an
@@ -304,20 +328,24 @@ class PipelineMonitor
       issue.review_failure_count = 0
     end
 
-    # Every non-success outcome here is `:tool_unavailable` (Autodev #107),
-    # never `:unusable_output`: `mr-review` posts its findings to GitLab
-    # itself, so an exit status this reads carries no verdict on the merge
-    # request — a crash and a refusal look identical from here. The budget is
-    # spent on this path never any more, only the age bound remains.
+    # No non-success outcome here is ever `:unusable_output` (Autodev #107):
+    # `mr-review` posts its findings to GitLab itself, so an exit status this
+    # reads carries no verdict on the merge request — a crash and a refusal
+    # look identical from here. So the budget is never spent on this path.
+    #
+    # What the alpha-53 review (G3a) split off is the *absent binary*, which
+    # #107 had folded into `:tool_unavailable` along with every transient
+    # failure. It is not transient: it is a configuration fact, true on every
+    # poll until somebody installs the tool, and waiting fourteen days on it
+    # is the wrong answer. `:tool_missing` gives up immediately and says so.
     def execute_mr_review(issue)
-      return log('mr-review not installed, skipping review') && :tool_unavailable unless command_exists?('mr-review')
+      return :tool_missing unless command_exists?('mr-review')
 
       log 'Waiting 15s for GitLab to compute diff_refs...'
       sleep 15
       run_mr_review_command(issue.mr_url)
     rescue StandardError => e
-      log_error "mr-review error (non-fatal): #{e.message}"
-      :tool_unavailable
+      note_review_outage("#{e.class}: #{e.message}")
     end
 
     # mr-review is not a danger-claude call, so it gets no heartbeat of its own
@@ -360,7 +388,15 @@ class PipelineMonitor
       )
       return log('Review completed successfully') || true if ok
 
-      log_error "mr-review failed (non-fatal): #{review_failure_diagnostic(out, err, status)}"
+      note_review_outage(review_failure_diagnostic(out, err, status))
+    end
+
+    # The cause `ReviewOutageBound` counts, remembered for the dispatch that
+    # follows — a different diagnostic is a different fact and restarts the
+    # count, so it may not be dropped on the way out.
+    def note_review_outage(diagnostic)
+      log_error "mr-review failed (non-fatal): #{diagnostic}"
+      @review_outage_diagnostic = diagnostic
       :tool_unavailable
     end
 

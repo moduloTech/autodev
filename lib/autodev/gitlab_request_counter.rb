@@ -38,7 +38,7 @@ class GitlabRequestCounter < SimpleDelegator
 
     kind = self.class.classify(name)
     ::GitlabRequestStat.record!(kind: kind, endpoint: name.to_s)
-    call_and_track_failures(name, kind, ...)
+    own_pages(call_and_track_failures(name, kind, ...))
   end
 
   def respond_to_missing?(name, include_private = false)
@@ -46,6 +46,26 @@ class GitlabRequestCounter < SimpleDelegator
   end
 
   private
+
+  # The pages after the first, which were escaping the count (alpha-53 review,
+  # G4). The gem builds its `Gitlab::PaginatedResponse` with `parsed.client =
+  # self` — `self` being the **raw** client, not this proxy — so
+  # `.auto_paginate` and `.each_page` fetched pages 2..N through
+  # `Gitlab::Client#get` directly: uncounted, and unlogged when they failed by
+  # transport. Eight call sites paginate in `lib/`, one of them
+  # (`GitlabMembershipSync`'s `all_members`) without a `per_page`, so it
+  # paginates from the 21st member on.
+  #
+  # Reassigning the response's client to the proxy puts those requests back
+  # through `method_missing`, where `get` is classified `:read` and counted
+  # like everything else. Guarded on `respond_to?` because most return values
+  # are plain objects with no client to reassign.
+  def own_pages(result)
+    result.client = self if result.respond_to?(:client=)
+    result
+  rescue StandardError
+    result # a return value that refuses the reassignment is still the answer
+  end
 
   def call_and_track_failures(name, kind, ...)
     __getobj__.public_send(name, ...)

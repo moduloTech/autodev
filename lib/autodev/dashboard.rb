@@ -107,9 +107,21 @@ module Dashboard
     end
   end
 
+  # No reclaim here, and that is a statement rather than an omission
+  # (alpha-53 review, G8). `Autodev::ResetReclaim` is what takes a ticket back
+  # on GitLab before an abandoned request is resumed, and the dashboard's
+  # button calls it — but `--reset` cannot reach such a row: its scope filters
+  # `status: 'error'`, while `needs_attention` is only ever true on a `done`
+  # row, because every abandon fires the `abandon` AASM event and that lands in
+  # `done`. The first version of this method wired the reclaim in anyway, "so a
+  # future widening inherits it"; the loop was unreachable, its `rescue` was
+  # unreachable, and this repository has spent four tickets (#78, #87, #99 and
+  # the guard above) on code that looked like a protection and was not. If this
+  # scope is ever widened to `done` rows, the reclaim has to be added here with
+  # a test that reaches it.
   def perform_reset(scope, config, pastel)
+    _ = config
     count = scope.count
-    return unless reclaim_abandoned_rows(scope, config, pastel)
 
     # The MR split and the `next_retry_at` stamp (task #26) now live in
     # Issue.reset_for_retry! — this used to be their only correct copy, while
@@ -120,26 +132,5 @@ module Dashboard
     puts pastel.green("✓ #{label} relancée(s).")
   end
 
-  # `--reset` filters on `status: 'error'`, and `needs_attention` is only ever
-  # true on `status: 'done'` rows (every abandon fires the `abandon` AASM event,
-  # which lands in `done`) — so this loop is a no-op today, structurally. Wired
-  # anyway (Autodev #93/#106, design §6) for parity with the dashboard button and
-  # so a future widening of this scope inherits the reclaim instead of silently
-  # reproducing the ticket's own bug. Returns false (and refuses the WHOLE
-  # reset, nothing written) when a reclaim could not be completed — a
-  # half-applied resume must not be this remedy's failure mode either.
-  def reclaim_abandoned_rows(scope, config, pastel)
-    # `Autodev::JobLogger` bridges the legacy `info(msg, project: ...)` kwarg
-    # shape `PollRouter`/`LabelManager` call with onto a plain `Logger`.
-    logger = Autodev::JobLogger.new(Logger.new($stdout))
-    scope.select(&:needs_attention?).each do |issue|
-      Autodev::ResetReclaim.perform(issue, config: config, logger: logger)
-    end
-    true
-  rescue StandardError => e
-    puts pastel.red("✗ Réinitialisation refusée : #{e.message}")
-    false
-  end
-
-  private_class_method :fetch_issues, :empty_message, :reset_empty_message, :perform_reset, :reclaim_abandoned_rows
+  private_class_method :fetch_issues, :empty_message, :reset_empty_message, :perform_reset
 end

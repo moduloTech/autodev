@@ -36,6 +36,10 @@ module Autodev
     # and the jobs it gates.
     TTL_POLL_INTERVALS = 2
     TTL_FLOOR = 600
+    # Upper bound on how many probes a `consecutive` streak is counted over
+    # (alpha-53 review, G5): the debounce it feeds is 2, so anything past a
+    # handful is already decided, and this keeps the query bounded.
+    STREAK_LIMIT = 20
 
     # The statuses `UsageChecker#verdict` can answer that close the gate
     # (Autodev #108): a quota outage, a dead credential, an absent binary, or a
@@ -76,7 +80,29 @@ module Autodev
         unknown_state
       end
 
+      # How many of the most recent probes in a row carry `status` — used by
+      # `HealthReport` to debounce the `broken` catch-all rather than page on
+      # one observation (alpha-53 review, G5). Counted over the probes still
+      # inside the TTL window plus a small look-back, because the question is
+      # "is this persisting" and a run that started before the window is still
+      # a run. Capped so a long outage does not walk the whole table.
+      def consecutive(status, config: nil, now: Time.current)
+        _ = config
+        _ = now
+        wanted = status.to_s
+        recent_events.take_while { |event| event.payload['status'].to_s == wanted }.size
+      rescue StandardError
+        1 # unreadable history reads as "the one we just saw", never as a streak
+      end
+
       private
+
+      # Newest first, bounded. `STREAK_LIMIT` is the most probes a streak is
+      # ever counted over; anything beyond it is already well past the
+      # debounce.
+      def recent_events
+        ActivityEvent.where(kind: KIND).order(created_at: :desc, id: :desc).limit(STREAK_LIMIT)
+      end
 
       def state_from(event)
         value = event.payload['available']

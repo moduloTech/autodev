@@ -155,21 +155,39 @@ class ResetForRetryTest < ActiveSupport::TestCase
                     status: 'fixing_discussions', mr_iid: 42, needs_attention: false }.merge(overrides))
   end
 
+  # Both tests below assert the *absence of a reclaim* and not merely the
+  # resulting status: the alpha-53 review pointed out that a status assertion
+  # alone passes whether a reclaim was attempted or not, so the property was
+  # true by construction and pinned by nothing. `ResetReclaim.perform` is
+  # stubbed to record the fact and raise, which is what an accidental call
+  # would have to survive.
+  def with_reclaim_tripwire(&)
+    calls = []
+    tripwire = lambda do |issue, **|
+      calls << issue.id
+      raise 'reclaimed'
+    end
+    Autodev::ResetReclaim.stub(:perform, tripwire, &)
+    calls
+  end
+
   def test_revive_stalled_reclaims_nothing
     issue = abandoned_active_row
 
-    Issue.revive_stalled!(Issue.where(id: issue.id))
+    calls = with_reclaim_tripwire { Issue.revive_stalled!(Issue.where(id: issue.id)) }
     issue.reload
 
     assert_equal 'checking_pipeline', issue.status
+    assert_empty calls, 'an automatic revival must never reach the GitLab reclaim'
   end
 
   def test_recover_on_startup_reclaims_nothing
     issue = errored(retry_count: 1, next_retry_at: nil, mr_iid: nil, needs_attention: true,
                     attention_reason: 'stagnation_pipeline')
 
-    Issue.recover_on_startup!(max_retries: 1)
+    calls = with_reclaim_tripwire { Issue.recover_on_startup!(max_retries: 1) }
 
     assert_equal 'pending', issue.reload.status
+    assert_empty calls, 'startup recovery must never reach the GitLab reclaim'
   end
 end

@@ -132,18 +132,35 @@ class AnOutageIsNotAReviewVerdictTest < ActiveSupport::TestCase # rubocop:disabl
 
   # --- five in a row ---------------------------------------------------------
 
-  def test_five_consecutive_tool_unavailable_leave_the_budget_at_zero_and_the_row_watching
+  # #107's rule and the alpha-53 review's correction of it, in one assertion
+  # each: the review budget is never spent on an outage, **and** the row does
+  # not wait fourteen days to end under a reason that says the watch stopped
+  # moving. `ReviewOutageBound` stops it under the cause.
+  def test_five_consecutive_tool_unavailable_spend_no_budget_and_end_under_the_outage_reason
     row = issue
     5.times { poll(row, outcome: :tool_unavailable) }
+    row.reload
 
-    assert_equal [0, 'checking_pipeline'], [row.reload.review_failure_count, row.reload.status]
+    assert_equal [0, 'done'], [row.review_failure_count, row.status]
+    assert_equal 'review_tool_unavailable', row.attention_reason
   end
 
-  def test_five_consecutive_clone_failed_leave_the_budget_at_zero_and_the_row_watching
+  def test_five_consecutive_clone_failed_spend_no_budget_and_end_under_the_outage_reason
     row = issue
     5.times { poll(row, outcome: :clone_failed) }
+    row.reload
 
-    assert_equal [0, 'checking_pipeline'], [row.reload.review_failure_count, row.reload.status]
+    assert_equal [0, 'done'], [row.review_failure_count, row.status]
+    assert_equal 'review_clone_failed', row.attention_reason
+  end
+
+  def test_four_consecutive_outages_still_leave_the_row_watching
+    row = issue
+    4.times { poll(row, outcome: :tool_unavailable) }
+    row.reload
+
+    assert_equal [0, 'checking_pipeline'], [row.review_failure_count, row.status]
+    refute row.needs_attention
   end
 
   # The bound that remains must remain: `:unusable_output` is the one cause
@@ -212,19 +229,42 @@ class AnOutageIsNotAReviewVerdictTest < ActiveSupport::TestCase # rubocop:disabl
   # review failure that never happened. The operator still gets a
   # distinguishable line in the issue timeline — just not on the ticket.
 
-  def test_no_gitlab_comment_on_tool_unavailable
+  def test_no_review_failure_line_on_tool_unavailable
     row = issue
     sink = poll(row, outcome: :tool_unavailable)
 
     refute_includes sink[:activity].map(&:first), :review_failed
-    assert_equal [:review_tool_unavailable], sink[:activity_warn].map(&:first)
   end
 
-  def test_no_gitlab_comment_on_clone_failed
+  def test_no_review_failure_line_on_clone_failed
     row = issue
     sink = poll(row, outcome: :clone_failed)
 
     refute_includes sink[:activity].map(&:first), :review_failed
-    assert_equal [:review_clone_failed], sink[:activity_warn].map(&:first)
   end
+
+  # --- and nothing is written to the journal per poll (alpha-53 review, G3b) --
+  #
+  # This is the half that mattered. `log_activity_warn` is DB-only, which is
+  # why writing one on every poll of an outage looked free. It is not:
+  # `Issue.without_activity_since` is the clause common to all three of
+  # `DormantAudit`'s arms, so a row writing an activity line every cycle
+  # leaves the safety net Autodev #103 had just widened — for as long as the
+  # outage lasts, which is exactly when it is needed. The countdown is logged
+  # instead; the give-up, which happens once, is what reaches the journal.
+
+  def test_an_outage_writes_no_activity_row_per_poll
+    row = issue
+    sink = poll(row, outcome: :tool_unavailable)
+
+    assert_empty sink[:activity_warn],
+                 'an activity row per poll takes the request out of DormantAudit for the whole outage'
+  end
+
+  # Deliberately asserted on the sink above and **not** on
+  # `Issue.without_activity_since`: this harness routes `log_activity_warn`
+  # into a sink rather than into `activity_events`, so a database-level
+  # assertion here would pass whether the fix is present or not — which is the
+  # class of test the alpha-53 review objected to. The sink assertion fails
+  # without the fix, verified by re-introducing it.
 end

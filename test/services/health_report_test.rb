@@ -151,13 +151,36 @@ class HealthReportTest < ActiveSupport::TestCase # rubocop:disable Metrics/Class
     assert_includes check[:detail], 'not found on PATH'
   end
 
-  test 'danger_claude down when broken, quoting the diagnostic' do
+  # `broken` is the catch-all for any non-zero exit matching neither the quota
+  # nor the auth signature, so one observation may be a container hiccup. It
+  # warns first and pages on the second consecutive probe (alpha-53 review,
+  # G5) — the same calibration `mr_review`'s thresholds got in Autodev #60.
+  # `auth_refused` / `binary_missing` are deterministic and still page at
+  # once, asserted above.
+  test 'danger_claude warns on a single broken probe, quoting the diagnostic' do
     usage_event(available: false, status: 'broken', diagnostic: 'v1.54/volumes/danger-claude 500')
     check = report.check(:danger_claude)[:checks][:danger_claude]
 
-    assert_equal :down, check[:status]
+    assert_equal :warn, check[:status]
     assert_includes check[:detail], 'v1.54/volumes/danger-claude 500'
     assert_equal 'v1.54/volumes/danger-claude 500', check[:meta][:diagnostic]
+  end
+
+  test 'danger_claude down on the second consecutive broken probe' do
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500', age_seconds: 30)
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :down, check[:status]
+    assert_equal 2, check[:meta][:consecutive]
+  end
+
+  test 'a broken probe after a healthy one is not a streak' do
+    usage_event(available: true, status: 'available', age_seconds: 30)
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :warn, check[:status], 'a healthy probe in between must break the run'
   end
 
   test 'danger_claude ok when the verdict is stale' do

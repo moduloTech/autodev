@@ -45,6 +45,10 @@ class PipelineMonitor
     rescue GitError, ImplementationError, ReviewContract::InvalidError => e
       outcome, verb = skill_review_outcome(e)
       log_skill_review_failure(issue, verb, e)
+      # What `ReviewOutageBound` counts as "the same cause" — the exception
+      # class and its message. A different failure is a different fact and
+      # restarts the count (alpha-53 review, G3).
+      @review_outage_diagnostic = "#{e.class}: #{e.message}"
       outcome
     ensure
       FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)

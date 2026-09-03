@@ -456,10 +456,17 @@ end
 # Autodev #92 design §2: runs once, before any child is spawned. `Supervisor
 # #run`'s own `ensure` (lib/autodev/supervisor.rb) closes the leak for this
 # process going forward; this reaps what an *earlier*, already-dead
-# supervisor left behind — a child reparented to pid 1, holding our SQLite
-# file open for writing — or refuses to start naming anything it cannot
-# positively identify as one of ours. `ConfigError` propagates to `main`'s
-# existing rescue, same as every other boot refusal.
+# supervisor left behind — a holder of our SQLite file whose process group
+# has lost its leader (see BootGuard for why the group, and not `ppid == 1`,
+# is the discriminator).
+#
+# It deliberately does **not** refuse the boot over a holder it cannot
+# identify: this call sits after `bootstrap` → `setup_database`, so the
+# booting process holds the database itself, and the production host's
+# container VM holds it too. Refusing there was a boot loop under
+# `KeepAlive: Crashed`. `AUTODEV_BOOT_GUARD_STRICT=1` restores the refusal
+# for an operator investigating by hand, and only then does `ConfigError`
+# propagate to `main`'s existing rescue.
 def run_boot_guard(config, logger)
   db_path = ENV.fetch('AUTODEV_DB') { File.expand_path('~/.autodev/autodev.db') }
   Autodev::BootGuard.new(db_path: db_path, logger: logger, locale: cli_locale(config)).call
