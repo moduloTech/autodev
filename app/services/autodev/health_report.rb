@@ -15,13 +15,19 @@ module Autodev
   # where the top-level status is the worst severity across checks.
   class HealthReport # rubocop:disable Metrics/ClassLength
     CHECKS = %i[poller workers queue claude_usage issues_error mr_review review_skill
-                mr_review_token stuck_issues database migrations].freeze
+                mr_review_token stuck_issues database migrations gitlab_requests].freeze
     SEVERITY = { ok: 0, warn: 1, down: 2 }.freeze
 
     DEFAULT_POLL_INTERVAL = 300
     DEFAULT_POLL_STALE_FACTOR = 3
     POLL_STALE_FLOOR = 900 # never flag stale before 15 min, even on a tight interval
     BACKLOG_WARN = 100
+
+    # Windows for the gitlab_requests check (Autodev #96) — fixed, not
+    # configurable: this is an observability figure, not a threshold anybody
+    # tunes to change behaviour.
+    GITLAB_REQUESTS_HOUR_WINDOW = 3600
+    GITLAB_REQUESTS_DAY_WINDOW = 86_400
 
     # "the review is broken for everybody" detection (Autodev #60, item 1) — the
     # alert missing behind Autodev #49. `review_failure_count` is per ticket and
@@ -308,6 +314,40 @@ module Autodev
 
       meta[:sample] = stuck.first(5).map { |i| "##{i.issue_iid}(#{i.status})" }.join(' ')
       build(:warn, "#{stuck.size} issue(s) stuck with no path forward", meta)
+    end
+
+    # Reads what GitlabRequestCounter already recorded on the last
+    # however-many real GitLab calls (Autodev #96) — passive like every
+    # other check here, since reading the two tables back is not itself a
+    # GitLab call. Turns the instruction's point 1 (a derived ~30-45
+    # requests/cycle estimate) into a measured hourly total, and its point 3
+    # (an hourly failure curve four hand-timed samples could not produce)
+    # into an actual rate over the last 24h.
+    #
+    # Always `:ok`: no failure-rate threshold exists to warn against yet —
+    # producing one is what this instrumentation is for, not something to
+    # guess at before the first real numbers are on file.
+    def check_gitlab_requests
+      meta = gitlab_requests_meta
+      build(:ok, "#{meta[:total_last_hour]} GitLab request(s) in the last hour, " \
+                 "#{meta[:failures_last_24h]} transport failure(s) in the last 24h " \
+                 "(#{meta[:failure_rate_pct]}%)", meta)
+    end
+
+    def gitlab_requests_meta
+      by_kind = GitlabRequestStat.by_kind_since(@now - GITLAB_REQUESTS_HOUR_WINDOW)
+      requests_day = GitlabRequestStat.total_since(@now - GITLAB_REQUESTS_DAY_WINDOW)
+      failures_day = GitlabTransportFailure.count_since(@now - GITLAB_REQUESTS_DAY_WINDOW)
+
+      { reads_last_hour: by_kind['read'].to_i, writes_last_hour: by_kind['write'].to_i,
+        total_last_hour: by_kind.values.sum, requests_last_24h: requests_day,
+        failures_last_24h: failures_day, failure_rate_pct: failure_rate_pct(failures_day, requests_day) }
+    end
+
+    def failure_rate_pct(failures, total)
+      return 0.0 unless total.positive?
+
+      (failures.to_f / total * 100).round(2)
     end
 
     # --- helpers -----------------------------------------------------------

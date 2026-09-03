@@ -89,6 +89,10 @@ module GitlabHelpers
     raise GitlabFailure.classify(what, e)
   end
 
+  # The single place a URL + token become a Gitlab::Client (Autodev #96 — 12
+  # call sites, confirmed by grep in the design spec). Wrapping the return
+  # value here, rather than at each call site, is what instruments every
+  # request — read and write — without any of them changing.
   def build_gitlab_client(gitlab_url, token)
     unless token
       raise ConfigError,
@@ -96,7 +100,7 @@ module GitlabHelpers
     end
     raise ConfigError, 'Missing gitlab_url in config' unless gitlab_url
 
-    Gitlab.client(endpoint: "#{gitlab_url}/api/v4", private_token: token)
+    GitlabRequestCounter.new(Gitlab.client(endpoint: "#{gitlab_url}/api/v4", private_token: token))
   end
 
   def fetch_assignee_issues(client, project_path, labels_todo, assignee_id)

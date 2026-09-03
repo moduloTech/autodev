@@ -41,6 +41,7 @@ en:
   web_admin_health_check_stuck_issues: Stuck issues
   web_admin_health_check_database: Database
   web_admin_health_check_migrations: Migrations
+  web_admin_health_check_gitlab_requests: GitLab requests
   web_theme_toggle: Toggle theme
   web_sign_out: Sign out
   web_sign_in_title: Sign in
