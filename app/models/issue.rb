@@ -396,12 +396,18 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `IssuesController#reset` dropped both the stamp and the split. Hence one
   # method rather than a fourth chance to get it wrong.
   #
-  # `reset_budget:` zeroes `retry_count` — for an operator-driven reset, which
-  # means "clean slate". `clear_attention:` also clears the needs_attention
-  # trio, for the same reason.
+  # `reset_budget:` zeroes `retry_count` and `review_failure_count` — both are
+  # budgets, and both mean "clean slate" for an operator-driven reset.
+  # `review_failure_count` joined this list under Autodev #107: before it, the
+  # dashboard's Reset button left the counter untouched, so a request
+  # abandoned at `REVIEW_FAILURE_THRESHOLD`/`REVIEW_FAILURE_THRESHOLD` still
+  # carried that after a reset and could give itself up again on the very next
+  # stumble — with no way for the operator who clicked to know that.
+  # `clear_attention:` also clears the needs_attention trio, for the same
+  # reason.
   def self.reset_for_retry!(scope, reset_budget: false, clear_attention: false)
     fields = { error_message: nil, started_at: nil }
-    fields[:retry_count] = 0 if reset_budget
+    fields.merge!(retry_count: 0, review_failure_count: 0) if reset_budget
     fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention
 
     scope.where.not(mr_iid: nil)

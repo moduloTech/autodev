@@ -12,9 +12,22 @@ require 'autodev/pipeline_monitor'
 # 36 short-lived reviewing transitions in ~90 minutes before a single
 # successful run finally broke the loop.
 #
-# Now: consecutive mr-review failures increment `review_failure_count`;
-# at REVIEW_FAILURE_THRESHOLD we fire `review_giveup!` (reviewing → done)
-# with an alert. A successful run resets the counter.
+# That fix made every non-success answer `false`, counted identically whether
+# mr-review was merely absent, crashed, timed out, or exited non-zero — and
+# `false` was never a verdict on the merge request in the first place: the
+# binary posts its own findings straight to GitLab, so its exit status carries
+# nothing autodev can read as "this MR failed review" versus "the tool could
+# not run at all". Autodev #107 corrects that: every non-success outcome on
+# this path is `:tool_unavailable`, and `dispatch_review_outcome` no longer
+# spends `review_failure_count` on it — the binary path spent its credential
+# revoked for four months (Autodev #80) while this counter was the only thing
+# watching and never said so. The row still comes back to `checking_pipeline`
+# exactly as before (so the old infinite-loop regression above stays fixed);
+# what changed is that it costs nothing to get there, and the row is bounded
+# by `pipeline_watch_max_days` instead of `REVIEW_FAILURE_THRESHOLD`.
+#
+# A successful run still resets the counter and increments `review_count`,
+# unchanged.
 class PipelineMonitorReviewFailureTest < Minitest::Test
   include DatabaseTestHelper
 
@@ -26,17 +39,17 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     @monitor = build_monitor
   end
 
-  def test_failed_review_increments_failure_counter
-    stub_mr_review(success: false)
+  def test_failed_review_does_not_increment_the_failure_counter
+    stub_mr_review(outcome: :tool_unavailable)
 
     @monitor.send(:launch_review, @issue)
     @issue.reload
 
-    assert_equal 1, @issue.review_failure_count
+    assert_equal 0, @issue.review_failure_count
   end
 
-  def test_failed_review_under_threshold_returns_to_checking_pipeline
-    stub_mr_review(success: false)
+  def test_failed_review_returns_to_checking_pipeline
+    stub_mr_review(outcome: :tool_unavailable)
 
     @monitor.send(:launch_review, @issue)
     @issue.reload
@@ -44,45 +57,25 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     assert_equal 'checking_pipeline', @issue.status
   end
 
-  def test_threshold_reached_transitions_to_done
-    @issue.update(review_failure_count: PipelineMonitor::Reviewer::REVIEW_FAILURE_THRESHOLD - 1)
-    stub_mr_review(success: false)
-
-    @monitor.send(:launch_review, @issue)
+  # The regression this file exists to pin, restated for #107: five
+  # consecutive mr-review failures — what used to reach
+  # `REVIEW_FAILURE_THRESHOLD` and abandon the request — no longer spend
+  # anything or conclude anything on the binary path.
+  def test_five_consecutive_failures_neither_spend_the_budget_nor_abandon_the_request
+    5.times do
+      stub_mr_review(outcome: :tool_unavailable)
+      @monitor.send(:launch_review, @issue)
+    end
     @issue.reload
 
-    assert_equal 'done', @issue.status
-  end
-
-  def test_threshold_reached_flags_needs_attention
-    @issue.update(review_failure_count: PipelineMonitor::Reviewer::REVIEW_FAILURE_THRESHOLD - 1)
-    stub_mr_review(success: false)
-
-    @monitor.send(:launch_review, @issue)
-    @issue.reload
-
-    assert @issue.needs_attention, 'a gave-up done must be flagged for attention'
-    assert_equal 'review_failures_exhausted', @issue.attention_reason
-  end
-
-  # A given-up review is the one terminal, human-facing outcome that recorded
-  # nothing about why (Autodev #49). production.log rotates; the row does not.
-  def test_giving_up_keeps_the_last_mr_review_output_on_the_row
-    @issue.update(review_failure_count: PipelineMonitor::Reviewer::REVIEW_FAILURE_THRESHOLD - 1)
-    @monitor.instance_variable_set(:@dc_stdout, +"=== mr-review ===\nunknown option -H\n")
-    @monitor.instance_variable_set(:@dc_stderr, +"=== mr-review ===\n\n")
-    stub_mr_review(success: false)
-
-    @monitor.send(:launch_review, @issue)
-    @issue.reload
-
-    assert_includes @issue.dc_stdout, 'unknown option -H'
-    assert_equal 'review_failures_exhausted', @issue.attention_reason
+    assert_equal 0, @issue.review_failure_count
+    assert_equal 'checking_pipeline', @issue.status
+    refute @issue.needs_attention
   end
 
   def test_successful_review_resets_failure_counter
     @issue.update(review_failure_count: 3)
-    stub_mr_review(success: true)
+    stub_mr_review(outcome: true)
 
     @monitor.send(:launch_review, @issue)
     @issue.reload
@@ -92,7 +85,7 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
 
   def test_successful_review_increments_review_count
     @issue.update(review_count: 0, review_failure_count: 2)
-    stub_mr_review(success: true)
+    stub_mr_review(outcome: true)
 
     @monitor.send(:launch_review, @issue)
     @issue.reload
@@ -123,8 +116,8 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     monitor
   end
 
-  def stub_mr_review(success:)
-    @monitor.define_singleton_method(:execute_mr_review) { |_| success }
+  def stub_mr_review(outcome:)
+    @monitor.define_singleton_method(:execute_mr_review) { |_| outcome }
   end
 
   # Swallows every GitLab API call that the finalize / giveup paths fan out

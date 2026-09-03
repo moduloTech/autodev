@@ -28,7 +28,12 @@ class DcOutputPersistenceScrubTest < Minitest::Test
     setup_database
     @issue = build_reviewing_issue
     @monitor = build_monitor
-    @monitor.define_singleton_method(:execute_mr_review) { |_| false }
+    # `:unusable_output`, not `:tool_unavailable` (Autodev #107): this test is
+    # about what `give_up_reviewing` writes to the row, which only
+    # `:unusable_output` still reaches — `execute_mr_review`'s real outcomes no
+    # longer spend the budget at all, but the stub only needs to drive the
+    # give-up path, not replay the binary's actual vocabulary.
+    @monitor.define_singleton_method(:execute_mr_review) { |_| :unusable_output }
     @issue.update(review_failure_count: PipelineMonitor::Reviewer::REVIEW_FAILURE_THRESHOLD - 1)
   end
 
