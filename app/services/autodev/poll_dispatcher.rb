@@ -31,6 +31,24 @@ module Autodev
     DEFAULT_DORMANT_AUDIT_MAX = 3
     DEFAULT_DORMANT_AUDIT_BACKOFF = 3600
 
+    class << self
+      # The one definition of "a pass will pick this `error`/`pending` row up
+      # on its own, right now" — read by `fetch_retryable` below and, negated
+      # and refined to "and never will", by `DormantAudit#error_arm` (Autodev
+      # #103). A Ruby predicate rather than a second hand-written SQL string,
+      # so the two populations are tested against the same rule instead of
+      # against column values that can silently drift apart — which is
+      # exactly how a 401 landed in neither: `handle_auth_failure` left
+      # `next_retry_at` NULL, `fetch_retryable` requires it non-NULL, and the
+      # old `error_arm` required `retry_count > max_retries`, a fact that row
+      # never satisfied either.
+      def retryable?(issue, max_retries:, now: Time.current)
+        issue.retry_count.to_i <= max_retries &&
+          !issue.next_retry_at.nil? &&
+          issue.next_retry_at <= now
+      end
+    end
+
     # PollRouter's contract expects a `pool` arg with an `enqueue?` method. In
     # the Solid Queue world the router still routes (returns :next vs
     # :continue) but the actual enqueue happens through `process_issue`
@@ -380,11 +398,10 @@ module Autodev
 
     def fetch_retryable
       max_retries = ::Config.max_retries(@project_config, @config)
+      now = Time.current
       ::Issue.where(project_path: @path)
              .where(status: %w[error pending])
-             .where('retry_count <= ?', max_retries)
-             .where("next_retry_at IS NOT NULL AND next_retry_at <= datetime('now')")
-             .to_a
+             .select { |issue| self.class.retryable?(issue, max_retries: max_retries, now: now) }
     end
 
     # === bounded second look at every row that has stopped moving ===

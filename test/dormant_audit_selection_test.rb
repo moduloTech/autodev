@@ -80,7 +80,7 @@ class DormantAuditSelectionTest < Minitest::Test # rubocop:disable Metrics/Class
     refute_includes candidate_iids, issue.issue_iid
   end
 
-  # --- the error arm (#34, unchanged) -------------------------------
+  # --- the error arm (#34, widened by #103) --------------------------
 
   def test_a_spent_budget_error_row_is_a_candidate
     issue = spent
@@ -88,10 +88,41 @@ class DormantAuditSelectionTest < Minitest::Test # rubocop:disable Metrics/Class
     assert_includes candidate_iids, issue.issue_iid
   end
 
-  # Still inside its budget: dispatch_retries owns it. Picking it up here too
-  # would double-dispatch the same ticket.
-  def test_an_error_row_still_within_budget_is_not
-    issue = spent(retry_count: 1)
+  # Still inside its budget AND scheduled: dispatch_retries owns it. Picking
+  # it up here too would double-dispatch the same ticket.
+  def test_an_error_row_within_budget_and_scheduled_is_not
+    issue = spent(retry_count: 1, next_retry_at: 1.hour.from_now)
+
+    refute_includes candidate_iids, issue.issue_iid
+  end
+
+  # The regression this ticket is about (Autodev #103): a row that errored on
+  # its first attempt — budget unspent, but no retry was ever scheduled (a
+  # 401, or one of the two generic handlers) — satisfies neither
+  # `fetch_retryable` (needs a stamp) nor the old `error_arm` (needs a spent
+  # budget). Production examples 11541 (retry_count 1, next_retry_at NULL)
+  # and 16424 (0, NULL) sat frozen until reset by hand.
+  def test_an_unstamped_error_row_within_budget_is_a_candidate
+    issue = spent(retry_count: 1, next_retry_at: nil)
+
+    assert_includes candidate_iids, issue.issue_iid
+  end
+
+  # A future stamp inside budget is not retryable *now*, but time alone fixes
+  # it — it is waiting, not dormant, and must not be double-dispatched.
+  def test_an_error_row_with_a_future_stamp_is_not_dormant_even_past_budget_check
+    issue = spent(retry_count: 0, next_retry_at: 1.hour.from_now)
+
+    refute_includes candidate_iids, issue.issue_iid
+  end
+
+  # `error_arm` gains the same freshness guard `pending_arm` already has:
+  # a row that has just errored must not be audited inside the same cycle
+  # that wrote it.
+  def test_a_freshly_errored_row_with_recent_activity_is_not_a_candidate
+    issue = spent(retry_count: 1, next_retry_at: nil)
+    ActivityEvent.create!(issue_id: issue.id, kind: 'transition', level: 'info',
+                          payload_json: '{}', created_at: 1.minute.ago)
 
     refute_includes candidate_iids, issue.issue_iid
   end

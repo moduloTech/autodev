@@ -7,21 +7,23 @@ class MrFixer
 
     def handle_rate_limit(issue, error)
       wait = error.wait_seconds
+      retry_at = wait.to_i.seconds.from_now
       log_error "MR !#{issue.mr_iid}: rate limit hit, parking for #{wait}s"
-      safe_mark_failed!(issue)
+      safe_mark_failed!(issue, next_retry_at: retry_at)
       Issue.where(id: issue.id).update_all(
         error_message: error.message,
-        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
-        next_retry_at: wait.to_i.seconds.from_now
+        dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
       )
       log_activity(issue, :rate_limit, wait: wait)
     end
 
     # Claude credentials are dead — see IssueProcessor::ErrorHandler#handle_auth_failure.
-    # No retry is scheduled and no per-ticket comment is posted.
+    # No retry is scheduled and no per-ticket comment is posted. `next_retry_at: nil`
+    # is explicit (Autodev #103): a stamp left over from a previous life in
+    # `error` must not survive into this one.
     def handle_auth_failure(issue, error)
       log_error "MR !#{issue.mr_iid}: Claude authentication failed, manual intervention required"
-      safe_mark_failed!(issue)
+      safe_mark_failed!(issue, next_retry_at: nil)
       Issue.where(id: issue.id).update_all(
         error_message: "#{error.class}: #{error.message}",
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
@@ -35,7 +37,9 @@ class MrFixer
       return stop_on_stale_transition(error) if error.is_a?(StaleTransitionError)
 
       bt = error.backtrace&.first(10)&.join("\n  ")
-      safe_mark_failed!(issue)
+      # No retry scheduled — same asymmetry as PipelineMonitor's generic
+      # handler, and the same recovery: DormantAudit's error arm (Autodev #103).
+      safe_mark_failed!(issue, next_retry_at: nil)
       persist_and_notify_fix_error(issue, error, bt)
       log_error "MR fix failed: #{error.class}: #{error.message}"
       log_error "  #{bt}" if bt
