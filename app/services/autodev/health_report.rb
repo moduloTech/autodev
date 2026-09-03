@@ -14,8 +14,20 @@ module Autodev
   #     checks: { <name> => { status:, detail:, meta: {} }, ... } }
   # where the top-level status is the worst severity across checks.
   class HealthReport # rubocop:disable Metrics/ClassLength
-    CHECKS = %i[poller workers queue claude_usage issues_error mr_review review_skill
+    CHECKS = %i[poller workers queue claude_usage danger_claude issues_error mr_review review_skill
                 mr_review_token stuck_issues database migrations].freeze
+
+    # `danger_claude`'s severity mapping (Autodev #108): a quota outage is not
+    # a fault of the tool — `claude_usage` already carries that alarm — but the
+    # other three recognised failure causes plus the unenumerated `broken`
+    # bucket mean the tool cannot run at all, and everything the product does
+    # (implementation, review, discussion fixing) depends on it.
+    DANGER_CLAUDE_DOWN_STATUSES = %w[auth_refused binary_missing broken].freeze
+    DANGER_CLAUDE_FAULT_DETAIL = {
+      'auth_refused' => 'danger-claude can no longer authenticate against Claude (API 401)',
+      'binary_missing' => 'the danger-claude binary was not found on PATH',
+      'broken' => 'danger-claude failed and the cause is unrecognised'
+    }.freeze
     SEVERITY = { ok: 0, warn: 1, down: 2 }.freeze
 
     DEFAULT_POLL_INTERVAL = 300
@@ -183,14 +195,61 @@ module Autodev
     # very state the dispatcher and PipelineMonitor act on (Autodev #46). It
     # fails open on a missing or stale verdict; a poller that stopped ticking is
     # the `poller` check's job to report, not this one's.
+    #
+    # Narrowed to the quota alone since Autodev #108: `quota_exhausted` is the
+    # only status this card raises on. The other three fault causes — a dead
+    # credential, an absent binary, an unrecognised failure — are not a
+    # property of the quota, and `danger_claude` below is where they surface.
     def check_claude_usage
       state = UsageGate.state(config: @config, now: @now)
       return build(:ok, 'no usage probe on file') if state[:checked_at].nil?
 
       meta = { checked_at: iso(state[:checked_at]) }
-      return build(:warn, 'Claude usage exhausted at last probe', meta) unless state[:available]
+      return build(:warn, 'Claude usage exhausted at last probe', meta) if state[:status] == :quota_exhausted
 
       build(:ok, 'Claude usage available at last probe', meta)
+    end
+
+    # Does danger-claude — the hard dependency behind implementation, review
+    # and discussion fixing — actually run? (Autodev #108.) Two total outages
+    # in two days went unseen: a 401 (dead credential) and a nine-hour Docker
+    # engine outage (API-version mismatch, every call failing in
+    # `ensure_volume` before a container even started), both read as
+    # `available: true` by the boolean the probe used to keep, and neither
+    # `/healthz` in the window carried a warning about it. Same probe as
+    # `claude_usage` — `UsageChecker#verdict` already exercises the whole
+    # chain (binary, container runtime, volumes, credentials, quota) once per
+    # cycle — this card just keeps the causes that boolean used to discard.
+    #
+    # `down`, unlike every other check here bar `migrations`: a broken review
+    # tool degrades one pass (`mr_review`'s `warn` tier), but a danger-claude
+    # that cannot run stops implementation, review AND discussion fixing
+    # alike — every job fails, the same reason `migrations` pages.
+    # `quota_exhausted` stays `ok` here: an exhausted quota is not a fault of
+    # the tool, and it already has its own alarm on `claude_usage`.
+    def check_danger_claude
+      state = UsageGate.state(config: @config, now: @now)
+      return build(:ok, 'no usage probe on file') if state[:checked_at].nil?
+
+      danger_claude_verdict(state)
+    end
+
+    def danger_claude_verdict(state)
+      status = state[:status]
+      meta = { status: (status || :unknown).to_s, checked_at: iso(state[:checked_at]) }
+      unless DANGER_CLAUDE_DOWN_STATUSES.include?(status.to_s)
+        return build(:ok, "danger-claude #{status || 'unknown'} at last probe", meta)
+      end
+
+      meta[:diagnostic] = state[:diagnostic] if state[:diagnostic]
+      build(:down, danger_claude_fault_detail(status, state[:diagnostic]), meta)
+    end
+
+    def danger_claude_fault_detail(status, diagnostic)
+      base = DANGER_CLAUDE_FAULT_DETAIL.fetch(status.to_s)
+      return base unless status.to_s == 'broken' && diagnostic
+
+      "#{base}: #{diagnostic}"
     end
 
     def check_issues_error

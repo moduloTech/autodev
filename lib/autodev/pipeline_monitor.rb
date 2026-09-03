@@ -156,6 +156,17 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     ::Autodev::UsageGate.available?
   end
 
+  # The recorded cause behind a closed gate, for the two deferrals below
+  # (Autodev #108 §7). Only called from inside them, i.e. only once
+  # `claude_available?` has already answered false with `Autodev::UsageGate`
+  # defined — so the status this reads is never the fail-open default.
+  # `:claude_usage_exhausted` is the fallback for a status this constant does
+  # not carry (nil — no verdict on file, or a pre-upgrade row).
+  def claude_unavailable_reason
+    status = ::Autodev::UsageGate.state[:status]
+    status ? :"claude_usage_#{status}" : :claude_usage_exhausted
+  end
+
   # Deliberately placed before `clear_pipeline_poll_since` and `log_activity`:
   # the ticket is still waiting, so the "checking pipeline" line stays as it is
   # rather than being replaced by a green line we can't act on — and a note
@@ -204,15 +215,23 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   # nowhere, so the age bound must not read it as a frozen watch. Without this a
   # pipeline that turned green on day 15 during a quota outage was abandoned with
   # a comment saying it had not moved for a fortnight.
+  #
+  # Both the flag's reason and the log line now name the recorded cause
+  # (Autodev #108 §7) rather than always saying "Claude usage exhausted" — a
+  # dead Docker engine produced that exact sentence verbatim, which is the
+  # family of defect this whole lot exists to end. Found while specifying
+  # Autodev #107, which depends on this gate.
   def defer_review_for_usage(issue)
-    poll_inconclusive!(:claude_usage_exhausted)
-    log "Issue ##{issue.issue_iid}: pipeline green but Claude usage exhausted, " \
+    reason = claude_unavailable_reason
+    poll_inconclusive!(reason)
+    log "Issue ##{issue.issue_iid}: pipeline green but danger-claude unavailable (#{reason}), " \
         'deferring mr-review, staying in checking_pipeline'
   end
 
   def defer_fix_for_usage(issue)
-    poll_inconclusive!(:claude_usage_exhausted)
-    log "Issue ##{issue.issue_iid}: pipeline red but Claude usage exhausted, " \
+    reason = claude_unavailable_reason
+    poll_inconclusive!(reason)
+    log "Issue ##{issue.issue_iid}: pipeline red but danger-claude unavailable (#{reason}), " \
         'deferring the fix, staying in checking_pipeline'
   end
 

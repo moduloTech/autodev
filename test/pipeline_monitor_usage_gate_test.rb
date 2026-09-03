@@ -14,6 +14,12 @@ require 'autodev/pipeline_monitor'
 # no counter, signature or activity line touched — so the next cycle picks it up
 # unchanged once the quota is back.
 class PipelineMonitorUsageGateTest < Minitest::Test
+  include DatabaseTestHelper
+
+  def setup
+    setup_database
+  end
+
   # Minimal Issue stand-in (same shape as pipeline_monitor_infra_stagnation_test).
   class FakeIssue
     attr_reader :attrs, :issue_iid, :mr_iid, :mr_url, :review_count
@@ -141,5 +147,33 @@ class PipelineMonitorUsageGateTest < Minitest::Test
 
     assert_equal [issue.issue_iid], sink[:fixed]
     assert_equal 1, JSON.parse(issue.stagnation_signatures).dig('pipeline', 'count')
+  end
+
+  # --- claude_unavailable_reason (Autodev #108 §7) ------------------------
+  #
+  # The deferral's flag and log line must name the recorded cause instead of
+  # always saying "Claude usage exhausted" — a dead Docker engine produced
+  # that exact sentence verbatim, indistinguishable from a real quota outage.
+
+  def test_the_deferral_reason_names_the_recorded_cause
+    ActivityEvent.create!(issue_id: nil, kind: 'usage', level: 'warn',
+                          payload_json: JSON.generate(available: false, status: 'auth_refused'))
+    m = PipelineMonitor.allocate
+
+    assert_equal :claude_usage_auth_refused, m.send(:claude_unavailable_reason)
+  end
+
+  def test_the_deferral_reason_names_a_broken_tool
+    ActivityEvent.create!(issue_id: nil, kind: 'usage', level: 'warn',
+                          payload_json: JSON.generate(available: false, status: 'broken'))
+    m = PipelineMonitor.allocate
+
+    assert_equal :claude_usage_broken, m.send(:claude_unavailable_reason)
+  end
+
+  def test_the_deferral_reason_falls_back_to_the_quota_wording_with_nothing_on_file
+    m = PipelineMonitor.allocate
+
+    assert_equal :claude_usage_exhausted, m.send(:claude_unavailable_reason)
   end
 end
