@@ -275,7 +275,9 @@ module Autodev
 
       streak = UsageGate.consecutive(status, config: @config, now: @now)
       meta[:consecutive] = streak
-      return build(:warn, "#{detail} (1 probe so far)", meta) if streak < DANGER_CLAUDE_DEBOUNCE
+      if streak < DANGER_CLAUDE_DEBOUNCE
+        return build(:warn, "#{detail} (#{streak} of #{DANGER_CLAUDE_DEBOUNCE} probes)", meta)
+      end
 
       build(:down, "#{detail} (#{streak} probes in a row)", meta)
     end

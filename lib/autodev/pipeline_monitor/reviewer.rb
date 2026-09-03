@@ -93,17 +93,17 @@ class PipelineMonitor
       skill = ReviewSkillSource.declared(@project_config)
       announce_review(issue, skill)
       dispatch_review_outcome(issue, skill ? review_with_skill(issue) : execute_mr_review(issue))
-    # A GitLab outage while *we* publish is not a review failure and must not spend
-    # the budget (Autodev #62, #71) — so neither counter is touched — but the row
-    # still has to come back to `checking_pipeline` before the poll aborts at
-    # `PipelineMonitor#check`'s boundary, or nothing re-enqueues it. Re-raised so
-    # the abort still happens and `abandon_expired_watch` stays unreached.
     # The project declared a review skill its repository does not carry. Nothing
     # further can be attempted for this request, or for any other request of the
     # project, until somebody fixes the configuration or adds the skill — so the
     # answer is a give-up that says so, not a retry (Autodev #81).
     rescue MissingReviewSkillError => e
       give_up_on_missing_review_skill(issue, e)
+    # A GitLab outage while *we* publish is not a review failure and must not spend
+    # the budget (Autodev #62, #71) — so neither counter is touched — but the row
+    # still has to come back to `checking_pipeline` before the poll aborts at
+    # `PipelineMonitor#check`'s boundary, or nothing re-enqueues it. Re-raised so
+    # the abort still happens and `abandon_expired_watch` stays unreached.
     rescue ApiUnavailableError
       resume_watch(issue)
       raise
@@ -148,33 +148,38 @@ class PipelineMonitor
 
     # `:tool_unavailable` and `:clone_failed` join `:inconclusive` on the
     # non-spending side: none of the three is evidence about the request, so
-    # none of them may spend `review_failure_count` (Autodev #107).
+    # none of them may spend `review_failure_count` (Autodev #107). The bound
+    # is the age bound, `pipeline_watch_max_days`, and its give-up says
+    # exactly what happened — "watching for N days without ever being able to
+    # conclude" — which is true of a persistent tool outage or a source branch
+    # that cannot be cloned.
     #
-    # Two things the alpha-53 neutral review (G3) corrected here.
+    # **What is deliberately absent is a per-cause counter.** The alpha-53
+    # review asked for one and the second review measured what it cost: a
+    # count keyed on the failure's own message is inert against the cause it
+    # was written for, because git says `Failed to connect … after 75002 ms`
+    # and the timing moves every attempt — the Autodev #99 defect exactly, a
+    # guard indexed on a signature that changes by construction. Keyed on a
+    # *stable* message it is worse than inert: five polls at a two-minute
+    # interval is a ten-minute burst of GitLab 502s ending in a give-up that
+    # asks the client whether their source branch still exists. Bounding an
+    # outage by occurrences is the wrong instrument; the age bound is the
+    # right one, and it was already there. What the review's complaint really
+    # named — a *missing binary* waiting fourteen days — is answered by
+    # `:tool_missing` above, which does not wait at all.
     #
-    # **They are bounded.** #107 left the age bound as the only thing stopping
-    # a row on either outcome — fourteen days, ending under
-    # `pipeline_watch_expired`, which says the watch stopped moving and is not
-    # what happened. `ReviewOutageBound` counts the cause and stops the
-    # request under a reason that names it, on `stagnation_threshold`
-    # occurrences, the way `InvalidRequestBound` and `MissingBaseBound`
-    # already do. When it gives up it has already transitioned the row, so
-    # there is no watch left to resume.
-    #
-    # **They no longer write an activity row per poll.** `log_activity_warn`
-    # is DB-only, which is why it looked free; but
-    # `Issue.without_activity_since` is the clause common to all three of
-    # `DormantAudit`'s arms, so a row writing one every poll leaves the safety
-    # net Autodev #103 had just widened, for as long as the outage lasts. This
-    # file already said so five methods above, in `launch_review`, as its
-    # reason for not rescuing `ConfigError` and resuming. The countdown is
-    # logged instead — `WatchBound#log_bound_withheld`'s precedent for
-    # exactly this situation — and the give-up, which happens once, is what
-    # reaches the journal and the ticket.
+    # **No activity row per poll.** `log_activity_warn` is DB-only, which is
+    # why writing one here looked free; but `Issue.without_activity_since` is
+    # the clause common to all three of `DormantAudit`'s arms, so a row
+    # writing one every poll leaves the safety net Autodev #103 had just
+    # widened, for as long as the outage lasts. This file says so five methods
+    # above, in `launch_review`, as its reason for not rescuing `ConfigError`
+    # and resuming. The distinction between the two causes lives in the log,
+    # which is `WatchBound#log_bound_withheld`'s precedent for a per-poll line
+    # during an outage.
     def resume_after_non_spending_outcome(issue, outcome)
-      log "MR !#{issue.mr_iid}: review outcome #{outcome}, retrying next poll without spending the review budget"
-      return if bound_review_outage(issue, outcome, @review_outage_diagnostic)
-
+      log "MR !#{issue.mr_iid}: review outcome #{outcome}, retrying next poll without spending " \
+          'the review budget — bounded by the pipeline watch age'
       resume_watch(issue)
     end
 
@@ -345,7 +350,8 @@ class PipelineMonitor
       sleep 15
       run_mr_review_command(issue.mr_url)
     rescue StandardError => e
-      note_review_outage("#{e.class}: #{e.message}")
+      log_error "mr-review error (non-fatal): #{e.class}: #{e.message}"
+      :tool_unavailable
     end
 
     # mr-review is not a danger-claude call, so it gets no heartbeat of its own
@@ -388,15 +394,7 @@ class PipelineMonitor
       )
       return log('Review completed successfully') || true if ok
 
-      note_review_outage(review_failure_diagnostic(out, err, status))
-    end
-
-    # The cause `ReviewOutageBound` counts, remembered for the dispatch that
-    # follows — a different diagnostic is a different fact and restarts the
-    # count, so it may not be dropped on the way out.
-    def note_review_outage(diagnostic)
-      log_error "mr-review failed (non-fatal): #{diagnostic}"
-      @review_outage_diagnostic = diagnostic
+      log_error "mr-review failed (non-fatal): #{review_failure_diagnostic(out, err, status)}"
       :tool_unavailable
     end
 

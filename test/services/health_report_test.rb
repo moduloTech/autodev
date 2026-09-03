@@ -175,6 +175,33 @@ class HealthReportTest < ActiveSupport::TestCase # rubocop:disable Metrics/Class
     assert_equal 2, check[:meta][:consecutive]
   end
 
+  # N11 of the second review: a tool that alternates between failing and
+  # hanging produces `broken, unknown, broken, …`. Counting a run of the *same*
+  # status never reached two of anything, so the pager never fired — while
+  # #108 exists because two total outages went unseen. The run is of
+  # consecutive **unhealthy** probes; `unknown` on its own still reads `ok`
+  # (a probe that could not observe is not a fault, Autodev #62), it just no
+  # longer breaks the run.
+  test 'a probe that hung between two broken ones does not break the run' do
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500', age_seconds: 60)
+    usage_event(available: false, status: 'unknown', age_seconds: 30)
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :down, check[:status]
+  end
+
+  # And a gap wider than the probe's own TTL means probes are missing — the
+  # poller was down, the machine asleep — so the two verdicts either side of
+  # it are not consecutive (N2).
+  test 'two broken probes separated by a gap wider than the ttl are not a streak' do
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500', age_seconds: 4_000)
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :warn, check[:status], 'a gap in the probe history is not a run of polls'
+  end
+
   test 'a broken probe after a healthy one is not a streak' do
     usage_event(available: true, status: 'available', age_seconds: 30)
     usage_event(available: false, status: 'broken', diagnostic: 'docker 500')

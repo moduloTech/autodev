@@ -462,8 +462,9 @@ end
 #
 # It deliberately does **not** refuse the boot over a holder it cannot
 # identify: this call sits after `bootstrap` → `setup_database`, so the
-# booting process holds the database itself, and the production host's
-# container VM holds it too. Refusing there was a boot loop under
+# booting process holds the database itself — permanently, and enough on its
+# own — and a third-party process may hold it transiently too (the container
+# VM danger-claude runs in was measured doing so once). Refusing was a boot loop under
 # `KeepAlive: Crashed`. `AUTODEV_BOOT_GUARD_STRICT=1` restores the refusal
 # for an operator investigating by hand, and only then does `ConfigError`
 # propagate to `main`'s existing rescue.

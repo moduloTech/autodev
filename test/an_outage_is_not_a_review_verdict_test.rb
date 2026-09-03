@@ -132,35 +132,60 @@ class AnOutageIsNotAReviewVerdictTest < ActiveSupport::TestCase # rubocop:disabl
 
   # --- five in a row ---------------------------------------------------------
 
-  # #107's rule and the alpha-53 review's correction of it, in one assertion
-  # each: the review budget is never spent on an outage, **and** the row does
-  # not wait fourteen days to end under a reason that says the watch stopped
-  # moving. `ReviewOutageBound` stops it under the cause.
-  def test_five_consecutive_tool_unavailable_spend_no_budget_and_end_under_the_outage_reason
+  # #107's rule, and the second neutral review's correction of the first
+  # one's remedy. The budget is never spent on an outage, and the row keeps
+  # working: what bounds it is the **age** bound, not a per-cause counter.
+  #
+  # A counter was tried and removed. Keyed on the failure's own message it is
+  # inert — git says `Failed to connect … after 75002 ms` and the timing moves
+  # every attempt, which is Autodev #99's defect by construction. Keyed on a
+  # stable message it fires in ten minutes on a burst of GitLab 502s and asks
+  # the client whether their source branch still exists. Neither is a bound on
+  # an outage; `pipeline_watch_max_days` is, and its give-up sentence
+  # ("watching for N days without ever being able to conclude") is true.
+  def test_five_consecutive_tool_unavailable_spend_no_budget_and_keep_watching
     row = issue
     5.times { poll(row, outcome: :tool_unavailable) }
     row.reload
 
-    assert_equal [0, 'done'], [row.review_failure_count, row.status]
-    assert_equal 'review_tool_unavailable', row.attention_reason
+    assert_equal [0, 'checking_pipeline'], [row.review_failure_count, row.status]
+    refute row.needs_attention, 'an outage may not give the request up on its own count'
   end
 
-  def test_five_consecutive_clone_failed_spend_no_budget_and_end_under_the_outage_reason
+  def test_five_consecutive_clone_failed_spend_no_budget_and_keep_watching
     row = issue
     5.times { poll(row, outcome: :clone_failed) }
     row.reload
 
-    assert_equal [0, 'done'], [row.review_failure_count, row.status]
-    assert_equal 'review_clone_failed', row.attention_reason
-  end
-
-  def test_four_consecutive_outages_still_leave_the_row_watching
-    row = issue
-    4.times { poll(row, outcome: :tool_unavailable) }
-    row.reload
-
     assert_equal [0, 'checking_pipeline'], [row.review_failure_count, row.status]
     refute row.needs_attention
+  end
+
+  # And the age bound does end it — the replacement bound has to be real, or
+  # the paragraph above is an excuse rather than a design.
+  def test_the_age_bound_still_ends_a_row_stuck_in_an_outage
+    row = issue(since: 30.days.ago)
+
+    poll(row, outcome: :tool_unavailable)
+    row.reload
+
+    assert_equal 'done', row.status
+    assert_equal 'pipeline_watch_expired', row.attention_reason
+  end
+
+  # And it is not stood down by these outcomes — `resume_watch` restores the
+  # clock the poll started with (Autodev #74) instead of restamping it, so the
+  # bound keeps its schedule instead of being pushed a poll into the future
+  # for ever. Without that, the paragraph above would be the only bound and it
+  # would never arrive.
+  def test_an_outage_does_not_push_the_age_bound_forward
+    row = issue(since: 10.days.ago)
+    before = row.checking_pipeline_since
+
+    poll(row, outcome: :tool_unavailable)
+
+    assert_in_delta before.to_f, row.reload.checking_pipeline_since.to_f, 1.0,
+                    'the watch clock must not be restamped by an outage poll'
   end
 
   # The bound that remains must remain: `:unusable_output` is the one cause

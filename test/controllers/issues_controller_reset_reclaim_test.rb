@@ -137,6 +137,35 @@ class IssuesControllerResetReclaimTest < ActionDispatch::IntegrationTest
     assert issue.needs_attention
   end
 
+  # The narrowed rescue (second review, N8/G8): a bug in this repository must
+  # travel as itself rather than be shown to the operator as a refused reset.
+  # `RECLAIM_FAILURES` names the failures a reclaim can actually have; a
+  # `NoMethodError` is not one of them.
+  def test_a_programming_error_is_not_presented_as_a_refused_reset
+    issue = abandoned_issue
+    Autodev::ResetReclaim.stub(:perform, ->(*, **) { raise NoMethodError, "undefined method 'x'" }) do
+      post "/issues/#{issue.id}/reset"
+    end
+
+    refute_equal 302, response.status, 'a bug must not read as an ordinary refusal + redirect'
+    assert_nil flash[:alert], 'a bug must not be dressed up as "Réinitialisation refusée"'
+    assert_equal 'done', issue.reload.status
+  end
+
+  # And the message an operator does see is scrubbed: a GitLab error carries
+  # the PAT in its request URI.
+  def test_a_refusal_message_is_scrubbed_of_credentials
+    issue = abandoned_issue
+    boom = ApiUnavailableError.new(:issue, StandardError.new('https://oauth2:glpat-SECRETVALUE@gitlab.example failed'))
+
+    Autodev::ResetReclaim.stub(:perform, ->(*, **) { raise boom }) do
+      post "/issues/#{issue.id}/reset"
+    end
+
+    refute_includes flash[:alert].to_s, 'glpat-SECRETVALUE', 'a refusal must not print a token'
+    assert_equal 'done', issue.reload.status
+  end
+
   # The regression itself: replay 16030's next poll cycle against
   # `Autodev::ExternalState` (the same predicates `dispatch_unassignment`
   # uses) and confirm the row is not closed with a false "unassigned" comment.

@@ -16,8 +16,6 @@ en:
   activity_review_done: ":white_check_mark: Review complete"
   activity_review_failed: ":warning: the review failed (%{count} consecutive failure(s))"
   activity_review_failures_exhausted: ":warning: %{count} consecutive review failures → done"
-  activity_review_tool_unavailable: ":wrench: the review could not be produced %{count} times for the same cause (tool unavailable) → done, needs attention"
-  activity_review_clone_failed: ":wrench: the review could not be produced %{count} times for the same cause (clone failed) → done, needs attention"
   activity_pipeline_watch: ":hourglass_flowing_sand: Waiting for pipeline result..."
   activity_pipeline_checking: ":mag: Polling pipeline status since %{since}..."
   activity_pipeline_green: ":white_check_mark: Pipeline green"

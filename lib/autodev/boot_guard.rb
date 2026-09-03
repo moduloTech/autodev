@@ -42,10 +42,13 @@ module Autodev
   # It used to, and that made autodev unbootable. There is always a holder the
   # guard cannot identify: `run_boot_guard` runs after `bootstrap` →
   # `setup_database`, so **the booting process itself** holds the database,
-  # and on the production host the container VM in which danger-claude runs
-  # holds all three paths too. Refusing there is a total outage, repeated on
-  # every launchd restart — exactly the "boot loop … worse than the leak it
-  # replaces" this comment used to claim had been avoided.
+  # That one is permanent and sufficient on its own. Third parties come and
+  # go: the container VM danger-claude runs in was measured holding all three
+  # paths on 03/09 and none of them the next day, so it is a transient holder
+  # rather than a standing one — which is exactly why the answer cannot be a
+  # refusal. Refusing is a total outage, repeated on every launchd restart —
+  # the "boot loop … worse than the leak it replaces" this comment used to
+  # claim had been avoided.
   #
   # The asymmetry is the reason: a false refusal is a total outage, a false
   # pass is one ghost process that `Supervisor#run`'s `ensure` now prevents

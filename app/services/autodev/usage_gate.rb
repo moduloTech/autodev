@@ -80,17 +80,34 @@ module Autodev
         unknown_state
       end
 
-      # How many of the most recent probes in a row carry `status` — used by
-      # `HealthReport` to debounce the `broken` catch-all rather than page on
-      # one observation (alpha-53 review, G5). Counted over the probes still
-      # inside the TTL window plus a small look-back, because the question is
-      # "is this persisting" and a run that started before the window is still
-      # a run. Capped so a long outage does not walk the whole table.
+      # How many probes in a row, ending with the most recent one, found
+      # `danger-claude` **unhealthy** — what `HealthReport` debounces the
+      # `broken` catch-all on rather than paging on one observation.
+      #
+      # Two things this counts that the first version did not, both found by
+      # the second neutral review.
+      #
+      # It counts a **run of polls**, not a run of rows: a gap wider than the
+      # probe's own TTL means probes are missing (the poller was down, the
+      # machine was asleep), and two verdicts either side of such a gap are not
+      # consecutive. Without that, a `broken` from this morning plus one fresh
+      # probe read as a streak of two and paged immediately.
+      #
+      # And it counts "not healthy" rather than "the same status", because a
+      # tool that alternates between failing and hanging produces
+      # `broken, unknown, broken, …` and never reached two of anything — while
+      # #108 exists because two *total* outages went unseen. `unknown` still
+      # reads `ok` on the card on its own (a probe that could not observe is
+      # not a fault, Autodev #62); what it may no longer do is break a run.
       def consecutive(status, config: nil, now: Time.current)
-        _ = config
-        _ = now
-        wanted = status.to_s
-        recent_events.take_while { |event| event.payload['status'].to_s == wanted }.size
+        _ = status
+        window = ttl(config)
+        cutoff = now
+        recent_events.take_while do |event|
+          in_run = unhealthy?(event) && (cutoff - event.created_at) <= window
+          cutoff = event.created_at if in_run
+          in_run
+        end.size
       rescue StandardError
         1 # unreadable history reads as "the one we just saw", never as a streak
       end
@@ -103,6 +120,8 @@ module Autodev
       def recent_events
         ActivityEvent.where(kind: KIND).order(created_at: :desc, id: :desc).limit(STREAK_LIMIT)
       end
+
+      def unhealthy?(event) = event.payload['available'] == false
 
       def state_from(event)
         value = event.payload['available']

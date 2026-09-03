@@ -4,6 +4,7 @@ require_relative 'test_helper'
 require 'autodev/boot_guard'
 require 'tmpdir'
 require 'sqlite3'
+require 'open3'
 
 # Autodev #92 design §2: `SIGKILL` leaves nothing to run, so no in-process
 # `ensure` can reach a child that was already orphaned before this boot
@@ -23,8 +24,8 @@ require 'sqlite3'
 #     leader is gone;
 #   * it refused the boot on any holder it did not recognise, and there is
 #     always one — the booting process itself (`setup_database` opens the
-#     database before the guard runs) and, on the production host, the
-#     container VM. A false refusal is a total outage under
+#     database before the guard runs); third parties such as the container VM
+#     hold it transiently on top. A false refusal is a total outage under
 #     `KeepAlive: Crashed`; a false pass is a leak that `Supervisor#run`'s
 #     `ensure` now closes going forward. So an unidentified holder warns and
 #     the boot proceeds, and refusing is opt-in (`AUTODEV_BOOT_GUARD_STRICT`).
@@ -104,9 +105,9 @@ class BootGuardTest < Minitest::Test
   # --- what gets left alone -------------------------------------------------
 
   def test_an_unrecognized_process_holding_the_database_warns_and_lets_the_boot_proceed
-    # The production host has one permanently: the container VM holds all
-    # three paths. Refusing here is the boot loop the guard was supposed to
-    # avoid.
+    # A third-party holder, measured once on the production host (the
+    # container VM danger-claude runs in). Refusing here is the boot loop the
+    # guard was supposed to avoid.
     holder = build_holder(pid: 777, command: '/System/…/com.apple.Virtualization.VirtualMachine')
     guard = build_guard(holders: [holder])
 
@@ -178,10 +179,19 @@ class BootGuardTest < Minitest::Test
     # the booting process holds the database itself. `lsof` lists it, `ps`
     # answers `ruby …/bin/autodev`, which matches no pattern — under the old
     # code that alone refused every boot.
+    #
+    # The first version of this test closed its own handle before looking, so
+    # the calling process held nothing and it passed with the exclusion
+    # removed (second neutral review, N7). It now holds the database open for
+    # the duration, which is the state a real boot is in, and is red without
+    # the `reject { pid == Process.pid }`.
     with_held_database do |db_path, _child_pid|
-      finder_pids = real_finder_pids(db_path)
-
-      refute_includes finder_pids, Process.pid, 'the finder must exclude the calling process'
+      holding_it_ourselves(db_path) do
+        assert_includes lsof_pids_for(db_path), Process.pid,
+                        'precondition: this process must really hold the database'
+        refute_includes real_finder_pids(db_path), Process.pid,
+                        'the finder must exclude the calling process'
+      end
     end
   end
 
@@ -237,6 +247,24 @@ class BootGuardTest < Minitest::Test
 
   def real_finder_pids(db_path)
     real_finder(db_path).map(&:pid)
+  end
+
+  # An open handle in *this* process, which is what a real boot holds by the
+  # time the guard runs.
+  def holding_it_ourselves(db_path)
+    own = SQLite3::Database.new(db_path)
+    own.execute('INSERT INTO t VALUES (3)')
+    yield
+  ensure
+    own&.close
+  end
+
+  # Raw `lsof`, deliberately not the code under test: the precondition of the
+  # test above must not be established by the method it is testing.
+  def lsof_pids_for(db_path)
+    paths = [db_path, "#{db_path}-wal", "#{db_path}-shm"]
+    out, = Open3.capture2('lsof', '-t', *paths, err: File::NULL)
+    out.split("\n").filter_map { |line| Integer(line.strip, exception: false) }
   end
 
   # Spawns a child that opens `db_path` and keeps it open until we kill it,

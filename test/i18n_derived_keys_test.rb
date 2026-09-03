@@ -216,11 +216,7 @@ module KeySites # rubocop:disable Metrics/ModuleLength
     'app/services/autodev/external_state.rb Locales.t' => "`notify_stop`'s key",
     'app/helpers/web/i18n_helpers.rb Locales.t' => "`t_web`'s delegation — the `web_` literals",
     'lib/autodev/numeric_settings.rb Locales.t' => '`MESSAGE_KEYS`, two literal `cli_` symbols',
-    'app/services/autodev/ticket_reclaim.rb Locales.t' => "`reclaim!`'s `message_key:` argument",
-    # `OUTAGE_REASONS[outcome]`, enumerated as its own family by
-    # `attention_reasons` below (alpha-53 review, G3).
-    'lib/autodev/review_outage_bound.rb abandon_issue' => 'the review-outage reason ' \
-                                                          '(`ReviewOutageBound::OUTAGE_REASONS`)'
+    'app/services/autodev/ticket_reclaim.rb Locales.t' => "`reclaim!`'s `message_key:` argument"
   }.freeze
 
   LITERAL_SYMBOL = /\A:([a-z_]\w*)\z/
@@ -510,16 +506,7 @@ class ScannedI18nKeysTest < Minitest::Test
     KeySites.vocabularies[:attention_reason].merge(
       KeySites.vocabularies[:stagnation_type]
               .transform_keys { |type| "stagnation_#{type}" }
-    ).merge(review_outage_reasons)
-  end
-
-  # `ReviewOutageBound` reaches `abandon_issue` with a reason looked up in a
-  # table rather than written at the call site, so the scan cannot see it and
-  # the constant is the vocabulary (alpha-53 review, G3).
-  def review_outage_reasons
-    ReviewOutageBound::OUTAGE_REASONS.values.to_h do |reason|
-      [reason.to_s, 'ReviewOutageBound::OUTAGE_REASONS']
-    end
+    )
   end
 
   def expected_attention_keys(reasons)

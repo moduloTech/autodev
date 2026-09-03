@@ -33,8 +33,22 @@ class GitlabRequestCounter < SimpleDelegator
     end
   end
 
+  # The gem's own configuration accessors (`endpoint`, `private_token`, …)
+  # issue no request, and `PaginatedResponse#client_relative_path` reads
+  # `@client.endpoint` on **every** page turn — so once the proxy owns the
+  # response (see `own_pages`), counting every message turned the fix for
+  # under-counting into over-counting: two stats per page for one HTTP
+  # request, plus a bogus `endpoint` row in the per-endpoint breakdown
+  # (second neutral review, N3). Derived from the gem rather than listed, so
+  # a new option cannot reopen it.
+  NON_REQUEST_METHODS = (
+    ::Gitlab::Configuration::VALID_OPTIONS_KEYS.flat_map { |key| [key.to_s, "#{key}="] } +
+    %w[reset options]
+  ).to_set.freeze
+
   def method_missing(name, ...)
     return super unless __getobj__.respond_to?(name)
+    return __getobj__.public_send(name, ...) if NON_REQUEST_METHODS.include?(name.to_s)
 
     kind = self.class.classify(name)
     ::GitlabRequestStat.record!(kind: kind, endpoint: name.to_s)

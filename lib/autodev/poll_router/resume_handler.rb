@@ -182,7 +182,18 @@ class PollRouter
       log "Issue ##{issue.issue_iid}: infrastructure recovered, but somebody has worked on this " \
           'ticket since autodev gave it up — leaving it with them, not re-arming'
       false
-    rescue StandardError => e
+    # Named rather than `StandardError` (second review, N9): the argument for
+    # swallowing here is about the *direction* of the answer — declining is
+    # safe — and it does not extend to a bug in this repository, which would
+    # switch the whole recheck pass off while logging it as an unreadable
+    # ticket. Same narrowing as `IssuesController#reclaim_before_reset`.
+    #
+    # The classes are spelled here rather than behind a constant on purpose:
+    # `test/api_failure_is_not_a_verdict_test.rb` recognises a swallow by the
+    # class names written on the `rescue` line, so a constant would hide this
+    # clause from the very guard that is supposed to hold it declared — the
+    # "escaped the scan" family Autodev #73 closed three of.
+    rescue *GitlabHelpers::TRANSPORT_ERRORS, ApiUnavailableError => e
       log_error "Issue ##{issue.issue_iid}: could not read whether a human has taken this ticket " \
                 "back (#{e.class}: #{e.message}) — not re-arming this cycle"
       false

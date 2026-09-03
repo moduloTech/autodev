@@ -61,4 +61,38 @@ class ErrorsTabStrandedRowTest < ActiveSupport::TestCase
 
     refute_includes html, 'cause-status'
   end
+
+  # The retry time is the only absolute time on the card — everything else
+  # goes through `relative_time` — so a UTC rendering had nothing on screen to
+  # be compared against and read two hours early in Paris (second neutral
+  # review, N8 / first review G6). `activity_time_zone` is the convention this
+  # application already has for exactly that.
+  def test_the_retry_time_is_rendered_in_the_configured_timezone
+    at = Time.utc(2026, 9, 3, 12, 34)
+    issue = create_issue(status: 'error', retry_count: 0, next_retry_at: at)
+
+    with_web_timezone('Europe/Paris') do
+      assert_includes render_for(issue), '03/09 14:34', 'the operator reads their own working day'
+    end
+  end
+
+  def test_the_retry_time_is_utc_when_no_timezone_is_configured
+    at = Time.utc(2026, 9, 3, 12, 34)
+    issue = create_issue(status: 'error', retry_count: 0, next_retry_at: at)
+
+    with_web_timezone(nil) do
+      assert_includes render_for(issue), '03/09 12:34'
+    end
+  end
+
+  private
+
+  def with_web_timezone(name)
+    previous = Web.config
+    web = (previous['web'] || {}).merge('timezone' => name).compact
+    Web.config = previous.merge('web' => web)
+    yield
+  ensure
+    Web.config = previous
+  end
 end

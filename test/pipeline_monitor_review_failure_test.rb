@@ -22,15 +22,18 @@ require 'autodev/pipeline_monitor'
 # credential revoked for four months (Autodev #80) while this counter was the
 # only thing watching and never said so.
 #
-# The alpha-53 neutral review (G3) then put a bound back, because #107 had
-# left `pipeline_watch_max_days` — fourteen days — as the only thing ending a
-# row whose review tool cannot run, under a reason that says the watch stopped
-# moving. Two outcomes now, not one: an **absent binary** is a configuration
-# fact and gives up at once (`:tool_missing`), and a tool that **could not
-# run** is counted by `ReviewOutageBound` and gives up after
-# `stagnation_threshold` occurrences of the same cause. Neither spends the
-# review budget, which is #107's rule, and both end under a reason that is
-# true.
+# The alpha-53 reviews then split one outcome in two. An **absent binary** is
+# a configuration fact, true on every poll until somebody installs it, so it
+# gives up at once (`:tool_missing`) instead of waiting fourteen days to end
+# under a reason about the watch. A tool that **could not run** keeps
+# working and is bounded by the age bound, `pipeline_watch_max_days`, whose
+# give-up sentence is true of it.
+#
+# A per-cause counter was tried in between and removed: keyed on the failure's
+# message it is inert (git's `after 75002 ms` moves every attempt — Autodev
+# #99's defect), and keyed on a stable message it gives a healthy request up
+# after a ten-minute burst of GitLab 502s. Neither spends the review budget,
+# which is #107's rule and is what these tests pin.
 #
 # A successful run still resets the counter and increments `review_count`,
 # unchanged.
@@ -63,51 +66,27 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     assert_equal 'checking_pipeline', @issue.status
   end
 
-  # The regression this file exists to pin, restated twice. Five consecutive
-  # mr-review failures still spend **nothing** of the review budget (#107's
-  # rule), and they do now conclude — under `review_tool_unavailable`, which
-  # says what happened, rather than after fourteen days under
-  # `pipeline_watch_expired`, which would not (alpha-53 review, G3).
-  def test_five_consecutive_failures_spend_no_budget_and_end_under_the_outage_reason # rubocop:disable Minitest/MultipleAssertions
+  # The regression this file exists to pin: five consecutive mr-review
+  # failures spend **nothing** of the review budget and conclude nothing on
+  # their own count. What ends such a row is the age bound, exercised in
+  # `an_outage_is_not_a_review_verdict_test.rb`.
+  def test_five_consecutive_failures_spend_no_budget_and_conclude_nothing
     5.times do
       stub_mr_review(outcome: :tool_unavailable)
       @monitor.send(:launch_review, @issue)
     end
     @issue.reload
 
-    assert_equal 0, @issue.review_failure_count, "#107's rule: an outage never spends the review budget"
-    assert_equal 'done', @issue.status
-    assert @issue.needs_attention
-    assert_equal 'review_tool_unavailable', @issue.attention_reason
-  end
-
-  # Below the threshold the row keeps working, which is what makes the bound a
-  # bound and not a hair trigger.
-  def test_four_consecutive_failures_leave_the_row_watching
-    4.times do
-      stub_mr_review(outcome: :tool_unavailable)
-      @monitor.send(:launch_review, @issue)
-    end
-    @issue.reload
-
-    assert_equal 'checking_pipeline', @issue.status
+    assert_equal [0, 'checking_pipeline'], [@issue.review_failure_count, @issue.status]
     refute @issue.needs_attention
-    assert_equal 0, @issue.review_failure_count
-  end
-
-  # A cause that changes is a different fact and restarts the count — the rule
-  # `ConsecutiveOccurrences` applies everywhere else it is used.
-  def test_a_different_cause_restarts_the_count
-    4.times { poll_with_outage('docker 500') }
-    poll_with_outage('a different failure entirely')
-
-    assert_equal 'checking_pipeline', @issue.reload.status, 'a new cause must not inherit the old count'
   end
 
   # `mr-review` absent is deterministic and known on the first poll, so it is
-  # a give-up rather than a countdown (alpha-53 review, G3a).
+  # a give-up rather than a wait — and the outcome is produced by the real
+  # `command_exists?`, not stubbed past, because the whole point is that this
+  # branch is reached from a PATH lookup (second review, N8).
   def test_an_absent_binary_gives_up_at_once_under_its_own_reason
-    stub_mr_review(outcome: :tool_missing)
+    @monitor.define_singleton_method(:command_exists?) { |_| false }
 
     @monitor.send(:launch_review, @issue)
     @issue.reload
@@ -115,6 +94,20 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
     assert_equal 'done', @issue.status
     assert_equal 'review_tool_missing', @issue.attention_reason
     assert_equal 0, @issue.review_failure_count
+  end
+
+  # The other side of the same lookup: a binary that IS on PATH must not take
+  # the give-up branch.
+  def test_a_present_binary_does_not_give_up
+    @monitor.define_singleton_method(:command_exists?) { |_| true }
+    @monitor.define_singleton_method(:run_mr_review_command) { |_| true }
+    @monitor.define_singleton_method(:sleep) { |_| nil }
+
+    @monitor.send(:launch_review, @issue)
+    @issue.reload
+
+    assert_equal 'checking_pipeline', @issue.status
+    refute @issue.needs_attention
   end
 
   def test_successful_review_resets_failure_counter
@@ -163,16 +156,6 @@ class PipelineMonitorReviewFailureTest < Minitest::Test
 
   def stub_mr_review(outcome:)
     @monitor.define_singleton_method(:execute_mr_review) { |_| outcome }
-  end
-
-  # One poll whose review tool failed with `diagnostic` — the value
-  # `ReviewOutageBound` counts as "the same cause".
-  def poll_with_outage(diagnostic)
-    @monitor.define_singleton_method(:execute_mr_review) do |_|
-      @review_outage_diagnostic = diagnostic
-      :tool_unavailable
-    end
-    @monitor.send(:launch_review, @issue)
   end
 
   # Swallows every GitLab API call that the finalize / giveup paths fan out

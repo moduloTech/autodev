@@ -16,8 +16,6 @@ fr:
   activity_review_done: ":white_check_mark: Review terminee"
   activity_review_failed: ":warning: la review a echoue (%{count} echec(s) consecutif(s))"
   activity_review_failures_exhausted: ":warning: %{count} echecs de review consecutifs → termine"
-  activity_review_tool_unavailable: ":wrench: la revue n'a pas pu etre produite %{count} fois pour la meme cause (outil indisponible) → termine, intervention requise"
-  activity_review_clone_failed: ":wrench: la revue n'a pas pu etre produite %{count} fois pour la meme cause (echec du clonage) → termine, intervention requise"
   activity_pipeline_watch: ":hourglass_flowing_sand: En attente du resultat du pipeline..."
   activity_pipeline_checking: ":mag: Interrogation du statut du pipeline depuis %{since}..."
   activity_pipeline_green: ":white_check_mark: Pipeline vert"

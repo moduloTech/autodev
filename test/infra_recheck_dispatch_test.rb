@@ -379,6 +379,34 @@ class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassL
     assert_equal [AUTODEV_ID], client.assignee_ids, 'only activity *since* the give-up counts'
   end
 
+  # The branch the code, the CHANGELOG and CLAUDE.md all assert four times
+  # over and that nothing exercised (second review, N9): a read GitLab could
+  # not answer is never permission to take somebody's ticket. Reading it as
+  # permission is the Autodev #62 defect, and this pass is the one place where
+  # the substitute is a *declining* answer, so the direction has to be pinned.
+  # Same fixture shape as `ReviewArrearsSweepTest`: the gem's error reads
+  # `code`, `parsed_response` and the request's `base_uri`/`path`.
+  FakeRequest = Struct.new(:base_uri, :path)
+  FakeResponse = Struct.new(:parsed_response, :code, :request)
+
+  class UnreadableClient < StubClient
+    def issue(_project, _iid)
+      raise Gitlab::Error::ResponseError,
+            FakeResponse.new('boom', 500, FakeRequest.new('https://gitlab.example', '/api/v4/x'))
+    end
+  end
+
+  def test_an_unreadable_ticket_declines_the_re_arm
+    issue = infra_stagnation_issue(finished_at: 2.hours.ago)
+    client = UnreadableClient.new
+
+    resumed(issue, client)
+
+    assert_equal [AUTHOR_ID], client.assignee_ids, 'an unreadable ticket must not be taken'
+    refute_equal 'checking_pipeline', issue.reload.status
+    assert issue.needs_attention, 'the row keeps its give-up state for the next cycle'
+  end
+
   # A read GitLab accepted and then silently ignored (Community edition: one
   # assignee per issue) must not be read as a landed reclaim.
   def test_resume_recovered_infra_leaves_the_row_untransitioned_when_the_assignment_does_not_land

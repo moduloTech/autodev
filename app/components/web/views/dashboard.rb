@@ -326,6 +326,12 @@ module Web
       # is the exact defect this ticket exists to end: autodev asserting
       # something its own state contradicts. `quota_exhausted`, and a
       # pre-upgrade row carrying no `status` at all, keep the verbatim wording.
+      # Deliberately NOT debounced, unlike `/healthz`'s `danger_claude` card,
+      # which warns on a first `broken` and only pages on the second (second
+      # neutral review, N12). A banner wakes nobody, and telling the operator
+      # looking at the dashboard right now is the point; the debounce exists for
+      # the external pager. The two surfaces therefore disagree for one cycle on
+      # an isolated fault, and that is the intended reading of each.
       DANGER_CLAUDE_FAULT_STATUSES = %i[auth_refused binary_missing broken].freeze
       private_constant :DANGER_CLAUDE_FAULT_STATUSES
 
