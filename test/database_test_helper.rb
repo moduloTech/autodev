@@ -43,7 +43,7 @@ module DatabaseTestHelper
   # tests that read global issue state (e.g. HealthReport's issues_error check),
   # which otherwise flaked depending on Minitest's run order. See task #25.
   def wipe_business_tables
-    %w[audit_logs activity_events issues].each do |table|
+    %w[audit_logs activity_events issues gitlab_request_stats gitlab_transport_failures].each do |table|
       ActiveRecord::Base.connection.execute("DELETE FROM #{table}")
     end
   rescue ActiveRecord::StatementInvalid, ActiveRecord::ConnectionNotEstablished
