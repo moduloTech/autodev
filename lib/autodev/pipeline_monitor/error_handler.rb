@@ -7,20 +7,24 @@ class PipelineMonitor
 
     def handle_rate_limit(issue, error)
       wait = error.wait_seconds
+      retry_at = wait.to_i.seconds.from_now
       log_error "Issue ##{issue.issue_iid}: rate limit hit, parking for #{wait}s"
-      safe_mark_failed!(issue)
+      safe_mark_failed!(issue, next_retry_at: retry_at)
       Issue.where(id: issue.id).update_all(
-        error_message: error.message, dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
-        next_retry_at: wait.to_i.seconds.from_now
+        error_message: error.message, dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
       )
       log_activity(issue, :rate_limit, wait: wait)
     end
 
     # Claude credentials are dead — see IssueProcessor::ErrorHandler#handle_auth_failure.
-    # No retry is scheduled and no per-ticket comment is posted.
+    # No retry is scheduled and no per-ticket comment is posted. `next_retry_at: nil`
+    # is explicit (Autodev #103): retrying against dead credentials cannot produce
+    # anything, and a stamp left over from a previous life in `error` must not
+    # survive into this one — that is what made 15888 come back on its own, by
+    # luck, off a residue from May.
     def handle_auth_failure(issue, error)
       log_error "Issue ##{issue.issue_iid}: Claude authentication failed, manual intervention required"
-      safe_mark_failed!(issue)
+      safe_mark_failed!(issue, next_retry_at: nil)
       Issue.where(id: issue.id).update_all(
         error_message: "#{error.class}: #{error.message}",
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
@@ -46,7 +50,11 @@ class PipelineMonitor
       bt = error.backtrace&.first(10)&.join("\n  ")
       log_error "Pipeline evaluation/fix failed: #{error.class}: #{error.message}"
       log_error "  #{bt}" if bt
-      safe_mark_failed!(issue)
+      # No retry scheduled — the asymmetry with IssueProcessor's backoff is a
+      # policy question left open (see the design doc's Out of scope), but the
+      # row must not be stranded: DormantAudit's error arm recovers it (Autodev
+      # #103).
+      safe_mark_failed!(issue, next_retry_at: nil)
       persist_and_notify_failure(issue, error, bt)
     end
 

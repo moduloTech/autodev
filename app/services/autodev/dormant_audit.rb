@@ -106,10 +106,31 @@ module Autodev
           .without_activity_since(@now - pending_window)
     end
 
+    # The complement of `PollDispatcher.retryable?` (Autodev #103), refined to
+    # "and never will": a row is dormant only when nothing is ever going to
+    # make `retryable?` true for it again — no schedule at all, or a spent
+    # budget. `retryable?` alone cannot express that (it only speaks to
+    # *now*): a row with a future stamp still inside budget is not retryable
+    # this instant either, but time alone fixes it, so it is excluded here —
+    # it is waiting, not dormant.
+    #
+    # Before this the arm asked only the budget half of the question
+    # (`retry_count > max_retries`), which is why a row that errored on its
+    # first attempt — no stamp, budget untouched — was in neither population:
+    # `fetch_retryable` requires a non-NULL stamp, this arm required a spent
+    # budget, and a request stopped on a 401 satisfies neither.
+    #
+    # The age guard is `pending_arm`'s, for the same reason: `mark_failed!`
+    # via `safe_mark_failed!` writes `error` (and, since #103, decides the
+    # stamp) in the same instant a row enters this state, so without it a row
+    # would be dormant-eligible inside the very cycle that parked it.
     def error_arm
       base.where(status: 'error')
-          .where('retry_count > ?', ::Config.max_retries(@project_config, @config))
+          .where('next_retry_at IS NULL OR retry_count > ?', max_retries)
+          .without_activity_since(@now - pending_window)
     end
+
+    def max_retries = ::Config.max_retries(@project_config, @config)
 
     def active_arm
       base.where(status: ::Issue::STALLED_STATES)

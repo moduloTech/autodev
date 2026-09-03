@@ -250,6 +250,8 @@ fr:
   web_errors_action_close: Clôturer
   web_errors_requester: 'Demandé par %{name}'
   web_errors_contact: Contactez un développeur du projet pour finaliser cette livraison.
+  web_errors_status_stranded: Aucune reprise automatique n'est prévue — cette demande attend une intervention.
+  web_errors_status_retry_at: 'Reprise automatique prévue le %{time}'
   web_project_title: Projet — %{path}
   web_project_config: Configuration <code>app:</code>
   web_project_no_config: Projet non listé dans la config courante.
