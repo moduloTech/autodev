@@ -61,8 +61,61 @@ module Web
         def render_cause_panel_body(row)
           div(class: 'cause-title') { t_web(cause_key(row)) }
           div(class: 'cause-body') { t_web(explain_key(row)) }
+          render_retry_status(row)
           render_attention_detail(row)
           render_attention_contact(row)
+        end
+
+        # The distinction the errors tab did not use to make (Autodev #103): a
+        # row in `error` is rendered identically whether a pass will pick it up
+        # in four minutes or never at all. Reads the same rule
+        # `DormantAudit#error_arm` audits by — nothing new is queried, `status`,
+        # `next_retry_at` and `retry_count` are already on the row the tab
+        # renders, and the per-project budget is a handful of memoized `Project`
+        # lookups, not a new GitLab call.
+        def render_retry_status(row)
+          return unless row[:status].to_s == 'error'
+
+          if stranded_error?(row)
+            div(class: 'cause-status cause-status--stranded') { t_web(:web_errors_status_stranded) }
+          else
+            div(class: 'cause-status') do
+              t_web(:web_errors_status_retry_at, time: format_retry_time(row[:next_retry_at]))
+            end
+          end
+        end
+
+        # "No pass will ever pick this row up on its own" — the same rule as
+        # `DormantAudit#error_arm`: no schedule at all, or a spent budget. A
+        # future stamp still inside budget comes back on its own — it renders
+        # as waiting, not stranded.
+        def stranded_error?(row)
+          row[:next_retry_at].nil? || row[:retry_count].to_i > max_retries_for(row)
+        end
+
+        def max_retries_for(row)
+          @max_retries_cache ||= {}
+          @max_retries_cache[row[:project_path]] ||=
+            ::Config.max_retries(project_config_for(row[:project_path]), app_config)
+        end
+
+        def project_config_for(project_path)
+          @project_config_cache ||= {}
+          @project_config_cache[project_path] ||=
+            ::Project.find_by(gitlab_path: project_path)&.to_project_config || {}
+        end
+
+        # The only absolute time on the card — everything else goes through
+        # `relative_time` — so a UTC rendering had nothing on screen to be
+        # compared against and read two hours early in Paris (alpha-53 review,
+        # G6). `activity_time_zone` is the convention this application already
+        # has for exactly this: it reads `web.timezone` so an operator can
+        # align a display to their working day without changing how
+        # ActiveRecord stores the column.
+        def format_retry_time(timestamp)
+          Time.parse(timestamp.to_s).in_time_zone(activity_time_zone).strftime('%d/%m %H:%M')
+        rescue ArgumentError, TypeError
+          timestamp.to_s
         end
 
         # The concrete infra blocker (failing job + reason, e.g. "deploy_review

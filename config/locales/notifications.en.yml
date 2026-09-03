@@ -24,7 +24,7 @@ en:
   gitlab_refused_request: ":warning: %{tag}: GitLab keeps refusing the `%{what}` call I have to make on %{mr_url} — HTTP %{status}, %{count} times with the same answer. The request is well formed on my side and the answer does not change on its own, so I am no longer following this request. I am not diagnosing the cause for you, I am reporting what GitLab replies: %{answer}. Fix what GitLab is objecting to, then put the starting label back and reassign me."
   abandon_reassigned: ":arrow_right: I have reassigned the ticket to you: autodev is no longer tracking it. The MR is yours to take over."
   unassigned_stop: |-
-    :stop_sign: %{tag}: I was unassigned from this ticket, I'm stopping the work in progress.
+    :stop_sign: %{tag}: I am no longer assigned to this ticket, I'm stopping the work in progress.
 
     :arrow_right: **Want me to pick it up again?** Put the _%{label_todo}_ label back and reassign me.
   handover_doing_removed: |-
@@ -58,3 +58,18 @@ en:
     Our GitLab holds only one assignee per ticket, so I cannot add myself next to you: I'm taking the ticket. **@%{user} I will hand it back to you** as soon as I'm done, or if I stop.
 
     :arrow_right: **Would you rather keep it?** Assign it back to yourself and I'll stop at the next cycle.
+  reclaim_infra_recovered: |-
+    :arrows_counterclockwise: %{tag}: I'm taking this ticket back.
+
+    Its CI infrastructure has recovered — the request had been handed back to a human when it was given up on pipeline stagnation, and I'm resuming the interrupted work.
+
+    Our GitLab holds only one assignee per ticket, so I cannot add myself next to you: I'm taking the ticket. **@%{user} I will hand it back to you** as soon as I'm done, or if I stop.
+
+    :arrow_right: **Would you rather keep it?** Assign it back to yourself and I'll stop at the next cycle.
+  reclaim_operator_reset: |-
+    :arrows_counterclockwise: %{tag}: I'm taking this ticket back at an operator's request, via the dashboard's Reset button.
+
+    Our GitLab holds only one assignee per ticket, so I cannot add myself next to you: I'm taking the ticket. **@%{user} I will hand it back to you** as soon as I'm done, or if I stop.
+
+    :arrow_right: **Would you rather keep it?** Assign it back to yourself and I'll stop at the next cycle.
+  review_tool_missing: ":warning: %{tag}: I cannot review %{mr_url}: the `mr-review` binary is not installed on my machine and this project declares no `review_skill`. This is not a transient outage — nothing changes on the next cycle — so I am no longer following this request rather than waiting on it. Install `mr-review` or declare a `review_skill` for this project, then put the starting label back and reassign me."

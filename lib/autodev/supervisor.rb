@@ -32,10 +32,19 @@ module Autodev
       @sleeper = sleeper || method(:sleep)
     end
 
+    # Autodev #92: any abrupt end of this method — an exception out of
+    # spawn_all after the first child, an exception out of wait_loop, a
+    # signal the trap does not cover — must still take every already-spawned
+    # child with it. `shutdown_children` is idempotent (send_term skips a
+    # child that is not alive?, force_kill_stragglers rescues ESRCH/ECHILD),
+    # so running it here on the normal path too — instead of as `run`'s last
+    # statement — is harmless, and it is the only shape that also covers a
+    # partial spawn_all: it tears down exactly the children that exist.
     def run
       trap_signals
       spawn_all
       wait_loop
+    ensure
       shutdown_children
     end
 

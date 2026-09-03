@@ -534,7 +534,7 @@ module Autodev
     # labels it knows and poses none, so there is no label whose presence is the
     # fact). Neither describes the project this sweep's population comes from.
     def repose_working_label(row)
-      row.router.repose_working_label(row.issue, @client)
+      row.router.repose_working_label(row.issue, @client, clear_scope: true)
       doing = verifiable_working_label(row)
       return if doing.nil?
 
@@ -640,13 +640,15 @@ module Autodev
     # filter only took rows already assigned to autodev that gap cost nothing;
     # widening to human-held rows is what makes it matter, so it is closed in the
     # same ticket that opens the filter.
+    # The body moved to `Autodev::UntouchedSinceGiveup` when the alpha-53
+    # neutral review found `PollRouter#resume_recovered_infra` re-arming — and
+    # taking the ticket — without asking it. Two callers re-deriving one
+    # protection is how it drifts, so there is one implementation and the
+    # sweep reads it like everybody else.
     def untouched_since_giveup?(issue, gl_issue)
-      return false if ::GitlabHelpers.human_comment_since?(@client, issue.project_path,
-                                                           issue.issue_iid, issue.finished_at)
-      return false if ::GitlabHelpers.human_mr_comment_since?(@client, issue.project_path,
-                                                              issue.mr_iid, issue.finished_at)
-
-      !handover(issue).moved_since?(gl_issue, issue.issue_iid, issue.finished_at)
+      UntouchedSinceGiveup.new(client: @client, logger: @logger,
+                               project_config: ->(path) { project_config(path) })
+                          .call(issue, gl_issue)
     end
 
     def handed_back_to_author?(issue, gl_issue)

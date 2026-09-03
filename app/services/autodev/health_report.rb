@@ -14,14 +14,48 @@ module Autodev
   #     checks: { <name> => { status:, detail:, meta: {} }, ... } }
   # where the top-level status is the worst severity across checks.
   class HealthReport # rubocop:disable Metrics/ClassLength
-    CHECKS = %i[poller workers queue claude_usage issues_error mr_review review_skill
-                mr_review_token stuck_issues database migrations].freeze
+    CHECKS = %i[poller workers queue claude_usage danger_claude issues_error
+                mr_review review_skill mr_review_token stuck_issues database
+                migrations gitlab_requests].freeze
+
+    # `danger_claude`'s severity mapping (Autodev #108): a quota outage is not
+    # a fault of the tool — `claude_usage` already carries that alarm — but the
+    # other three recognised failure causes plus the unenumerated `broken`
+    # bucket mean the tool cannot run at all, and everything the product does
+    # (implementation, review, discussion fixing) depends on it.
+    DANGER_CLAUDE_DOWN_STATUSES = %w[auth_refused binary_missing broken].freeze
+    # `auth_refused` and `binary_missing` are deterministic: the credential is
+    # refused or the binary is absent, and one observation is the whole story,
+    # so they page at once.
+    #
+    # `broken` is not — it is the catch-all for any non-zero exit whose output
+    # matches neither signature, so a single container hiccup or an MCP error
+    # would take `/healthz` to 503 and wake somebody (alpha-53 review, G5).
+    # This repository's own precedent is against that: `mr_review`'s
+    # thresholds were calibrated on production data (#60) precisely so an
+    # isolated incident does not page. A `broken` verdict therefore warns
+    # first and pages on the second consecutive one — the nine-hour Docker
+    # outage of 02-03/09 produced 262 in a row, so nothing real is missed by
+    # waiting for two.
+    DANGER_CLAUDE_DEBOUNCED_STATUSES = %w[broken].freeze
+    DANGER_CLAUDE_DEBOUNCE = 2
+    DANGER_CLAUDE_FAULT_DETAIL = {
+      'auth_refused' => 'danger-claude can no longer authenticate against Claude (API 401)',
+      'binary_missing' => 'the danger-claude binary was not found on PATH',
+      'broken' => 'danger-claude failed and the cause is unrecognised'
+    }.freeze
     SEVERITY = { ok: 0, warn: 1, down: 2 }.freeze
 
     DEFAULT_POLL_INTERVAL = 300
     DEFAULT_POLL_STALE_FACTOR = 3
     POLL_STALE_FLOOR = 900 # never flag stale before 15 min, even on a tight interval
     BACKLOG_WARN = 100
+
+    # Windows for the gitlab_requests check (Autodev #96) — fixed, not
+    # configurable: this is an observability figure, not a threshold anybody
+    # tunes to change behaviour.
+    GITLAB_REQUESTS_HOUR_WINDOW = 3600
+    GITLAB_REQUESTS_DAY_WINDOW = 86_400
 
     # "the review is broken for everybody" detection (Autodev #60, item 1) — the
     # alert missing behind Autodev #49. `review_failure_count` is per ticket and
@@ -183,14 +217,80 @@ module Autodev
     # very state the dispatcher and PipelineMonitor act on (Autodev #46). It
     # fails open on a missing or stale verdict; a poller that stopped ticking is
     # the `poller` check's job to report, not this one's.
+    #
+    # Narrowed to the quota alone since Autodev #108: `quota_exhausted` is the
+    # only status this card raises on. The other three fault causes — a dead
+    # credential, an absent binary, an unrecognised failure — are not a
+    # property of the quota, and `danger_claude` below is where they surface.
     def check_claude_usage
       state = UsageGate.state(config: @config, now: @now)
       return build(:ok, 'no usage probe on file') if state[:checked_at].nil?
 
       meta = { checked_at: iso(state[:checked_at]) }
-      return build(:warn, 'Claude usage exhausted at last probe', meta) unless state[:available]
+      return build(:warn, 'Claude usage exhausted at last probe', meta) if state[:status] == :quota_exhausted
 
       build(:ok, 'Claude usage available at last probe', meta)
+    end
+
+    # Does danger-claude — the hard dependency behind implementation, review
+    # and discussion fixing — actually run? (Autodev #108.) Two total outages
+    # in two days went unseen: a 401 (dead credential) and a nine-hour Docker
+    # engine outage (API-version mismatch, every call failing in
+    # `ensure_volume` before a container even started), both read as
+    # `available: true` by the boolean the probe used to keep, and neither
+    # `/healthz` in the window carried a warning about it. Same probe as
+    # `claude_usage` — `UsageChecker#verdict` already exercises the whole
+    # chain (binary, container runtime, volumes, credentials, quota) once per
+    # cycle — this card just keeps the causes that boolean used to discard.
+    #
+    # `down`, unlike every other check here bar `migrations`: a broken review
+    # tool degrades one pass (`mr_review`'s `warn` tier), but a danger-claude
+    # that cannot run stops implementation, review AND discussion fixing
+    # alike — every job fails, the same reason `migrations` pages.
+    # `quota_exhausted` stays `ok` here: an exhausted quota is not a fault of
+    # the tool, and it already has its own alarm on `claude_usage`.
+    def check_danger_claude
+      state = UsageGate.state(config: @config, now: @now)
+      return build(:ok, 'no usage probe on file') if state[:checked_at].nil?
+
+      danger_claude_verdict(state)
+    end
+
+    def danger_claude_verdict(state)
+      status = state[:status]
+      meta = { status: (status || :unknown).to_s, checked_at: iso(state[:checked_at]) }
+      unless DANGER_CLAUDE_DOWN_STATUSES.include?(status.to_s)
+        return build(:ok, "danger-claude #{status || 'unknown'} at last probe", meta)
+      end
+
+      meta[:diagnostic] = state[:diagnostic] if state[:diagnostic]
+      danger_claude_fault(status, state, meta)
+    end
+
+    # A recognised cause pages at once; the `broken` catch-all waits for a
+    # second consecutive probe (see `DANGER_CLAUDE_DEBOUNCED_STATUSES`).
+    def danger_claude_fault(status, state, meta)
+      detail = danger_claude_fault_detail(status, state[:diagnostic])
+      return build(:down, detail, meta) unless danger_claude_debounced?(status)
+
+      streak = UsageGate.consecutive(status, config: @config, now: @now)
+      meta[:consecutive] = streak
+      if streak < DANGER_CLAUDE_DEBOUNCE
+        return build(:warn, "#{detail} (#{streak} of #{DANGER_CLAUDE_DEBOUNCE} probes)", meta)
+      end
+
+      build(:down, "#{detail} (#{streak} probes in a row)", meta)
+    end
+
+    def danger_claude_debounced?(status)
+      DANGER_CLAUDE_DEBOUNCED_STATUSES.include?(status.to_s)
+    end
+
+    def danger_claude_fault_detail(status, diagnostic)
+      base = DANGER_CLAUDE_FAULT_DETAIL.fetch(status.to_s)
+      return base unless status.to_s == 'broken' && diagnostic
+
+      "#{base}: #{diagnostic}"
     end
 
     def check_issues_error
@@ -308,6 +408,40 @@ module Autodev
 
       meta[:sample] = stuck.first(5).map { |i| "##{i.issue_iid}(#{i.status})" }.join(' ')
       build(:warn, "#{stuck.size} issue(s) stuck with no path forward", meta)
+    end
+
+    # Reads what GitlabRequestCounter already recorded on the last
+    # however-many real GitLab calls (Autodev #96) — passive like every
+    # other check here, since reading the two tables back is not itself a
+    # GitLab call. Turns the instruction's point 1 (a derived ~30-45
+    # requests/cycle estimate) into a measured hourly total, and its point 3
+    # (an hourly failure curve four hand-timed samples could not produce)
+    # into an actual rate over the last 24h.
+    #
+    # Always `:ok`: no failure-rate threshold exists to warn against yet —
+    # producing one is what this instrumentation is for, not something to
+    # guess at before the first real numbers are on file.
+    def check_gitlab_requests
+      meta = gitlab_requests_meta
+      build(:ok, "#{meta[:total_last_hour]} GitLab request(s) in the last hour, " \
+                 "#{meta[:failures_last_24h]} transport failure(s) in the last 24h " \
+                 "(#{meta[:failure_rate_pct]}%)", meta)
+    end
+
+    def gitlab_requests_meta
+      by_kind = GitlabRequestStat.by_kind_since(@now - GITLAB_REQUESTS_HOUR_WINDOW)
+      requests_day = GitlabRequestStat.total_since(@now - GITLAB_REQUESTS_DAY_WINDOW)
+      failures_day = GitlabTransportFailure.count_since(@now - GITLAB_REQUESTS_DAY_WINDOW)
+
+      { reads_last_hour: by_kind['read'].to_i, writes_last_hour: by_kind['write'].to_i,
+        total_last_hour: by_kind.values.sum, requests_last_24h: requests_day,
+        failures_last_24h: failures_day, failure_rate_pct: failure_rate_pct(failures_day, requests_day) }
+    end
+
+    def failure_rate_pct(failures, total)
+      return 0.0 unless total.positive?
+
+      (failures.to_f / total * 100).round(2)
     end
 
     # --- helpers -----------------------------------------------------------

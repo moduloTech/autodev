@@ -17,8 +17,11 @@ require 'autodev/pipeline_monitor/reviewer'
 # HealthReport#longest_worker_timeout now accounts for.
 #
 # The timeout must stay NON-FATAL: run_with_timeout raises, execute_mr_review's
-# rescue turns that into `false`, and launch_review counts it as a review failure
-# (review_failure_count, threshold 5) rather than dropping the request to `error`.
+# rescue turns that into `:tool_unavailable` rather than dropping the request to
+# `error`. Autodev #107: this outcome no longer spends `review_failure_count` —
+# the binary posts to GitLab itself, so its exit status (crash, timeout,
+# non-zero exit) carries no verdict autodev can read, and none of it is
+# evidence about the merge request.
 class PipelineMonitorReviewHeartbeatTest < Minitest::Test
   include DatabaseTestHelper
 
@@ -92,24 +95,24 @@ class PipelineMonitorReviewHeartbeatTest < Minitest::Test
     assert @harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
   end
 
-  def test_the_failure_path_returns_false
+  def test_the_failure_path_returns_tool_unavailable
     stub_timeout_wrapper(['', 'boom', false])
 
-    refute @harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
+    assert_equal :tool_unavailable, @harness.send(:run_mr_review_command, 'https://gitlab.example/mr/1')
   end
 
   # The non-fatal contract. run_with_timeout raises ImplementationError on
-  # timeout; execute_mr_review's rescue must absorb it and answer `false`, which
-  # is what launch_review reads to increment review_failure_count instead of
+  # timeout; execute_mr_review's rescue must absorb it and answer
+  # `:tool_unavailable`, which spends no budget (Autodev #107) rather than
   # failing the request.
-  def test_a_timeout_is_absorbed_and_answers_false
+  def test_a_timeout_is_absorbed_and_answers_tool_unavailable
     @harness.define_singleton_method(:run_with_timeout) do |*|
       raise ImplementationError, 'mr-review timed out after 1800s'
     end
 
     result = @harness.send(:execute_mr_review, @issue)
 
-    refute result, 'a timeout must be absorbed into false, not raised'
+    assert_equal :tool_unavailable, result
   end
 
   # The heartbeat is written before the call, so a killed run still leaves proof

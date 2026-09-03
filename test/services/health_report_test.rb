@@ -44,11 +44,18 @@ class HealthReportTest < ActiveSupport::TestCase # rubocop:disable Metrics/Class
 
   # Since Autodev #46 the check reads Autodev::UsageGate's state (written at
   # probe time, before the passes run) rather than the heartbeat (written at
-  # cycle end) — same envelope, fresher source.
-  def usage_event(available:, age_seconds: 0)
+  # cycle end) — same envelope, fresher source. `status` defaults from
+  # `available` (Autodev #108's real vocabulary: `available`/`quota_exhausted`)
+  # so every pre-existing call site keeps modelling exactly what it always did;
+  # a call site testing one of the other four verdicts passes `status:`
+  # explicitly.
+  def usage_event(available:, status: nil, diagnostic: nil, age_seconds: 0)
+    status ||= available ? 'available' : 'quota_exhausted'
+    payload = { available: available, status: status }
+    payload[:diagnostic] = diagnostic if diagnostic
     ActivityEvent.create!(
       issue_id: nil, kind: 'usage', level: available ? 'info' : 'warn',
-      payload_json: JSON.generate(available: available),
+      payload_json: JSON.generate(payload),
       created_at: Time.now.utc - age_seconds
     )
   end
@@ -75,6 +82,147 @@ class HealthReportTest < ActiveSupport::TestCase # rubocop:disable Metrics/Class
     usage_event(available: false, age_seconds: 5_000)
 
     assert_equal :ok, report.check(:claude_usage)[:status]
+  end
+
+  # Autodev #108: claude_usage is scoped to the quota alone. A tool fault is
+  # not a property of the quota — it has its own card, danger_claude, below.
+  test 'claude_usage ok when the fault is an authentication refusal, not the quota' do
+    usage_event(available: false, status: 'auth_refused')
+
+    assert_equal :ok, report.check(:claude_usage)[:status]
+  end
+
+  test 'claude_usage ok when the fault is a missing binary' do
+    usage_event(available: false, status: 'binary_missing')
+
+    assert_equal :ok, report.check(:claude_usage)[:status]
+  end
+
+  test 'claude_usage ok when the fault is unrecognised (broken)' do
+    usage_event(available: false, status: 'broken', diagnostic: 'boom')
+
+    assert_equal :ok, report.check(:claude_usage)[:status]
+  end
+
+  # --- danger_claude (Autodev #108) ---------------------------------------
+  #
+  # The probe that already exercises the whole danger-claude chain kept only
+  # one boolean; this card keeps the causes that boolean discarded. `down`
+  # (not `warn`, unlike every other secondary check here bar `migrations`):
+  # a danger-claude that cannot run stops implementation, review AND
+  # discussion fixing alike, so /healthz must page on it.
+
+  test 'danger_claude ok when nothing was ever probed' do
+    assert_equal :ok, report.check(:danger_claude)[:status]
+  end
+
+  test 'danger_claude ok when the last probe succeeded' do
+    usage_event(available: true)
+
+    assert_equal :ok, report.check(:danger_claude)[:status]
+  end
+
+  # An exhausted quota is not a fault of the tool.
+  test 'danger_claude ok when the quota is exhausted' do
+    usage_event(available: false, status: 'quota_exhausted')
+
+    assert_equal :ok, report.check(:danger_claude)[:status]
+  end
+
+  test 'danger_claude ok when the probe itself could not answer (unknown)' do
+    usage_event(available: true, status: 'unknown')
+
+    assert_equal :ok, report.check(:danger_claude)[:status]
+  end
+
+  test 'danger_claude down when the credential is refused, naming the cause' do
+    usage_event(available: false, status: 'auth_refused')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :down, check[:status]
+    assert_includes check[:detail], 'authenticate'
+  end
+
+  test 'danger_claude down when the binary is missing, naming the cause' do
+    usage_event(available: false, status: 'binary_missing')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :down, check[:status]
+    assert_includes check[:detail], 'not found on PATH'
+  end
+
+  # `broken` is the catch-all for any non-zero exit matching neither the quota
+  # nor the auth signature, so one observation may be a container hiccup. It
+  # warns first and pages on the second consecutive probe (alpha-53 review,
+  # G5) — the same calibration `mr_review`'s thresholds got in Autodev #60.
+  # `auth_refused` / `binary_missing` are deterministic and still page at
+  # once, asserted above.
+  test 'danger_claude warns on a single broken probe, quoting the diagnostic' do
+    usage_event(available: false, status: 'broken', diagnostic: 'v1.54/volumes/danger-claude 500')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :warn, check[:status]
+    assert_includes check[:detail], 'v1.54/volumes/danger-claude 500'
+    assert_equal 'v1.54/volumes/danger-claude 500', check[:meta][:diagnostic]
+  end
+
+  test 'danger_claude down on the second consecutive broken probe' do
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500', age_seconds: 30)
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :down, check[:status]
+    assert_equal 2, check[:meta][:consecutive]
+  end
+
+  # N11 of the second review: a tool that alternates between failing and
+  # hanging produces `broken, unknown, broken, …`. Counting a run of the *same*
+  # status never reached two of anything, so the pager never fired — while
+  # #108 exists because two total outages went unseen. The run is of
+  # consecutive **unhealthy** probes; `unknown` on its own still reads `ok`
+  # (a probe that could not observe is not a fault, Autodev #62), it just no
+  # longer breaks the run.
+  test 'a probe that hung between two broken ones does not break the run' do
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500', age_seconds: 60)
+    usage_event(available: false, status: 'unknown', age_seconds: 30)
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :down, check[:status]
+  end
+
+  # And a gap wider than the probe's own TTL means probes are missing — the
+  # poller was down, the machine asleep — so the two verdicts either side of
+  # it are not consecutive (N2).
+  test 'two broken probes separated by a gap wider than the ttl are not a streak' do
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500', age_seconds: 4_000)
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :warn, check[:status], 'a gap in the probe history is not a run of polls'
+  end
+
+  test 'a broken probe after a healthy one is not a streak' do
+    usage_event(available: true, status: 'available', age_seconds: 30)
+    usage_event(available: false, status: 'broken', diagnostic: 'docker 500')
+    check = report.check(:danger_claude)[:checks][:danger_claude]
+
+    assert_equal :warn, check[:status], 'a healthy probe in between must break the run'
+  end
+
+  test 'danger_claude ok when the verdict is stale' do
+    usage_event(available: false, status: 'auth_refused', age_seconds: 5_000)
+
+    assert_equal :ok, report.check(:danger_claude)[:status]
+  end
+
+  # A row written before Autodev #108 (no `status` key) must not crash the
+  # card — see Autodev::UsageGate#state.
+  test 'danger_claude does not crash on a pre-upgrade row with no status key' do
+    ActivityEvent.create!(issue_id: nil, kind: 'usage', level: 'warn',
+                          payload_json: JSON.generate(available: false))
+
+    assert_equal :ok, report.check(:danger_claude)[:status]
   end
 
   test 'issues_error warn when an issue is in error' do
@@ -108,8 +256,9 @@ class HealthReportTest < ActiveSupport::TestCase # rubocop:disable Metrics/Class
     end
 
     assert_equal :down, result[:status]
-    assert_equal %i[poller workers queue claude_usage issues_error mr_review review_skill
-                    mr_review_token stuck_issues database migrations],
+    assert_equal %i[poller workers queue claude_usage danger_claude issues_error
+                    mr_review review_skill mr_review_token stuck_issues database
+                    migrations gitlab_requests],
                  result[:checks].keys
   end
 

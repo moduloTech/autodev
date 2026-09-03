@@ -58,7 +58,7 @@ fr:
   activity_target_branch_missing: ":wrench: Branche cible `%{branch}` absente du depot apres %{count} tentatives → termine, intervention requise"
   activity_review_findings_unanchored: ":wrench: Revue en demande de corrections, aucun constat ancrable sur la merge request → termine, intervention requise"
   activity_gitlab_refused_request: ":wrench: GitLab a refuse l'appel `%{what}` (HTTP %{status}) %{count} fois avec la meme reponse → termine, intervention requise"
-  activity_unassigned_stop: ":stop_sign: Desassigne, travail en cours arrete"
+  activity_unassigned_stop: ":stop_sign: Plus assigne, travail en cours arrete"
   activity_closed_externally: ":lock: Ticket cloture sur GitLab, travail en cours arrete"
   activity_handover_doing_removed: ":stop_sign: Label _%{label}_ retire par un tiers, travail en cours arrete"
   activity_handover_done_added: ":stop_sign: Label _%{label}_ pose par un tiers, travail en cours arrete"
@@ -66,3 +66,4 @@ fr:
   activity_dc_parse_failed: ":warning: Sortie danger-claude non parsable, session reuse desactive pour cet appel"
   activity_dormant_exhausted: ":mag: Aucune reprise possible apres %{cap} verifications, demande laissee en l'etat"
   activity_truncation_marker: "*[anciennes entrees tronquees pour rester sous la limite GitLab]*"
+  activity_review_tool_missing: ":wrench: aucun outil ne peut relire cette merge request (mr-review absent, aucun review_skill declare) → termine, intervention requise"

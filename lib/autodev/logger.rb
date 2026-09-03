@@ -14,6 +14,11 @@ class AppLogger
     @global_file  = nil
     @global_date  = nil
     @level        = LEVELS['INFO']
+    # Autodev #92: unbuffer the console stream so a lifecycle line ("spawned
+    # rails-server", "stopping solid-queue", …) is on disk before the next
+    # statement runs, instead of sitting in a block buffer a killed process
+    # never flushes — see print_console.
+    $stdout.sync = true
   end
 
   def configure(log_dir:, level: 'INFO')

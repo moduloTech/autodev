@@ -171,5 +171,52 @@ class PollRouter
       log_activity(existing, :reenter_skipped_merged)
       log "Issue ##{existing.issue_iid}: MR !#{existing.mr_iid} already merged → skipping reentry"
     end
+
+    # The sweep's protection, asked on this path too (alpha-53 review G2). A
+    # read GitLab could not answer is not permission (Autodev #62), so an
+    # unreadable ticket declines the re-arm for this cycle rather than
+    # proceeding — the row keeps its give-up state and the next cycle re-asks.
+    def infra_recheck_still_ours?(issue, client)
+      return true if untouched_since_giveup?(issue, client)
+
+      log "Issue ##{issue.issue_iid}: infrastructure recovered, but somebody has worked on this " \
+          'ticket since autodev gave it up — leaving it with them, not re-arming'
+      false
+    # Named rather than `StandardError` (second review, N9): the argument for
+    # swallowing here is about the *direction* of the answer — declining is
+    # safe — and it does not extend to a bug in this repository, which would
+    # switch the whole recheck pass off while logging it as an unreadable
+    # ticket. Same narrowing as `IssuesController#reclaim_before_reset`.
+    #
+    # The classes are spelled here rather than behind a constant on purpose:
+    # `test/api_failure_is_not_a_verdict_test.rb` recognises a swallow by the
+    # class names written on the `rescue` line, so a constant would hide this
+    # clause from the very guard that is supposed to hold it declared — the
+    # "escaped the scan" family Autodev #73 closed three of.
+    rescue *GitlabHelpers::TRANSPORT_ERRORS, ApiUnavailableError => e
+      log_error "Issue ##{issue.issue_iid}: could not read whether a human has taken this ticket " \
+                "back (#{e.class}: #{e.message}) — not re-arming this cycle"
+      false
+    end
+
+    def untouched_since_giveup?(issue, client)
+      gl_issue = ::GitlabHelpers.answer(:issue) { client.issue(@project_path, issue.issue_iid) }
+      Autodev::UntouchedSinceGiveup
+        .new(client: client, project_config: @project_config, logger: @logger)
+        .call(issue, gl_issue)
+    end
+
+    # Returns whether the reclaim landed. On failure the label is put back
+    # (design §5) and the caller must not go on to transition the row.
+    def reclaim_infra_recheck(issue, client)
+      Autodev::TicketReclaim.new(client: client, logger: @logger)
+                            .reclaim!(issue, message_key: :reclaim_infra_recovered)
+      true
+    rescue StandardError => e
+      apply_label_attention(issue.issue_iid)
+      log_error "Issue ##{issue.issue_iid}: could not reclaim the assignment after the infra " \
+                "recheck (#{e.class}: #{e.message}) — left in its handed-back state, the label restored"
+      false
+    end
   end
 end

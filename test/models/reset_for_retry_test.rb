@@ -76,6 +76,26 @@ class ResetForRetryTest < ActiveSupport::TestCase
     assert_equal 2, issue.retry_count
   end
 
+  # `review_failure_count` joins `reset_budget:` (Autodev #107): it is a
+  # budget like `retry_count`, and the dashboard's Reset button used to leave
+  # it untouched — a request abandoned at 5/5 stayed at 5/5 after a reset and
+  # gave itself up on the very next stumble, with no way for the operator who
+  # clicked to know that.
+  def test_reset_budget_clears_the_review_failure_count
+    issue = reset!(errored(review_failure_count: 5), reset_budget: true)
+
+    assert_equal 0, issue.review_failure_count
+  end
+
+  # The automatic revivals (`recover_on_startup!`, `dispatch_dormant_audit`)
+  # do not pass `reset_budget:`, and must not clear a budget they did not
+  # decide to clear.
+  def test_the_review_failure_count_is_preserved_by_default
+    issue = reset!(errored(review_failure_count: 5))
+
+    assert_equal 5, issue.review_failure_count
+  end
+
   # --- attention flags ----------------------------------------------
 
   def test_clear_attention_clears_the_needs_attention_trio
@@ -119,5 +139,55 @@ class ResetForRetryTest < ActiveSupport::TestCase
     Issue.recover_on_startup!(max_retries: 1)
 
     assert_equal 1, issue.reload.retry_count
+  end
+
+  # --- Autodev #93/#106: the reclaim is not this method's ------------
+
+  # `revive_stalled!` and `recover_on_startup!` are automatic recoveries of a
+  # row that was never handed back — no GitLab client is stubbed anywhere in
+  # this test, and none of these calls need one: `reset_for_retry!` never
+  # touches `GitlabHelpers`, `Autodev::TicketReclaim` or `Autodev::ResetReclaim`.
+  # The reclaim is deliberately a separate collaborator invoked only by the two
+  # operator entry points (`IssuesController#reset`, the `--reset` CLI), design
+  # §6 — precisely so these automatic paths cannot reach it by accident.
+  def abandoned_active_row(overrides = {})
+    Issue.create!({ project_path: 'group/proj', issue_iid: rand(10_000..99_999),
+                    status: 'fixing_discussions', mr_iid: 42, needs_attention: false }.merge(overrides))
+  end
+
+  # Both tests below assert the *absence of a reclaim* and not merely the
+  # resulting status: the alpha-53 review pointed out that a status assertion
+  # alone passes whether a reclaim was attempted or not, so the property was
+  # true by construction and pinned by nothing. `ResetReclaim.perform` is
+  # stubbed to record the fact and raise, which is what an accidental call
+  # would have to survive.
+  def with_reclaim_tripwire(&)
+    calls = []
+    tripwire = lambda do |issue, **|
+      calls << issue.id
+      raise 'reclaimed'
+    end
+    Autodev::ResetReclaim.stub(:perform, tripwire, &)
+    calls
+  end
+
+  def test_revive_stalled_reclaims_nothing
+    issue = abandoned_active_row
+
+    calls = with_reclaim_tripwire { Issue.revive_stalled!(Issue.where(id: issue.id)) }
+    issue.reload
+
+    assert_equal 'checking_pipeline', issue.status
+    assert_empty calls, 'an automatic revival must never reach the GitLab reclaim'
+  end
+
+  def test_recover_on_startup_reclaims_nothing
+    issue = errored(retry_count: 1, next_retry_at: nil, mr_iid: nil, needs_attention: true,
+                    attention_reason: 'stagnation_pipeline')
+
+    calls = with_reclaim_tripwire { Issue.recover_on_startup!(max_retries: 1) }
+
+    assert_equal 'pending', issue.reload.status
+    assert_empty calls, 'startup recovery must never reach the GitLab reclaim'
   end
 end

@@ -63,6 +63,8 @@ module ActiveRecordTestCleanup
     autospec_drafts
     audit_logs
     activity_events
+    gitlab_request_stats
+    gitlab_transport_failures
     issues
     project_memberships
     project_app_commands

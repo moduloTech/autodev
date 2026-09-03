@@ -130,7 +130,7 @@ end
 # `abandon_issue`. So they are read off the call sites, textually and knowingly —
 # the same trade Autodev #62's source guard makes, for the same reason: what is
 # being checked is a property of the source a reader sees.
-module KeySites
+module KeySites # rubocop:disable Metrics/ModuleLength
   # Module methods with a private half; nothing here is mixed into a test case.
   extend self
 
@@ -215,12 +215,12 @@ module KeySites
     'lib/autodev/issue_notifier.rb Locales.t' => 'the notification key and its `suffix:`',
     'app/services/autodev/external_state.rb Locales.t' => "`notify_stop`'s key",
     'app/helpers/web/i18n_helpers.rb Locales.t' => "`t_web`'s delegation — the `web_` literals",
-    'lib/autodev/numeric_settings.rb Locales.t' => '`MESSAGE_KEYS`, two literal `cli_` symbols'
+    'lib/autodev/numeric_settings.rb Locales.t' => '`MESSAGE_KEYS`, two literal `cli_` symbols',
+    'app/services/autodev/ticket_reclaim.rb Locales.t' => "`reclaim!`'s `message_key:` argument"
   }.freeze
 
   LITERAL_SYMBOL = /\A:([a-z_]\w*)\z/
-  # `log_activity(issue, discussions.empty? ? :pipeline_green_done : :done, …)`:
-  # a two-branch choice between literals is still two literals.
+  # `… ? :pipeline_green_done : :done`: a two-branch choice of literals is still two literals.
   TERNARY_SYMBOLS = /\A.+\?\s*:([a-z_]\w*)\s*:\s*:([a-z_]\w*)\z/
   # `notify_localized(…, suffix: :abandon_reassigned)` — a second, var-free
   # template appended after the message (Autodev #60). Also a key.
@@ -577,7 +577,10 @@ class LiteralI18nKeysTest < Minitest::Test
   # of interpolated symbols this codebase builds for other purposes.
   NOT_LOCALE_NAMESPACES = {
     'has_' => "StackDetector's per-gem flags (`:\"has_\#{gem}\"`), a stack fingerprint",
-    'pending_' => "HealthReport's per-migration meta keys on the `migrations` card"
+    'pending_' => "HealthReport's per-migration meta keys on the `migrations` card",
+    'claude_usage_' => 'PipelineMonitor#claude_unavailable_reason (Autodev #108): the ' \
+                       '`poll_inconclusive!` flag and its log line name the recorded UsageChecker ' \
+                       'verdict for an operator reading the log, never rendered through Locales.t/t_web'
   }.freeze
 
   # Widened from `(?:web|activity|cli|notify|handover)` to any stem (Autodev #73).

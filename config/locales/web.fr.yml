@@ -34,6 +34,7 @@ fr:
   web_admin_health_check_workers: Workers
   web_admin_health_check_queue: File de jobs
   web_admin_health_check_claude_usage: Quota Claude
+  web_admin_health_check_danger_claude: danger-claude
   web_admin_health_check_issues_error: Issues en erreur
   web_admin_health_check_mr_review: Revue automatique
   web_admin_health_check_review_skill: Skills de revue
@@ -41,6 +42,7 @@ fr:
   web_admin_health_check_stuck_issues: Issues bloquées
   web_admin_health_check_database: Base de données
   web_admin_health_check_migrations: Migrations
+  web_admin_health_check_gitlab_requests: Requêtes GitLab
   web_theme_toggle: Changer le thème
   web_sign_out: Se déconnecter
   web_sign_in_title: Connexion
@@ -157,6 +159,7 @@ fr:
   web_issue_actions: Actions
   web_issue_reset: Réinitialiser
   web_issue_confirm_reset: Relancer cette demande depuis le début ?
+  web_issue_reset_refused: "Réinitialisation refusée : %{error}"
   web_issue_close: Clôturer
   web_issue_confirm_close: Clôturer ce ticket ? Il passera dans l'onglet « Clôs ».
   web_issue_deploy_review: Redéployer la review
@@ -250,6 +253,8 @@ fr:
   web_errors_action_close: Clôturer
   web_errors_requester: 'Demandé par %{name}'
   web_errors_contact: Contactez un développeur du projet pour finaliser cette livraison.
+  web_errors_status_stranded: Aucune reprise automatique n'est prévue — cette demande attend une intervention.
+  web_errors_status_retry_at: 'Reprise automatique prévue le %{time}'
   web_project_title: Projet — %{path}
   web_project_config: Configuration <code>app:</code>
   web_project_no_config: Projet non listé dans la config courante.
@@ -501,6 +506,8 @@ fr:
   web_dashboard_anthropic_missing_hint: AutoSpec chat est désactivé. Définissez ANTHROPIC_API_KEY ou ajoutez `anthropic.api_key` à ~/.autodev/config.yml puis redémarrez autodev.
   web_dashboard_usage_paused_title: Quota Claude épuisé
   web_dashboard_usage_paused_hint: L'implémentation des nouvelles demandes est en pause. Le suivi des pipelines, les clôtures et les livraisons continuent normalement. Dernière vérification %{checked_at}.
+  web_dashboard_danger_claude_broken_title: danger-claude est en panne
+  web_dashboard_danger_claude_broken_hint: L'implémentation, la revue et la correction des discussions sont en pause — ce n'est pas un quota épuisé, l'outil ne peut plus tourner du tout. Une intervention humaine est nécessaire. Dernière vérification %{checked_at}.
   web_dashboard_drafts_to_vote: Brouillons à valider
   web_dashboard_drafts_to_vote_author: "auteur : %{email}"
   web_dashboard_drafts_to_vote_cta: Voter
@@ -580,3 +587,4 @@ fr:
   web_deploy_review_no_matches: Aucune MR ouverte ne correspond à cette recherche.
   web_deploy_review_no_untracked_mrs: Toutes les MR ouvertes de ce projet sont déjà suivies par autodev.
   web_deploy_review_count: "%{count} MR ouverte(s)"
+  web_errors_explain_attention_review_tool_missing: "Rien ne peut relire cette merge request : le binaire `mr-review` n'est pas installe et le projet ne declare aucun `review_skill`. C'est un fait de configuration, vrai des le premier poll et jusqu'a ce que quelqu'un installe l'outil ou declare un skill — pas une panne qui passe. Autodev arrete donc la demande immediatement au lieu de la surveiller quatorze jours pour finir par dire que la surveillance n'a plus bouge, ce qui serait faux. Aucun budget de revue n'a ete consomme : il n'y a eu aucune revue. Installez `mr-review`, ou declarez un `review_skill` pour ce projet, puis remettez le label de depart et reassignez autodev."

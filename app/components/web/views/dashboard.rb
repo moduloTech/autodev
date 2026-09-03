@@ -320,11 +320,38 @@ module Web
       # say what still runs or the banner reads as "autodev is down".
       def usage_paused? = @usage_state[:available] == false
 
+      # The three fault causes Autodev #108 added to the recorded verdict — a
+      # dead credential, an absent binary, or an unrecognised failure — are not
+      # the quota, and reusing "Quota Claude épuisé" for a broken Docker engine
+      # is the exact defect this ticket exists to end: autodev asserting
+      # something its own state contradicts. `quota_exhausted`, and a
+      # pre-upgrade row carrying no `status` at all, keep the verbatim wording.
+      # Deliberately NOT debounced, unlike `/healthz`'s `danger_claude` card,
+      # which warns on a first `broken` and only pages on the second (second
+      # neutral review, N12). A banner wakes nobody, and telling the operator
+      # looking at the dashboard right now is the point; the debounce exists for
+      # the external pager. The two surfaces therefore disagree for one cycle on
+      # an isolated fault, and that is the intended reading of each.
+      DANGER_CLAUDE_FAULT_STATUSES = %i[auth_refused binary_missing broken].freeze
+      private_constant :DANGER_CLAUDE_FAULT_STATUSES
+
       def render_usage_paused_banner
-        render_warn_banner(
-          t_web(:web_dashboard_usage_paused_title),
-          t_web(:web_dashboard_usage_paused_hint, checked_at: relative_time(@usage_state[:checked_at]))
-        )
+        title, hint = usage_paused_copy
+        render_warn_banner(title, hint)
+      end
+
+      def usage_paused_copy
+        checked_at = relative_time(@usage_state[:checked_at])
+        if danger_claude_fault?
+          return [t_web(:web_dashboard_danger_claude_broken_title),
+                  t_web(:web_dashboard_danger_claude_broken_hint, checked_at: checked_at)]
+        end
+
+        [t_web(:web_dashboard_usage_paused_title), t_web(:web_dashboard_usage_paused_hint, checked_at: checked_at)]
+      end
+
+      def danger_claude_fault?
+        DANGER_CLAUDE_FAULT_STATUSES.include?(@usage_state[:status])
       end
 
       def render_warn_banner(title, hint) # rubocop:disable Metrics/MethodLength

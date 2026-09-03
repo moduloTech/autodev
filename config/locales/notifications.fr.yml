@@ -24,7 +24,7 @@ fr:
   gitlab_refused_request: ":warning: %{tag} : GitLab refuse l'appel `%{what}` que je dois faire sur %{mr_url} — HTTP %{status}, %{count} fois avec la meme reponse. La requete est correcte de mon cote et la reponse ne changera pas d'elle-meme : j'arrete de suivre cette demande. Je ne diagnostique pas la cause a votre place, je vous rapporte ce que GitLab repond : %{answer}. Corrigez ce que GitLab refuse, puis remettez le label de depart et reassignez-moi."
   abandon_reassigned: ":arrow_right: Je t'ai reassigne le ticket : autodev ne le suit plus. A toi de reprendre la main sur la MR."
   unassigned_stop: |-
-    :stop_sign: %{tag} : j'ai ete desassigne de ce ticket, j'arrete le travail en cours.
+    :stop_sign: %{tag} : je ne suis plus assigne a ce ticket, j'arrete le travail en cours.
 
     :arrow_right: **Vous souhaitez que je reprenne ?** Remettez le label _%{label_todo}_ et reassignez-moi.
   handover_doing_removed: |-
@@ -58,3 +58,18 @@ fr:
     Notre GitLab n'accepte qu'un seul assigne par ticket, donc je ne peux pas m'ajouter a cote de toi : je prends le ticket. **@%{user} je te le rendrai** des que j'aurai termine ou si je m'arrete.
 
     :arrow_right: **Tu preferes le garder ?** Reassigne-toi le ticket, je m'arreterai au cycle suivant.
+  reclaim_infra_recovered: |-
+    :arrows_counterclockwise: %{tag} : je reprends ce ticket.
+
+    Son infrastructure d'integration continue s'est retablie — la demande avait ete rendue a un humain lors de l'abandon pour stagnation de la pipeline, et je reprends le travail interrompu.
+
+    Notre GitLab n'accepte qu'un seul assigne par ticket, donc je ne peux pas m'ajouter a cote de toi : je prends le ticket. **@%{user} je te le rendrai** des que j'aurai termine ou si je m'arrete.
+
+    :arrow_right: **Tu preferes le garder ?** Reassigne-toi le ticket, je m'arreterai au cycle suivant.
+  reclaim_operator_reset: |-
+    :arrows_counterclockwise: %{tag} : je reprends ce ticket a la demande d'un operateur, via le bouton Reinitialiser du tableau de bord.
+
+    Notre GitLab n'accepte qu'un seul assigne par ticket, donc je ne peux pas m'ajouter a cote de toi : je prends le ticket. **@%{user} je te le rendrai** des que j'aurai termine ou si je m'arrete.
+
+    :arrow_right: **Tu preferes le garder ?** Reassigne-toi le ticket, je m'arreterai au cycle suivant.
+  review_tool_missing: ":warning: %{tag} : je ne peux pas relire %{mr_url} : le binaire `mr-review` n'est pas installe sur ma machine et ce projet ne declare aucun `review_skill`. Ce n'est pas une panne passagere — rien ne changera au prochain cycle — donc j'arrete de suivre cette demande plutot que de l'attendre. Installez `mr-review` ou declarez un `review_skill` pour ce projet, puis remettez le label de depart et reassignez-moi."

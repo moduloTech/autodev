@@ -47,6 +47,7 @@ require 'optparse'
 ENV['RAILS_ENV'] ||= 'production'
 require_relative '../config/environment'
 require_relative '../lib/autodev/supervisor'
+require_relative '../lib/autodev/boot_guard'
 # Required explicitly rather than relying on config/initializers/auto_migrate.rb
 # having already pulled it in — the gate in setup_database is the one thing
 # standing between a broken schema and a worker that fails every job.
@@ -452,12 +453,33 @@ def supervisor_env(config) # rubocop:disable Metrics/MethodLength
   }.compact
 end
 
-def main
+# Autodev #92 design §2: runs once, before any child is spawned. `Supervisor
+# #run`'s own `ensure` (lib/autodev/supervisor.rb) closes the leak for this
+# process going forward; this reaps what an *earlier*, already-dead
+# supervisor left behind — a holder of our SQLite file whose process group
+# has lost its leader (see BootGuard for why the group, and not `ppid == 1`,
+# is the discriminator).
+#
+# It deliberately does **not** refuse the boot over a holder it cannot
+# identify: this call sits after `bootstrap` → `setup_database`, so the
+# booting process holds the database itself — permanently, and enough on its
+# own — and a third-party process may hold it transiently too (the container
+# VM danger-claude runs in was measured doing so once). Refusing was a boot loop under
+# `KeepAlive: Crashed`. `AUTODEV_BOOT_GUARD_STRICT=1` restores the refusal
+# for an operator investigating by hand, and only then does `ConfigError`
+# propagate to `main`'s existing rescue.
+def run_boot_guard(config, logger)
+  db_path = ENV.fetch('AUTODEV_DB') { File.expand_path('~/.autodev/autodev.db') }
+  Autodev::BootGuard.new(db_path: db_path, logger: logger, locale: cli_locale(config)).call
+end
+
+def main # rubocop:disable Metrics/MethodLength
   pastel = Pastel.new
   logger = AppLogger.new(pastel: pastel)
   config = parse_args(ARGV)
   handle_early_commands(config, pastel)
   bootstrap(config, logger, pastel)
+  run_boot_guard(config, logger)
   run_supervisor(config, logger)
 rescue StandardError, Interrupt => e
   handle_fatal(e, logger)

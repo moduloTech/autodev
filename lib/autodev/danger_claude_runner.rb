@@ -176,17 +176,19 @@ module DangerClaudeRunner
     args
   end
 
-  def safe_mark_failed!(issue)
+  # `next_retry_at:` is mandatory — no default — so a caller cannot land a row
+  # in `error` without deciding what happens next (Autodev #103). A caller
+  # scheduling a retry passes the moment; one scheduling none passes `nil`,
+  # clearing the column rather than leaving a stamp from a previous life in
+  # `error` to make the row selected on every cycle forever (15888's mirror).
+  def safe_mark_failed!(issue, next_retry_at:)
+    issue.next_retry_at = next_retry_at
     issue.mark_failed!
   rescue AASM::InvalidTransition
-    issue.update(status: 'error')
+    issue.update(status: 'error', next_retry_at: next_retry_at)
   end
 
-  def log(msg)
-    @logger.info(msg, project: @project_path)
-  end
+  def log(msg) = @logger.info(msg, project: @project_path)
 
-  def log_error(msg)
-    @logger.error(msg, project: @project_path)
-  end
+  def log_error(msg) = @logger.error(msg, project: @project_path)
 end

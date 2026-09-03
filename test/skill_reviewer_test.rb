@@ -5,7 +5,7 @@ require 'ostruct'
 
 # The skill judges and stops; autodev posts (Autodev #74). What counts as a
 # review failure is the whole point of this file.
-class SkillReviewerTest < ActiveSupport::TestCase
+class SkillReviewerTest < ActiveSupport::TestCase # rubocop:disable Metrics/ClassLength
   # A logger that discards everything. Not in the brief's snippet, but
   # `prepare_review_clone` calls the real `SkillsInjector.inject`, which logs
   # through `@logger` — left unset, `mon.instance_variable_set` never touches
@@ -88,9 +88,12 @@ class SkillReviewerTest < ActiveSupport::TestCase
     mon.define_singleton_method(:mr_review_timeout) { 600 }
   end
 
+  # `dc_raises` is either `true` (a generic crash) or a String — the message
+  # to raise `ImplementationError` with, so a scenario can replay a specific
+  # production failure (Autodev #107's Docker 500 fixture below).
   def stub_danger_claude_prompt!(mon, dc_raises:, contract_json:)
     mon.define_singleton_method(:danger_claude_prompt) do |*|
-      raise ImplementationError, 'dc failed' if dc_raises
+      raise ImplementationError, (dc_raises.is_a?(String) ? dc_raises : 'dc failed') if dc_raises
 
       File.write(mon.send(:review_contract_path, 7), contract_json) if contract_json
       'ok'
@@ -105,16 +108,37 @@ class SkillReviewerTest < ActiveSupport::TestCase
     assert reviewer(contract_json: json).send(:review_with_skill, issue)
   end
 
-  def test_a_missing_contract_file_is_a_failure
-    refute reviewer(contract_json: nil).send(:review_with_skill, issue)
+  # A missing or off-schema contract is `:unusable_output` (Autodev #107): the
+  # one cause that is about *this* merge request meeting *this* skill, so it
+  # is the only one left that still spends `review_failure_count` — unchanged
+  # from before this ticket, only named now instead of collapsing into `false`.
+  def test_a_missing_contract_file_is_unusable_output
+    assert_equal :unusable_output, reviewer(contract_json: nil).send(:review_with_skill, issue)
   end
 
-  def test_an_off_schema_contract_is_a_failure
-    refute reviewer(contract_json: '{"verdict":"lgtm"}').send(:review_with_skill, issue)
+  def test_an_off_schema_contract_is_unusable_output
+    assert_equal :unusable_output,
+                 reviewer(contract_json: '{"verdict":"lgtm"}').send(:review_with_skill, issue)
   end
 
-  def test_a_danger_claude_crash_is_a_failure
-    refute reviewer(contract_json: nil, dc_raises: true).send(:review_with_skill, issue)
+  # A `danger_claude_prompt` crash — the container runtime, a timeout, a crash
+  # — is `:tool_unavailable` (Autodev #107): nothing about it is a statement on
+  # the merge request, so `dispatch_review_outcome` must not spend the budget
+  # on it. The Docker 500 fixture is the measured cause: bobette's engine
+  # refused every `danger-claude` call in `ensure_volume` for nine hours on an
+  # API-version mismatch, and burned five review failures on
+  # powerpanne/core#16030 in the middle of it.
+  def test_a_docker_outage_is_tool_unavailable_not_a_review_failure
+    docker500 = 'Error response from daemon: client version 1.54 is too old. ' \
+                'Minimum supported API version is 1.55 (ensure_volume danger-claude)'
+
+    outcome = reviewer(contract_json: nil, dc_raises: docker500).send(:review_with_skill, issue)
+
+    assert_equal :tool_unavailable, outcome
+  end
+
+  def test_a_generic_danger_claude_crash_is_also_tool_unavailable
+    assert_equal :tool_unavailable, reviewer(contract_json: nil, dc_raises: true).send(:review_with_skill, issue)
   end
 
   def test_absent_diff_refs_are_inconclusive_not_a_success
@@ -137,24 +161,33 @@ class SkillReviewerTest < ActiveSupport::TestCase
 
   # Fix round 1: `clone_and_checkout` raises `GitError` — a sibling of
   # `ImplementationError` under `AutodevError`, not a subclass — so it escaped
-  # `review_with_skill`'s rescue and propagated instead of counting as a review
-  # failure. Every scenario above stubs the clone to succeed, which is why
+  # `review_with_skill`'s rescue and propagated instead of being read as an
+  # outcome. Every scenario above stubs the clone to succeed, which is why
   # nothing caught this.
-  def test_a_clone_failure_is_a_review_failure_not_an_escaped_exception
+  #
+  # Autodev #107 reverses what it *becomes*: `clone_for_review` still catches
+  # every `StandardError` so a network hiccup and a deleted branch both arrive
+  # here the same way, but the outcome is now `:clone_failed`, not a spent
+  # review failure — a clone failure is not evidence about the merge request
+  # (Autodev #96 measured ~9% of GitLab reads failing from bobette by TCP
+  # refusal, in bursts).
+  def test_a_clone_failure_is_clone_failed_not_a_spent_review_failure
     subject = reviewer(contract_json: nil)
     subject.define_singleton_method(:clone_and_checkout) { |*| raise GitError, 'clone failed' }
 
-    refute subject.send(:review_with_skill, issue)
+    assert_equal :clone_failed, subject.send(:review_with_skill, issue)
   end
 
   # `SkillsInjector.inject` has no rescue of its own, so an `Errno::*` from its
   # `File.write` / `FileUtils.mkdir_p` calls would otherwise escape untyped —
-  # same shape as the `GitError` case above, different source.
-  def test_a_skill_injection_failure_is_a_review_failure_not_an_escaped_exception
+  # same shape as the `GitError` case above, different source. It is a local
+  # environment failure, not a clone failure and not a statement on the merge
+  # request, so it joins `:tool_unavailable`.
+  def test_a_skill_injection_failure_is_tool_unavailable_not_an_escaped_exception
     subject = reviewer(contract_json: nil)
 
     SkillsInjector.stub(:inject, ->(*) { raise Errno::ENOENT, 'no such file or directory' }) do
-      refute subject.send(:review_with_skill, issue)
+      assert_equal :tool_unavailable, subject.send(:review_with_skill, issue)
     end
   end
 

@@ -34,15 +34,36 @@ class PipelineMonitor
     # because three outcomes leave by exception: `ApiUnavailableError` from the
     # publish or from reading the declared skill off the target branch, and
     # `MissingReviewSkillError` from a declared skill that branch does not carry.
+    # Three named outcomes now, not one `false` (Autodev #107): `false` used to
+    # cover a clone that never completed, a tool that could not run at all, and
+    # a contract the run never produced — three unrelated causes, only one of
+    # which is evidence about *this* merge request. `dispatch_review_outcome`
+    # spends `review_failure_count` on `:unusable_output` alone.
     def review_with_skill(issue)
       work_dir = "/tmp/autodev_review_#{@project_path.tr('/', '_')}_#{issue.issue_iid}"
       run_skill_review(work_dir, issue)
-    rescue ImplementationError, ReviewContract::InvalidError => e
-      log_error "MR !#{issue.mr_iid}: review via skill " \
-                "'#{ReviewSkillSource.declared(@project_config)}' failed: #{e.message}"
-      false
+    rescue GitError, ImplementationError, ReviewContract::InvalidError => e
+      outcome, verb = skill_review_outcome(e)
+      log_skill_review_failure(issue, verb, e)
+      outcome
     ensure
       FileUtils.rm_rf(work_dir) if work_dir && Dir.exist?(work_dir)
+    end
+
+    # The three exceptions `review_with_skill`'s rescue can catch, each mapped
+    # to the outcome `dispatch_review_outcome` reads and the verb the log line
+    # uses (Autodev #107).
+    def skill_review_outcome(error)
+      case error
+      when GitError then [:clone_failed, 'could not clone']
+      when ImplementationError then [:tool_unavailable, 'could not run']
+      when ReviewContract::InvalidError then [:unusable_output, 'produced no usable output']
+      end
+    end
+
+    def log_skill_review_failure(issue, verb, error)
+      log_error "MR !#{issue.mr_iid}: review via skill " \
+                "'#{ReviewSkillSource.declared(@project_config)}' #{verb}: #{error.message}"
     end
 
     def run_skill_review(work_dir, issue)
@@ -54,8 +75,13 @@ class PipelineMonitor
       publish_from_contract(issue, path)
     end
 
-    # A clone failure is a review failure: unlike a GitLab error while posting,
-    # here judgment never started.
+    # A clone failure is no longer a review failure (Autodev #107): unlike a
+    # GitLab error while posting, here judgment never started, but a clone
+    # failure is also not evidence about *this* merge request — it arrives
+    # with nothing to tell a deleted source branch apart from a network hiccup
+    # (Autodev #96 measured ~9% of GitLab reads failing from bobette by TCP
+    # refusal, in bursts). `review_with_skill` reads it as `:clone_failed` and
+    # spends no budget on it.
     #
     # The four steps are in this order for four separate reasons (Autodev #89).
     # `ReviewSkillSource.locate` runs **first** so a read GitLab could not answer
@@ -89,14 +115,17 @@ class PipelineMonitor
       raise MissingReviewSkillError.new(skill, source[:ref])
     end
 
-    # `clone_and_checkout` raises `GitError` — a sibling of `ImplementationError`
-    # under `AutodevError`, not a subclass (Autodev #74 fix round 1) — so it would
-    # otherwise escape `review_with_skill`'s rescue instead of counting as a
-    # review failure.
+    # Every `StandardError` a clone can raise — `GitError` included — is
+    # re-wrapped into `GitError` itself, so `review_with_skill` reads all of
+    # them as `:clone_failed` (Autodev #107) rather than letting a bare
+    # `GitError` escape unclassified (the original reason this wrapping
+    # exists, Autodev #74 fix round 1) or letting it fall in with
+    # `ImplementationError`'s `:tool_unavailable`, which would spend nothing
+    # either but would name the wrong cause in the log.
     def clone_for_review(work_dir, issue)
       clone_and_checkout(work_dir, issue.branch_name)
     rescue StandardError => e
-      raise ImplementationError, "clone failed: #{e.message}"
+      raise GitError, "clone failed: #{e.message}"
     end
 
     # `SkillsInjector.inject` raises nothing of its own, so a `File.write` /
@@ -104,8 +133,11 @@ class PipelineMonitor
     #
     # Split from the clone (it used to be one `clone_and_inject`) because the
     # overlay now sits between them and makes GitLab reads: under a shared
-    # `rescue StandardError` those would be reclassed to `ImplementationError`,
-    # i.e. read as a review failure, which is precisely what Autodev #62 forbids.
+    # `rescue StandardError` those would be reclassed to `ImplementationError`
+    # (`:tool_unavailable`, unchanged since Autodev #107) instead of escaping
+    # as `ApiUnavailableError`, which is precisely what Autodev #62 forbids —
+    # an outage must resume the watch and re-raise, not be read as a local
+    # tool failure.
     def inject_skills(work_dir)
       SkillsInjector.inject(work_dir, logger: @logger, project_path: @project_path)
     rescue StandardError => e

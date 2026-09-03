@@ -4,6 +4,17 @@
 # answers any route not declared above the catch-all `mount Web::Server`
 # in config/routes.rb.
 class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLength
+  # The rescue names the failures a reclaim can actually have, and lets a bug
+  # in this repository travel as itself (alpha-53 review, G8): a blanket
+  # `StandardError` presented a `NoMethodError` to the operator as
+  # "Réinitialisation refusée : undefined method …" and refused the gesture,
+  # which is the reverse of the rule `GitlabHelpers::TRANSPORT_ERRORS` states
+  # — an outage is data, a bug is a stack trace. The message is scrubbed
+  # because a GitLab error can carry a token in its URI, and `Redactor` is
+  # what the rest of this controller already uses for that.
+  RECLAIM_FAILURES = [*GitlabHelpers::TRANSPORT_ERRORS, ApiUnavailableError,
+                      Autodev::TicketReclaim::AssignmentNotLanded, ConfigError].freeze
+
   # Web::Helpers is the same module Sinatra mixes into Web::Server via
   # `helpers Web::Helpers`. Pulled in here so we can call find_issue,
   # activity_events_dataset, dashboard_kpis, web_locale, etc. with
@@ -56,17 +67,10 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
     issue = find_issue(params[:id])
     return head :not_found unless issue
 
-    previous_state = issue.status
-    # Delegated to the model so this button can't drift from the CLI `--reset`
-    # again: it used to force `pending` with a NULL `next_retry_at` for every
-    # row, which left the ticket orphaned (no stamp → `fetch_retryable` skips
-    # it; `label_doing` → `dispatch_new_issues` never rediscovers it) and sent
-    # MR-bearing rows to a full re-implementation. See Issue.reset_for_retry!.
-    Issue.reset_for_retry!(Issue.where(id: issue.id), reset_budget: true, clear_attention: true)
-    Audit.record!(
-      resource: issue, action: 'issue.reset_manual', actor: current_user,
-      payload: { project_path: issue.project_path, iid: issue.issue_iid, previous_state: previous_state }
-    )
+    refusal = reclaim_before_reset(issue)
+    return redirect_to_reset_refusal(refusal) if refusal
+
+    apply_reset!(issue)
     redirect_to safe_return_to || "/issues/#{issue.id}"
   end
 
@@ -124,6 +128,45 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
   def safe_return_to
     target = params[:return_to].to_s
     target if target.match?(%r{\A/(?![/\\])})
+  end
+
+  # A reset that resumes an abandoned request (`needs_attention`) has to take
+  # the ticket back on GitLab before the row is touched (Autodev #93/#106) —
+  # otherwise it re-enters `checking_pipeline` still assigned to whoever the
+  # abandon handed it to, and `dispatch_unassignment` closes it at the next
+  # cycle with a comment blaming that person for something nobody did.
+  #
+  # A no-op for a plain `error` reset (`Autodev::ResetReclaim#perform` returns
+  # immediately when `needs_attention` is false). Where no GitLab client can be
+  # built, the gesture is refused rather than half-applied: nothing is written
+  # to the database, and the operator sees why.
+  def reclaim_before_reset(issue)
+    # `PollRouter`/`LabelManager` call `@logger.info(msg, project: ...)` — the
+    # legacy kwarg shape `Autodev::JobLogger` exists to bridge onto Rails'
+    # plain `Logger`, which raises `ArgumentError` on it otherwise.
+    Autodev::ResetReclaim.perform(issue, config: app_config, logger: Autodev::JobLogger.new(Rails.logger))
+    nil
+  rescue *RECLAIM_FAILURES => e
+    t_web(:web_issue_reset_refused, error: Redactor.scrub(e.message))
+  end
+
+  def redirect_to_reset_refusal(message)
+    flash[:alert] = message
+    redirect_to safe_return_to || "/issues/#{params[:id]}"
+  end
+
+  def apply_reset!(issue)
+    previous_state = issue.status
+    # Delegated to the model so this button can't drift from the CLI `--reset`
+    # again: it used to force `pending` with a NULL `next_retry_at` for every
+    # row, which left the ticket orphaned (no stamp → `fetch_retryable` skips
+    # it; `label_doing` → `dispatch_new_issues` never rediscovers it) and sent
+    # MR-bearing rows to a full re-implementation. See Issue.reset_for_retry!.
+    Issue.reset_for_retry!(Issue.where(id: issue.id), reset_budget: true, clear_attention: true)
+    Audit.record!(
+      resource: issue, action: 'issue.reset_manual', actor: current_user,
+      payload: { project_path: issue.project_path, iid: issue.issue_iid, previous_state: previous_state }
+    )
   end
 
   def close_issue!(issue)

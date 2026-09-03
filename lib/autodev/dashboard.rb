@@ -107,8 +107,22 @@ module Dashboard
     end
   end
 
+  # No reclaim here, and that is a statement rather than an omission
+  # (alpha-53 review, G8). `Autodev::ResetReclaim` is what takes a ticket back
+  # on GitLab before an abandoned request is resumed, and the dashboard's
+  # button calls it — but `--reset` cannot reach such a row: its scope filters
+  # `status: 'error'`, while `needs_attention` is only ever true on a `done`
+  # row, because every abandon fires the `abandon` AASM event and that lands in
+  # `done`. The first version of this method wired the reclaim in anyway, "so a
+  # future widening inherits it"; the loop was unreachable, its `rescue` was
+  # unreachable, and this repository has spent four tickets (#78, #87, #99 and
+  # the guard above) on code that looked like a protection and was not. If this
+  # scope is ever widened to `done` rows, the reclaim has to be added here with
+  # a test that reaches it.
   def perform_reset(scope, config, pastel)
+    _ = config
     count = scope.count
+
     # The MR split and the `next_retry_at` stamp (task #26) now live in
     # Issue.reset_for_retry! — this used to be their only correct copy, while
     # the dashboard button and recover_errored! each got a piece wrong (#34).

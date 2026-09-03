@@ -79,6 +79,13 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
     create_issue({ status: 'error', retry_count: 2, created_at: 2.hours.ago }.merge(overrides))
   end
 
+  # The shape `handle_auth_failure` (and the two generic handlers) leaves an
+  # `error` row in since Autodev #103: budget unspent, no retry scheduled.
+  def unstamped_within_budget(overrides = {})
+    create_issue({ status: 'error', retry_count: 1, next_retry_at: nil,
+                   created_at: 2.hours.ago }.merge(overrides))
+  end
+
   # --- outcome 1: closed on GitLab (#16207) -------------------------
 
   def test_a_closed_pending_row_is_closed_locally
@@ -173,6 +180,22 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
     issue = run_audit(create_issue(status: 'implementing', mr_iid: 42, created_at: 4.hours.ago))
 
     assert_equal 'checking_pipeline', issue.status
+  end
+
+  # --- outcome 3b: the parked-401 shape (Autodev #103) ----------------
+
+  def test_an_unstamped_error_row_within_budget_gets_its_budget_reaffirmed
+    issue = run_audit(unstamped_within_budget)
+
+    assert_equal 0, issue.retry_count
+    refute_nil issue.next_retry_at
+  end
+
+  def test_an_unstamped_error_row_within_budget_reaches_dormant_exhausted_at_the_cap
+    issue = run_audit(unstamped_within_budget(dormant_recheck_count: CAP))
+
+    assert issue.needs_attention
+    assert_equal 'dormant_exhausted', issue.attention_reason
   end
 
   # --- the bound ------------------------------------------------------
