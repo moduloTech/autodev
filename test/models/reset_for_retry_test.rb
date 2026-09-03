@@ -76,6 +76,26 @@ class ResetForRetryTest < ActiveSupport::TestCase
     assert_equal 2, issue.retry_count
   end
 
+  # `review_failure_count` joins `reset_budget:` (Autodev #107): it is a
+  # budget like `retry_count`, and the dashboard's Reset button used to leave
+  # it untouched — a request abandoned at 5/5 stayed at 5/5 after a reset and
+  # gave itself up on the very next stumble, with no way for the operator who
+  # clicked to know that.
+  def test_reset_budget_clears_the_review_failure_count
+    issue = reset!(errored(review_failure_count: 5), reset_budget: true)
+
+    assert_equal 0, issue.review_failure_count
+  end
+
+  # The automatic revivals (`recover_on_startup!`, `dispatch_dormant_audit`)
+  # do not pass `reset_budget:`, and must not clear a budget they did not
+  # decide to clear.
+  def test_the_review_failure_count_is_preserved_by_default
+    issue = reset!(errored(review_failure_count: 5))
+
+    assert_equal 5, issue.review_failure_count
+  end
+
   # --- attention flags ----------------------------------------------
 
   def test_clear_attention_clears_the_needs_attention_trio

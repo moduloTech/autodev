@@ -4,7 +4,7 @@ require_relative 'rails_helper'
 require_relative 'database_test_helper'
 
 # Which path runs, and what each one does to the counters (Autodev #74).
-class ReviewSkillPathTest < ActiveSupport::TestCase
+class ReviewSkillPathTest < ActiveSupport::TestCase # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
   def setup = setup_database
@@ -42,9 +42,12 @@ class ReviewSkillPathTest < ActiveSupport::TestCase
     assert_equal [true], called
   end
 
-  def test_a_skill_review_failure_increments_the_failure_counter
+  # `:unusable_output`, not `false` (Autodev #107): the contract file being
+  # absent or off-schema is the one skill-path outcome that is still evidence
+  # about *this* request, so it is the only one left that spends the budget.
+  def test_a_skill_review_unusable_output_increments_the_failure_counter
     row = issue
-    monitor(review_skill: 'mr-review', skill_result: false).send(:launch_review, row)
+    monitor(review_skill: 'mr-review', skill_result: :unusable_output).send(:launch_review, row)
 
     assert_equal 1, row.reload.review_failure_count
     assert_equal 0, row.reload.review_count
@@ -53,6 +56,27 @@ class ReviewSkillPathTest < ActiveSupport::TestCase
   def test_an_inconclusive_review_touches_neither_counter_and_returns_to_the_watch
     row = issue
     monitor(review_skill: 'mr-review', skill_result: :inconclusive).send(:launch_review, row)
+
+    assert_equal 0, row.reload.review_count
+    assert_equal 0, row.reload.review_failure_count
+    assert_equal 'checking_pipeline', row.reload.status
+  end
+
+  # `:tool_unavailable` and `:clone_failed` (Autodev #107) join `:inconclusive`
+  # on the side that spends nothing — neither is a statement about the merge
+  # request, only about a tool or a clone that could not run at all.
+  def test_a_tool_unavailable_review_touches_neither_counter_and_returns_to_the_watch
+    row = issue
+    monitor(review_skill: 'mr-review', skill_result: :tool_unavailable).send(:launch_review, row)
+
+    assert_equal 0, row.reload.review_count
+    assert_equal 0, row.reload.review_failure_count
+    assert_equal 'checking_pipeline', row.reload.status
+  end
+
+  def test_a_clone_failed_review_touches_neither_counter_and_returns_to_the_watch
+    row = issue
+    monitor(review_skill: 'mr-review', skill_result: :clone_failed).send(:launch_review, row)
 
     assert_equal 0, row.reload.review_count
     assert_equal 0, row.reload.review_failure_count

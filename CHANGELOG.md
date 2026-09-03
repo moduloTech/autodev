@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **An infrastructure outage no longer spends a review budget, and can no longer abandon a request over it (Autodev #107).** `review_failure_count` used to be, in effect, a counter of "reviews that could not be produced" collapsed into one boolean: the two rescues that fed it covered a clone that never completed, a tool that could not run at all (`danger_claude_prompt` crashing, `mr-review` absent/timed out/crashed/exited non-zero), and a review contract that was absent or off-schema — three unrelated causes, only the last of which is evidence about the merge request under review. Measured: bobette's Docker engine was down from 02/09 23:00 UTC to 03/09 08:26, every `danger-claude` call failing in `ensure_volume` on an API-version mismatch before any container started. powerpanne/core#16030 crossed that window, burned its five review failures inside it — each about two minutes apart — and was abandoned at 03:11 under `review_failures_exhausted`: a GitLab comment, `Development::StandBy`, the ticket handed back to a named person under a broken promise. Its merge request was `mergeable, conflicts no`; nothing was wrong with it.
+
+  `dispatch_review_outcome` (`lib/autodev/pipeline_monitor/reviewer.rb`) now dispatches on three named outcomes instead of `true`/`false`/`:inconclusive`: `:unusable_output` (the contract file is absent or off-schema) is the one cause left that spends `review_failure_count`, unchanged from before; `:tool_unavailable` and `:clone_failed` join `:inconclusive` on the non-spending side, exactly its `resume_watch` mechanism — neither counter moves, the watch clock is preserved, and the row is bounded by `pipeline_watch_max_days` instead. The binary (`mr-review`) path no longer spends the budget on any outcome but success at all: the binary posts its own findings to GitLab, so its exit status carries no verdict autodev can read. Each non-spending outcome writes its own DB-only activity key (`activity_review_tool_unavailable` / `activity_review_clone_failed`, `log_activity_warn` — no GitLab comment, the same precedent `:inconclusive` already set) so an operator reading the issue timeline can tell them apart without opening a log.
+
+  A clone failure moving to the non-spending side reverses an Autodev #74 fix-round-1 choice to count it: it *can* be request-specific (a deleted source branch), but arrives with no evidence to tell that apart from routine GitLab flakiness (Autodev #96 measured ~9% of GitLab reads failing from bobette by TCP refusal, in bursts). Over-spending the budget on an unreadable cause abandons a healthy request; under-spending only costs polls, bounded at `pipeline_watch_max_days`.
+
+  `Issue.reset_for_retry!(reset_budget: true)` — the dashboard's Reset button and the `--reset` CLI — now also clears `review_failure_count`, joining `retry_count`. Before this fix a request abandoned at `REVIEW_FAILURE_THRESHOLD` still carried that count after a reset and could give itself up again on the very next stumble, with no way for the operator who clicked to know that. The automatic revivals (`recover_on_startup!`, `dispatch_dormant_audit`) do not pass `reset_budget:` and keep the budget they did not decide to clear.
+
+  Depends on Autodev #108 for the occasions this closes *ahead of* the reviewer (a broken `danger-claude` now gates the whole cycle before a first review is attempted); this fix covers what is left independent of that gate — a fault starting after the cycle's probe, clone failures, and the reset gesture.
+
 ## [1.0.0-alpha.52] - 2026-09-02
 
 ### Fixed

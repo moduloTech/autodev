@@ -14,10 +14,20 @@ class PipelineMonitor
   # `DIAGNOSTIC_STREAM_LIMIT` in one file and its only reader in another.
   module Reviewer # rubocop:disable Metrics/ModuleLength
     MAX_REVIEW_ROUNDS = 3
-    # Consecutive mr-review failures before we give up reviewing the MR. Each
-    # failed mr-review still fires a state transition, so without a cap the
-    # checking_pipeline ↔ reviewing loop runs forever on a persistently
-    # broken mr-review (token expired, binary crash, etc.).
+    # Consecutive **unusable review output** outcomes before we give up
+    # reviewing the MR (Autodev #107). Each still fires a state transition, so
+    # without a cap the checking_pipeline ↔ reviewing loop runs forever on a
+    # request whose skill review keeps producing a contract file that is
+    # absent or off-schema — the one cause that is about *this* request
+    # meeting *this* skill.
+    #
+    # Before Autodev #107 this also bounded "a persistently broken mr-review
+    # (token expired, binary crash, etc.)" — but neither the tool being
+    # unavailable (`:tool_unavailable`) nor a clone failure (`:clone_failed`)
+    # spends this budget any more, because neither is evidence about the
+    # request: see `dispatch_review_outcome`. What bounds a row stuck on
+    # either of those now is the age bound, `pipeline_watch_max_days`
+    # (`WatchBound`).
     REVIEW_FAILURE_THRESHOLD = 5
     # Per stream, in the failure message only (Autodev #49). 300 characters — the
     # previous cap, applied to stderr alone — is about four lines, enough to lose
@@ -27,6 +37,32 @@ class PipelineMonitor
     # first and OptionParser prints usage first, which are the two shapes this
     # failure is expected to take.
     DIAGNOSTIC_STREAM_LIMIT = 2000
+    # The two review outcomes that spend neither counter (Autodev #107),
+    # joining `:inconclusive` on the same `resume_watch` mechanism.
+    #
+    # `:tool_unavailable` means the tool that runs the review could not run at
+    # all: `danger_claude_prompt` raised (the container runtime, a timeout, a
+    # crash — the Docker API-version mismatch that took bobette down 02-03/09
+    # is the measured case), or the `mr-review` binary is absent, timed out,
+    # crashed, or exited non-zero. The binary posts its own findings to
+    # GitLab, so its exit status carries no verdict autodev can read — a
+    # crash and a refusal look identical from here — which is why the binary
+    # path spends nothing on any outcome but success.
+    #
+    # `:clone_failed` means the skill review's own clone did not complete.
+    # That can be request-specific (a deleted source branch), but it arrives
+    # with no evidence to tell that apart from routine GitLab flakiness
+    # (Autodev #96 measured ~9% of GitLab reads failing from bobette by TCP
+    # refusal, in bursts) — so it stays on the non-spending side too, reversing
+    # the Autodev #74 fix-round-1 choice to count it.
+    #
+    # Counting either as a success would deliver the MR unreviewed; counting
+    # either as a failure spends a budget on a cycle that never got to judge
+    # anything (Autodev #71) — measured on powerpanne/core#16030, abandoned
+    # mid-Docker-outage with a false "review failed 5 times" comment on a
+    # merge request nothing was wrong with (Autodev #107, the ticket this
+    # constant answers).
+    NON_SPENDING_REVIEW_OUTCOMES = %i[tool_unavailable clone_failed].freeze
 
     private
 
@@ -76,8 +112,8 @@ class PipelineMonitor
     # (ErrorHandler) sorts them the way every other `danger_claude_prompt` call site
     # does — `handle_rate_limit` for the quota, `handle_auth_failure` for dead
     # credentials. Named here because this path has no generic handler by design (a
-    # `StandardError` from the review is already `false`), so neither class would be
-    # caught otherwise.
+    # `StandardError` from the review is already read as a named outcome by
+    # `review_with_skill`'s own rescues), so neither class would be caught otherwise.
     rescue RateLimitError, AuthenticationError => e
       handle_review_interruption(issue, e)
     end
@@ -90,34 +126,53 @@ class PipelineMonitor
       log_activity(issue, :reviewing)
     end
 
-    # Four outcomes, not two, and the two that are neither `true` nor `false` are
-    # both cases where the review ran and the *publication* is what did not end as
-    # it should.
-    #
-    # `:inconclusive` means GitLab had not computed the MR's diff_refs yet, so
-    # nothing could be published: hand the row back to `checking_pipeline` WITHOUT
-    # touching either counter, and the next cycle runs the whole review again
-    # (review_count is still 0). Counting it as a success would deliver the MR
-    # unreviewed; counting it as a failure would spend a budget on a cycle that
-    # could not act (Autodev #71).
-    #
-    # `:unanchored` means the opposite: the review was published in full, and what
-    # it published holds nothing back. See `give_up_on_unanchored_review`.
+    # No longer an axis with `false` on it (Autodev #107): `true` is a
+    # success; `:unanchored` is the neutral-review give-up (see
+    # `give_up_on_unanchored_review`); `:unusable_output` is the one remaining
+    # cause that spends `review_failure_count`; `:inconclusive`,
+    # `:tool_unavailable` and `:clone_failed` (`NON_SPENDING_REVIEW_OUTCOMES`
+    # above) are cycles in which judgment never started, for a reason that is
+    # not evidence about the request, and share one mechanism —
+    # `resume_watch`, no counter moved. Full account of each cause on
+    # `NON_SPENDING_REVIEW_OUTCOMES`.
     def dispatch_review_outcome(issue, outcome)
       return finalize_review_success(issue) if outcome == true
       return give_up_on_unanchored_review(issue) if outcome == :unanchored
-      return finalize_review_failure(issue) unless outcome == :inconclusive
+      return finalize_review_failure(issue) if outcome == :unusable_output
+      return resume_after_non_spending_outcome(issue, outcome) if NON_SPENDING_REVIEW_OUTCOMES.include?(outcome)
 
       log "MR !#{issue.mr_iid}: review not published this cycle, retrying next poll"
       resume_watch(issue)
     end
 
-    # The two ways the row goes back to the watch having done nothing: an
-    # `:inconclusive` review and a GitLab outage while publishing. Neither counter
-    # moves, so the row did not move either — and `review_done!` would otherwise
-    # restamp `checking_pipeline_since` to now on the way in, restarting the age
-    # bound on every poll (Autodev #74). `restore_watch_clock` puts the age this
-    # poll started with back.
+    # `:tool_unavailable` and `:clone_failed` join `:inconclusive` on the
+    # non-spending side, but unlike it they still get their own line in the
+    # activity trail (Autodev #107, design §4): a review failure writes
+    # `:review_failed` with its count, and a non-spending outcome must never
+    # write that — the count did not move, and a line claiming otherwise is
+    # the defect this lot exists to end. `log_activity_warn` is DB-only (no
+    # GitLab note update), the same precedent `:inconclusive` already set —
+    # nothing is being asked of anyone, and a note appended on every poll of a
+    # nine-hour outage is the growth Autodev #53 went to some trouble to
+    # bound. An operator reading the issue timeline can still tell "the tool
+    # could not run" from "the clone failed" from "GitLab had not computed
+    # diff_refs yet" without opening a log.
+    def resume_after_non_spending_outcome(issue, outcome)
+      log "MR !#{issue.mr_iid}: review outcome #{outcome}, retrying next poll without spending the review budget"
+      case outcome
+      when :tool_unavailable then log_activity_warn(:review_tool_unavailable)
+      when :clone_failed then log_activity_warn(:review_clone_failed)
+      end
+      resume_watch(issue)
+    end
+
+    # The three ways the row goes back to the watch having done nothing: an
+    # `:inconclusive` review, `:tool_unavailable`, `:clone_failed`, and a
+    # GitLab outage while publishing (the `ApiUnavailableError` rescue in
+    # `launch_review`). Neither counter moves, so the row did not move either
+    # — and `review_done!` would otherwise restamp `checking_pipeline_since`
+    # to now on the way in, restarting the age bound on every poll (Autodev
+    # #74). `restore_watch_clock` puts the age this poll started with back.
     def resume_watch(issue)
       issue.review_done!
       restore_watch_clock(issue)
@@ -249,15 +304,20 @@ class PipelineMonitor
       issue.review_failure_count = 0
     end
 
+    # Every non-success outcome here is `:tool_unavailable` (Autodev #107),
+    # never `:unusable_output`: `mr-review` posts its findings to GitLab
+    # itself, so an exit status this reads carries no verdict on the merge
+    # request — a crash and a refusal look identical from here. The budget is
+    # spent on this path never any more, only the age bound remains.
     def execute_mr_review(issue)
-      return log('mr-review not installed, skipping review') && false unless command_exists?('mr-review')
+      return log('mr-review not installed, skipping review') && :tool_unavailable unless command_exists?('mr-review')
 
       log 'Waiting 15s for GitLab to compute diff_refs...'
       sleep 15
       run_mr_review_command(issue.mr_url)
     rescue StandardError => e
       log_error "mr-review error (non-fatal): #{e.message}"
-      false
+      :tool_unavailable
     end
 
     # mr-review is not a danger-claude call, so it gets no heartbeat of its own
@@ -301,7 +361,7 @@ class PipelineMonitor
       return log('Review completed successfully') || true if ok
 
       log_error "mr-review failed (non-fatal): #{review_failure_diagnostic(out, err, status)}"
-      false
+      :tool_unavailable
     end
 
     # The GitLab credential `mr-review` authenticates with, handed over by autodev
