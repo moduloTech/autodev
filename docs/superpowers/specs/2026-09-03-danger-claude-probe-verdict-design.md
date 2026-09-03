@@ -272,11 +272,31 @@ So the banner reads the recorded `status` and carries per-cause title and hint.
 `quota_exhausted` keeps the current wording verbatim; the three fault causes get
 their own, saying that the tool cannot run and that a human has to act.
 
-### 7. Where the code goes
+### 7. The quota deferral must name the cause too
+
+`PipelineMonitor#defer_review_for_usage` and `#defer_fix_for_usage`
+(`lib/autodev/pipeline_monitor.rb:206` and `:212`) are reached from
+`claude_available?`, so widening `available?` reaches them. Both raise
+`poll_inconclusive!(:claude_usage_exhausted)` and log "Claude usage exhausted,
+deferring mr-review" — a sentence that a dead Docker engine would produce
+verbatim. Same defect as the banner, one layer down, and the reason label is
+read back by the age bound's own log line ("this poll could not conclude
+(<reason>)").
+
+So both take the recorded cause: the flag's reason and the log line name what
+actually happened. Standing the age bound down stays correct for every cause —
+"an infrastructure failure or a quota outage must never be the reason a 14-day-old
+ticket is given up" (Autodev #56) covers a broken tool as squarely as an
+exhausted quota.
+
+Found while specifying Autodev #107, which depends on this gate.
+
+### 8. Where the code goes
 
 * `lib/autodev/usage_checker.rb` — verdict vocabulary, classification, bounded spawn.
 * `app/services/autodev/usage_gate.rb` — record and expose the cause; widen `available?`.
 * `app/services/autodev/health_report.rb` — `check_danger_claude`, `CHECKS`, and `check_claude_usage` narrowed to the quota.
+* `lib/autodev/pipeline_monitor.rb` — the two quota deferrals name the cause.
 * `app/components/web/views/dashboard.rb` — per-cause banner.
 * `config/locales/web.{fr,en}.yml` — card label and banner strings.
 
@@ -303,6 +323,8 @@ answer "available"**, and neither must the Docker 500.
   still reads, so a verdict recorded before the upgrade is not a crash.
 * The dashboard renders the quota wording for `quota_exhausted` and the fault
   wording for `broken`.
+* A deferral under `broken` does not say "quota exhausted", and the age bound
+  still stands down.
 
 ## Docs and i18n
 
