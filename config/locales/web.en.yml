@@ -157,6 +157,7 @@ en:
   web_issue_actions: Actions
   web_issue_reset: Reset
   web_issue_confirm_reset: Restart this request from the beginning?
+  web_issue_reset_refused: "Reset refused: %{error}"
   web_issue_close: Close
   web_issue_confirm_close: Close this ticket? It will move to the "Closed" tab.
   web_issue_deploy_review: Redeploy review

@@ -157,6 +157,7 @@ fr:
   web_issue_actions: Actions
   web_issue_reset: Réinitialiser
   web_issue_confirm_reset: Relancer cette demande depuis le début ?
+  web_issue_reset_refused: "Réinitialisation refusée : %{error}"
   web_issue_close: Clôturer
   web_issue_confirm_close: Clôturer ce ticket ? Il passera dans l'onglet « Clôs ».
   web_issue_deploy_review: Redéployer la review

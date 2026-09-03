@@ -670,7 +670,13 @@ ALLOWED_SWALLOWS = {
     # `PollDispatcher#dispatch`'s own `rescue StandardError` and one unreadable
     # MR takes the whole project's cycle down with it — pipeline checks,
     # discussion fixes and retries included.
-    'route' => 'routing boundary for one issue'
+    'route' => 'routing boundary for one issue',
+    # Autodev #93/#106's write boundary, the same shape as the sweep's `rearm`:
+    # the label is put back and `false` is returned, which the caller (`resume_
+    # recovered_infra`) reads as "do not transition" — not as a verdict on the
+    # request, which stays `done` + `needs_attention` for a human or the next
+    # recheck to look at again.
+    'reclaim_infra_recheck' => 'write boundary: the label is restored and the row is left untransitioned'
   },
   'lib/autodev/pipeline_monitor/api_helpers.rb' => {
     # The one read still allowed to substitute. The substitute names itself in the
@@ -754,6 +760,13 @@ ALLOWED_SWALLOWS = {
     # because a ticket that changed hands in silence is the whole defect this
     # notice exists to prevent.
     'announce_takeover' => 'write after the fact it announces: the takeover has landed and been read back'
+  },
+  'app/services/autodev/ticket_reclaim.rb' => {
+    # `TicketReclaim::announce`'s own version of `announce_takeover` above,
+    # sharing its reason word for word: the assignment has already landed and
+    # been read back by the time this runs, so a failure here reports a
+    # missing notice rather than undoing a completed reclaim.
+    'announce' => 'write after the fact it announces: the takeover has landed and been read back'
   },
   'lib/autodev/review_publisher.rb' => {
     # Autodev #95, and the one entry in this list whose substitute is a *better*
@@ -1026,12 +1039,18 @@ class DegradedApiValueShapeTest < Minitest::Test
   #     construction, so it needs no declaration and gets none (a dead entry is
   #     what `test_no_declared_swallow_is_dead` refuses); what the file buys is
   #     that the next clause here is not free.
+  #
+  # **And two more by Autodev #93/#106**, the same shape as the arrears pass
+  # above: `app/services/autodev/ticket_reclaim.rb` reads and writes an
+  # assignment on a ticket it reclaims, and `app/services/autodev/reset_reclaim.rb`
+  # is its second write (the working label) plus the failure-mode label restore.
   SCANNED = %w[
     lib/autodev/pipeline_monitor.rb lib/autodev/mr_fixer.rb lib/autodev/mr_discussions.rb
     lib/autodev/poll_router.rb lib/autodev/review_skill_source.rb lib/autodev/target_branch.rb
     lib/autodev/missing_base_bound.rb lib/autodev/invalid_request_bound.rb
     lib/autodev/review_publisher.rb app/services/autodev/review_arrears_sweep.rb
     lib/autodev/gitlab_failure.rb lib/autodev/consecutive_occurrences.rb
+    app/services/autodev/ticket_reclaim.rb app/services/autodev/reset_reclaim.rb
   ].freeze
 
   SCANNED_DIRS = %w[lib/autodev/pipeline_monitor lib/autodev/mr_fixer lib/autodev/poll_router].freeze

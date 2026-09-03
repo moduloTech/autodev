@@ -74,7 +74,25 @@ class PollRouter
   # overwhelmingly a request that stalled before any review round ran. Writing 1
   # over its 0 made the first green pipeline after the recovery skip the review
   # and finish the request under `label_done`.
+  #
+  # Every `stagnation_pipeline` row reached `done` through `abandon_issue`,
+  # which hands the ticket back to a human (Autodev #93/#106) — so this pass
+  # is not exempt from the reclaim `ReviewArrearsSweep#reclaim` already does;
+  # it is the one population entirely made of the case the reclaim exists for.
+  # The comment that used to sit here said the opposite and is corrected in
+  # the same pass, on `resume_never_reviewed` below.
+  #
+  # Order follows the design's §5, the sweep's own reason: the label first (no
+  # `clear_scope:` — nobody has asked `untouched_since_giveup?` on this path,
+  # so clearing the scope would destroy the evidence `LabelHandover` reads),
+  # then the assignment with its read-back, then the transition. If the
+  # assignment cannot be landed, the label is put back and nothing is
+  # transitioned — a half-applied resume is exactly what this ticket is about.
   def resume_recovered_infra(issue, client)
+    @client = @route_client = client
+    apply_label_doing(issue.issue_iid)
+    return unless reclaim_infra_recheck(issue, client)
+
     resume_via_pipeline_check(issue, client)
   end
 
@@ -87,10 +105,17 @@ class PollRouter
   # row, the audit log, `stamp_pipeline_watch!` and `persist_status_change!` all
   # run.
   #
-  # The caller owns the two things this method deliberately does not: reading
-  # whether the request is still autodev's, and putting autodev back on the
-  # ticket. The infra pass gets the first from its own dispatch query and does not
-  # need the second; the sweep needs both and has different answers.
+  # The caller owns reading whether the request is still autodev's — the infra
+  # pass gets that from its own dispatch query (`stagnation_pipeline` is
+  # already a give-up), the sweep asks `ownership_verdict`.
+  #
+  # Putting autodev back on the ticket used to be described as the sweep's
+  # alone to do. That was false (Autodev #93/#106): every `stagnation_pipeline`
+  # row reached `done` through `abandon_issue`, which hands the ticket back
+  # exactly like every other give-up, so the infra pass needed the reclaim as
+  # much as the sweep does — it just never did it. `resume_recovered_infra`
+  # now performs its own reclaim before calling in here; leaving that sentence
+  # uncorrected is how the next caller would have skipped it too.
   def resume_never_reviewed(issue, client)
     resume_via_pipeline_check(issue, client, origin: REVIEW_ARREARS_ORIGIN)
   end
@@ -108,13 +133,28 @@ class PollRouter
   # human for a move nobody made. The sweep therefore poses the label first and
   # reads the ticket back before transitioning anything; the `apply_label_doing`
   # inside the reentry then finds nothing to change and writes nothing.
-  # `clear_scope: true` here and nowhere else (review of the alpha-52 lot): this is
-  # the sweep's entry, and the sweep has already asked `untouched_since_giveup?`
-  # whether a human moved this ticket on. Clearing the scope destroys the evidence
-  # of that question, so it may only happen where the question has been answered.
-  def repose_working_label(issue, client)
+  # `clear_scope: true` is the sweep's own choice, made explicit at its call
+  # site rather than baked in here (review of the alpha-52 lot, widened by
+  # Autodev #93/#106 for `resume_recovered_infra` and `Autodev::ResetReclaim`,
+  # which share this method but must default to `false`): the sweep has
+  # already asked `untouched_since_giveup?` whether a human moved this ticket
+  # on before it writes. Clearing the scope destroys the evidence of that
+  # question, so it may only happen where the question has been answered —
+  # nowhere else has asked it.
+  def repose_working_label(issue, client, clear_scope: false)
     @client = @route_client = client
-    apply_label_doing(issue.issue_iid, clear_scope: true)
+    apply_label_doing(issue.issue_iid, clear_scope: clear_scope)
+  end
+
+  # The other side of `repose_working_label`, for a reclaim whose assignment
+  # write did not land (Autodev #93/#106, design §5): puts the give-up's end
+  # label back rather than leaving the ticket carrying `label_doing` with no
+  # transition and no assignment behind it — a half-applied resume is exactly
+  # what this ticket is about. A no-op wherever `label_attention` is not
+  # configured, same as `apply_label_attention` everywhere else.
+  def restore_attention_label(issue, client)
+    @client = @route_client = client
+    apply_label_attention(issue.issue_iid)
   end
 
   private
@@ -122,6 +162,19 @@ class PollRouter
   def resume_via_pipeline_check(issue, client, origin: nil)
     @client = @route_client = client
     reenter_via_pipeline_check(issue, origin: origin)
+  end
+
+  # Returns whether the reclaim landed. On failure the label is put back
+  # (design §5) and the caller must not go on to transition the row.
+  def reclaim_infra_recheck(issue, client)
+    Autodev::TicketReclaim.new(client: client, logger: @logger)
+                          .reclaim!(issue, message_key: :reclaim_infra_recovered)
+    true
+  rescue StandardError => e
+    apply_label_attention(issue.issue_iid)
+    log_error "Issue ##{issue.issue_iid}: could not reclaim the assignment after the infra " \
+              "recheck (#{e.class}: #{e.message}) — left in its handed-back state, the label restored"
+    false
   end
 
   def init_project_settings(project_config)
