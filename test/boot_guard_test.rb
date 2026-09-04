@@ -56,7 +56,11 @@ class BootGuardTest < Minitest::Test
   def setup
     @logger = FakeLogger.new
     @killed = []
-    @killer = ->(pid) { @killed << pid }
+    @verdict = :gone_on_term
+    @stopper = lambda do |pid|
+      @killed << pid
+      @verdict
+    end
   end
 
   # --- what gets reaped -----------------------------------------------------
@@ -100,6 +104,49 @@ class BootGuardTest < Minitest::Test
     guard.call
 
     assert_equal [555, 556], @killed.sort
+  end
+
+  def test_an_orphan_that_honours_term_is_reported_stopped_without_a_kill
+    @verdict = :gone_on_term
+    guard = build_guard(holders: [build_holder(pid: 555, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')])
+
+    guard.call
+
+    assert_equal [555], @killed
+    assert(messages.any? { |m| m.include?('555') && m.match?(/SIGTERM|TERM/) },
+           'the outcome must be stated, and it must name the pid')
+  end
+
+  def test_an_orphan_that_ignores_term_reports_the_kill
+    @verdict = :gone_on_kill
+    guard = build_guard(holders: [build_holder(pid: 555, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')])
+
+    guard.call
+
+    kill_lines = @logger.entries.select { |level, msg| level == :warn && msg.include?('555') }
+
+    refute_empty kill_lines, 'a straggler killed after the grace must be visible at warn level'
+  end
+
+  # The 03/09 case: the boot must NOT stop, and the pid must be named.
+  def test_an_orphan_that_survives_kill_warns_and_lets_the_boot_proceed
+    @verdict = :alive
+    guard = build_guard(holders: [build_holder(pid: 1383, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')])
+
+    guard.call # must not raise
+
+    assert(messages.any? { |m| m.include?('1383') },
+           'a surviving orphan must be named so an operator can find it')
+  end
+
+  def test_the_discovery_sentence_no_longer_announces_a_stop
+    @verdict = :alive
+    guard = build_guard(holders: [build_holder(pid: 1383, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')])
+
+    guard.call
+
+    refute(messages.any? { |m| m.include?('Stopping it (TERM)') },
+           'the discovery sentence must not claim an outcome it has not observed')
   end
 
   # --- what gets left alone -------------------------------------------------
@@ -234,9 +281,11 @@ class BootGuardTest < Minitest::Test
       overrides: { strict: strict, own_pgid: OUR_PGID,
                    holder_finder: ->(_db_path) { holders },
                    pgid_alive: ->(pgid) { live_pgids.include?(pgid) },
-                   killer: @killer }
+                   stopper: @stopper }
     )
   end
+
+  def messages = @logger.entries.map(&:last)
 
   # The real `default_holder_finder`, reached through a guard built with no
   # `holder_finder:` override.

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'open3'
+require_relative 'process_stopper'
 
 module Autodev
   # Autodev #92 design §2: a signal the supervisor's trap does not cover
@@ -79,7 +80,7 @@ module Autodev
     # Production needs the first three; `overrides:` carries everything that
     # has a working default — `strict` and `own_pgid`, which a caller may state
     # instead of reading from the environment, and the three collaborators a
-    # test stands in for (`holder_finder`, `pgid_alive`, `killer`).
+    # test stands in for (`holder_finder`, `pgid_alive`, `stopper`).
     def initialize(db_path:, logger:, locale: :fr, overrides: {})
       @db_path = db_path
       @logger = logger
@@ -89,7 +90,7 @@ module Autodev
       @own_pgid = overrides[:own_pgid] || Process.getpgrp
       @holder_finder = overrides[:holder_finder] || method(:default_holder_finder)
       @pgid_alive = overrides[:pgid_alive] || method(:default_pgid_alive)
-      @killer = overrides[:killer] || method(:default_kill)
+      @stopper = overrides[:stopper] || ->(pid) { ProcessStopper.stop(pid) }
     end
 
     # Raises ConfigError only in strict mode, and only for a holder that
@@ -110,7 +111,7 @@ module Autodev
 
       return refuse(holder) if @strict
 
-      warn_foreign(holder)
+      @logger.warn(foreign_message(holder))
     end
 
     # Not ours to touch unless the group it belongs to has lost its leader.
@@ -125,16 +126,39 @@ module Autodev
       RECOGNIZED_COMMANDS.find { |_name, pattern| holder.command.to_s.match?(pattern) }&.first
     end
 
+    # Discovery and outcome are two sentences on purpose. A single one would
+    # have to be written before the result is known, which is how this defect
+    # was born (Autodev #109): the old key ended with "Stopping it (TERM)" and
+    # nothing ever checked.
     def reap(holder, name)
-      msg = Locales.t(:cli_boot_guard_reaped_orphan, locale: @locale,
-                                                     name: name, pid: holder.pid,
-                                                     pgid: holder.pgid, db_path: @db_path)
-      @logger.warn(msg)
-      @killer.call(holder.pid)
+      @logger.warn(Locales.t(:cli_boot_guard_orphan_found, locale: @locale, name: name, pid: holder.pid,
+                                                           pgid: holder.pgid, db_path: @db_path))
+      announce(@stopper.call(holder.pid), holder, name)
     end
 
-    def warn_foreign(holder)
-      @logger.warn(foreign_message(holder))
+    def announce(verdict, holder, name)
+      case verdict
+      when :gone_on_term
+        @logger.info(Locales.t(:cli_boot_guard_orphan_stopped_term, locale: @locale, name: name, pid: holder.pid))
+      when :gone_on_kill
+        @logger.warn(Locales.t(:cli_boot_guard_orphan_stopped_kill, locale: @locale, name: name,
+                                                                    pid: holder.pid, grace: ProcessStopper::DEFAULT_GRACE_SECONDS))
+      else
+        survived(holder, name)
+      end
+    end
+
+    # An orphan that survives SIGKILL is remarkable, and it still does not
+    # justify refusing the boot: a false refusal is a total outage repeated on
+    # every launchd restart under `KeepAlive: Crashed`, a false pass is one
+    # ghost process. Strict mode is where an operator investigating by hand
+    # gets the refusal.
+    def survived(holder, name)
+      msg = Locales.t(:cli_boot_guard_orphan_survived, locale: @locale, name: name, pid: holder.pid,
+                                                       command: holder.command, db_path: @db_path)
+      raise ConfigError, msg if @strict
+
+      @logger.warn(msg)
     end
 
     def refuse(holder)
@@ -147,12 +171,6 @@ module Autodev
     def foreign_message(holder, strict: false)
       Locales.t(strict ? :cli_boot_guard_unrecognized_holder : :cli_boot_guard_foreign_holder,
                 locale: @locale, pid: holder.pid, command: holder.command, db_path: @db_path)
-    end
-
-    def default_kill(pid)
-      Process.kill('TERM', pid)
-    rescue Errno::ESRCH
-      nil # already gone
     end
 
     # `Process.kill(0, pgid)` asks "does the group leader still exist?"
