@@ -250,6 +250,38 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
     assert_equal 1, issue.dormant_recheck_count
   end
 
+  # --- a failed handover read (Autodev #115) ---------------------------
+  #
+  # `route_still_assigned` reaches `LabelHandover#verdict`'s stage-2 read only
+  # once stage 1 already found a candidate off the labels — this reuses
+  # `handover_client`'s own suspicious-label shape (`AWAITING_CR`) and fails
+  # the read that used to confirm or deny it. `verdict` used to answer this with
+  # nil ("no handover") instead of aborting; `#audit`'s rescue is what has to
+  # decline the row instead, per row, the same way it already did for the
+  # `client.issue` read above.
+  class HandoverReadFailingClient < StubClient
+    def initialize
+      super(labels: [AWAITING_CR])
+    end
+
+    def issue_label_events(_project, _iid)
+      raise Gitlab::Error::ResponseError,
+            FakeResponse.new('boom', 500, FakeRequest.new('https://gitlab.example', '/api/v4/issues'))
+    end
+  end
+
+  def test_a_failed_handover_read_leaves_the_row_untouched
+    issue = run_audit(orphan, client: HandoverReadFailingClient.new)
+
+    assert_equal 'pending', issue.status
+  end
+
+  def test_a_failed_handover_read_still_costs_the_one_recheck_attempt
+    issue = run_audit(orphan, client: HandoverReadFailingClient.new)
+
+    assert_equal 1, issue.dormant_recheck_count
+  end
+
   # --- end of cap -----------------------------------------------------
 
   # #34's pass went silent when its cap ran out: the row became permanently
