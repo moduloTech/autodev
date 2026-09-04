@@ -8,7 +8,9 @@ module Autodev
   # and stayed alive for forty minutes, holding `autodev.db`, its WAL and its
   # shared-memory file open for writing on three descriptors. A manual KILL was
   # needed; `PRAGMA wal_checkpoint(PASSIVE)` answered `0|322|322` immediately
-  # afterwards, which is the checkpoint the ghost had been blocking.
+  # afterwards — consistent with that being the checkpoint the ghost had been
+  # blocking, though the before/after pair is what was measured, not a proof
+  # of the causal link.
   #
   # == Why this is not `Supervisor#shutdown_children`
   #
@@ -52,8 +54,10 @@ module Autodev
     DEFAULT_GRACE_SECONDS = 10
 
     # SIGKILL cannot be caught, so this is a confirmation window and not a
-    # grace: it covers the microseconds between the signal and the process
-    # leaving the table, not any work the process might do.
+    # grace: it covers the time between the signal and the process leaving
+    # the table — typically very short, but not measured, and a process
+    # parked in uninterruptible sleep (D state) can outlast it — not any work
+    # the process might do.
     KILL_CONFIRM_SECONDS = 2
 
     POLL_INTERVAL_SECONDS = 0.2

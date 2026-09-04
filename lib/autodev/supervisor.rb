@@ -106,7 +106,7 @@ module Autodev
     # pid. This one is not written in terms of it: `send_term` logs per child,
     # and `force_kill_stragglers` must `Process.wait` — these are our children
     # and we owe them a reap, where the boot guard's orphans belong to init.
-    # `ProcessStopper#alive?` is `Process.kill(0, pid)`, which cannot tell a
+    # `ProcessStopper.alive?` is `Process.kill(0, pid)`, which cannot tell a
     # running process from a zombie: pointed at our own child it would read a
     # killed-but-unreaped process as alive until something reaps it — measured
     # by adopting the module and watching it happen against a real
@@ -119,8 +119,9 @@ module Autodev
     # (one shared deadline). The
     # production LaunchAgent plist on bobette declares no `ExitTimeOut`, so
     # launchd SIGKILLs a job that has not stopped after its **20-second
-    # default** — the doubled worst case would sit exactly on that budget
-    # instead of comfortably inside it, and a supervisor SIGKILLed mid-teardown
+    # default** — the doubled worst case (measured ~20.748s) would sit just
+    # over that budget instead of comfortably inside it, and a supervisor
+    # SIGKILLed mid-teardown
     # leaves behind every child it had not reached yet, which is the orphan
     # `Autodev::BootGuard` (Autodev #92, #109) exists to clean up after.
     #
