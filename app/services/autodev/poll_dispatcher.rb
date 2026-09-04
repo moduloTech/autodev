@@ -324,7 +324,15 @@ module Autodev
     # the workers.
     rescue StaleTransitionError => e
       stop_on_stale_transition(e)
-    rescue ::Gitlab::Error::ResponseError => e
+    # `ApiUnavailableError` joins the clause at the integration of the alpha-54
+    # lot, for the same reason the sentence above gives. Autodev #115 made
+    # `LabelHandover#events` raise instead of answering `[]`, so `stop_on_handover`
+    # can now reach this boundary with a transport failure — and without the class
+    # named here, that raise would take the six passes that had not run yet down
+    # with it, for the whole project, on ~9% of GitLab reads (Autodev #96). The
+    # row is declined for the cycle and re-read on the next one, which is what
+    # the rule prescribes.
+    rescue ::Gitlab::Error::ResponseError, ::ApiUnavailableError => e
       @logger.error("Failed to check external state for ##{issue.issue_iid}: #{e.message}",
                     project: @path)
     end
