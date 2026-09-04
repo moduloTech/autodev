@@ -12,10 +12,12 @@ module Autodev
   # and Solid Queue's queue.yml-configured worker pool runs them with
   # configurable concurrency (default 3, matching legacy `max_workers`).
   #
-  # The Sequel models (`Issue`, `ActivityEvent`) are dynamically defined by
-  # `Database.build_model!` which the legacy_sinatra initializer runs at
-  # boot — so this class can call `::Issue.where(...)` exactly like the
-  # legacy handlers do.
+  # `Issue` and `ActivityEvent` are ActiveRecord models (`Issue < ApplicationRecord`,
+  # `app/models/issue.rb:12`) — this comment used to say Sequel, which stopped
+  # being true when the Rails migration landed, and is exactly the kind of
+  # unverified statement Autodev #73 exists for: it would send a reader of
+  # `::Issue.where(...)` to `Sequel.expr` instead of ActiveRecord's own query
+  # interface.
   class PollDispatcher # rubocop:disable Metrics/ClassLength
     include ExternalState
     include StaleTransitionBound
@@ -441,12 +443,39 @@ module Autodev
     # recovery. Only `stagnation_pipeline` is targeted — never
     # `stagnation_discussions`, never a code-origin give-up.
 
+    # Autodev #110. The row is **reserved** before the job is enqueued, by moving
+    # the one column the selection races on. Without it every cycle between the
+    # enqueue and the execution re-selected the same row: five enqueues in eighty
+    # seconds on 04/09/2026, then five jobs each spending an attempt, `9/5`.
+    #
+    # Who owns what, and it is not symmetric on purpose:
+    #   * this pass owns `infra_recheck_at` — the clock it selects on;
+    #   * `InfraRecheck#record_recheck_attempt` owns `infra_recheck_count` — the
+    #     budget, spent only by an attempt that actually read a pipeline
+    #     (`verdict == :spend`), so a GitLab outage cannot burn the whole watch
+    #     window without ever having looked.
+    #
+    # The UPDATE repeats the whole predicate rather than matching on `id`: that
+    # is what makes it a compare-and-set, so two cycles racing on one row cannot
+    # both match.
     def dispatch_infra_recheck
       fetch_infra_recheck_candidates.each do |issue|
+        next unless reserve_infra_recheck?(issue)
+
         IssueProcessJob.perform_later(@path, issue.issue_iid, :recheck_infra)
         @logger.info("Enqueued infra recheck for issue ##{issue.issue_iid} " \
                      "(attempt #{(issue.infra_recheck_count || 0) + 1})", project: @path)
       end
+    end
+
+    def reserve_infra_recheck?(issue)
+      ::Issue.where(id: issue.id, project_path: @path, status: 'done',
+                    needs_attention: true, attention_reason: 'stagnation_pipeline')
+             .where('infra_recheck_count < ?', Config.infra_recheck_max(@project_config, @config))
+             .where("infra_recheck_at IS NULL OR infra_recheck_at <= datetime('now')")
+             .update_all(infra_recheck_at: Config.infra_recheck_backoff(@project_config,
+                                                                        @config).seconds.from_now)
+             .positive?
     end
 
     def fetch_infra_recheck_candidates

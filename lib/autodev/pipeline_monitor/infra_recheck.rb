@@ -103,21 +103,32 @@ class PipelineMonitor
       pre_triage(failed_jobs)[:verdict]
     end
 
-    # Records one bounded, backed-off attempt so the dispatch pass self-limits
-    # at the cap. Never re-enters — the caller returns false after this.
+    # Records one bounded attempt. The **clock** belongs to
+    # `PollDispatcher#dispatch_infra_recheck`, which moves `infra_recheck_at` to
+    # reserve the row before the job is enqueued (Autodev #110); this method owns
+    # the budget alone, and is reached only on `verdict == :spend` — an outage or
+    # a transient MR state spends nothing, which is why the two columns cannot
+    # both be written in the same place. Never re-enters — the caller returns
+    # false after this.
     def record_recheck_attempt(issue)
+      max = infra_recheck_max
       attempt = (issue.infra_recheck_count || 0) + 1
-      issue.update(infra_recheck_count: attempt,
-                   infra_recheck_at: infra_recheck_backoff_seconds.seconds.from_now)
-      log "Issue ##{issue.issue_iid}: infra recheck attempt #{attempt}/#{infra_recheck_max}, backing off"
+      return log_recheck_overrun(issue, attempt, max) if attempt > max
+
+      issue.update(infra_recheck_count: attempt)
+      log "Issue ##{issue.issue_iid}: infra recheck attempt #{attempt}/#{max}, backing off"
+    end
+
+    # Autodev #110: the old code logged `9/5` and wrote it anyway. A logged
+    # overrun with no consequence is what kept the defect invisible for a night —
+    # a write beyond the cap is refused and logged at warning level instead.
+    def log_recheck_overrun(issue, attempt, max)
+      log_error "Issue ##{issue.issue_iid}: refusing to record infra recheck attempt " \
+                "#{attempt} past the cap of #{max}"
     end
 
     def infra_recheck_max
       ::Config.infra_recheck_max(@project_config, @config)
-    end
-
-    def infra_recheck_backoff_seconds
-      ::Config.infra_recheck_backoff(@project_config, @config)
     end
   end
 end
