@@ -57,6 +57,13 @@ module Autodev
     # `nil` when nothing happened or when autodev did it itself; a Verdict when
     # somebody else moved the ticket on. `reason` is also the locale key suffix
     # the caller uses (`handover_#{reason}` / `activity_handover_#{reason}`).
+    #
+    # A failed label-events read during `decisive_event` raises rather than
+    # answering nil (Autodev #115): `suspicion` is the evidence a handover
+    # happened, already read for free off the labels the caller fetched, and an
+    # outage on the *second* read (who did it) must not erase that evidence into
+    # "nothing happened" — see `events` for the full account and for which
+    # boundary declines the row per caller.
     def verdict(gl_issue, issue_iid)
       suspicion = suspect(Array(::GitlabHelpers.field(gl_issue, :labels)))
       return unless suspicion
@@ -77,6 +84,14 @@ module Autodev
     # separates "autodev parked it there in July" from "a human moved it on since"
     # is *when* the edit was made, and the author of an edit is read off the
     # resource label events rather than inferred — the rule this class exists for.
+    #
+    # Same failure rule as `verdict` (Autodev #115): a failed `decisive_event`
+    # read raises, it does not answer `false`. `Autodev::UntouchedSinceGiveup`,
+    # this method's one caller, already documents that "the three helpers raise
+    # on an unreadable GitLab" — until this fix that sentence was false for this
+    # one, and a failed read here read as "untouched", i.e. permission to
+    # reclaim a ticket a human might be holding (the Autodev #98 harm, reached
+    # through this door).
     def moved_since?(gl_issue, issue_iid, threshold)
       return false if threshold.nil?
 
@@ -96,6 +111,15 @@ module Autodev
     # an operator closed by hand from the dashboard carries a todo label that was
     # applied *before* the close, so it stays closed and the button keeps working
     # as an off-switch. Only a fresh application counts as a new request.
+    #
+    # A failed read raises here too (Autodev #115), even though `false` (nobody
+    # re-asked, stay `closed`) would have been the conservative answer on its
+    # own: the label stays on the ticket and the next cycle asks again, so
+    # nothing here is lost by declining instead of guessing. One definition
+    # serving every consumer of `events` uniformly was judged better than a
+    # fallback that would only ever be right for this one — see `events`.
+    # `PollRouter#route` is this consumer's boundary and already declines the
+    # row for the cycle on `ApiUnavailableError`.
     def todo_reapplied_after?(issue_iid, threshold)
       return false if threshold.nil? || labels_todo.empty?
 
@@ -240,7 +264,9 @@ module Autodev
     #
     # The edit that produced the state we read, or nil when the events disagree
     # with it: an event carrying the other action means the labels are stale, not
-    # that a human acted.
+    # that a human acted. A failed read never reaches this fallthrough — `events`
+    # raises instead (Autodev #115) — so this `nil` is only ever the labels
+    # disagreeing with a real answer, never a folded-in outage.
     def decisive_event(issue_iid, suspicion)
       event = last_event_for(issue_iid, suspicion.label)
       return unless event
@@ -264,11 +290,48 @@ module Autodev
     # for that without a special case.
     def label_name(event) = ::GitlabHelpers.field(::GitlabHelpers.field(event, :label), :name)
 
+    # A failed read here used to answer `[]` and log it (Autodev #62's rule,
+    # broken): on `verdict`'s path `[]` reaches `decisive_event` as "no event
+    # contradicts the labels", i.e. the good news, on the read that decides
+    # *who* moved a ticket whose evidence (`suspicion`) was already found for
+    # free off the labels the caller fetched. An outage there did not close the
+    # ticket by itself, but it silently discarded that evidence rather than
+    # merely declining to act on it — and the next poll re-derives the same
+    # `suspicion` from the same labels and can lose it again, for as long as
+    # this one call keeps failing.
+    #
+    # Three consumers share this method and all three now abort instead of
+    # answering: `verdict` and `moved_since?` reach it through
+    # `decisive_event`/`last_event_for`, and `todo_reapplied_after?` calls it
+    # directly. The third's `false` (nobody re-asked, stay `closed`) is the
+    # conservative answer and is self-correcting on its own — the todo label
+    # stays on the ticket and the next cycle asks again — so raising there costs
+    # only a cycle's delay, and one definition serving all three uniformly was
+    # judged better than a fallback that would only ever be right for one of
+    # them.
+    #
+    # `GitlabHelpers.answer` is the raise; each caller's own boundary is what
+    # catches it, and every one of them already means "decline this row this
+    # cycle" — except one, checked rather than assumed (Autodev #115):
+    # `PollRouter#route` (`todo_reapplied_after?`) already names
+    # `ApiUnavailableError` on its rescue line, and so does
+    # `Autodev::UntouchedSinceGiveup`'s first caller,
+    # `PollRouter::ResumeHandler#infra_recheck_still_ours?` (`moved_since?`).
+    # Its second caller, `ReviewArrearsSweep#examine` (`moved_since?` too),
+    # catches it by inheritance through a per-row `rescue StandardError` rather
+    # than by name, with the same effect — decline this row, tally it
+    # `:unreadable`, examine the next one. `DormantAudit#audit` (`verdict`, via
+    # `route_still_assigned`) is widened alongside this change.
+    # `PollDispatcher#check_external_state` (`verdict`, via `stop_on_handover`)
+    # is not: it rescues `StaleTransitionError` and
+    # `Gitlab::Error::ResponseError` only, so this raise currently escapes it to
+    # `PollDispatcher#dispatch`'s own `rescue StandardError` — the whole
+    # project's dispatch pass for that one cycle, not just this row.
+    # `poll_dispatcher.rb` is owned by a sibling branch integrating separately
+    # and is out of scope here; see this ticket's report for the follow-up it
+    # leaves.
     def events(issue_iid)
-      Array(@client.issue_label_events(@path, issue_iid))
-    rescue ::Gitlab::Error::ResponseError => e
-      @logger.error("Failed to read label events for ##{issue_iid}: #{e.message}", project: @path)
-      []
+      Array(::GitlabHelpers.answer(:issue_label_events) { @client.issue_label_events(@path, issue_iid) })
     end
   end
 end

@@ -178,7 +178,13 @@ module Autodev
       attempt = (issue.dormant_recheck_count || 0) + 1
       issue.update(dormant_recheck_count: attempt, dormant_recheck_at: backoff.seconds.from_now)
       route(issue, @client.issue(@path, issue.issue_iid), attempt)
-    rescue ::Gitlab::Error::ResponseError => e
+    # `route_still_assigned` → `stop_on_handover` → `LabelHandover#verdict` can
+    # now raise `ApiUnavailableError` on a failed label-events read (Autodev
+    # #115 — it used to answer `[]`/nil instead of aborting). This boundary is
+    # per row (`candidates.each` in `run`), so declining here leaves the rest of
+    # this cycle's audit to run, exactly like the `Gitlab::Error::ResponseError`
+    # case already did for the outer `client.issue` read above.
+    rescue ::Gitlab::Error::ResponseError, ::ApiUnavailableError => e
       @logger.error("Failed to audit dormant ##{issue.issue_iid}: #{e.message}", project: @path)
     end
 

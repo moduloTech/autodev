@@ -105,7 +105,21 @@ module Autodev
       message = ::Locales.t(key, locale: (issue.locale || 'fr').to_sym,
                                  tag: ::ActivityLogger.tag, label_todo: first_labels_todo, **vars)
       @client.create_issue_note(@path, issue.issue_iid, message)
-    rescue ::Gitlab::Error::ResponseError => e
+    # A write (Autodev #62 scopes writes out of the read rule): a stop notice
+    # that could not be posted reports what happened, it invents nothing, so
+    # this stays non-fatal. Widened from `Gitlab::Error::ResponseError` alone to
+    # the whole transport family (Autodev #115): a `Net::ReadTimeout` or
+    # `Errno::ECONNRESET` posting this note used to escape uncaught, unlike
+    # every other write-swallow in this codebase.
+    #
+    # Spelled out rather than `rescue *GitlabHelpers::TRANSPORT_ERRORS`, on
+    # `PollRouter::ResumeHandler#infra_recheck_still_ours?`'s own precedent: a
+    # bare splat of the constant carries none of the literal class names
+    # `test/api_failure_is_not_a_verdict_test.rb`'s scanner matches a `rescue`
+    # line against, so it would not be recognised as a swallow at all were this
+    # file ever brought into `SCANNED`.
+    rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
+           ::OpenSSL::SSL::SSLError, ::EOFError => e
       @logger.error("Failed to post the stop notice on ##{issue.issue_iid}: #{e.message}",
                     project: @path)
     end
