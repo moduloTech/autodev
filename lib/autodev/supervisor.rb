@@ -115,7 +115,8 @@ module Autodev
     # `ProcessStopper.stop` is also per-pid, where this method waits for every
     # child against one shared deadline; adopting it would make two
     # simultaneous stragglers wait out `TERM_GRACE_SECONDS` one after another
-    # instead of together — measured at ~20s against today's ~10s. The
+    # instead of together — measured at ~20s against a reasoned ~10s today
+    # (one shared deadline). The
     # production LaunchAgent plist on bobette declares no `ExitTimeOut`, so
     # launchd SIGKILLs a job that has not stopped after its **20-second
     # default** — the doubled worst case would sit exactly on that budget
