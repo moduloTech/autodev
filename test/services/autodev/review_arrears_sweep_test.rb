@@ -316,13 +316,60 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
     assert_includes @out.string, 'state opened, merge status conflict, conflicts yes'
   end
 
-  # Which also means: the first row a default run re-arms is the one most likely
-  # to reach a danger-claude conflict resolution and a force-push on a client
-  # branch, at the correction round after the review.
-  def test_a_conflicted_merge_request_is_still_eligible
+  # Autodev #105. This test used to assert the opposite, with a comment noting
+  # that the first row a default run re-arms is the one most likely to reach a
+  # danger-claude conflict resolution and a force-push on a client branch.
+  #
+  # Measured on 02/09/2026: two of the six eligible rows were in conflict, both
+  # were taken from the people holding them, and they ran 32 and 39 hours — 21
+  # danger-claude correction rounds on one of them — before giving up on
+  # stagnation. Neither reached the `gitlab_refused_request` bound the ticket
+  # expected. The information was on the payload the whole time: `describe` prints
+  # `conflicts yes` three lines from the decision that ignores it.
+  def test_a_conflicted_merge_request_is_declined
     issue = arrear
 
     sweep(StubClient.new(mr: FakeMr.new('opened', 'conflict', true)), apply: true)
+
+    assert_equal 'done', issue.reload.status, 'a conflicted merge request must not be re-armed'
+    assert_includes @out.string, 'conflicts'
+  end
+
+  def test_a_conflicted_merge_request_is_declined_on_the_flag_alone
+    issue = arrear
+
+    # `detailed_merge_status` can be anything while `has_conflicts` is true.
+    sweep(StubClient.new(mr: FakeMr.new('opened', 'discussions_not_resolved', true)), apply: true)
+
+    assert_equal 'done', issue.reload.status
+  end
+
+  def test_a_conflicted_merge_request_is_declined_on_the_merge_status_alone
+    issue = arrear
+
+    sweep(StubClient.new(mr: FakeMr.new('opened', 'conflict', false)), apply: true)
+
+    assert_equal 'done', issue.reload.status
+  end
+
+  # A read that could not answer is not permission to take somebody's ticket
+  # (Autodev #67, which `conflicts` already applies to this same field). `waiting`
+  # costs nothing: the row stays in the arrears and the next run asks again, by
+  # which time GitLab will have finished computing.
+  def test_a_merge_status_still_being_computed_is_not_eligible
+    issue = arrear
+
+    sweep(StubClient.new(mr: FakeMr.new('opened', 'checking', false)), apply: true)
+
+    assert_equal 'done', issue.reload.status
+    assert_includes @out.string, 'waiting 1'
+  end
+
+  # The regression guard: this change sits on the path of every eligible row.
+  def test_a_clean_merge_request_is_still_re_armed
+    issue = arrear
+
+    sweep(StubClient.new(mr: FakeMr.new('opened', 'mergeable', false)), apply: true)
 
     assert_equal 'checking_pipeline', issue.reload.status
   end
