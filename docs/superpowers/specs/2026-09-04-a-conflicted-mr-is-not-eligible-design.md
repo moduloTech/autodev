@@ -40,7 +40,7 @@ database on 04/09:
 |---|---|---|
 | Ran from | 02/09 15:18 | 02/09 15:03 |
 | Gave up at | 04/09 01:10 | 04/09 06:02 |
-| Elapsed | ~32 h | ~39 h |
+| Elapsed | ~34 h | ~39 h |
 | Final `attention_reason` | `stagnation_pipeline` | `stagnation_discussions` |
 | `fix_round` | 2 | 7 |
 | `discussion_fix_round` | 1 | 6 |
@@ -48,6 +48,10 @@ database on 04/09:
 | Correction rounds (`discussion_fixing`) | 21 | — |
 | `discussions_checking` / unchanged | 23 / 4 | 34 / 23 |
 | `error` activity events | 19 | 25 |
+
+15839's elapsed figure was recomputed from the stored timestamps above (02/09
+15:18 → 04/09 01:10:04 = 1 day, 9:52:04) after this table first read "~32 h";
+it is ~34 h.
 
 Neither ended under `gitlab_refused_request`. Both were fully re-armed, ran the
 whole correction loop for a day and a half on a merge request that could not
@@ -162,7 +166,7 @@ TDD. Every test verified red against the fix removed.
 ## Docs
 
 - `CHANGELOG.md` `[Unreleased]`, carrying the measured outcome of 15839 and
-  14724 — 32 and 39 hours, 21 correction rounds, two give-ups on stagnation —
+  14724 — 34 and 39 hours, 21 correction rounds, two give-ups on stagnation —
   because it corrects the estimate written in the ticket and in the error
   catalogue.
 - The error catalogue's costing of `gitlab_refused_request` mentions the
