@@ -46,3 +46,52 @@ plugin :tmp_restart
 # Specify the PID file. Defaults to tmp/pids/server.pid in development.
 # In other environments, only set the PID file if requested.
 pidfile ENV['PIDFILE'] if ENV['PIDFILE']
+
+# Autodev #112: an open `/stream` connection (SSE via `ActionController::Live`,
+# see `StreamController`) never releases its Puma thread on its own — a tab
+# left open holds it for the tab's whole lifetime by design (alpha-16
+# changelog entry). `force_shutdown_after` is unset by default (absent from
+# Puma's own defaults, confirmed in this gem version — puma 6.6.1,
+# `lib/puma/server.rb:604-609`), so `graceful_shutdown` calls
+# `@thread_pool.shutdown` with **no timeout** when a thread is still parked
+# there: a SIGTERM closed the port at once (the next process could bind it)
+# but left the old process running, holding `~/.autodev/autodev.db`, its WAL
+# and its shared-memory file open for writing — reproduced locally (a client
+# attached to `/stream` kept the process alive at least 16s post-SIGTERM with
+# no cap) and measured in production holding the database for 40 minutes on
+# 03/09/2026.
+#
+# 2 seconds — not the 5 this ticket's own brief proposed, which the code
+# ruled out. `force_shutdown_after` is not the whole wait: once it elapses,
+# `Puma::ThreadPool#shutdown` raises `ForceShutdown` in the stuck thread and
+# then waits a **second**, fixed grace period — `SHUTDOWN_GRACE_TIME = 5`
+# seconds (`lib/puma/thread_pool.rb:26`), settable only via the
+# undocumented `pool_shutdown_grace_time` option ("Not an 'exposed' option
+# ... used in CI", same file) and reachable from nowhere in the public DSL
+# `config/puma.rb` speaks — before it finally kills the thread and waits up
+# to 1 more second. Measured against a real client attached to `/stream`,
+# with `Process.clock_gettime` around a real `SIGTERM` (see
+# `test/sse_shutdown_test.rb` / AGENT-REPORT.md for the harness):
+# `force_shutdown_after` → total time to exit was `:immediately`(0) → 5.1s,
+# `1` → 6.1s, `2` → 7.1s, `3` → 8.1s, `5` → 10.2s. The relationship is
+# `force_shutdown_after + ~5.1s`, not `force_shutdown_after` alone.
+#
+# `Autodev::Supervisor::TERM_GRACE_SECONDS` is 10: the supervisor KILLs a
+# straggler after that, so Puma must exit *inside* the window or every
+# ordinary shutdown — not only one with a stuck SSE thread — ends in a KILL
+# instead of a drain. The brief's 5 measures out at ~10.2s, past the
+# supervisor's own ceiling more often than not; `2` measures at ~7.1s,
+# leaving close to 3s of margin against process-scheduling jitter on top of
+# this dev machine's own numbers. launchd's `ExitTimeOut` defaults to 20s
+# with no override in the production plist (read on bobette, 04/09/2026),
+# so either number clears that bound easily — the supervisor's 10s is the
+# binding constraint, not launchd's.
+#
+# Why 2 and not lower: `:immediately`/`1` would buy more margin against the
+# supervisor's ceiling, but neither is chosen for that. 2 is the smallest
+# value that still comfortably exceeds any real request this app serves —
+# an ordinary dashboard render is milliseconds — so it is the floor that
+# costs nothing against real, in-flight, non-SSE work while still clearing
+# the ceiling with margin to spare. Going lower would trade that real-work
+# safety for margin the measurements above show is already sufficient.
+force_shutdown_after 2
