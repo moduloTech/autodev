@@ -53,6 +53,10 @@ class BootGuardTest < Minitest::Test
   OUR_PGID = 4242
   DEAD_PGID = 1176
 
+  # The anchor `assert_outcomes_do_not_cross_contaminate` checks each locale's
+  # KILL sentence for, and the TERM sentence's absence of (see that method).
+  ESCALATION_WORD = { en: 'escalated', fr: 'dépassé' }.freeze
+
   def setup
     @logger = FakeLogger.new
     @stopped = []
@@ -176,15 +180,22 @@ class BootGuardTest < Minitest::Test
   # `announce` dispatches to for a given verdict is a property of this file,
   # not of the locale file. What a locale swap breaks is the *meaning* of the
   # text at each key, so the second half of this test checks the one thing
-  # that never depends on which locale is loaded: the words "killed" and
-  # "SIGKILL" name what actually happened and must land on the sentence that
-  # actually happened to, in either language and however the prose is phrased.
+  # that does not move with a swap: the words that name what actually
+  # happened, in the locale actually rendered — checked in **both** `:en` and
+  # `:fr`, not `:en` alone (the neutral review of the alpha-54 lot: the first
+  # version of this test rendered `:en` only, while `BootGuard`'s default is
+  # `:fr` and production configures `web.locale: fr` — so a swap of the exact
+  # pair this test exists to catch, made in `cli.fr.yml`, the file the
+  # deployed sentence actually reads, left the whole suite green).
   def test_the_three_outcomes_are_distinct_and_only_the_matching_one_is_logged
     holder = build_holder(pid: 555, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')
-    rendered = observed_outcome_messages(holder)
 
-    assert_outcomes_match_their_own_locale_key(rendered, holder)
-    assert_outcomes_do_not_cross_contaminate(rendered)
+    %i[en fr].each do |locale|
+      rendered = observed_outcome_messages(holder, locale: locale)
+
+      assert_outcomes_match_their_own_locale_key(rendered, holder, locale)
+      assert_outcomes_do_not_cross_contaminate(rendered, locale)
+    end
   end
 
   # --- the default stopper, which every other test bypasses -----------------
@@ -350,11 +361,11 @@ class BootGuardTest < Minitest::Test
     Autodev::BootGuard::Holder.new(pid: pid, ppid: ppid, pgid: pgid, command: command)
   end
 
-  def build_guard(holders:, strict: false, live_pgids: [])
+  def build_guard(holders:, strict: false, live_pgids: [], locale: :en)
     Autodev::BootGuard.new(
       db_path: '/home/x/.autodev/autodev.db',
       logger: @logger,
-      locale: :en,
+      locale: locale,
       overrides: { strict: strict, own_pgid: OUR_PGID,
                    holder_finder: ->(_db_path) { holders },
                    pgid_alive: ->(pgid) { live_pgids.include?(pgid) },
@@ -372,11 +383,11 @@ class BootGuardTest < Minitest::Test
       alive: :cli_boot_guard_orphan_survived }
   end
 
-  def observed_outcome_messages(holder)
+  def observed_outcome_messages(holder, locale:)
     outcome_keys.each_with_object({}) do |(verdict, _key), acc|
       @logger = FakeLogger.new
       @verdict = verdict
-      guard = build_guard(holders: [holder])
+      guard = build_guard(holders: [holder], locale: locale)
 
       guard.call
 
@@ -386,15 +397,15 @@ class BootGuardTest < Minitest::Test
     end
   end
 
-  def assert_outcomes_match_their_own_locale_key(rendered, holder)
+  def assert_outcomes_match_their_own_locale_key(rendered, holder, locale)
     outcome_keys.each_key do |verdict|
-      assert_equal expected_outcome_message(verdict, holder), rendered[verdict]
+      assert_equal expected_outcome_message(verdict, holder, locale), rendered[verdict]
     end
   end
 
-  def expected_outcome_message(verdict, holder)
+  def expected_outcome_message(verdict, holder, locale)
     extra = verdict == :alive ? { command: holder.command, db_path: '/home/x/.autodev/autodev.db' } : {}
-    Locales.t(outcome_keys[verdict], locale: :en, name: 'rails-server', pid: holder.pid, **extra)
+    Locales.t(outcome_keys[verdict], locale: locale, name: 'rails-server', pid: holder.pid, **extra)
   end
 
   # The full-string checks above cannot, by themselves, catch a locale file
@@ -402,12 +413,28 @@ class BootGuardTest < Minitest::Test
   # "expected" side is read through the same `Locales.t` call as the "actual"
   # side, so a swap changes both identically and the equality still holds.
   # These checks anchor on the one thing that does not move with such a
-  # swap — the words that actually name what happened.
-  def assert_outcomes_do_not_cross_contaminate(rendered)
+  # swap — the words that actually name what happened, in the locale actually
+  # under test rather than in English alone (Autodev #109 review round two):
+  # `observed_outcome_messages` used to render `:en` only, so a swap of the
+  # TERM/KILL pair in `cli.fr.yml` left every test in the suite green — the
+  # deployed sentence is `:fr` (`BootGuard`'s default, and what
+  # `bin/autodev:473` passes from `web.locale`), so that was the one locale
+  # this guard did not cover.
+  #
+  # `ESCALATION_WORD` is the anchor: since Autodev #109's follow-up correction
+  # (a `:gone_on_kill` sentence must not claim a kill that may not have
+  # happened — `ProcessStopper#stop`'s KILL-vs-ESRCH race), the KILL sentence
+  # names the *escalation past the grace period* rather than a kill, in both
+  # locales, and the TERM sentence names neither. "SIGKILL" itself is
+  # reserved for `:alive`, which is the one verdict that names the signal it
+  # survived, in both locales.
+  def assert_outcomes_do_not_cross_contaminate(rendered, locale)
+    escalation = ESCALATION_WORD.fetch(locale)
+
     assert_equal rendered.values.uniq.length, rendered.size, 'the three outcomes must render distinct sentences'
-    refute_includes rendered[:gone_on_term], 'killed', 'a TERM stop must not claim a kill'
+    refute_includes rendered[:gone_on_term], escalation, 'a TERM stop must not claim an escalation past the grace'
     refute_includes rendered[:gone_on_term], 'SIGKILL', 'a TERM stop must not name an escalation that never happened'
-    assert_includes rendered[:gone_on_kill], 'killed', 'a KILL escalation must say the process was killed'
+    assert_includes rendered[:gone_on_kill], escalation, 'a KILL escalation must say it escalated past the grace'
     refute_includes rendered[:gone_on_kill], 'SIGKILL',
                     "the KILL sentence names the escalation delivered, not survival — that's :alive's word"
     assert_includes rendered[:alive], 'SIGKILL', 'a surviving orphan must name the signal it survived'

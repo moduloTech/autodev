@@ -88,10 +88,19 @@ pidfile ENV['PIDFILE'] if ENV['PIDFILE']
 # binding constraint, not launchd's.
 #
 # Why 2 and not lower: `:immediately`/`1` would buy more margin against the
-# supervisor's ceiling, but neither is chosen for that. 2 is the smallest
-# value that still comfortably exceeds any real request this app serves —
-# an ordinary dashboard render is milliseconds — so it is the floor that
-# costs nothing against real, in-flight, non-SSE work while still clearing
-# the ceiling with margin to spare. Going lower would trade that real-work
-# safety for margin the measurements above show is already sufficient.
+# supervisor's ceiling, but neither is chosen for that. 2s does not
+# comfortably cover every request this app serves, and the neutral review of
+# the alpha-54 lot is right to say so: `IssuesController#reset` (via
+# `Autodev::ResetReclaim.perform`) makes two synchronous GitLab writes
+# in-request — repose the working label, then reclaim the assignment — and
+# `DeployReviewsController#index` fetches merge requests from GitLab
+# synchronously too; either can outlast 2s on a slow link. `ForceShutdown`
+# landing between `ResetReclaim`'s two writes leaves the reclaim
+# half-applied — the label reposed but the assignment not reclaimed, or the
+# reverse — a state nothing here repairs on its own. The choice of 2 stands
+# anyway: most requests this app serves ARE ordinary dashboard renders
+# (milliseconds), the alternative this ticket exists to fix is an unbounded
+# hang, and cutting an occasional slow reclaim mid-write is the trade that
+# choice makes, not one it hides. Going lower would trade real-work safety
+# for margin the measurements above show is already sufficient.
 force_shutdown_after 2

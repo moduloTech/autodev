@@ -295,11 +295,20 @@ module Autodev
     # `conflicts` already applies to this field, applied to the decision as well.
     # `:waiting` rather than `:eligible`: a read that could not answer is not
     # permission to take somebody's ticket, and the next run asks again for free.
+    #
+    # The same rule extends to `has_conflicts` itself (neutral review of the
+    # alpha-54 lot): `nil` there is a read that did not answer either — not
+    # "no conflicts" — and used to fall through to `:eligible` whenever the
+    # status was neither `checking` nor `conflict`. `conflicts` (below) already
+    # reports `nil` as `'unknown'`, so the report could print "conflicts
+    # unknown" on the very row the decision just called eligible and re-armed.
     def opened_verdict(merge_req)
       status = ::GitlabHelpers.field(merge_req, :detailed_merge_status).to_s
+      has_conflicts = ::GitlabHelpers.field(merge_req, :has_conflicts)
       return :waiting if status == 'checking'
       return :mr_conflicted if status == 'conflict'
-      return :mr_conflicted if ::GitlabHelpers.field(merge_req, :has_conflicts)
+      return :mr_conflicted if has_conflicts
+      return :waiting if has_conflicts.nil?
 
       :eligible
     end

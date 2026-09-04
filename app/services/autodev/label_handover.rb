@@ -311,25 +311,20 @@ module Autodev
     # them.
     #
     # `GitlabHelpers.answer` is the raise; each caller's own boundary is what
-    # catches it, and every one of them already means "decline this row this
-    # cycle" — except one, checked rather than assumed (Autodev #115):
-    # `PollRouter#route` (`todo_reapplied_after?`) already names
-    # `ApiUnavailableError` on its rescue line, and so does
-    # `Autodev::UntouchedSinceGiveup`'s first caller,
+    # catches it, and every one of them means "decline this row this cycle",
+    # checked rather than assumed (Autodev #115): `PollRouter#route`
+    # (`todo_reapplied_after?`) already names `ApiUnavailableError` on its
+    # rescue line, and so does `Autodev::UntouchedSinceGiveup`'s first caller,
     # `PollRouter::ResumeHandler#infra_recheck_still_ours?` (`moved_since?`).
     # Its second caller, `ReviewArrearsSweep#examine` (`moved_since?` too),
     # catches it by inheritance through a per-row `rescue StandardError` rather
     # than by name, with the same effect — decline this row, tally it
     # `:unreadable`, examine the next one. `DormantAudit#audit` (`verdict`, via
-    # `route_still_assigned`) is widened alongside this change.
+    # `route_still_assigned`) was widened alongside this change, and so was
     # `PollDispatcher#check_external_state` (`verdict`, via `stop_on_handover`)
-    # is not: it rescues `StaleTransitionError` and
-    # `Gitlab::Error::ResponseError` only, so this raise currently escapes it to
-    # `PollDispatcher#dispatch`'s own `rescue StandardError` — the whole
-    # project's dispatch pass for that one cycle, not just this row.
-    # `poll_dispatcher.rb` is owned by a sibling branch integrating separately
-    # and is out of scope here; see this ticket's report for the follow-up it
-    # leaves.
+    # at the alpha-54 lot's integration: its rescue line now names
+    # `ApiUnavailableError` beside `Gitlab::Error::ResponseError`, so every
+    # consumer's boundary catches this raise.
     def events(issue_iid)
       Array(::GitlabHelpers.answer(:issue_label_events) { @client.issue_label_events(@path, issue_iid) })
     end

@@ -24,7 +24,13 @@ class ADuplicateJobFindsNothingToDoTest < Minitest::Test
     process: 'IssueProcessor#process leaves PROCESSABLE_STATES on start_processing!',
     check_pipeline: 'a conclusive poll leaves checking_pipeline; an inconclusive one re-reads harmlessly',
     fix_discussions: 'a round ends on discussions_fixed! or an abandon, leaving fixing_discussions',
-    retry_errored: 'retry_pipeline! / retry_processing! leave error',
+    retry_errored: 'retry_pipeline! / retry_processing! leave error — except while ' \
+                   '`handed_over?` keeps declining on an unreadable GitLab read (Autodev #102): ' \
+                   'the row stays in `error` with `next_retry_at` unchanged, so `dispatch_retries` ' \
+                   're-enqueues it every cycle for as long as the read keeps failing. Not RESERVED: ' \
+                   '`retry_count` is written by `mark_failed`, not by this pass, so nothing is ' \
+                   'overspent — the recurring cost is one extra GitLab read per cycle, not a budget ' \
+                   'unit, and the row self-clears the moment the read succeeds',
     retry_stuck: 'IssueProcessor#process leaves pending'
   }.freeze
 

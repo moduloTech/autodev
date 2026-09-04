@@ -276,6 +276,70 @@ class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/Clas
     assert_equal 'checking_pipeline', issue.status
   end
 
+  # --- ApiUnavailableError joined the same rescue at the lot's integration --
+  #
+  # `LabelHandover#events` raises `ApiUnavailableError` on a failed
+  # label-events read (Autodev #115), and `stop_on_handover` reaches it on the
+  # second, evidence-gathering read once the free label check already found a
+  # candidate. `check_external_state`'s rescue clause gained
+  # `::ApiUnavailableError` beside `Gitlab::Error::ResponseError` at this lot's
+  # integration to catch it (`app/services/autodev/poll_dispatcher.rb`) —
+  # closing a gap the neutral review found nothing in this suite capable of
+  # detecting: reverting that one class off the rescue line leaves every other
+  # test in the suite green, because nothing else ever drives a label-events
+  # read to fail from inside `check_external_state`.
+  #
+  # Proven able to fail: with `::ApiUnavailableError` removed from the rescue
+  # clause, `test_a_failed_label_events_read_during_a_handover_check_leaves_the_row_untouched`
+  # errors out (the raise now escapes `dispatch_unassignment`'s `find_each`
+  # instead of being caught) and
+  # `test_a_failed_label_events_read_does_not_stop_the_sweep_for_the_rest_of_the_cycle`
+  # errors the same way, with the second row never read at all — see
+  # AGENT-REPORT.md for the transcript.
+  class LabelEventsFailingClient < StubClient
+    def issue_label_events(_project, _iid)
+      @event_calls += 1
+      raise Errno::ECONNRESET, 'Connection reset by peer'
+    end
+  end
+
+  # Labels that already make `test_a_suspicious_row_costs_exactly_one_label_event_read`
+  # reach `issue_label_events` above — a `workflow_moved` candidate found for
+  # free off the labels the caller fetched, which is what triggers the second
+  # read this class fails.
+  def suspicious_client
+    LabelEventsFailingClient.new(labels: [AWAITING_CR, 'PM::Evolution'])
+  end
+
+  def test_a_failed_label_events_read_during_a_handover_check_leaves_the_row_untouched
+    issue = sweep(active, suspicious_client)
+
+    assert_equal 'checking_pipeline', issue.status
+  end
+
+  def test_a_failed_label_events_read_during_a_handover_check_is_logged
+    sweep(active, suspicious_client)
+
+    assert(@logger.messages.any? { |m| m.include?('Failed to check external state') },
+           'a transport failure reading the label events must be logged, not silently dropped')
+  end
+
+  # The whole point of catching it locally rather than at `dispatch`'s own
+  # `rescue StandardError`: a transport blip on one row's label-event read
+  # must not take the rest of the cycle's rows down with it (the original
+  # defect, Autodev #96 — ~9% of GitLab reads fail this way from the
+  # production host).
+  def test_a_failed_label_events_read_does_not_stop_the_sweep_for_the_rest_of_the_cycle
+    first = active
+    second = active(mr_iid: 43)
+    client = suspicious_client
+    dispatcher(client).send(:dispatch_unassignment)
+
+    assert_equal 'checking_pipeline', first.reload.status
+    assert_equal 'checking_pipeline', second.reload.status
+    assert_equal 2, client.calls, 'the second row must still be read even though the first row raised'
+  end
+
   # --- ordering within one cycle ------------------------------------
 
   # The sweep only helps if it runs before the row is handed to a worker.

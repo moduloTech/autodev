@@ -102,10 +102,15 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
   # Autodev #102, design §4: HandoverStop must add no logic of its own — every
   # method beyond the question it forwards is an answer free to drift from
   # PollDispatcher's.
-  def test_handover_stop_adds_no_logic_of_its_own
-    own = Autodev::HandoverStop.instance_methods(false) - [:stop_on_handover]
-
-    assert_empty own, 'HandoverStop carries ivars; any method here is an answer free to drift'
+  #
+  # `stop_on_handover` arrives from the included `ExternalState` module and is
+  # never a member of `instance_methods(false)` (methods defined directly on
+  # this class), so subtracting it here removed nothing — the guard this test
+  # names was never exercised by the subtraction. What it actually checks, and
+  # states now: `HandoverStop` defines no public method of its own at all.
+  def test_handover_stop_has_no_public_method_of_its_own
+    assert_empty Autodev::HandoverStop.instance_methods(false),
+                 'HandoverStop carries ivars; any method here is an answer free to drift'
   end
 
   private

@@ -321,7 +321,8 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   # danger-claude conflict resolution and a force-push on a client branch.
   #
   # Measured on 02/09/2026: two of the six eligible rows were in conflict, both
-  # were taken from the people holding them, and they ran 32 and 39 hours — 21
+  # were taken from the people holding them, and they ran ~34 and ~39 hours
+  # (33.87 h and 38.98 h, recomputed from the stored timestamps) — 21
   # danger-claude correction rounds on one of them — before giving up on
   # stagnation. Neither reached the `gitlab_refused_request` bound the ticket
   # expected. The information was on the payload the whole time: `describe` prints
@@ -367,6 +368,31 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
     assert_equal 'done', issue.reload.status
     assert_includes @out.string, 'waiting 1'
+  end
+
+  # Neutral review of the alpha-54 lot: `has_conflicts: nil` is a read that did
+  # not answer either, on a status that is neither `checking` nor `conflict` —
+  # GitLab's `mergeable`/`unchecked`/etc. all leave `has_conflicts` unset on
+  # some responses. `opened_verdict` used to fall through to `:eligible` here,
+  # while `conflicts` (exercised by
+  # `test_a_merge_status_still_being_computed_reports_unknown_conflicts`'s
+  # sibling below) already reports the very same field as `'unknown'` — so the
+  # report could print "conflicts unknown" on the row the decision just
+  # called eligible and re-armed.
+  def test_an_unanswered_conflicts_flag_is_not_eligible
+    issue = arrear
+
+    sweep(StubClient.new(mr: FakeMr.new('opened', 'mergeable', nil)), apply: true)
+
+    assert_equal 'done', issue.reload.status, 'an unread has_conflicts flag must not be taken as permission to re-arm'
+    assert_includes @out.string, 'waiting 1'
+  end
+
+  def test_an_unanswered_conflicts_flag_reports_unknown_conflicts
+    arrear
+    sweep(StubClient.new(mr: FakeMr.new('opened', 'mergeable', nil)))
+
+    assert_includes @out.string, 'conflicts unknown'
   end
 
   # The regression guard: this change sits on the path of every eligible row.
