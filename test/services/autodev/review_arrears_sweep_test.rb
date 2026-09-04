@@ -383,6 +383,43 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
     assert_includes @out.string, 'conflicts unknown'
   end
 
+  # --- the report is the only thing that makes a declined row actionable ------
+
+  def test_every_verdict_that_declines_carries_a_reason
+    declining = Autodev::ReviewArrearsSweep::VERDICTS.keys - [:eligible]
+    documented = Autodev::ReviewArrearsSweep::MR_VERDICT_REASON.keys
+
+    (declining & %i[waiting already_merged mr_closed mr_conflicted unknown_state]).each do |verdict|
+      assert_includes documented, verdict,
+                      "#{verdict} declines a row and `consider` fetches its reason — " \
+                      'a missing entry is a KeyError in front of an operator'
+    end
+  end
+
+  def test_every_verdict_is_named_in_the_report
+    arrear
+    sweep(StubClient.new(mr: FakeMr.new('opened', 'conflict', true)))
+
+    # `mr_conflicted` is the one verdict whose report label drops the `mr_`
+    # prefix (`report` prints "conflicted N", not "mr conflicted N", to read
+    # naturally next to "mr closed") — named explicitly rather than bent into
+    # the loop's generic spelling.
+    (Autodev::ReviewArrearsSweep::VERDICTS.keys - [:mr_conflicted]).each do |verdict|
+      assert_includes @out.string, verdict.to_s.tr('_', ' '),
+                      "#{verdict} must appear in the report, or the rows it counts are invisible"
+    end
+    assert_includes @out.string, 'conflicted',
+                    'mr_conflicted must appear in the report, or the rows it counts are invisible'
+  end
+
+  def test_the_counters_account_for_every_examined_row
+    3.times { |i| arrear(issue_iid: 900 + i) }
+    sweep(StubClient.new(mr: FakeMr.new('opened', 'conflict', true)))
+
+    assert_match(/examined 3/, @out.string)
+    assert_match(/conflicted 3/, @out.string)
+  end
+
   # --- 3. APPLY -------------------------------------------------------------
 
   def test_apply_rearms_the_request
