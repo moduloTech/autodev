@@ -85,12 +85,11 @@ module Autodev
       @db_path = db_path
       @logger = logger
       @locale = locale
-      strict = overrides[:strict]
-      @strict = strict.nil? ? strict_env? : strict
+      @strict = overrides[:strict].nil? ? strict_env? : overrides[:strict]
       @own_pgid = overrides[:own_pgid] || Process.getpgrp
       @holder_finder = overrides[:holder_finder] || method(:default_holder_finder)
       @pgid_alive = overrides[:pgid_alive] || method(:default_pgid_alive)
-      @stopper = overrides[:stopper] || ->(pid) { ProcessStopper.stop(pid) }
+      build_stopper(overrides)
     end
 
     # Raises ConfigError only in strict mode, and only for a holder that
@@ -100,6 +99,15 @@ module Autodev
     end
 
     private
+
+    # `@grace` is bound once so the default `@stopper` and a future sentence
+    # could share it — not threaded into the KILL sentence today, since an
+    # injected `stopper:` (every test here passes one) ignores it, and a
+    # number nothing threaded back is the unchecked claim Autodev #109 opened.
+    def build_stopper(overrides)
+      @grace = overrides[:grace] || ProcessStopper::DEFAULT_GRACE_SECONDS
+      @stopper = overrides[:stopper] || ->(pid) { ProcessStopper.stop(pid, grace: @grace) }
+    end
 
     def strict_env?
       %w[1 true yes].include?(ENV.fetch(STRICT_ENV, '').strip.downcase)
@@ -141,8 +149,7 @@ module Autodev
       when :gone_on_term
         @logger.info(Locales.t(:cli_boot_guard_orphan_stopped_term, locale: @locale, name: name, pid: holder.pid))
       when :gone_on_kill
-        @logger.warn(Locales.t(:cli_boot_guard_orphan_stopped_kill, locale: @locale, name: name,
-                                                                    pid: holder.pid, grace: ProcessStopper::DEFAULT_GRACE_SECONDS))
+        @logger.warn(Locales.t(:cli_boot_guard_orphan_stopped_kill, locale: @locale, name: name, pid: holder.pid))
       else
         survived(holder, name)
       end

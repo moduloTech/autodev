@@ -5,7 +5,7 @@ fr:
   cli_mr_review_missing: "mr-review n'est pas installé : l'étape de revue sera ignorée pour les projets qui ne déclarent pas de `review_skill`."
   cli_boot_guard_orphan_found: "Processus orphelin détecté au démarrage : %{name} (pid=%{pid}), enfant d'un superviseur précédent dont le groupe de processus %{pgid} n'a plus de chef, gardant %{db_path} ouvert."
   cli_boot_guard_orphan_stopped_term: "Processus orphelin %{name} (pid=%{pid}) arrêté sur SIGTERM."
-  cli_boot_guard_orphan_stopped_kill: "Processus orphelin %{name} (pid=%{pid}) a ignoré SIGTERM et a été tué après %{grace}s."
+  cli_boot_guard_orphan_stopped_kill: "Processus orphelin %{name} (pid=%{pid}) a ignoré SIGTERM et a été tué après expiration du délai de grâce."
   cli_boot_guard_orphan_survived: "Le processus orphelin %{name} (pid=%{pid}, commande : %{command}) a survécu à SIGKILL et retient toujours %{db_path}. Autodev démarre quand même — arrêtez ce processus manuellement, et posez AUTODEV_BOOT_GUARD_STRICT=1 si vous préférez que le démarrage soit refusé."
   cli_boot_guard_foreign_holder: "Un autre processus retient %{db_path} (pid=%{pid}, commande : %{command}). Autodev ne peut pas l'identifier comme un des siens : démarrage poursuivi, mais vérifiez ce processus si le comportement est anormal."
   cli_boot_guard_unrecognized_holder: "Un processus non reconnu retient %{db_path} (pid=%{pid}, commande : %{command}). Démarrage refusé (mode strict) — vérifiez et arrêtez ce processus manuellement avant de relancer autodev."

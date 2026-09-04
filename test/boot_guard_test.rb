@@ -55,10 +55,10 @@ class BootGuardTest < Minitest::Test
 
   def setup
     @logger = FakeLogger.new
-    @killed = []
+    @stopped = []
     @verdict = :gone_on_term
     @stopper = lambda do |pid|
-      @killed << pid
+      @stopped << pid
       @verdict
     end
   end
@@ -73,7 +73,7 @@ class BootGuardTest < Minitest::Test
 
     guard.call
 
-    assert_equal [555], @killed, 'a recognised orphan must be reaped'
+    assert_equal [555], @stopped, 'a recognised orphan must be reaped'
     # `entries` is an Array of [level, msg] pairs, not a Hash — Style/HashSlice's
     # autocorrect misread this `select` as a Hash#slice candidate, which would
     # raise (Array#slice takes an index/range, not a key). rubocop:disable
@@ -93,7 +93,7 @@ class BootGuardTest < Minitest::Test
 
     guard.call
 
-    assert_equal [1402], @killed
+    assert_equal [1402], @stopped
   end
 
   def test_both_children_are_reaped_in_the_same_pass
@@ -103,7 +103,7 @@ class BootGuardTest < Minitest::Test
 
     guard.call
 
-    assert_equal [555, 556], @killed.sort
+    assert_equal [555, 556], @stopped.sort
   end
 
   def test_an_orphan_that_honours_term_is_reported_stopped_without_a_kill
@@ -112,31 +112,46 @@ class BootGuardTest < Minitest::Test
 
     guard.call
 
-    assert_equal [555], @killed
+    assert_equal [555], @stopped
     assert(messages.any? { |m| m.include?('555') && m.match?(/SIGTERM|TERM/) },
            'the outcome must be stated, and it must name the pid')
   end
 
   def test_an_orphan_that_ignores_term_reports_the_kill
+    # The discovery sentence is *also* a warn line naming pid 555 (it is
+    # logged before the stopper is even called), so "some warn line mentions
+    # the pid" is satisfied whether or not `announce` ever runs. Asserting the
+    # exact rendered `cli_boot_guard_orphan_stopped_kill` text is the only way
+    # to name the sentence this test is actually about.
     @verdict = :gone_on_kill
     guard = build_guard(holders: [build_holder(pid: 555, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')])
 
     guard.call
 
-    kill_lines = @logger.entries.select { |level, msg| level == :warn && msg.include?('555') }
+    expected = Locales.t(:cli_boot_guard_orphan_stopped_kill, locale: :en, name: 'rails-server', pid: 555)
 
-    refute_empty kill_lines, 'a straggler killed after the grace must be visible at warn level'
+    assert_includes @logger.entries, [:warn, expected],
+                    'a straggler killed after the grace must state the escalation, at warn level'
   end
 
   # The 03/09 case: the boot must NOT stop, and the pid must be named.
   def test_an_orphan_that_survives_kill_warns_and_lets_the_boot_proceed
+    # Same trap as the kill test above: the discovery sentence already names
+    # pid 1383 at warn level, so a bare `messages.any? { include?('1383') }`
+    # passes with `announce`/`survived` never called. Assert the rendered
+    # `cli_boot_guard_orphan_survived` text specifically.
     @verdict = :alive
-    guard = build_guard(holders: [build_holder(pid: 1383, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')])
+    holder = build_holder(pid: 1383, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')
+    guard = build_guard(holders: [holder])
 
     guard.call # must not raise
 
-    assert(messages.any? { |m| m.include?('1383') },
-           'a surviving orphan must be named so an operator can find it')
+    expected = Locales.t(:cli_boot_guard_orphan_survived, locale: :en, name: 'rails-server', pid: 1383,
+                                                          command: holder.command,
+                                                          db_path: '/home/x/.autodev/autodev.db')
+
+    assert_includes @logger.entries, [:warn, expected],
+                    'a surviving orphan must be named so an operator can find it'
   end
 
   def test_the_discovery_sentence_no_longer_announces_a_stop
@@ -147,6 +162,48 @@ class BootGuardTest < Minitest::Test
 
     refute(messages.any? { |m| m.include?('Stopping it (TERM)') },
            'the discovery sentence must not claim an outcome it has not observed')
+  end
+
+  # Design spec Testing §5: "the three outcome sentences are distinct and each
+  # is logged only on its own verdict." Written after the alpha-53 review
+  # found no test that would fail if the locale file assigned the TERM text to
+  # the KILL key and vice versa — every existing test only checked that *a*
+  # message named the pid, not *which* message.
+  #
+  # `assert_equal` against `Locales.t(<the key this verdict's branch calls>)`
+  # cannot catch a mis-swapped locale *file* by itself: it reads the same
+  # (possibly wrong) text on both sides of the comparison, because the key
+  # `announce` dispatches to for a given verdict is a property of this file,
+  # not of the locale file. What a locale swap breaks is the *meaning* of the
+  # text at each key, so the second half of this test checks the one thing
+  # that never depends on which locale is loaded: the words "killed" and
+  # "SIGKILL" name what actually happened and must land on the sentence that
+  # actually happened to, in either language and however the prose is phrased.
+  def test_the_three_outcomes_are_distinct_and_only_the_matching_one_is_logged
+    holder = build_holder(pid: 555, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')
+    rendered = observed_outcome_messages(holder)
+
+    assert_outcomes_match_their_own_locale_key(rendered, holder)
+    assert_outcomes_do_not_cross_contaminate(rendered)
+  end
+
+  # --- the default stopper, which every other test bypasses -----------------
+
+  # Every `build_guard` above injects `stopper:`, so the real default —
+  # `->(pid) { ProcessStopper.stop(pid, grace: @grace) }` — is dead code as
+  # far as the rest of this file is concerned, and a signature drift between
+  # `BootGuard` and `ProcessStopper.stop` would only surface in production.
+  # This drives it against a real subprocess that ignores SIGTERM, the same
+  # harness `test/process_stopper_test.rb#with_stubborn_child` uses one layer
+  # down — `grace: 1` (via `overrides:`) keeps it fast without touching the
+  # production default.
+  def test_the_real_default_stopper_escalates_against_a_process_that_ignores_term
+    with_stubborn_orphan do |pid|
+      real_stopper_guard_for(pid).call
+
+      assert_includes @logger.entries, [:warn, kill_message_for(pid)]
+      assert_raises(Errno::ESRCH, 'the real stopper must really have killed it') { Process.kill(0, pid) }
+    end
   end
 
   # --- what gets left alone -------------------------------------------------
@@ -160,7 +217,7 @@ class BootGuardTest < Minitest::Test
 
     guard.call # must not raise
 
-    assert_empty @killed, 'an unidentified holder must never be killed'
+    assert_empty @stopped, 'an unidentified holder must never be handed to the stopper'
     assert(@logger.entries.any? { |level, msg| level == :warn && msg.include?('777') },
            'an unidentified holder must be named in a warning')
   end
@@ -174,7 +231,7 @@ class BootGuardTest < Minitest::Test
 
     guard.call
 
-    assert_empty @killed, "a live supervisor's child must not be reaped"
+    assert_empty @stopped, "a live supervisor's child must not be reaped"
     assert(@logger.entries.any? { |level, _| level == :warn })
   end
 
@@ -186,7 +243,7 @@ class BootGuardTest < Minitest::Test
 
     guard.call
 
-    assert_empty @killed, 'the guard must never reap something in its own process group'
+    assert_empty @stopped, 'the guard must never reap something in its own process group'
   end
 
   def test_nothing_holding_the_database_is_a_silent_pass
@@ -194,7 +251,7 @@ class BootGuardTest < Minitest::Test
 
     guard.call
 
-    assert_empty @killed
+    assert_empty @stopped
     assert_empty @logger.entries
   end
 
@@ -207,7 +264,7 @@ class BootGuardTest < Minitest::Test
     error = assert_raises(ConfigError) { guard.call }
 
     assert_includes error.message, '777'
-    assert_empty @killed
+    assert_empty @stopped
   end
 
   def test_strict_mode_still_reaps_what_it_recognises
@@ -216,7 +273,7 @@ class BootGuardTest < Minitest::Test
 
     guard.call
 
-    assert_equal [555], @killed
+    assert_equal [555], @stopped
   end
 
   def test_strict_mode_refuses_when_an_orphan_survives_kill
@@ -236,7 +293,7 @@ class BootGuardTest < Minitest::Test
 
     guard.call # must not raise: an operator investigating by hand must still be able to boot
 
-    assert_equal [555], @killed
+    assert_equal [555], @stopped
   end
 
   # --- the real finder, which nothing exercised before ----------------------
@@ -306,6 +363,70 @@ class BootGuardTest < Minitest::Test
   end
 
   def messages = @logger.entries.map(&:last)
+
+  # --- helpers for test_the_three_outcomes_are_distinct_and_only_the_matching_one_is_logged --
+
+  def outcome_keys
+    { gone_on_term: :cli_boot_guard_orphan_stopped_term,
+      gone_on_kill: :cli_boot_guard_orphan_stopped_kill,
+      alive: :cli_boot_guard_orphan_survived }
+  end
+
+  def observed_outcome_messages(holder)
+    outcome_keys.each_with_object({}) do |(verdict, _key), acc|
+      @logger = FakeLogger.new
+      @verdict = verdict
+      guard = build_guard(holders: [holder])
+
+      guard.call
+
+      # `reap` always logs discovery first and the outcome second (two
+      # sentences on purpose, Autodev #109) — the outcome is the last entry.
+      acc[verdict] = messages.last
+    end
+  end
+
+  def assert_outcomes_match_their_own_locale_key(rendered, holder)
+    outcome_keys.each_key do |verdict|
+      assert_equal expected_outcome_message(verdict, holder), rendered[verdict]
+    end
+  end
+
+  def expected_outcome_message(verdict, holder)
+    extra = verdict == :alive ? { command: holder.command, db_path: '/home/x/.autodev/autodev.db' } : {}
+    Locales.t(outcome_keys[verdict], locale: :en, name: 'rails-server', pid: holder.pid, **extra)
+  end
+
+  # The full-string checks above cannot, by themselves, catch a locale file
+  # that assigned the TERM key's text to the KILL key (or vice versa): the
+  # "expected" side is read through the same `Locales.t` call as the "actual"
+  # side, so a swap changes both identically and the equality still holds.
+  # These checks anchor on the one thing that does not move with such a
+  # swap — the words that actually name what happened.
+  def assert_outcomes_do_not_cross_contaminate(rendered)
+    assert_equal rendered.values.uniq.length, rendered.size, 'the three outcomes must render distinct sentences'
+    refute_includes rendered[:gone_on_term], 'killed', 'a TERM stop must not claim a kill'
+    refute_includes rendered[:gone_on_term], 'SIGKILL', 'a TERM stop must not name an escalation that never happened'
+    assert_includes rendered[:gone_on_kill], 'killed', 'a KILL escalation must say the process was killed'
+    refute_includes rendered[:gone_on_kill], 'SIGKILL',
+                    "the KILL sentence names the escalation delivered, not survival — that's :alive's word"
+    assert_includes rendered[:alive], 'SIGKILL', 'a surviving orphan must name the signal it survived'
+  end
+
+  # --- helpers for test_the_real_default_stopper_escalates_against_a_process_that_ignores_term --
+
+  def real_stopper_guard_for(pid)
+    holder = build_holder(pid: pid, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')
+    Autodev::BootGuard.new(
+      db_path: '/home/x/.autodev/autodev.db', logger: @logger, locale: :en,
+      overrides: { own_pgid: OUR_PGID, holder_finder: ->(_db_path) { [holder] },
+                   pgid_alive: ->(_pgid) { false }, grace: 1 }
+    )
+  end
+
+  def kill_message_for(pid)
+    Locales.t(:cli_boot_guard_orphan_stopped_kill, locale: :en, name: 'rails-server', pid: pid)
+  end
 
   # The real `default_holder_finder`, reached through a guard built with no
   # `holder_finder:` override.
@@ -397,6 +518,45 @@ class BootGuardTest < Minitest::Test
     rescue Errno::ECHILD
       nil
     end
+  end
+
+  # Modelled on `with_stubborn_child` in test/process_stopper_test.rb, for
+  # MINOR 4's own harness rather than a shared one: a real child that traps
+  # and ignores TERM, a readiness file, and `Process.detach` so a killed child
+  # doesn't sit as an unreaped zombie — which `Process.kill(0, pid)` would
+  # still report alive, defeating the very assertion this test makes.
+  def with_stubborn_orphan
+    Dir.mktmpdir('boot-guard-stubborn-orphan') do |dir|
+      pid = spawn_stubborn_orphan(dir)
+      begin
+        yield pid
+      ensure
+        force_reap_stubborn_orphan(pid)
+      end
+    end
+  end
+
+  def spawn_stubborn_orphan(dir)
+    ready = File.join(dir, 'ready')
+    pid = spawn(RbConfig.ruby, '-e', stubborn_orphan_script(ready), out: File::NULL, err: File::NULL)
+    Process.detach(pid)
+    wait_for(ready)
+    pid
+  end
+
+  def stubborn_orphan_script(ready_path)
+    <<~RUBY
+      Signal.trap('TERM') { }
+      File.write(#{ready_path.inspect}, 'ok')
+      sleep 60
+    RUBY
+  end
+
+  def force_reap_stubborn_orphan(pid)
+    Process.kill('KILL', pid)
+    Process.wait(pid)
+  rescue Errno::ESRCH, Errno::ECHILD
+    nil # already gone, which is the normal path after a successful stop
   end
 end
 # rubocop:enable Metrics/ClassLength
