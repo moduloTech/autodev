@@ -188,11 +188,36 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # because `fetch_retryable` filters on status; that filter is a second line,
   # not the rule.
   def perform_retry_errored(issue, config, project_config)
+    return if handed_over?(issue, config, project_config)
+
     has_mr = !issue.mr_iid.nil?
     has_mr ? issue.retry_pipeline! : issue.retry_processing!
     issue.update(error_message: nil, started_at: nil, next_retry_at: nil)
     restore_working_label(issue, config, project_config)
     log_retry_activity(issue, config, project_config)
+  end
+
+  # Autodev #102. `error` is outside `dispatch_unassignment`'s ACTIVE_STATUSES
+  # sweep, so this is the only place the question gets asked before autodev
+  # writes on the ticket again. A read that could not answer declines the retry
+  # for this cycle and leaves the row exactly as it was — the Autodev #67 rule,
+  # and the choice Autodev #93 made for `UntouchedSinceGiveup`: an unreadable
+  # ticket is never permission to take it.
+  #
+  # Costs one GitLab read per errored retry — not per poll cycle. `manage_labels`
+  # does read the issue, but inside `apply_label_doing`, i.e. after the
+  # transition, which is too late to be the one this needs.
+  def handed_over?(issue, config, project_config)
+    client = build_client(config)
+    gl_issue = client.issue(project_config['path'], issue.issue_iid)
+    stopper = ::Autodev::HandoverStop.new(client: client, path: project_config['path'],
+                                          project_config: project_config,
+                                          logger: ::Autodev::JobLogger.new(logger))
+    !stopper.stop_on_handover(issue, gl_issue).nil?
+  rescue ::ApiUnavailableError, ::Gitlab::Error::ResponseError => e
+    logger.warn("Declining the retry of ##{issue.issue_iid}: could not read the ticket " \
+                "(#{e.class}: #{e.message})")
+    true
   end
 
   def perform_retry_stuck(issue, config, project_config)

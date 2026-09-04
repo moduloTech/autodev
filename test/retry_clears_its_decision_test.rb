@@ -50,10 +50,13 @@ class RetryClearsItsDecisionTest < Minitest::Test
   # Runs the job's perform_retry_errored / perform_retry_stuck against real
   # ActiveRecord transitions, with the GitLab-touching collaborators stubbed to
   # no-ops — this test is about the stamp, not about the label, the activity
-  # note, or IssueProcessor#process (which perform_retry_stuck calls and which
-  # clones + runs danger-claude for real).
+  # note, the handover check (Autodev #102, its own
+  # test/errored_retry_respects_a_handover_test.rb), or IssueProcessor#process
+  # (which perform_retry_stuck calls and which clones + runs danger-claude for
+  # real).
   def run_retry(issue, action)
     job = IssueProcessJob.new
+    job.define_singleton_method(:handed_over?) { |*| false }
     job.define_singleton_method(:restore_working_label) { |*| nil }
     job.define_singleton_method(:log_retry_activity) { |*| nil }
 

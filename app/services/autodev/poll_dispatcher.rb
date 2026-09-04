@@ -290,6 +290,10 @@ module Autodev
 
     # === poll_unassignment equivalent (inline — DB-only, no queue overhead) ===
 
+    # `error` is deliberately NOT in ACTIVE_STATUSES (Autodev #102). Widening the
+    # constant would change the population of every pass that reads it, for a
+    # defect that lives in one method: `IssueProcessJob#perform_retry_errored`
+    # asks the same question through `Autodev::HandoverStop` before it relaunches.
     def dispatch_unassignment
       ::Issue.where(project_path: @path, status: ACTIVE_STATUSES).find_each do |issue|
         check_external_state(issue)
