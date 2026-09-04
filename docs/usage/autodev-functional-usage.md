@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-09-02
+date: 2026-09-04
 lang: fr
 documentclass: article
 papersize: a4
@@ -439,6 +439,8 @@ Relancez-la d'abord avec **Réessayer maintenant** (l'erreur est peut-être pass
 
 **Autodev s'est trompé ou a fait n'importe quoi, je peux annuler ?**
 Oui, de trois façons. **Déplacez le label de suivi** du ticket sur GitLab (passez-le en revue, en recette, où vous voulez) : Autodev s'en aperçoit au tour suivant, arrête le travail en cours et vous laisse un commentaire sur le ticket pour confirmer qu'il a bien lâché la main. **Désassignez-le** du ticket : même effet, même commentaire. Ou ouvrez le détail de la demande et cliquez sur **Clôturer** pour la mettre de côté depuis le tableau de bord. Dans tous les cas vous pouvez ensuite assigner le ticket à un humain, et la MR déjà créée reste disponible — vous pouvez la fermer ou la modifier librement. Depuis cette version, votre geste tient même si Autodev est en plein milieu d'un travail long : ce travail peut mettre jusqu'à une heure à se terminer, et il ne réveille plus la demande en se terminant. Auparavant, une demande clôturée pouvait repartir toute seule quelques minutes plus tard, sans que rien ne le signale.
+
+Votre geste tient aussi quand la demande est en **Échec technique** : Autodev réessaie tout seul dans cet état, et il commence désormais par regarder si quelqu'un a repris le ticket avant de relancer. Si oui, il ne relance pas, ne remet pas son label de travail en cours, et vous laisse le ticket avec un commentaire. Auparavant, une relance automatique pouvait reposer son label sur un ticket que vous teniez déjà, et ne s'en apercevoir qu'au tour suivant.
 
 Une précision utile : remettre le label *{{label_todo|à traiter}}* n'arrête **pas** Autodev, c'est au contraire la façon de lui redemander du travail (voir plus bas).
 
