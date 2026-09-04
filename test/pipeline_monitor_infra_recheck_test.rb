@@ -79,13 +79,17 @@ class PipelineMonitorInfraRecheckTest < Minitest::Test
     assert monitor(client: StubClient.new(merge_req: mr)).recheck_infra_recovery(issue)
   end
 
-  def test_still_infra_failing_does_not_reenter_and_records_backed_off_attempt
+  # Autodev #110: the backoff stamp moved to
+  # `PollDispatcher#reserve_infra_recheck`, which now reserves the row before
+  # the job runs. `record_recheck_attempt` owns the counter alone and no
+  # longer touches `infra_recheck_at` — this test used to assert the opposite.
+  def test_still_infra_failing_does_not_reenter_and_records_the_attempt
     mr = FakeMr.new('opened', FakePipeline.new(9, 'failed'))
     issue = FakeIssue.new(infra_recheck_count: 1)
 
     refute monitor(client: StubClient.new(merge_req: mr, jobs: deploy_jobs)).recheck_infra_recovery(issue)
     assert_equal 2, issue.infra_recheck_count
-    assert_operator issue.infra_recheck_at, :>, Time.now, 'backoff must be stamped in the future'
+    assert_nil issue.infra_recheck_at, 'the dispatcher owns this column now, not the job'
   end
 
   def test_code_origin_failure_is_left_untouched
@@ -112,13 +116,33 @@ class PipelineMonitorInfraRecheckTest < Minitest::Test
     assert_equal 1, issue.infra_recheck_count
   end
 
-  def test_backoff_seconds_are_configurable
+  # Autodev #110: `infra_recheck_backoff` now governs
+  # `PollDispatcher#reserve_infra_recheck` alone (see
+  # `test/infra_recheck_settings_test.rb` and
+  # `test/infra_recheck_reservation_test.rb`) — this test used to assert that
+  # `record_recheck_attempt` read the setting and stamped it; it no longer
+  # writes the column at all, whatever the config says.
+  def test_recording_an_attempt_no_longer_stamps_the_backoff_whatever_the_config
     mr = FakeMr.new('opened', FakePipeline.new(9, 'failed'))
     issue = FakeIssue.new
     m = monitor(client: StubClient.new(merge_req: mr, jobs: deploy_jobs), config: { 'infra_recheck_backoff' => 60 })
 
     m.recheck_infra_recovery(issue)
 
-    assert_in_delta 60, issue.infra_recheck_at - Time.now, 5
+    assert_nil issue.infra_recheck_at, 'the dispatcher owns this column now, not the job'
+  end
+
+  # Autodev #110, design §2: even with the dispatcher's reservation, the cap is
+  # a guard and not only a filter. A write beyond `infra_recheck_max` is
+  # refused rather than logged and written — the old code logged `9/5` and
+  # wrote it anyway, which is what kept the defect invisible for a night.
+  def test_an_attempt_past_the_cap_is_refused_and_not_written
+    mr = FakeMr.new('opened', FakePipeline.new(9, 'failed'))
+    issue = FakeIssue.new(infra_recheck_count: 5)
+    m = monitor(client: StubClient.new(merge_req: mr, jobs: deploy_jobs), config: { 'infra_recheck_max' => 5 })
+
+    refute m.recheck_infra_recovery(issue)
+
+    assert_equal 5, issue.infra_recheck_count, 'a write past the cap must be refused, not clamped'
   end
 end

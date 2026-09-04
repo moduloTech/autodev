@@ -68,8 +68,7 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   end
 
   # Gitlab::Error::ResponseError builds its message from a real HTTP response;
-  # this is the minimum surface its constructor reads. The rescue under test is
-  # narrow, so a plain Gitlab::Error::Error would not exercise it.
+  # this is the minimum surface its constructor reads.
   FakeRequest = Struct.new(:base_uri, :path)
   FakeResponse = Struct.new(:parsed_response, :code, :request)
 
@@ -77,6 +76,15 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     def issue_label_events(_project, _iid)
       raise Gitlab::Error::ResponseError,
             FakeResponse.new('boom', 500, FakeRequest.new('https://gitlab.example', '/api/v4/issues'))
+    end
+  end
+
+  # The other half of `GitlabHelpers::TRANSPORT_ERRORS` (Autodev #62's third
+  # round): a peer hanging up is not an HTTP response, so this must travel
+  # through `GitlabHelpers.answer` too, not only `Gitlab::Error::ResponseError`.
+  class TransportFailingClient < StubClient
+    def issue_label_events(_project, _iid)
+      raise Errno::ECONNRESET, 'Connection reset by peer'
     end
   end
 
@@ -95,6 +103,14 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     Autodev::LabelHandover.new(client: @client, path: 'group/project',
                                project_config: config, logger: StubLogger.new)
                           .verdict(FakeIssue.new(labels), 42)
+  end
+
+  # `moved_since?` and `todo_reapplied_after?` are not reachable through
+  # `verdict`'s helper above, and the failure-abort tests below need the
+  # instance itself to call them directly.
+  def handover(client:, config: POWERPANNE)
+    Autodev::LabelHandover.new(client: client, path: 'group/project',
+                               project_config: config, logger: StubLogger.new)
   end
 
   # --- the case this was written for --------------------------------
@@ -262,7 +278,12 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   #
   # A missed handover costs what the bug already costs today. A wrong stop closes
   # a ticket autodev is actively working on and posts a comment blaming somebody
-  # who did nothing. Every unknown resolves to "do not stop".
+  # who did nothing. Every *known* unknown resolves to "do not stop" — an empty
+  # event list, an event naming a different label, an event whose action
+  # contradicts the labels just read. A GitLab outage is not one of these
+  # (Autodev #115, below): it does not get read as "do not stop" at all, it
+  # aborts, because "do not stop" would erase the evidence `suspect` already
+  # found rather than merely decline to act on it.
 
   def test_an_empty_event_list_does_not_stop
     assert_nil verdict(labels: ['Development::Awaiting CR'])
@@ -280,8 +301,53 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
                        events: [ev('add', 'Development::Doing', HUMAN_ID)])
   end
 
-  def test_a_gitlab_error_does_not_stop
-    assert_nil verdict(labels: ['Development::Awaiting CR'], client: FailingClient.new)
+  # --- api failures abort; they do not answer (Autodev #115) ---------
+  #
+  # `[]` used to stand in for a failed label-events read (rescued, logged, and
+  # returned as the empty list). On this path `[]` is not "nothing happened" —
+  # `suspicion` was already found for free off the labels the caller fetched,
+  # and `[]` reached `verdict` as "no event contradicts it", i.e. good news read
+  # from an outage. The fix is the one Autodev #62 already made everywhere
+  # else: `events` now raises through `GitlabHelpers.answer`, and the caller's
+  # own boundary declines the row for the cycle instead of guessing.
+
+  def test_a_gitlab_error_aborts_the_verdict_instead_of_answering_no_stop
+    assert_raises(ApiUnavailableError) do
+      verdict(labels: ['Development::Awaiting CR'], client: FailingClient.new)
+    end
+  end
+
+  # Autodev #62's third round widened `GitlabHelpers.answer` past HTTP
+  # responses; this class's own read has to travel through it for that to
+  # matter here. A peer hanging up mid-response is not a
+  # `Gitlab::Error::ResponseError`.
+  def test_a_non_http_transport_error_also_aborts_the_verdict
+    assert_raises(ApiUnavailableError) do
+      verdict(labels: ['Development::Awaiting CR'], client: TransportFailingClient.new)
+    end
+  end
+
+  # `moved_since?` shares the same stage-2 read via `decisive_event`.
+  # `Autodev::UntouchedSinceGiveup` — its one caller — already documented (and,
+  # before this fix, wrongly assumed) that the three helpers it depends on raise
+  # rather than answer "nobody moved it".
+  def test_a_gitlab_error_aborts_moved_since_instead_of_answering_false
+    assert_raises(ApiUnavailableError) do
+      handover(client: FailingClient.new)
+        .moved_since?(FakeIssue.new(['Development::Awaiting CR']), 42, 1.day.ago)
+    end
+  end
+
+  # `todo_reapplied_after?` calls `events` directly, with no `suspicion` gate —
+  # and it is the one consumer for whom a silent `false` (nobody re-asked, stay
+  # `closed`) would itself have been the conservative answer. It raises anyway:
+  # one definition serving every consumer of `events` uniformly, and
+  # `PollRouter#route` already declines the row for the cycle on
+  # `ApiUnavailableError`.
+  def test_a_gitlab_error_aborts_todo_reapplied_after_instead_of_answering_false
+    assert_raises(ApiUnavailableError) do
+      handover(client: FailingClient.new).todo_reapplied_after?(42, 1.day.ago)
+    end
   end
 
   # --- cost ----------------------------------------------------------

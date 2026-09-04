@@ -124,7 +124,8 @@ module Autodev
     # `incomplete` (the re-arm started and did not finish — the slot is spent,
     # and the report names which of its writes landed).
     VERDICTS = { eligible: :eligible, waiting: :waiting, already_merged: :already_merged,
-                 mr_closed: :mr_closed, unknown_state: :unknown_state,
+                 mr_closed: :mr_closed, mr_conflicted: :mr_conflicted,
+                 unknown_state: :unknown_state,
                  already_swept: :already_swept, not_ours: :not_ours }.freeze
 
     # Each of these leaves the row exactly as it is. `already_merged`: the work is
@@ -135,6 +136,8 @@ module Autodev
     MR_VERDICT_REASON = {
       already_merged: 'the merge request is merged, left untouched',
       mr_closed: 'the merge request is closed, left untouched (attention_reason unchanged)',
+      mr_conflicted: 'the merge request has conflicts, left untouched ' \
+                     '(re-arming it takes the ticket to run a correction loop on work that cannot land)',
       waiting: 'GitLab is mid-merge, nothing concluded and no slot spent',
       unknown_state: 'the merge request state carries no known verdict, left untouched'
     }.freeze
@@ -270,16 +273,44 @@ module Autodev
     # `when 'locked'` written by hand is exactly the fault that ticket repaired.
     # An allow-list, never a deny-list: a state GitLab adds tomorrow is unknown
     # and nothing is done to it.
+    #
+    # Autodev #105 refines `opened`, and only `opened`: a merge request that
+    # cannot merge is not eligible. The fields were already being read — `describe`
+    # prints `conflicts yes` on the line above this decision — the decision just
+    # did not look at them.
     def mr_verdict(merge_req)
       state = ::GitlabHelpers.field(merge_req, :state)
       return :waiting if ::MrState.transient?(state)
 
       case state
-      when 'opened' then :eligible
+      when 'opened' then opened_verdict(merge_req)
       when 'merged' then :already_merged
       when 'closed' then :mr_closed
       else :unknown_state
       end
+    end
+
+    # `detailed_merge_status: "checking"` means GitLab has not finished computing,
+    # so `has_conflicts: false` is not a fact there — the Autodev #67 rule that
+    # `conflicts` already applies to this field, applied to the decision as well.
+    # `:waiting` rather than `:eligible`: a read that could not answer is not
+    # permission to take somebody's ticket, and the next run asks again for free.
+    #
+    # The same rule extends to `has_conflicts` itself (neutral review of the
+    # alpha-54 lot): `nil` there is a read that did not answer either — not
+    # "no conflicts" — and used to fall through to `:eligible` whenever the
+    # status was neither `checking` nor `conflict`. `conflicts` (below) already
+    # reports `nil` as `'unknown'`, so the report could print "conflicts
+    # unknown" on the very row the decision just called eligible and re-armed.
+    def opened_verdict(merge_req)
+      status = ::GitlabHelpers.field(merge_req, :detailed_merge_status).to_s
+      has_conflicts = ::GitlabHelpers.field(merge_req, :has_conflicts)
+      return :waiting if status == 'checking'
+      return :mr_conflicted if status == 'conflict'
+      return :mr_conflicted if has_conflicts
+      return :waiting if has_conflicts.nil?
+
+      :eligible
     end
 
     def decline(tally, verdict, line)
@@ -587,10 +618,10 @@ module Autodev
     # move by somebody else since `finished_at`. A permissive gesture is always a
     # written one.
     #
-    # `human_comment_since?` raises on an unreadable thread (Autodev #67), so an
-    # outage declines nothing into a verdict. `LabelHandover#moved_since?` keeps
-    # that class's own rule instead — an unreadable event list reads as "nobody
-    # moved it" — which is worth knowing when running with the flag on.
+    # `human_comment_since?` raises on an unreadable thread (Autodev #67), and
+    # `LabelHandover#moved_since?` now raises the same way (Autodev #115): an
+    # unreadable event list declines the row rather than answering "nobody
+    # moved it", which is worth knowing when running with the flag on.
     # Why a row is or is not ours, not merely whether — because the report says it
     # out loud, and "assigned to user X, left untouched" on a row declined because
     # somebody commented on the ticket since the give-up names the wrong reason
@@ -798,7 +829,8 @@ module Autodev
       say("examined #{tally[:examined]}, eligible #{tally[:eligible]} " \
           "(re-armed #{tally[:rearmed]}, deferred: #{tally[:deferred]}), " \
           "waiting #{tally[:waiting]}, already merged #{tally[:already_merged]}, " \
-          "mr closed #{tally[:mr_closed]}, unknown state #{tally[:unknown_state]}, " \
+          "mr closed #{tally[:mr_closed]}, conflicted #{tally[:mr_conflicted]}, " \
+          "unknown state #{tally[:unknown_state]}, " \
           "already swept #{tally[:already_swept]}, not ours #{tally[:not_ours]}, " \
           "unreadable #{tally[:unreadable]}, incomplete #{tally[:incomplete]}")
       report_remaining(tally)

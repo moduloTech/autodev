@@ -14,17 +14,21 @@ class PipelineMonitor
   # - Only a *recovered* pipeline (green / no failing pipeline) re-enters. A
   #   pipeline still failing on infra keeps waiting; a pipeline now failing on
   #   *code* is deliberately left untouched (a real failure to fix by hand).
-  # - Every non-recovery outcome records one bounded attempt (count++ + backoff
-  #   stamp). The dispatch pass filters on `infra_recheck_count < cap`, so the
-  #   recheck self-limits at the cap and can never loop — a never-recovering
-  #   infra failure stays in `needs_attention` permanently.
+  # - Every non-recovery outcome records one bounded attempt (count++). The
+  #   backoff stamp is no longer written here — since Autodev #110,
+  #   `PollDispatcher#dispatch_infra_recheck` reserves the row by moving
+  #   `infra_recheck_at` *before* the job is enqueued, so this module writes
+  #   only the counter. The dispatch pass filters on `infra_recheck_count <
+  #   cap`, so the recheck self-limits at the cap and can never loop — a
+  #   never-recovering infra failure stays in `needs_attention` permanently.
   module InfraRecheck
     # Returns true only when CI has recovered and the caller should re-enter the
     # pipeline-check flow via ResumeHandler#reenter_via_pipeline_check. Any other
     # outcome (MR closed, still infra-failing, now code-failing, running,
-    # uncertain) returns false after recording a bounded, backed-off attempt —
-    # except the two that read nothing at all: a GitLab error (Autodev #62) and an
-    # MR in a transient state (Autodev #72) return false having spent nothing.
+    # uncertain) returns false after recording a bounded attempt (count only,
+    # since Autodev #110 — see the module header) — except the two that read
+    # nothing at all: a GitLab error (Autodev #62) and an MR in a transient
+    # state (Autodev #72) return false having spent nothing.
     def recheck_infra_recovery(issue)
       merge_req = @client.merge_request(@project_path, issue.mr_iid)
       verdict = recheck_verdict(issue, merge_req)
@@ -103,23 +107,33 @@ class PipelineMonitor
       pre_triage(failed_jobs)[:verdict]
     end
 
-    # Records one bounded, backed-off attempt so the dispatch pass self-limits
-    # at the cap. Never re-enters — the caller returns false after this.
+    # Records one bounded attempt. The **clock** belongs to
+    # `PollDispatcher#dispatch_infra_recheck`, which moves `infra_recheck_at` to
+    # reserve the row before the job is enqueued (Autodev #110); this method owns
+    # the budget alone, and is reached only on `verdict == :spend` — an outage or
+    # a transient MR state spends nothing, which is why the two columns cannot
+    # both be written in the same place. Never re-enters — the caller returns
+    # false after this.
     def record_recheck_attempt(issue)
+      max = infra_recheck_max
       attempt = (issue.infra_recheck_count || 0) + 1
-      issue.update(infra_recheck_count: attempt,
-                   infra_recheck_at: infra_recheck_backoff_seconds.seconds.from_now)
-      log "Issue ##{issue.issue_iid}: infra recheck attempt #{attempt}/#{infra_recheck_max}, backing off"
+      return log_recheck_overrun(issue, attempt, max) if attempt > max
+
+      issue.update(infra_recheck_count: attempt)
+      log "Issue ##{issue.issue_iid}: infra recheck attempt #{attempt}/#{max}, backing off"
+    end
+
+    # Autodev #110: the old code logged `9/5` and wrote it anyway. A logged
+    # overrun with no consequence is what kept the defect invisible for a night —
+    # a write beyond the cap is refused and logged as an error instead
+    # (`log_error`, `DangerClaudeRunner#log_error` → `@logger.error`).
+    def log_recheck_overrun(issue, attempt, max)
+      log_error "Issue ##{issue.issue_iid}: refusing to record infra recheck attempt " \
+                "#{attempt} past the cap of #{max}"
     end
 
     def infra_recheck_max
-      (@project_config['infra_recheck_max'] || @config['infra_recheck_max'] ||
-        DEFAULT_INFRA_RECHECK_MAX).to_i
-    end
-
-    def infra_recheck_backoff_seconds
-      (@project_config['infra_recheck_backoff'] || @config['infra_recheck_backoff'] ||
-        DEFAULT_INFRA_RECHECK_BACKOFF).to_i
+      ::Config.infra_recheck_max(@project_config, @config)
     end
   end
 end

@@ -178,6 +178,39 @@ class ExternalStateTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     assert_empty stop_notices
   end
 
+  # --- posting the stop notice is a write, and stays non-fatal (Autodev #62
+  # scopes writes out of the read rule) --------------------------------
+  #
+  # `notify_stop`'s own rescue named `Gitlab::Error::ResponseError` alone until
+  # Autodev #115 widened it to `GitlabHelpers::TRANSPORT_ERRORS`: a peer hanging
+  # up mid-response is not an HTTP response, and it used to escape this write
+  # uncaught — unlike every other write-swallow in this codebase — and take the
+  # whole `stop_unassigned` call down with it, closure included.
+
+  class NoteTransportFailingClient < StubClient
+    def create_issue_note(_project, _iid, _body)
+      raise Errno::ECONNRESET, 'Connection reset by peer'
+    end
+  end
+
+  def test_a_transport_error_posting_the_stop_notice_does_not_raise
+    logger = StubLogger.new
+    host = Host.new(NoteTransportFailingClient.new, logger)
+
+    host.stop_unassigned(create_issue(status: 'pending'))
+
+    assert(logger.messages.any? { |m| m.include?('Failed to post the stop notice') },
+           'the swallowed failure must still be logged, not silently dropped')
+  end
+
+  def test_a_transport_error_posting_the_stop_notice_still_closes_the_row
+    host = Host.new(NoteTransportFailingClient.new, StubLogger.new)
+    issue = create_issue(status: 'pending')
+    host.stop_unassigned(issue)
+
+    assert_equal 'closed', issue.reload.status
+  end
+
   # --- the label handover -------------------------------------------
 
   # The #15894 shape: a human replaced `Development::Doing` with

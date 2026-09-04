@@ -167,6 +167,23 @@ module Config # rubocop:disable Metrics/ModuleLength
     value.to_i
   end
 
+  # Autodev #110. One lookup for the two infra-recheck settings, read by both
+  # `PollDispatcher` (which reserves `infra_recheck_at`) and
+  # `PipelineMonitor::InfraRecheck` (which spends `infra_recheck_count`) — a
+  # second copy across the same two files is how the two answers drift apart,
+  # and `infra_recheck_max` was already duplicated before this.
+  def self.infra_recheck_max(project_config, config = nil)
+    value = project_config&.[]('infra_recheck_max') || config&.[]('infra_recheck_max') ||
+            ::PipelineMonitor::DEFAULT_INFRA_RECHECK_MAX
+    value.to_i
+  end
+
+  def self.infra_recheck_backoff(project_config, config = nil)
+    value = project_config&.[]('infra_recheck_backoff') || config&.[]('infra_recheck_backoff') ||
+            ::PipelineMonitor::DEFAULT_INFRA_RECHECK_BACKOFF
+    value.to_i
+  end
+
   # The credential `mr-review` runs with and the key that supplied it, as
   # `[token, key]` -- nil when autodev's configuration declares neither
   # (Autodev #80). One definition for both readers: the review step, which

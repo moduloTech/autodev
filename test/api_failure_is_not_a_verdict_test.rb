@@ -984,13 +984,24 @@ class DegradedApiValueShapeTest < Minitest::Test
   #   * `IssueNotifier`, `LabelManager`, `ActivityLogger`, `ScreenshotUploader`,
   #     `ExternalState#notify_stop` — writes. A note that could not be posted or a
   #     label that could not be set reports what happened; it invents nothing.
-  #     #62 scopes writes out explicitly.
+  #     #62 scopes writes out explicitly. `notify_stop`'s own rescue named
+  #     `Gitlab::Error::ResponseError` alone until Autodev #115 widened it to
+  #     `GitlabHelpers::TRANSPORT_ERRORS` — a `Net::ReadTimeout` posting the stop
+  #     notice used to escape this one write uncaught, unlike every other write
+  #     in this list. Still a write, still out of `SCANNED`: what changed was
+  #     the class list, not the shape.
   #   * `PollDispatcher#check_external_state` / `#check_post_completion_needed`,
-  #     `DormantAudit#audit`, `LabelHandover#events` — the rescue already sits at
-  #     the unit-of-work boundary and its substitute means "do not act on this row
-  #     this cycle", which is what the rule prescribes. `DormantAudit` bumps its
-  #     counter *before* the read, deliberately, so an unreachable project burns
-  #     the cap instead of being retried forever.
+  #     `DormantAudit#audit`, `IssueProcessJob#handed_over?` (Autodev #102, added
+  #     by branch review) — the rescue already sits at the unit-of-work boundary
+  #     and its substitute means "do not act on this row this cycle", which is
+  #     what the rule prescribes. `DormantAudit` bumps its counter *before* the
+  #     read, deliberately, so an unreachable project burns the cap instead of
+  #     being retried forever, and its clause now also names `ApiUnavailableError`
+  #     (Autodev #115), for the reason `LabelHandover#events` leaves this bullet
+  #     — see below. `handed_over?`'s substitute is "decline the retry for this
+  #     cycle", the same category, and it is wrapped in `GitlabHelpers.answer` so
+  #     the transport family (not only `Gitlab::Error::ResponseError`) reaches
+  #     that rescue too.
   #   * `IssueProcessor` — an active row mid-flight, where "conclude nothing and
   #     re-read next cycle" has no mechanism: no pass selects the pre-MR states
   #     (`cloning` … `creating_mr`). `dispatch_pipelines` and `dispatch_discussions`
@@ -1056,6 +1067,20 @@ class DegradedApiValueShapeTest < Minitest::Test
   # above: `app/services/autodev/ticket_reclaim.rb` reads and writes an
   # assignment on a ticket it reclaims, and `app/services/autodev/reset_reclaim.rb`
   # is its second write (the working label) plus the failure-mode label restore.
+  #
+  # **And Autodev #115 removes one from the omissions bullet above rather than
+  # adding to it.** `LabelHandover#events` was named there as a boundary swallow
+  # whose substitute meant "do not act on this row this cycle" — and on
+  # `verdict`'s path that sentence was false: `[]` reached `decisive_event` as
+  # "no event contradicts the labels", the good news, on the read that decides
+  # *who* moved a ticket whose evidence (`suspicion`) had already been found for
+  # free off the labels. It is now `GitlabHelpers.answer`, no swallow at all, so
+  # the file is added to `SCANNED` to let the scanner prove the omission this
+  # list used to only assert — the exact shape #73 warns about, found here in
+  # this file's own list.
+  #
+  #   * `app/services/autodev/label_handover.rb` — `events`, corrected rather
+  #     than declared: nothing in it swallows a failed read any more.
   SCANNED = %w[
     lib/autodev/pipeline_monitor.rb lib/autodev/mr_fixer.rb lib/autodev/mr_discussions.rb
     lib/autodev/poll_router.rb lib/autodev/review_skill_source.rb lib/autodev/target_branch.rb
@@ -1063,6 +1088,7 @@ class DegradedApiValueShapeTest < Minitest::Test
     lib/autodev/review_publisher.rb app/services/autodev/review_arrears_sweep.rb
     lib/autodev/gitlab_failure.rb lib/autodev/consecutive_occurrences.rb
     app/services/autodev/ticket_reclaim.rb app/services/autodev/reset_reclaim.rb
+    app/services/autodev/label_handover.rb
   ].freeze
 
   SCANNED_DIRS = %w[lib/autodev/pipeline_monitor lib/autodev/mr_fixer lib/autodev/poll_router].freeze

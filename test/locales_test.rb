@@ -2,7 +2,7 @@
 
 require_relative 'test_helper'
 
-class LocalesTest < Minitest::Test
+class LocalesTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- one file, every locale guard
   def test_french_template_with_interpolation
     msg = Locales.t(:processing_started, locale: :fr, tag: '**autodev**')
 
@@ -53,6 +53,56 @@ class LocalesTest < Minitest::Test
     missing = en_keys - fr_keys
 
     assert_empty missing, "FR locale is missing keys: #{missing.join(', ')}"
+  end
+
+  # Key parity says nothing about whether the two sides of a key take the same
+  # arguments — `Locales.t(key, **vars)` interpolates whatever `%{…}` the
+  # loaded template names and silently ignores the rest, so a key present in
+  # both tables with different placeholders renders fine in whichever locale
+  # is loaded and raises (`I18n::MissingInterpolationArgument`) only in the
+  # other, the day somebody's `issue.locale` picks it. The neutral review of
+  # the alpha-54 lot checked the four `cli_boot_guard_orphan_*` keys' by hand
+  # and found them matched; this is that check turned into a suite guard over
+  # every key both tables carry, so a future key does not depend on somebody
+  # doing the same check by hand again.
+  #
+  # Values that are not a String (the pluralized
+  # `web_autospec_attachments_label` hash — the only one, over the 662 keys
+  # `merged_for` returns; `devise.*.yml` is not in `LOCALE_FILES_GLOB` and
+  # so never reaches here at all) are out of scope: `merged_for`
+  # returns them verbatim rather than flattened, and a `%{…}` scan over a Hash
+  # answers nothing useful.
+  def placeholder_names(template)
+    template.to_s.scan(/%\{(\w+)\}/).flatten.map(&:to_sym).sort.uniq
+  end
+
+  # nil unless both sides are strings with a placeholder mismatch — the
+  # extraction that keeps the test method itself a plain `filter_map`.
+  def placeholder_mismatch(key, fr_value, en_value)
+    return unless fr_value.is_a?(String) && en_value.is_a?(String)
+
+    fr_placeholders = placeholder_names(fr_value)
+    en_placeholders = placeholder_names(en_value)
+    return if fr_placeholders == en_placeholders
+
+    "#{key} (fr: #{fr_placeholders.join(', ')} / en: #{en_placeholders.join(', ')})"
+  end
+
+  def test_every_key_present_in_both_locales_takes_the_same_placeholders
+    fr = Locales.merged_for(:fr)
+    en = Locales.merged_for(:en)
+    shared = fr.keys & en.keys
+
+    mismatches = shared.filter_map { |key| placeholder_mismatch(key, fr[key], en[key]) }
+
+    assert_empty mismatches, <<~MSG
+      These keys interpolate different placeholders in fr and en, so calling
+      `Locales.t` with one locale's variables raises in the other:
+      #{mismatches.join("\n")}
+
+      This is a report guard, not a fixer: an existing mismatch found here on a
+      key this lot did not touch is a separate ticket, not this one.
+    MSG
   end
 
   def test_stagnation_pipeline_renders_the_infra_detail_in_both_locales
