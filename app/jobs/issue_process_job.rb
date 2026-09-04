@@ -180,10 +180,21 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     issue.post_completion_done!
   end
 
+  # Autodev #111. Entering `error` writes the retry decision (`mark_failed`
+  # stamps `next_retry_at`); leaving it erases that decision. Both recovery
+  # paths do it — they used not to, for no reason written anywhere, and
+  # `PollDispatcher.retryable?` reads the stamp, `retry_count` and nothing else,
+  # so a residue is a scheduled return nobody decided on. It survived only
+  # because `fetch_retryable` filters on status; that filter is a second line,
+  # not the rule.
+  # `handed_over?` returns early — closing the row and posting the handover
+  # comment itself, not merely answering a question — on a yes.
   def perform_retry_errored(issue, config, project_config)
+    return if handed_over?(issue, config, project_config)
+
     has_mr = !issue.mr_iid.nil?
     has_mr ? issue.retry_pipeline! : issue.retry_processing!
-    issue.update(error_message: nil, started_at: nil)
+    issue.update(error_message: nil, started_at: nil, next_retry_at: nil)
     restore_working_label(issue, config, project_config)
     log_retry_activity(issue, config, project_config)
   end
@@ -195,6 +206,39 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   end
 
   private
+
+  # Autodev #102. `error` is outside `dispatch_unassignment`'s ACTIVE_STATUSES
+  # sweep, so this is the only place the question gets asked before autodev
+  # writes on the ticket again. A read that could not answer declines the retry
+  # for this cycle and leaves the row exactly as it was — the Autodev #67 rule,
+  # and the choice Autodev #93 made for `UntouchedSinceGiveup`: an unreadable
+  # ticket is never permission to take it.
+  #
+  # Costs one GitLab read per errored retry — not per poll cycle. `manage_labels`
+  # does read the issue, but inside `apply_label_doing`, i.e. after the
+  # transition, which is too late to be the one this needs.
+  #
+  # The read is wrapped in `GitlabHelpers.answer` — branch review: a raw
+  # `client.issue` left the transport family (`Errno::ECONNREFUSED` among them,
+  # ~9% of GitLab reads from bobette per Autodev #96) to escape as a job
+  # failure rather than the clean decline below, even though the rescue clause
+  # already covered `ApiUnavailableError`. Wrapping makes the two agree.
+  def handed_over?(issue, config, project_config)
+    client = build_client(config)
+    gl_issue = read_gitlab_issue(client, project_config, issue)
+    stopper = ::Autodev::HandoverStop.new(client: client, path: project_config['path'],
+                                          project_config: project_config,
+                                          logger: ::Autodev::JobLogger.new(logger))
+    !stopper.stop_on_handover(issue, gl_issue).nil?
+  rescue ::ApiUnavailableError => e
+    logger.warn("Declining the retry of ##{issue.issue_iid}: could not read the ticket " \
+                "(#{e.class}: #{e.message})")
+    true
+  end
+
+  def read_gitlab_issue(client, project_config, issue)
+    ::GitlabHelpers.answer(:issue) { client.issue(project_config['path'], issue.issue_iid) }
+  end
 
   # A retry resumes the work; it does not deliver it (Autodev #100).
   #

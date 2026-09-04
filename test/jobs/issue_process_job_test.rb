@@ -36,6 +36,12 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
     }
     @issue = build_fake_issue
     @client = Object.new
+    # Autodev #102: perform_retry_errored now reads the ticket once, before
+    # transitioning, to ask HandoverStop whether a human took it back. `nil`
+    # labels resolve to "untouched" here since @config's project declares no
+    # label_doing/label_done, which is what every test but the handover-specific
+    # ones (test/errored_retry_respects_a_handover_test.rb) wants.
+    @client.define_singleton_method(:issue) { |*| nil }
   end
 
   test 'invalid action raises ArgumentError' do
@@ -306,6 +312,9 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
       def update(**) = self
       def retry_processing! = nil
       def retry_pipeline! = nil
+      # Autodev #102: perform_retry_errored's handover check calls this via
+      # ExternalState#stop_on_handover before it does anything else.
+      def may_close? = true
     end.new(ISSUE_IID, nil, 'pending', 0)
   end
 

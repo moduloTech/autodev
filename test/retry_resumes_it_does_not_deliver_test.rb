@@ -38,6 +38,10 @@ class RetryResumesItDoesNotDeliverTest < ActiveSupport::TestCase
   PROJECT_PATH = 'group/foo'
   ISSUE_IID = 42
 
+  # Autodev #102: the fake GitLab issue perform_retry_errored's handover check
+  # now reads once before doing anything else.
+  GlIssue = Struct.new(:labels)
+
   # Every call site of the end label, and the delivery each one makes. Derived
   # against the tree by the last test in this file, in the shape
   # `test/api_failure_is_not_a_verdict_test.rb` uses: it proves every call site
@@ -113,11 +117,19 @@ class RetryResumesItDoesNotDeliverTest < ActiveSupport::TestCase
   end
 
   def perform_with_stubs
-    GitlabHelpers.stub(:build_gitlab_client, Object.new) do
+    GitlabHelpers.stub(:build_gitlab_client, untouched_client) do
       ActivityLogger.stub(:post, true) do
         MrFixer.stub(:new, label_recorder) { IssueProcessJob.new.perform(PROJECT_PATH, ISSUE_IID, :retry_errored) }
       end
     end
+  end
+
+  # Autodev #102: perform_retry_errored now reads the ticket once before doing
+  # anything else, to ask HandoverStop whether a human took it back. This file
+  # is about the label choice, not the handover, so the client answers with
+  # `label_doing` still on — the "nobody touched it" case.
+  def untouched_client
+    Object.new.tap { |c| c.define_singleton_method(:issue) { |*| GlIssue.new(['Development::Doing']) } }
   end
 
   # Which of the two labels was asked for, and nothing else: the question is the
@@ -135,6 +147,9 @@ class RetryResumesItDoesNotDeliverTest < ActiveSupport::TestCase
       def update(**) = self
       def retry_processing! = fired << :retry_processing!
       def retry_pipeline! = fired << :retry_pipeline!
+      # Autodev #102: the handover check calls this via
+      # ExternalState#stop_on_handover before it does anything else.
+      def may_close? = true
     end.new(ISSUE_IID, nil, 'error', 0, [])
   end
 

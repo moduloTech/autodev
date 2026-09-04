@@ -12,10 +12,12 @@ module Autodev
   # and Solid Queue's queue.yml-configured worker pool runs them with
   # configurable concurrency (default 3, matching legacy `max_workers`).
   #
-  # The Sequel models (`Issue`, `ActivityEvent`) are dynamically defined by
-  # `Database.build_model!` which the legacy_sinatra initializer runs at
-  # boot — so this class can call `::Issue.where(...)` exactly like the
-  # legacy handlers do.
+  # `Issue` and `ActivityEvent` are ActiveRecord models (`Issue < ApplicationRecord`,
+  # `app/models/issue.rb:12`) — this comment used to say Sequel, which stopped
+  # being true when the Rails migration landed, and is exactly the kind of
+  # unverified statement Autodev #73 exists for: it would send a reader of
+  # `::Issue.where(...)` to `Sequel.expr` instead of ActiveRecord's own query
+  # interface.
   class PollDispatcher # rubocop:disable Metrics/ClassLength
     include ExternalState
     include StaleTransitionBound
@@ -288,6 +290,10 @@ module Autodev
 
     # === poll_unassignment equivalent (inline — DB-only, no queue overhead) ===
 
+    # `error` is deliberately NOT in ACTIVE_STATUSES (Autodev #102). Widening the
+    # constant would change the population of every pass that reads it, for a
+    # defect that lives in one method: `IssueProcessJob#perform_retry_errored`
+    # asks the same question through `Autodev::HandoverStop` before it relaunches.
     def dispatch_unassignment
       ::Issue.where(project_path: @path, status: ACTIVE_STATUSES).find_each do |issue|
         check_external_state(issue)
@@ -441,26 +447,52 @@ module Autodev
     # recovery. Only `stagnation_pipeline` is targeted — never
     # `stagnation_discussions`, never a code-origin give-up.
 
+    # Autodev #110. The row is **reserved** before the job is enqueued, by moving
+    # the one column the selection races on. Without it every cycle between the
+    # enqueue and the execution re-selected the same row: five enqueues in eighty
+    # seconds on 04/09/2026, then five jobs each spending an attempt, `9/5`.
+    #
+    # Who owns what, and it is not symmetric on purpose:
+    #   * this pass owns `infra_recheck_at` — the clock it selects on;
+    #   * `InfraRecheck#record_recheck_attempt` owns `infra_recheck_count` — the
+    #     budget, spent only by an attempt that actually read a pipeline
+    #     (`verdict == :spend`), so a GitLab outage cannot burn the whole watch
+    #     window without ever having looked.
+    #
+    # The UPDATE repeats the raced predicate — status, flag, reason, count and
+    # backoff, the columns two cycles can disagree on — rather than matching on
+    # `id` alone: that is what makes it a compare-and-set, so two cycles racing
+    # on one row cannot both match. It omits `mr_iid IS NOT NULL`, which
+    # `fetch_infra_recheck_candidates` also filters on: that column is not
+    # raced (nothing here or in `record_recheck_attempt` writes it), so
+    # matching on it here would ask nothing new.
     def dispatch_infra_recheck
       fetch_infra_recheck_candidates.each do |issue|
+        next unless reserve_infra_recheck?(issue)
+
         IssueProcessJob.perform_later(@path, issue.issue_iid, :recheck_infra)
         @logger.info("Enqueued infra recheck for issue ##{issue.issue_iid} " \
                      "(attempt #{(issue.infra_recheck_count || 0) + 1})", project: @path)
       end
     end
 
+    def reserve_infra_recheck?(issue)
+      ::Issue.where(id: issue.id, project_path: @path, status: 'done',
+                    needs_attention: true, attention_reason: 'stagnation_pipeline')
+             .where('infra_recheck_count < ?', Config.infra_recheck_max(@project_config, @config))
+             .where("infra_recheck_at IS NULL OR infra_recheck_at <= datetime('now')")
+             .update_all(infra_recheck_at: Config.infra_recheck_backoff(@project_config,
+                                                                        @config).seconds.from_now)
+             .positive?
+    end
+
     def fetch_infra_recheck_candidates
       ::Issue.where(project_path: @path, status: 'done',
                     needs_attention: true, attention_reason: 'stagnation_pipeline')
              .where.not(mr_iid: nil)
-             .where('infra_recheck_count < ?', infra_recheck_max)
+             .where('infra_recheck_count < ?', Config.infra_recheck_max(@project_config, @config))
              .where("infra_recheck_at IS NULL OR infra_recheck_at <= datetime('now')")
              .to_a
-    end
-
-    def infra_recheck_max
-      (@project_config['infra_recheck_max'] || @config['infra_recheck_max'] ||
-        ::PipelineMonitor::DEFAULT_INFRA_RECHECK_MAX).to_i
     end
   end
 end

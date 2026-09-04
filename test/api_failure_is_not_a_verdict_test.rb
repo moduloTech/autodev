@@ -986,11 +986,15 @@ class DegradedApiValueShapeTest < Minitest::Test
   #     label that could not be set reports what happened; it invents nothing.
   #     #62 scopes writes out explicitly.
   #   * `PollDispatcher#check_external_state` / `#check_post_completion_needed`,
-  #     `DormantAudit#audit`, `LabelHandover#events` — the rescue already sits at
+  #     `DormantAudit#audit`, `LabelHandover#events`, `IssueProcessJob#handed_over?`
+  #     (Autodev #102, added by branch review) — the rescue already sits at
   #     the unit-of-work boundary and its substitute means "do not act on this row
   #     this cycle", which is what the rule prescribes. `DormantAudit` bumps its
   #     counter *before* the read, deliberately, so an unreachable project burns
-  #     the cap instead of being retried forever.
+  #     the cap instead of being retried forever. `handed_over?`'s substitute is
+  #     "decline the retry for this cycle", the same category, and it is now
+  #     wrapped in `GitlabHelpers.answer` so the transport family (not only
+  #     `Gitlab::Error::ResponseError`) reaches that rescue too.
   #   * `IssueProcessor` — an active row mid-flight, where "conclude nothing and
   #     re-read next cycle" has no mechanism: no pass selects the pre-MR states
   #     (`cloning` … `creating_mr`). `dispatch_pipelines` and `dispatch_discussions`
