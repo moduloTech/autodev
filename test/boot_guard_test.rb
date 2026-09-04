@@ -219,6 +219,26 @@ class BootGuardTest < Minitest::Test
     assert_equal [555], @killed
   end
 
+  def test_strict_mode_refuses_when_an_orphan_survives_kill
+    @verdict = :alive
+    guard = build_guard(holders: [build_holder(pid: 1383, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')],
+                        strict: true)
+
+    error = assert_raises(ConfigError) { guard.call }
+
+    assert_includes error.message, '1383'
+  end
+
+  def test_strict_mode_does_not_refuse_after_a_successful_reap
+    @verdict = :gone_on_kill
+    guard = build_guard(holders: [build_holder(pid: 555, command: 'puma 6.6.1 (tcp://0.0.0.0:4567)')],
+                        strict: true)
+
+    guard.call # must not raise: an operator investigating by hand must still be able to boot
+
+    assert_equal [555], @killed
+  end
+
   # --- the real finder, which nothing exercised before ----------------------
 
   def test_the_real_holder_finder_never_reports_the_calling_process
