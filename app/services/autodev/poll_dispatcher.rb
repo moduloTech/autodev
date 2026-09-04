@@ -459,9 +459,13 @@ module Autodev
     #     (`verdict == :spend`), so a GitLab outage cannot burn the whole watch
     #     window without ever having looked.
     #
-    # The UPDATE repeats the whole predicate rather than matching on `id`: that
-    # is what makes it a compare-and-set, so two cycles racing on one row cannot
-    # both match.
+    # The UPDATE repeats the raced predicate — status, flag, reason, count and
+    # backoff, the columns two cycles can disagree on — rather than matching on
+    # `id` alone: that is what makes it a compare-and-set, so two cycles racing
+    # on one row cannot both match. It omits `mr_iid IS NOT NULL`, which
+    # `fetch_infra_recheck_candidates` also filters on: that column is not
+    # raced (nothing here or in `record_recheck_attempt` writes it), so
+    # matching on it here would ask nothing new.
     def dispatch_infra_recheck
       fetch_infra_recheck_candidates.each do |issue|
         next unless reserve_infra_recheck?(issue)

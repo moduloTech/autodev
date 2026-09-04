@@ -3,14 +3,19 @@
 require_relative 'test_helper'
 
 # Autodev #110. Every dispatch pass enqueues its whole population each cycle, so
-# duplicates are normal. What makes them harmless is DISPATCHED_FROM (Autodev
-# #61): the work moves the row out of the state its action was dispatched from,
-# so the copy is skipped.
+# duplicates are normal. What makes most of them harmless is DISPATCHED_FROM
+# (Autodev #61): the work moves the row out of the state its action was
+# dispatched from, so the copy is skipped.
 #
-# `recheck_infra` is the one action whose precondition SURVIVES its own work — a
-# recheck that finds CI still broken leaves the row `done` — which is why it
-# needed a reservation and its neighbours did not. If a future action joins that
-# category, this test is where somebody finds out.
+# `recheck_infra` is the one action where a surviving precondition costs a real
+# budget unit — a recheck that finds CI still broken leaves the row `done`, so a
+# duplicate spends another attempt (`9/5`) — which is why it needed a
+# reservation. `post_completion`'s precondition survives too (see LATENT below),
+# but there is no budget there to overspend, so it needed no reservation; this
+# is the branch review's own correction (my spec's enumeration omitted it,
+# which is exactly how the false "recheck_infra is the *one* action" claim got
+# through). If a future action joins either category, this test is where
+# somebody finds out.
 class ADuplicateJobFindsNothingToDoTest < Minitest::Test
   # An action is "self-clearing" when performing it necessarily moves the row out
   # of every state it is dispatched from. Stated per action, with the transition
@@ -19,7 +24,6 @@ class ADuplicateJobFindsNothingToDoTest < Minitest::Test
     process: 'IssueProcessor#process leaves PROCESSABLE_STATES on start_processing!',
     check_pipeline: 'a conclusive poll leaves checking_pipeline; an inconclusive one re-reads harmlessly',
     fix_discussions: 'a round ends on discussions_fixed! or an abandon, leaving fixing_discussions',
-    post_completion: 'the hook transitions through running_post_completion',
     retry_errored: 'retry_pipeline! / retry_processing! leave error',
     retry_stuck: 'IssueProcessor#process leaves pending'
   }.freeze
@@ -30,8 +34,32 @@ class ADuplicateJobFindsNothingToDoTest < Minitest::Test
                    'state guard cannot tell a duplicate apart — PollDispatcher#reserve_infra_recheck? does'
   }.freeze
 
-  def test_every_dispatched_action_is_declared_self_clearing_or_reserved
-    declared = SELF_CLEARING.keys + RESERVED.keys
+  # A third category, found by branch review and not by this file's first
+  # version: `post_completion`'s precondition ALSO survives its own work.
+  # `start_post_completion!` -> `post_completion_done!` (`app/models/issue.rb:
+  # 117-118`) returns the row to `done`, and `dispatch_done_unassigned`'s own
+  # gates (`still_assigned?`, `mr_state_defers_hook?`) are unaffected by that
+  # round trip, so a duplicate job is NOT skipped by DISPATCHED_FROM — the pass
+  # re-runs the deploy command every poll interval it is still unassigned.
+  #
+  # Not RESERVED like `recheck_infra`, because there is no budget here to
+  # overspend: no counter, no cap, no `9/5`-shaped harm — just a repeated
+  # `post_completion` command. And latent rather than fixed: no configured
+  # project declares `post_completion` (CLAUDE.md), so the defect has never
+  # fired in production. Tracked as its own ticket, out of scope here.
+  LATENT = {
+    post_completion: 'start_post_completion! -> post_completion_done! returns the row to `done`; ' \
+                     'no budget to overspend, so no 9/5-shaped harm — latent because no project ' \
+                     'configures the hook, and fixed under a separate ticket'
+  }.freeze
+
+  # What this guard proves is that every action is **declared**, never that a
+  # declaration is **true** (the `test/api_failure_is_not_a_verdict_test.rb` /
+  # `test/i18n_derived_keys_test.rb` limit): the reason is an English sentence
+  # nothing verifies, which is exactly how `post_completion` survived under
+  # SELF_CLEARING — a declaration that read as true and was not.
+  def test_every_dispatched_action_is_declared_self_clearing_reserved_or_latent
+    declared = SELF_CLEARING.keys + RESERVED.keys + LATENT.keys
 
     assert_equal IssueProcessJob::DISPATCHED_FROM.keys.sort, declared.sort,
                  'a new action must declare whether its precondition survives its own work'

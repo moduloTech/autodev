@@ -187,6 +187,8 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # so a residue is a scheduled return nobody decided on. It survived only
   # because `fetch_retryable` filters on status; that filter is a second line,
   # not the rule.
+  # `handed_over?` returns early — closing the row and posting the handover
+  # comment itself, not merely answering a question — on a yes.
   def perform_retry_errored(issue, config, project_config)
     return if handed_over?(issue, config, project_config)
 
@@ -196,6 +198,14 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     restore_working_label(issue, config, project_config)
     log_retry_activity(issue, config, project_config)
   end
+
+  def perform_retry_stuck(issue, config, project_config)
+    issue.update(next_retry_at: nil)
+    log_retry_activity(issue, config, project_config)
+    ::IssueProcessor.new(**worker_kwargs(config, project_config)).process(issue)
+  end
+
+  private
 
   # Autodev #102. `error` is outside `dispatch_unassignment`'s ACTIVE_STATUSES
   # sweep, so this is the only place the question gets asked before autodev
@@ -207,26 +217,28 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # Costs one GitLab read per errored retry — not per poll cycle. `manage_labels`
   # does read the issue, but inside `apply_label_doing`, i.e. after the
   # transition, which is too late to be the one this needs.
+  #
+  # The read is wrapped in `GitlabHelpers.answer` — branch review: a raw
+  # `client.issue` left the transport family (`Errno::ECONNREFUSED` among them,
+  # ~9% of GitLab reads from bobette per Autodev #96) to escape as a job
+  # failure rather than the clean decline below, even though the rescue clause
+  # already covered `ApiUnavailableError`. Wrapping makes the two agree.
   def handed_over?(issue, config, project_config)
     client = build_client(config)
-    gl_issue = client.issue(project_config['path'], issue.issue_iid)
+    gl_issue = read_gitlab_issue(client, project_config, issue)
     stopper = ::Autodev::HandoverStop.new(client: client, path: project_config['path'],
                                           project_config: project_config,
                                           logger: ::Autodev::JobLogger.new(logger))
     !stopper.stop_on_handover(issue, gl_issue).nil?
-  rescue ::ApiUnavailableError, ::Gitlab::Error::ResponseError => e
+  rescue ::ApiUnavailableError => e
     logger.warn("Declining the retry of ##{issue.issue_iid}: could not read the ticket " \
                 "(#{e.class}: #{e.message})")
     true
   end
 
-  def perform_retry_stuck(issue, config, project_config)
-    issue.update(next_retry_at: nil)
-    log_retry_activity(issue, config, project_config)
-    ::IssueProcessor.new(**worker_kwargs(config, project_config)).process(issue)
+  def read_gitlab_issue(client, project_config, issue)
+    ::GitlabHelpers.answer(:issue) { client.issue(project_config['path'], issue.issue_iid) }
   end
-
-  private
 
   # A retry resumes the work; it does not deliver it (Autodev #100).
   #

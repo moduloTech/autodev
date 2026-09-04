@@ -84,6 +84,21 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
     assert_empty labels_written
   end
 
+  # Branch review, Minor 2: a raw `client.issue` only ever raised
+  # `Gitlab::Error::ResponseError`, so a transport failure (~9% of GitLab reads
+  # from bobette per Autodev #96 — `Errno::ECONNREFUSED` among them) would have
+  # escaped `handed_over?`'s `rescue ::ApiUnavailableError` entirely, failing
+  # the job instead of declining the retry. `handed_over?` now wraps the read in
+  # `GitlabHelpers.answer`, which converts the whole transport family.
+  def test_a_transport_failure_also_declines_the_retry
+    run_retry_with_handover(raises: Errno::ECONNREFUSED.new)
+    @issue.reload
+
+    assert_equal 'error', @issue.status,
+                 'a transport failure must decline the retry exactly like an HTTP error does'
+    assert_empty labels_written
+  end
+
   # Autodev #102, design §4: HandoverStop must add no logic of its own — every
   # method beyond the question it forwards is an answer free to drift from
   # PollDispatcher's.
