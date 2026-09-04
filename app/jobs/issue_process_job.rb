@@ -180,10 +180,17 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     issue.post_completion_done!
   end
 
+  # Autodev #111. Entering `error` writes the retry decision (`mark_failed`
+  # stamps `next_retry_at`); leaving it erases that decision. Both recovery
+  # paths do it — they used not to, for no reason written anywhere, and
+  # `PollDispatcher.retryable?` reads the stamp, `retry_count` and nothing else,
+  # so a residue is a scheduled return nobody decided on. It survived only
+  # because `fetch_retryable` filters on status; that filter is a second line,
+  # not the rule.
   def perform_retry_errored(issue, config, project_config)
     has_mr = !issue.mr_iid.nil?
     has_mr ? issue.retry_pipeline! : issue.retry_processing!
-    issue.update(error_message: nil, started_at: nil)
+    issue.update(error_message: nil, started_at: nil, next_retry_at: nil)
     restore_working_label(issue, config, project_config)
     log_retry_activity(issue, config, project_config)
   end
