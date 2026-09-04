@@ -332,7 +332,11 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
     sweep(StubClient.new(mr: FakeMr.new('opened', 'conflict', true)), apply: true)
 
     assert_equal 'done', issue.reload.status, 'a conflicted merge request must not be re-armed'
-    assert_includes @out.string, 'conflicts'
+    # `describe` prints "conflicts …" on every row regardless of verdict, so
+    # asserting on that substring proves nothing beyond "the sweep ran" — the
+    # `conflicted 1` counter is what discriminates this scenario from any
+    # other decline.
+    assert_includes @out.string, 'conflicted 1', 'the report must count this row under the conflicted verdict'
   end
 
   def test_a_conflicted_merge_request_is_declined_on_the_flag_alone
@@ -386,10 +390,18 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   # --- the report is the only thing that makes a declined row actionable ------
 
   def test_every_verdict_that_declines_carries_a_reason
-    declining = Autodev::ReviewArrearsSweep::VERDICTS.keys - [:eligible]
+    # Derived, not restated: a hardcoded list of "the verdicts to check" would
+    # equal today's set by construction and silently drop a verdict added to
+    # `VERDICTS` and forgotten here — exactly the failure this test exists to
+    # catch. `already_swept` and `not_ours` are the only two genuine
+    # exclusions, because they decline through `examine`'s own hand-built
+    # `decline` calls (`swept_line` / `ownership`), never through `consider`'s
+    # `MR_VERDICT_REASON.fetch` — so a missing reason for either of them is not
+    # the `KeyError` this test is about.
+    declining = Autodev::ReviewArrearsSweep::VERDICTS.keys - %i[eligible already_swept not_ours]
     documented = Autodev::ReviewArrearsSweep::MR_VERDICT_REASON.keys
 
-    (declining & %i[waiting already_merged mr_closed mr_conflicted unknown_state]).each do |verdict|
+    declining.each do |verdict|
       assert_includes documented, verdict,
                       "#{verdict} declines a row and `consider` fetches its reason — " \
                       'a missing entry is a KeyError in front of an operator'
@@ -412,12 +424,61 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
                     'mr_conflicted must appear in the report, or the rows it counts are invisible'
   end
 
+  # The arithmetic check the spec describes (Testing item 5): summing every
+  # counter reproduces `examined`, over a run that actually produces a mix of
+  # verdicts rather than one repeated nine times — a verdict added to
+  # `VERDICTS` and left out of `report` would break this sum without breaking
+  # a single-verdict scenario, which is exactly the gap a real regression
+  # would hide in.
   def test_the_counters_account_for_every_examined_row
-    3.times { |i| arrear(issue_iid: 900 + i) }
-    sweep(StubClient.new(mr: FakeMr.new('opened', 'conflict', true)))
+    iids = mixed_verdict_iids
+    build_mixed_verdict_arrears(iids)
 
-    assert_match(/examined 3/, @out.string)
-    assert_match(/conflicted 3/, @out.string)
+    tally = sweep(mixed_verdict_client(iids))
+
+    assert_equal 9, tally[:examined]
+    # Each row landed under the one verdict this scenario means it to, so the
+    # sum below is not vacuously true over a run that only ever produces a
+    # single verdict.
+    assert_equal({ eligible: 1, waiting: 1, already_merged: 1, mr_closed: 1, mr_conflicted: 1,
+                   unknown_state: 1, not_ours: 1, already_swept: 1, unreadable: 1 },
+                 tally.slice(*iids.keys))
+    assert_equal tally[:examined], accounted_for(tally),
+                 'every verdict counter plus unreadable and incomplete must account for every examined row'
+  end
+
+  def accounted_for(tally)
+    Autodev::ReviewArrearsSweep::VERDICTS.keys.sum { |verdict| tally[verdict] } +
+      tally[:unreadable] + tally[:incomplete]
+  end
+
+  # One issue iid per outcome the sweep can leave a row under: every
+  # `mr_verdict` branch, the ownership filter's `not_ours`, a row this sweep
+  # already swept once, and one GitLab could not answer for at all.
+  def mixed_verdict_iids
+    { eligible: 900, waiting: 901, already_merged: 902, mr_closed: 903, mr_conflicted: 904,
+      unknown_state: 905, not_ours: 906, already_swept: 907, unreadable: 908 }
+  end
+
+  def build_mixed_verdict_arrears(iids)
+    iids.each_value { |iid| arrear(issue_iid: iid, mr_iid: iid) }
+    sweep_marker_event(Issue.find_by!(issue_iid: iids[:already_swept]))
+  end
+
+  def mixed_verdict_client(iids)
+    StubClient.new(mrs: mixed_verdict_mrs(iids),
+                   gl_issues: { iids[:not_ours] =>
+                                  FakeGlIssue.new('opened', [FakeAssignee.new(OTHER_HUMAN_ID)], [DOING]) },
+                   mr_error_iids: [iids[:unreadable]])
+  end
+
+  def mixed_verdict_mrs(iids)
+    { iids[:eligible] => ReviewArrearsSweepTest.open_mr,
+      iids[:waiting] => FakeMr.new('opened', 'checking', false),
+      iids[:already_merged] => FakeMr.new('merged', 'mergeable', false),
+      iids[:mr_closed] => FakeMr.new('closed', 'not_open', false),
+      iids[:mr_conflicted] => FakeMr.new('opened', 'conflict', true),
+      iids[:unknown_state] => FakeMr.new('something_gitlab_added_later', nil, nil) }
   end
 
   # --- 3. APPLY -------------------------------------------------------------
