@@ -76,6 +76,24 @@ class ProcessStopperTest < Minitest::Test
     assert_equal [['TERM', 555]], @signals, 'a pid that was already gone needs no KILL'
   end
 
+  # The mirror of the TERM case above: the process outlasts the whole TERM
+  # grace window (`alive` never says otherwise), but by the time KILL is sent
+  # it has died on its own — the killer answers ESRCH (`false`) rather than
+  # confirming delivery.
+  def test_a_pid_already_gone_when_kill_is_sent_is_gone_on_kill
+    overrides = seams(alive: ->(_pid) { true })
+    overrides[:killer] = lambda do |sig, pid|
+      @signals << [sig, pid]
+      sig != 'KILL' # TERM is delivered; KILL finds the pid already gone (ESRCH)
+    end
+
+    verdict = Autodev::ProcessStopper.stop(555, grace: 1, overrides: overrides)
+
+    assert_equal :gone_on_kill, verdict
+    assert_equal [['TERM', 555], ['KILL', 555]], @signals,
+                 'KILL must still be attempted after the TERM grace expires'
+  end
+
   def test_the_default_grace_matches_the_supervisors
     require 'autodev/supervisor'
 

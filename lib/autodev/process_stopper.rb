@@ -19,8 +19,15 @@ module Autodev
   # shape is shared and the code is not. There is deliberately no `Process.wait`
   # anywhere in this file.
   #
-  # Liveness is `Process.kill(0, pid)`, the same question `Supervisor::Child#alive?`
-  # asks: `ESRCH` is gone, `EPERM` is alive and somebody else's.
+  # Liveness is `Process.kill(0, pid)`, the same probe `Supervisor::Child#alive?`
+  # (`lib/autodev/supervisor.rb`) makes — but the two read `EPERM` differently,
+  # deliberately. `Supervisor::Child#alive?` rescues `ESRCH` and `EPERM` together
+  # and answers `false` for both, which is correct for *its* question ("is this
+  # one of my own children still running", and a pid this process cannot signal
+  # was never spawned by it). This module answers a different question, "is
+  # this pid still on the process table at all", where `EPERM` is proof the pid
+  # exists and belongs to somebody else — reading it as gone would let `stop`
+  # declare victory over a process it never touched.
   module ProcessStopper
     # The same value as `Supervisor::TERM_GRACE_SECONDS`, declared here rather
     # than read from there: a module operating on a bare pid must not depend on
