@@ -28,7 +28,9 @@ class ADuplicateJobFindsNothingToDoTest < Minitest::Test
                    '`handed_over?` keeps declining on an unreadable GitLab read (Autodev #102): ' \
                    'the row stays in `error` with `next_retry_at` unchanged, so `dispatch_retries` ' \
                    're-enqueues it every cycle for as long as the read keeps failing. Not RESERVED: ' \
-                   '`retry_count` is written by `mark_failed`, not by this pass, so nothing is ' \
+                   '`retry_count` is only ever *incremented* by `mark_failed` (the two other ' \
+                   'writers, `Issue.reset_for_retry!` and the dormant audit, reset it to 0), ' \
+                   'and never by this pass, so nothing is ' \
                    'overspent — the recurring cost is one extra GitLab read per cycle, not a budget ' \
                    'unit, and the row self-clears the moment the read succeeds',
     retry_stuck: 'IssueProcessor#process leaves pending'

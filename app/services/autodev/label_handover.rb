@@ -323,7 +323,10 @@ module Autodev
     # `route_still_assigned`) was widened alongside this change, and so was
     # `PollDispatcher#check_external_state` (`verdict`, via `stop_on_handover`)
     # at the alpha-54 lot's integration: its rescue line now names
-    # `ApiUnavailableError` beside `Gitlab::Error::ResponseError`, so every
+    # `ApiUnavailableError` beside `Gitlab::Error::ResponseError`. The sixth
+    # consumer is this lot's own (Autodev #102): `IssueProcessJob#handed_over?`
+    # reaches `verdict` through `Autodev::HandoverStop` and rescues
+    # `ApiUnavailableError` by name, declining the retry for the cycle. So every
     # consumer's boundary catches this raise.
     def events(issue_iid)
       Array(::GitlabHelpers.answer(:issue_label_events) { @client.issue_label_events(@path, issue_iid) })

@@ -68,7 +68,7 @@ module Autodev
     # about what was observed, never about what was requested.
     #
     # `:gone_on_kill` names *when* the process was found gone, not what ended
-    # it: line 74's `unless seams[:killer].call('KILL', pid)` reaches this
+    # it: the `unless seams[:killer].call('KILL', pid)` line below reaches this
     # verdict on `ESRCH` too — the process outlived the TERM grace but died in
     # the window between that check and the KILL signal actually landing, so
     # nothing this process sent reached it. The neutral review of the alpha-54

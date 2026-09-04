@@ -66,8 +66,10 @@ class LocalesTest < Minitest::Test # rubocop:disable Metrics/ClassLength -- one 
   # every key both tables carry, so a future key does not depend on somebody
   # doing the same check by hand again.
   #
-  # Values that are not a String (`devise`'s nested scope, the pluralized
-  # `web_autospec_attachments_label` hash) are out of scope: `merged_for`
+  # Values that are not a String (the pluralized
+  # `web_autospec_attachments_label` hash — the only one, over the 662 keys
+  # `merged_for` returns; `devise.*.yml` is not in `LOCALE_FILES_GLOB` and
+  # so never reaches here at all) are out of scope: `merged_for`
   # returns them verbatim rather than flattened, and a `%{…}` scan over a Hash
   # answers nothing useful.
   def placeholder_names(template)

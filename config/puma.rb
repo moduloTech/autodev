@@ -96,8 +96,13 @@ pidfile ENV['PIDFILE'] if ENV['PIDFILE']
 # `DeployReviewsController#index` fetches merge requests from GitLab
 # synchronously too; either can outlast 2s on a slow link. `ForceShutdown`
 # landing between `ResetReclaim`'s two writes leaves the reclaim
-# half-applied — the label reposed but the assignment not reclaimed, or the
-# reverse — a state nothing here repairs on its own. The choice of 2 stands
+# half-applied. One direction only, and not unattended: `perform` reposes
+# the label and then reclaims, so the reachable half is a reposed label
+# with the assignment not taken, and `ResetReclaim#reclaim` rescues
+# `StandardError` — which `ForceShutdown` is, `< RuntimeError` in
+# `puma/thread_pool.rb:20` — to put the attention label back before
+# re-raising. That repair is itself a GitLab write on a process being
+# torn down, so it is an attempt rather than a guarantee. The choice of 2 stands
 # anyway: most requests this app serves ARE ordinary dashboard renders
 # (milliseconds), the alternative this ticket exists to fix is an unbounded
 # hang, and cutting an occasional slow reclaim mid-write is the trade that

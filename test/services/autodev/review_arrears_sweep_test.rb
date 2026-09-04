@@ -371,9 +371,11 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   end
 
   # Neutral review of the alpha-54 lot: `has_conflicts: nil` is a read that did
-  # not answer either, on a status that is neither `checking` nor `conflict` —
-  # GitLab's `mergeable`/`unchecked`/etc. all leave `has_conflicts` unset on
-  # some responses. `opened_verdict` used to fall through to `:eligible` here,
+  # not answer either, on a status that is neither `checking` nor `conflict`.
+  # Why the field can be absent is not asserted here — nothing in this repo
+  # establishes which GitLab responses omit it, and the rule does not need it:
+  # an absent field is an unanswered read whatever the reason.
+  # `opened_verdict` used to fall through to `:eligible` here,
   # while `conflicts` (exercised by
   # `test_a_merge_status_still_being_computed_reports_unknown_conflicts`'s
   # sibling below) already reports the very same field as `'unknown'` — so the
