@@ -61,13 +61,25 @@ poll liveness until a deadline, escalate, answer what happened.
 
 ### Why the guard's own tests did not catch this
 
-All six tests in `test/boot_guard_test.rb` inject `killer:` — a lambda that
-records the pid and kills nothing. The escalation could not have been observed
-by any of them, because no test ever had a process to observe. `Supervisor` has
-exactly the test that was missing here ("child ignoring term is still killed
-after the grace", `test/supervisor_test.rb`), against a real subprocess that
-ignores SIGTERM. That asymmetry is why one of the two escalations is correct and
-the other is a single unverified signal.
+The nine classification tests in `test/boot_guard_test.rb` inject `killer:` — a
+lambda that records the pid and kills nothing. The escalation could not have been
+observed by any of them, because no test ever had a process to observe.
+
+**And the sibling test the ticket points at does not do what the ticket says it
+does.** `test_child_ignoring_term_is_still_killed_after_the_grace`
+(`test/supervisor_test.rb:181`) is not run against a real subprocess: it stubs
+`Process.kill` through `with_fake_kill(… ignored_signals: ['TERM'])` and stubs
+`Process.clock_gettime` to jump past the deadline. It is a good test of the
+*decision* — TERM, then KILL past the grace — and it is worth keeping as one. It
+proves nothing about a real process's behaviour, so it cannot be the model for
+"a real subprocess that ignores SIGTERM", and this spec does not treat it as one.
+
+The real-subprocess harness that *does* exist is in `test/boot_guard_test.rb`
+itself: `with_held_database` / `spawn_holder` (`:274`, `:299`) spawn a real Ruby
+child, wait on a readiness file, and tear it down in an `ensure`. That is the
+model to extend, and the fact that it is already here — used by the three
+`test_the_real_holder_finder_*` cases — is why a real escalation test costs
+little.
 
 ## Design
 
@@ -184,12 +196,14 @@ TDD, and every test below must be verified red against the fix removed —
 the alpha-53 review found four fixes in this repository with no test capable of
 failing, and one of them was in this very file.
 
-1. **A real subprocess that ignores SIGTERM is killed after the grace.** The test
-   `test/supervisor_test.rb` already has for the supervisor, now for the guard:
-   spawn a child that traps and ignores TERM, drive `ProcessStopper.stop` with a
-   short injected grace, assert `:gone_on_kill` and assert the pid is really gone
-   with `Process.kill(0, pid)` raising `ESRCH`. This is the test whose absence let
-   the defect through.
+1. **A real subprocess that ignores SIGTERM is killed after the grace.** Built on
+   `spawn_holder`'s pattern (`test/boot_guard_test.rb:299`): a Ruby child that
+   traps and ignores TERM, writes a readiness file, then sleeps. Drive
+   `ProcessStopper.stop` against it with a short injected grace, assert
+   `:gone_on_kill`, and assert the pid is really gone — `Process.kill(0, pid)`
+   raising `ESRCH` after `Process.wait` has reaped it. This is the test whose
+   absence let the defect through, and no stub can stand in for it: the defect
+   was precisely that a real process did not do what the code assumed.
 2. **A process that honours TERM gives `:gone_on_term`,** and no KILL is sent —
    asserted through a `killer` spy that records every signal, so "we did not
    escalate unnecessarily" is a fact and not an assumption.
