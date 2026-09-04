@@ -453,14 +453,9 @@ module Autodev
       ::Issue.where(project_path: @path, status: 'done',
                     needs_attention: true, attention_reason: 'stagnation_pipeline')
              .where.not(mr_iid: nil)
-             .where('infra_recheck_count < ?', infra_recheck_max)
+             .where('infra_recheck_count < ?', Config.infra_recheck_max(@project_config, @config))
              .where("infra_recheck_at IS NULL OR infra_recheck_at <= datetime('now')")
              .to_a
-    end
-
-    def infra_recheck_max
-      (@project_config['infra_recheck_max'] || @config['infra_recheck_max'] ||
-        ::PipelineMonitor::DEFAULT_INFRA_RECHECK_MAX).to_i
     end
   end
 end

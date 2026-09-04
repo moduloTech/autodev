@@ -113,13 +113,11 @@ class PipelineMonitor
     end
 
     def infra_recheck_max
-      (@project_config['infra_recheck_max'] || @config['infra_recheck_max'] ||
-        DEFAULT_INFRA_RECHECK_MAX).to_i
+      ::Config.infra_recheck_max(@project_config, @config)
     end
 
     def infra_recheck_backoff_seconds
-      (@project_config['infra_recheck_backoff'] || @config['infra_recheck_backoff'] ||
-        DEFAULT_INFRA_RECHECK_BACKOFF).to_i
+      ::Config.infra_recheck_backoff(@project_config, @config)
     end
   end
 end
