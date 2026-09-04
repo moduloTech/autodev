@@ -82,7 +82,8 @@ That is the discriminator. The state guard is not a reservation, and it only
 looks like one when the work happens to change the state. `recheck_infra` is the
 one pass whose precondition survives its own work, so it is the one pass where a
 duplicate costs a real budget unit. The fix therefore cannot be another state
-guard: it has to be a reservation on the columns the selection reads.
+guard: it has to be a reservation written on the selection criteria themselves —
+see Design §1 for which column carries it, and why not both.
 
 ### #111 — the two recovery paths treat the stamp differently, for no written reason
 
@@ -134,9 +135,30 @@ The one-cycle hole does not.
 
 ### 1. `dispatch_infra_recheck` reserves the row it enqueues
 
-The dispatcher writes both columns it selects on, in a single conditional UPDATE
-that repeats the predicate of `fetch_infra_recheck_candidates`, and enqueues only
-if the update matched a row:
+**What the reservation writes, and what it deliberately does not.** The row is
+reserved by moving `infra_recheck_at` — the column the race is actually lost on —
+and **not** by incrementing `infra_recheck_count`.
+
+That is narrower than "the dispatcher writes both columns it selects on", and the
+reason is an invariant this pass already holds. `record_recheck_attempt` is called
+only `if verdict == :spend` (`lib/autodev/pipeline_monitor/infra_recheck.rb:31`),
+and the two verdicts that read nothing — a GitLab error and an MR in a transient
+state — return without spending, with the reason written on the `rescue`:
+
+> a cycle that could not read anything must not re-arm the row, and — like
+> `check_stagnation_and_fix` — must not spend one of the bounded attempts either,
+> or an outage burns the whole budget without ever having looked at a pipeline.
+
+Spending at enqueue would break exactly that: five minutes of GitLab being
+unreachable would consume the whole watch budget, which is the harm this ticket
+is about, reintroduced from the other side. So **point 2 of the ticket is
+answered explicitly: the spend lives with the attempt, because an attempt that
+looked at nothing is not an attempt.** The dispatcher owns the clock; the job
+owns the count. The defect was never that the count lived in the job — it was
+that *nothing* reserved the row, so the clock never moved between two cycles.
+
+The conditional UPDATE repeats the predicate of `fetch_infra_recheck_candidates`
+and enqueues only if it matched a row:
 
 ```ruby
 reserved = ::Issue.where(id: issue.id)
@@ -144,8 +166,7 @@ reserved = ::Issue.where(id: issue.id)
                          attention_reason: 'stagnation_pipeline')
                   .where('infra_recheck_count < ?', infra_recheck_max)
                   .where("infra_recheck_at IS NULL OR infra_recheck_at <= datetime('now')")
-                  .update_all(['infra_recheck_count = infra_recheck_count + 1, ' \
-                               'infra_recheck_at = ?', next_backoff_stamp])
+                  .update_all(infra_recheck_at: next_backoff_stamp)
 return if reserved.zero?
 ```
 
@@ -175,18 +196,20 @@ a stale declaration about which ORM a query targets is exactly the kind of
 unverified statement Autodev #73 exists for, and it is what would send an
 implementer to `Sequel.expr`.
 
-`record_recheck_attempt` stops writing `infra_recheck_count` and
-`infra_recheck_at`. It keeps whatever else it records, and becomes a statement of
-what happened rather than the place the budget is spent. The cap becomes a cap on
-attempts actually made, and the log's word "attempt" becomes true.
+`record_recheck_attempt` stops writing `infra_recheck_at` — the dispatcher owns
+that clock now — and keeps writing `infra_recheck_count` on a real attempt. Its
+log line stays true for the first time: one reservation, one job, one attempt.
 
-**Where the spend lives is now stated in one place**, in a comment on
-`dispatch_infra_recheck` that a future reader will hit before the job: the
-dispatcher owns `infra_recheck_count` and `infra_recheck_at`; the job owns the
-work and the right to find nothing to do.
+**Where each column lives is stated in one place**, in a comment on
+`dispatch_infra_recheck` that a future reader hits before the job: the dispatcher
+owns `infra_recheck_at`, the job owns `infra_recheck_count`, and the rule that
+ties them is that a cycle which read nothing spends nothing.
 
-The backoff stamp is computed the same way `record_recheck_attempt` computes it
-today — the interval is not changed by this ticket, only its writer.
+The backoff interval is unchanged (`infra_recheck_backoff_seconds`), only its
+writer moves. `PollDispatcher` must read it from the same config keys
+`InfraRecheck#infra_recheck_backoff_seconds` reads, and the two must not grow two
+copies of that lookup — `infra_recheck_max` is already duplicated between the two
+files, and this ticket should not add a second instance of the same duplication.
 
 ### 2. `record_recheck_attempt` refuses to exceed the cap
 
@@ -214,26 +237,31 @@ outside `fetch_retryable`'s status filter, cleaning them is a production write
 with no benefit, and the invariant holds from here on. The count is reported in
 the changelog so the decision is visible rather than silent.
 
-### 4. `Autodev::HandoverCheck` — the question gets one definition
+### 4. The question is not rewritten — it is reached from the job
 
-The takeover question exists today inside `ExternalState#stop_on_handover`
-(`app/services/autodev/external_state.rb:61`) and `LabelHandover#suspect`
-(`app/services/autodev/label_handover.rb:167`). `perform_retry_errored` must ask
-the same one, and a second hand-written copy is how two answers drift apart —
-the fault Autodev #93 fixed by extracting `UntouchedSinceGiveup`, which is the
-precedent this follows.
+`ExternalState#stop_on_handover(issue, gl_issue)`
+(`app/services/autodev/external_state.rb:61`) already **is** the pair this needs:
+it asks `LabelHandover#verdict`, and on a verdict it posts the notice and closes
+the row through `close_row!`, the module's single terminal write. `error` is in
+the `close` event's `from` list (`app/models/issue.rb:191`), so `may_close?` — the
+method's own precondition — holds from there.
 
-New `app/services/autodev/handover_check.rb`: a PORO built from
-`client:`, `path:`, `project_config:`, `logger:`, answering one question against
-an already-read GitLab issue. `ExternalState#stop_on_handover` delegates to it,
-so there is exactly one definition and the existing tests keep it honest.
+So no new definition of the question, and no PORO wrapping one. The gap is only
+that `ExternalState` is a mixin for poll-cycle services carrying `@client`,
+`@path`, `@project_config` and `@logger`, and `IssueProcessJob` is not one of
+those. A thin `Autodev::HandoverStop` (`app/services/autodev/handover_stop.rb`)
+includes `ExternalState`, sets those four ivars in its initializer and exposes
+nothing of its own. Twelve lines, no logic, and therefore nothing that can drift
+from `PollDispatcher`'s answer — which is the whole point, and the same reason
+Autodev #93 extracted `UntouchedSinceGiveup` rather than writing the question
+twice.
 
 ### 5. `perform_retry_errored` asks before it relaunches
 
 Order matters, and it is the reverse of today's:
 
 1. read the GitLab issue once;
-2. ask `HandoverCheck` whether a human holds the ticket;
+2. ask `HandoverStop#stop_on_handover` whether a human holds the ticket;
 3. **if yes** — no transition, no `restore_working_label`. The row is closed and
    a handover comment is posted, through the existing path
    `ExternalState#close_row!` / `notify_stop` uses, so the sentence and the
@@ -286,8 +314,9 @@ TDD. Every test verified red against its fix removed.
    regression guard for section 5.
 9. **A GitLab read that raises during the handover check leaves the row
    untouched** and enqueues nothing, with no comment posted.
-10. **`ExternalState#stop_on_handover` and `HandoverCheck` give the same answer**
-    on the same input, so the extraction cannot silently diverge.
+10. **`HandoverStop` and `PollDispatcher` give the same answer on the same
+    input**, since both reach `ExternalState#stop_on_handover` — the guard
+    against the wrapper growing logic of its own.
 
 ## Docs and i18n
 
