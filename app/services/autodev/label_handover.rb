@@ -313,11 +313,14 @@ module Autodev
     # `GitlabHelpers.answer` is the raise; each caller's own boundary is what
     # catches it, and every one of them already means "decline this row this
     # cycle" — except one, checked rather than assumed (Autodev #115):
-    # `PollRouter#route` (`todo_reapplied_after?`) and
-    # `Autodev::UntouchedSinceGiveup`'s two callers,
-    # `PollRouter::ResumeHandler#infra_recheck_still_ours?` and
-    # `ReviewArrearsSweep#examine` (`moved_since?`), already rescue
-    # `ApiUnavailableError` there. `DormantAudit#audit` (`verdict`, via
+    # `PollRouter#route` (`todo_reapplied_after?`) already names
+    # `ApiUnavailableError` on its rescue line, and so does
+    # `Autodev::UntouchedSinceGiveup`'s first caller,
+    # `PollRouter::ResumeHandler#infra_recheck_still_ours?` (`moved_since?`).
+    # Its second caller, `ReviewArrearsSweep#examine` (`moved_since?` too),
+    # catches it by inheritance through a per-row `rescue StandardError` rather
+    # than by name, with the same effect — decline this row, tally it
+    # `:unreadable`, examine the next one. `DormantAudit#audit` (`verdict`, via
     # `route_still_assigned`) is widened alongside this change.
     # `PollDispatcher#check_external_state` (`verdict`, via `stop_on_handover`)
     # is not: it rescues `StaleTransitionError` and

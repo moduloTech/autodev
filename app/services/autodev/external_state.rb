@@ -111,7 +111,15 @@ module Autodev
     # the whole transport family (Autodev #115): a `Net::ReadTimeout` or
     # `Errno::ECONNRESET` posting this note used to escape uncaught, unlike
     # every other write-swallow in this codebase.
-    rescue *::GitlabHelpers::TRANSPORT_ERRORS => e
+    #
+    # Spelled out rather than `rescue *GitlabHelpers::TRANSPORT_ERRORS`, on
+    # `PollRouter::ResumeHandler#infra_recheck_still_ours?`'s own precedent: a
+    # bare splat of the constant carries none of the literal class names
+    # `test/api_failure_is_not_a_verdict_test.rb`'s scanner matches a `rescue`
+    # line against, so it would not be recognised as a swallow at all were this
+    # file ever brought into `SCANNED`.
+    rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
+           ::OpenSSL::SSL::SSLError, ::EOFError => e
       @logger.error("Failed to post the stop notice on ##{issue.issue_iid}: #{e.message}",
                     project: @path)
     end

@@ -587,10 +587,10 @@ module Autodev
     # move by somebody else since `finished_at`. A permissive gesture is always a
     # written one.
     #
-    # `human_comment_since?` raises on an unreadable thread (Autodev #67), so an
-    # outage declines nothing into a verdict. `LabelHandover#moved_since?` keeps
-    # that class's own rule instead — an unreadable event list reads as "nobody
-    # moved it" — which is worth knowing when running with the flag on.
+    # `human_comment_since?` raises on an unreadable thread (Autodev #67), and
+    # `LabelHandover#moved_since?` now raises the same way (Autodev #115): an
+    # unreadable event list declines the row rather than answering "nobody
+    # moved it", which is worth knowing when running with the flag on.
     # Why a row is or is not ours, not merely whether — because the report says it
     # out loud, and "assigned to user X, left untouched" on a row declined because
     # somebody commented on the ticket since the give-up names the wrong reason

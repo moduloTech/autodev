@@ -270,7 +270,14 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
     end
   end
 
-  def test_a_failed_handover_read_leaves_the_row_untouched
+  # Not "untouched": `audit` writes the recheck count and backoff stamp
+  # *before* the read (see `test_a_failed_handover_read_still_costs_the_one_
+  # recheck_attempt` below), on purpose — an unreachable project must burn the
+  # cap rather than be retried forever. What this pins is narrower and is the
+  # thing the bug was about: the row is not closed, and it is not re-armed
+  # either (`retry_count`/`next_retry_at` from `revive` are untouched), so it
+  # stays exactly `pending` for the next cycle to re-ask.
+  def test_a_failed_handover_read_leaves_the_status_pending
     issue = run_audit(orphan, client: HandoverReadFailingClient.new)
 
     assert_equal 'pending', issue.status

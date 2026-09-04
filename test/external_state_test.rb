@@ -194,9 +194,13 @@ class ExternalStateTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   end
 
   def test_a_transport_error_posting_the_stop_notice_does_not_raise
-    host = Host.new(NoteTransportFailingClient.new, StubLogger.new)
+    logger = StubLogger.new
+    host = Host.new(NoteTransportFailingClient.new, logger)
 
     host.stop_unassigned(create_issue(status: 'pending'))
+
+    assert(logger.messages.any? { |m| m.include?('Failed to post the stop notice') },
+           'the swallowed failure must still be logged, not silently dropped')
   end
 
   def test_a_transport_error_posting_the_stop_notice_still_closes_the_row
