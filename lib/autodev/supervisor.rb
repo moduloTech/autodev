@@ -102,6 +102,29 @@ module Autodev
       @shutdown = true
     end
 
+    # `Autodev::ProcessStopper` (Autodev #109) has the same shape for a *foreign*
+    # pid. This one is not written in terms of it: `send_term` logs per child,
+    # and `force_kill_stragglers` must `Process.wait` — these are our children
+    # and we owe them a reap, where the boot guard's orphans belong to init.
+    # `ProcessStopper#alive?` is `Process.kill(0, pid)`, which cannot tell a
+    # running process from a zombie: pointed at our own child it would read a
+    # killed-but-unreaped process as alive until something reaps it — measured
+    # by adopting the module and watching it happen against a real
+    # ignore-SIGTERM subprocess, not assumed.
+    #
+    # `ProcessStopper.stop` is also per-pid, where this method waits for every
+    # child against one shared deadline; adopting it would make two
+    # simultaneous stragglers wait out `TERM_GRACE_SECONDS` one after another
+    # instead of together — measured at ~20s against today's ~10s. The
+    # production LaunchAgent plist on bobette declares no `ExitTimeOut`, so
+    # launchd SIGKILLs a job that has not stopped after its **20-second
+    # default** — the doubled worst case would sit exactly on that budget
+    # instead of comfortably inside it, and a supervisor SIGKILLed mid-teardown
+    # leaves behind every child it had not reached yet, which is the orphan
+    # `Autodev::BootGuard` (Autodev #92, #109) exists to clean up after.
+    #
+    # Two escalations on purpose, not by accident; the grace is asserted equal
+    # in test/process_stopper_test.rb.
     def shutdown_children
       send_term
       wait_for_graceful_exit

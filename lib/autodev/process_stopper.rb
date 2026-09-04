@@ -17,7 +17,22 @@ module Autodev
   # which raises `ECHILD` on a foreign pid. A boot guard's orphan belongs to
   # pid 1; init reaps it, and trying to reap it here would be an error. So the
   # shape is shared and the code is not. There is deliberately no `Process.wait`
-  # anywhere in this file.
+  # anywhere in this file. (Autodev #109 considered adopting this module in
+  # `Supervisor` too and declined — see the comment above
+  # `Supervisor#shutdown_children` — precisely because of the next paragraph
+  # and because the module is per-pid where the supervisor waits for all its
+  # children against one shared deadline.)
+  #
+  # That also means: `stop`'s liveness probe is `Process.kill(0, pid)`, which
+  # cannot tell a running process from a zombie — a killed process nobody has
+  # reaped still answers this probe successfully, because it still holds a
+  # process-table entry. Called on a pid *this* process must reap and hasn't,
+  # `stop` will report `:alive` for a process that is, in fact, dead; it can
+  # only ever settle on `:gone_on_term` / `:gone_on_kill` for a pid somebody
+  # else reaps — init, for a boot guard's orphan, or a caller's own `Process.wait`
+  # for one of its own children (which is exactly what `Supervisor` would have
+  # had to add, and why: reproduced against a real ignore-SIGTERM subprocess
+  # while evaluating the adoption).
   #
   # Liveness is `Process.kill(0, pid)`, the same probe `Supervisor::Child#alive?`
   # (`lib/autodev/supervisor.rb`) makes — but the two read `EPERM` differently,
