@@ -20,8 +20,10 @@ module Autodev
   # and the reason is written down once in `ReviewSkillSource`.
   #
   # So the ticket's estimate of "one clone per project" is not the price. It is
-  # one API call per *declaring* project per cycle — two calls at the current
-  # fleet size — and nothing is cloned, checked out or written to disk.
+  # one API call per *declaring* project per probe — two calls at the current
+  # fleet size — and nothing is cloned, checked out or written to disk. A probe
+  # is not every cycle any more: a healthy verdict is trusted while the next
+  # cycle can still refresh it (Autodev #118, `trusted?`).
   #
   # Everything here fails **open**. `unknown` is a real verdict and is not
   # `missing`: an unreachable GitLab must never be read as a broken
@@ -47,8 +49,9 @@ module Autodev
     MIN_CYCLE_PERIOD = 60
 
     class << self
-      # Runs the live check and records the result. Called once per cycle by
-      # AutodevPollJob, alongside the Claude-quota probe.
+      # Runs the live check and records the result. Called on every cycle by
+      # AutodevPollJob, alongside the Claude-quota probe — and asks GitLab only
+      # when the recorded verdict is no longer trusted.
       #
       # Returns the verdicts (an array of hashes) so a caller that wants them
       # immediately — a boot check, a test — does not have to read them back;

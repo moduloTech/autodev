@@ -57,11 +57,13 @@ class AutodevPollJob < ApplicationJob
     projects.size
   end
 
-  # One review-skill check per cycle, recorded for the health card to read
-  # (Autodev #81). Same shape and same reason as the quota probe above:
-  # `HealthReport` is passive by contract, so the live read has to happen here.
+  # The review-skill check, recorded for the health card to read (Autodev #81).
+  # Same shape and same reason as the quota probe above: `HealthReport` is
+  # passive by contract, so the live read has to happen here. Called every
+  # cycle, it asks GitLab only when its last verdict is no longer trusted
+  # (Autodev #118) — one cycle in four at a 120 s interval.
   #
-  # It costs one GitLab request per project that declares a `review_skill` — the
+  # A probe costs one GitLab request per project declaring a `review_skill` — the
   # repository-files endpoint answers "is this path on this ref" without a clone
   # — and it is the only thing that can name a misconfigured skill *before* the
   # project's next request stops at the review step. Advisory, so it never breaks

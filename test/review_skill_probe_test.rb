@@ -396,17 +396,6 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
     assert_equal [0, 1, 2, 3], cycles_that_asked({ 'poll_interval' => 300 }, cycles: 4, period: 300)
   end
 
-  # `poll_interval` may be as low as 10, but the recurring schedule fires at most
-  # once a minute (`config/recurring.yml`), so the real cycles are further apart
-  # than the setting says. The margin has to be taken on the real cadence, or the
-  # verdict expires between two cycles.
-  def test_an_interval_under_a_minute_keeps_the_card_dated_at_the_real_cadence
-    asked = cycles_that_asked({ 'poll_interval' => 10 }, cycles: 20, period: 60)
-
-    assert_equal 0, asked.first
-    assert_operator asked.size, :<, 20
-  end
-
   def test_a_skip_writes_no_row_so_the_card_keeps_the_real_probe_time
     probe_with(PROD, [fast], healthy_client)
     probed_at = card_dated_at(Time.current)
@@ -459,9 +448,12 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
     end
   end
 
-  # Exactly, so the one-minute floor on the real cadence is what is being
-  # measured: without it the period is taken as 10 s and the re-probe lands on
-  # the tenth cycle instead of the ninth.
+  # `poll_interval` may be as low as 10, but the recurring schedule fires at most
+  # once a minute (`config/recurring.yml`), so the real cycles are further apart
+  # than the setting says and the margin has to be taken on the real cadence.
+  # Exactly, so the one-minute floor is what is being measured: without it the
+  # period is taken as 10 s and the re-probe lands on the tenth cycle, not the
+  # ninth.
   def test_an_interval_under_a_minute_is_judged_on_the_one_minute_cadence
     assert_equal [0, 9, 18], cycles_that_asked({ 'poll_interval' => 10 }, cycles: 20, period: 60)
   end
