@@ -99,12 +99,13 @@ module DangerClaudeRunner
   #
   # Business events do not provide that bound (PipelineFixer: one event per
   # state, two calls per failed job), so liveness is recorded per call, here,
-  # where every issue-scoped danger-claude call funnels through. Two bypasses sit
+  # where every issue-scoped danger-claude call funnels through. Two callers sit
   # outside that guarantee, both not issue-scoped today: Autospec::ProjectBriefer
-  # (raw Open3.capture3, no timeout) and Autodev::UsageChecker's probe. Neither
-  # is broken by that — this class only bounds silence on rows the dormant audit
-  # can touch — but a future issue-scoped call written in ProjectBriefer's style
-  # would not be covered.
+  # (ProcessRunner's timed spawn since Autodev #117, but no heartbeat) and
+  # Autodev::UsageChecker's probe. Neither is broken by that — this class only
+  # bounds silence on rows the dormant audit can touch — but a future
+  # issue-scoped call that spawns through ProcessRunner directly, as the briefer
+  # does, would not be covered.
   #
   # Before the call, not after: the clock resets when the call starts, so the
   # longest possible gap is one call's dc_timeout plus loop overhead — whatever

@@ -43,6 +43,7 @@ fr:
   web_admin_health_check_database: Base de données
   web_admin_health_check_migrations: Migrations
   web_admin_health_check_gitlab_requests: Requêtes GitLab
+  web_admin_health_check_project_briefings: Briefings des projets
   web_theme_toggle: Changer le thème
   web_sign_out: Se déconnecter
   web_sign_in_title: Connexion
