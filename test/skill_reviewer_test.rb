@@ -100,7 +100,9 @@ class SkillReviewerTest < ActiveSupport::TestCase # rubocop:disable Metrics/Clas
     end
   end
 
-  def issue = OpenStruct.new(issue_iid: 1, mr_iid: 7, branch_name: 'b', locale: 'fr') # rubocop:disable Style/OpenStructUse
+  def issue
+    OpenStruct.new(issue_iid: 1, mr_iid: 7, branch_name: 'b', locale: 'fr') # rubocop:disable Style/OpenStructUse
+  end
 
   def test_a_clean_review_is_a_success
     json = { verdict: 'approve', summary: '', findings: [] }.to_json

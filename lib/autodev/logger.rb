@@ -28,8 +28,8 @@ class AppLogger
   end
 
   def debug(msg, project: nil, **context) = write('DEBUG', msg, project: project, **context)
-  def info(msg, project: nil, **context)  = write('INFO',  msg, project: project, **context)
-  def warn(msg, project: nil, **context)  = write('WARN',  msg, project: project, **context)
+  def info(msg, project: nil, **context)  = write('INFO', msg, project: project, **context)
+  def warn(msg, project: nil, **context)  = write('WARN', msg, project: project, **context)
   def error(msg, project: nil, **context) = write('ERROR', msg, project: project, **context)
 
   def close

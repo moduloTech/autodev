@@ -33,8 +33,8 @@ class VisibilityTest < ActionDispatch::IntegrationTest
     sign_in @member
     get '/'
 
-    assert_includes     response.body, 'group/mine'
-    refute_includes     response.body, 'group/other'
+    assert_includes response.body, 'group/mine'
+    refute_includes response.body, 'group/other'
   end
 
   def test_member_sees_only_visible_projects_on_projects_index
