@@ -15,7 +15,7 @@ require 'autodev/gitlab_helpers'
 # looks for a todo label added after the row was closed. Past twenty events both
 # read history that has since been overwritten, with no error and no signal.
 #
-# Not a corner case: on 23/09/2026, 86 of the 142 tracked tickets carried more
+# Not a corner case: on 23/09/2026, 86 of the 142 tickets of the dev copy of production carried more
 # than twenty label events (max 64). powerpanne/core#15673 carries 35; the todo
 # label a human reposed on 21/08/2026 at 10:26:54 UTC, after autodev closed the
 # row at 07:52:03, is on page 2, and the reentry gate answered false on every
@@ -109,31 +109,37 @@ class LabelEventsReadEveryPageTest < Minitest::Test # rubocop:disable Metrics/Cl
   end
 
   # Two pages would also be satisfied by a read that stops after two — or after
-  # forty events. The measured maximum is 64, four pages; in the three tests
-  # below only page 3 carries the deciding event, once per consumer.
-  def three_pages(last)
-    [noise(PAGE), noise(PAGE - 1) + [ev('add', POWERPANNE['label_done'], AUTODEV_ID, '2026-05-02T09:00:00Z')], last]
+  # forty events. No test can prove "every page, whatever their number"; what
+  # it can do is sit above what production holds. The measured maximum is 64
+  # events, four pages (powerpanne/core#15712), and a cap at three pages passed
+  # the first version of these tests — so here the deciding event is on page
+  # LONG, above that maximum, once per consumer.
+  LONG = 6
+
+  def long_history(last)
+    [*Array.new(LONG - 2) { noise(PAGE) },
+     noise(PAGE - 1) + [ev('add', POWERPANNE['label_done'], AUTODEV_ID, '2026-05-02T09:00:00Z')], last]
   end
 
-  def human_done_on_page_three
-    GitlabPagesClient.new(three_pages([ev('add', POWERPANNE['label_done'], HUMAN_ID, '2026-06-20T09:00:00Z')]))
+  def human_done_on_the_last_page
+    GitlabPagesClient.new(long_history([ev('add', POWERPANNE['label_done'], HUMAN_ID, '2026-06-20T09:00:00Z')]))
   end
 
   def test_the_reentry_gate_walks_to_the_last_page_whatever_their_number
-    client = GitlabPagesClient.new(three_pages([ev('add', 'To Do', HUMAN_ID, '2026-08-21T10:26:54Z')]))
+    client = GitlabPagesClient.new(long_history([ev('add', 'To Do', HUMAN_ID, '2026-08-21T10:26:54Z')]))
 
     assert handover(client).todo_reapplied_after?(15_673, FINISHED_AT)
-    assert_equal [1, 2, 3], client.fetched
+    assert_equal (1..LONG).to_a, client.fetched
   end
 
   def test_a_verdict_walks_to_the_last_page_whatever_their_number
-    verdict = handover(human_done_on_page_three).verdict(FakeIssue.new([POWERPANNE['label_done']]), 42)
+    verdict = handover(human_done_on_the_last_page).verdict(FakeIssue.new([POWERPANNE['label_done']]), 42)
 
     assert_equal :done_added, verdict&.reason
   end
 
   def test_moved_since_walks_to_the_last_page_whatever_their_number
-    assert handover(human_done_on_page_three)
+    assert handover(human_done_on_the_last_page)
       .moved_since?(FakeIssue.new([POWERPANNE['label_done']]), 42, Time.utc(2026, 6, 1))
   end
 

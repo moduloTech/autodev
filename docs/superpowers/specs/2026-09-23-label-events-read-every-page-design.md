@@ -21,7 +21,8 @@ Past 20 events both read the wrong page, silently.
 
 ## Measurements (23/09/2026)
 
-- **Distribution.** The 142 issues tracked in the dev DB (copy of production),
+- **Distribution.** The 142 issues tracked in the dev DB (a copy of production,
+  older than the 148 rows production held that day),
   counted through the API with `per_page=100` and full pagination: 56 have ≤ 20
   label events, **71 have 21–40, 15 have 41–100**, maximum 64. 61 % of tracked
   tickets are past the first page.
@@ -43,7 +44,9 @@ repository already applies to paginated reads (`MrDiscussions`,
 not let us pass.
 
 Rejected: **a direct `client.get(…, query: { per_page: 100 })`** (direction 2).
-It saves pages (86 requests instead of 190 to read all 142 tickets once), but:
+It saves pages (reading all 142 tickets once costs 142 requests at 100 per page
+against 246 at the default 20; the 86 tickets past one page account for 86
+against 190), but:
 
 1. `GitlabRequestCounter` records a request under the name of the method it
    forwards. The first page would be counted as `get` instead of
@@ -62,6 +65,16 @@ It saves pages (86 requests instead of 190 to read all 142 tickets once), but:
   genuinely reposed after the close, and the gate will now see it. That is the
   intended effect (ticket comment of 23/09/2026) and the reason Autodev #118's
   suggestion to remove that label is dropped.
+- **`moved_since?` changes its answer on six handed-back rows** (adversarial
+  review, simulated over the 148 production rows against the real GitLab):
+  #15971, #16076, #16110, #11339, #16261, #16735 flip from "untouched" to
+  "moved", and the review-arrears sweep and the infra recheck will decline them
+  instead of reclaiming them. The events read on five of them are real human
+  moves after the give-up (e.g. #16735, `Development::Awaiting Merge` on
+  22/09/2026) — the fix protecting the people now holding them. Of the 24
+  rows on which a one-page and a full read answer differently, these six and
+  #15673 are the only ones a consumer acts on; the rest are `done` rows the
+  reentry gate is never asked about.
 - Order is still GitLab's: the full list is chronological, so `.last` in
   `last_event_for` is right once — and only once — the list is whole. The
   comments on `last_event_for`, `events`, `decisive_event`, the class header and

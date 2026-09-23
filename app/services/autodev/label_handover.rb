@@ -337,7 +337,7 @@ module Autodev
     # `issue_label_events(project, iid)` is a bare `get` that takes no options,
     # so it answers GitLab's default page of twenty — the *oldest* twenty — and
     # all three consumers want the newest events. Measured 23/09/2026: 86 of the
-    # 142 tracked tickets carry more than twenty (max 64). powerpanne/core#15673
+    # 142 tickets of the dev copy of production carry more than twenty (max 64). powerpanne/core#15673
     # carries 35, and the todo label a human reposed after autodev closed the
     # row sat on page 2, so `todo_reapplied_after?` answered false on every
     # cycle for a month. The endpoint ignores `sort`/`order_by` (measured
