@@ -93,8 +93,9 @@ module Autodev
     # state (PowerPanne #14856, reassigned 11/06/2026).
     #
     # Reported, not closed. Whether a `needs_clarification` row that is no longer
-    # ours should be closed is a decision about the live passes — no pass sweeps
-    # this state today — and the arrears is not the place to take it.
+    # ours should be closed is a decision about the live passes, and since
+    # Autodev #86 `ClarificationWatch` takes it: closed on GitLab → `closed`,
+    # reassigned → flagged and kept. The arrears is not the place to take it.
     def still_ours?(issue)
       gl_issue = @client.issue(issue.project_path, issue.issue_iid)
       !externally_closed?(gl_issue) && assigned_to_autodev?(gl_issue)

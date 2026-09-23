@@ -43,6 +43,10 @@ module Autodev
 
     def perform(issue)
       return unless issue.needs_attention? && issue.mr_iid
+      # A clarification flag reads the other way round (Autodev #86): autodev
+      # never handed the ticket back, a human took it or the wait ran long. A
+      # reset on such a row never reclaimed before the flag existed either.
+      return if ::Autodev::ClarificationWatch::REASONS.include?(issue.attention_reason)
 
       client = ::GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @config['gitlab_token'])
       router = router_for(issue.project_path)

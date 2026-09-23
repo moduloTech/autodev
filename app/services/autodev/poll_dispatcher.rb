@@ -85,6 +85,10 @@ module Autodev
 
     def dispatch
       @logger.debug("[poll_dispatcher] #{@path}", project: @path)
+      # Nil until `dispatch_new_issues` records what it fetched, so a cycle that
+      # skipped it hands the watch no list at all rather than an empty one
+      # (Autodev #86) — an empty list reads every parked row as gone.
+      @seen_iids = @listed_at = nil
       claude_available? ? dispatch_new_issues : log_usage_pause
       return if @config['dry_run']
 
@@ -124,6 +128,11 @@ module Autodev
       # this pass never gets a second look at it — while `apply_label_done`
       # overwrites the label that human set.
       dispatch_unassignment
+      # The same question for the waiting rows, which `ACTIVE_STATUSES` leaves
+      # out: `dispatch_unassignment` closes an active row a human took back,
+      # this flags a parked one and keeps it (Autodev #86). An observation pass:
+      # it runs with the Claude gate closed, on the database arms only.
+      dispatch_clarification_watch
       dispatch_pipelines
       dispatch_discussions if claude_available?
       dispatch_done_unassigned
@@ -136,19 +145,27 @@ module Autodev
 
     # === poll_issues equivalent ===
 
+    # `@seen_iids` is what GitLab returned, recorded before `too_recent?` and the
+    # router filter anything (Autodev #86): `ClarificationWatch` reads an absence
+    # from it as "this ticket left the todo population", and a parked row dropped
+    # here for its age has not left it.
     def dispatch_new_issues
-      labels_todo = @project_config['labels_todo'] || []
-      ::GitlabHelpers.fetch_assignee_issues(
-        @client, @path, labels_todo, ::GitlabHelpers.current_user_id(@client)
-      ).each do |gl_issue|
-        next if too_recent?(gl_issue)
+      @listed_at = Time.current
+      gl_issues = ::GitlabHelpers.fetch_assignee_issues(
+        @client, @path, @project_config['labels_todo'] || [], ::GitlabHelpers.current_user_id(@client)
+      )
+      @seen_iids = gl_issues.to_set(&:iid)
+      gl_issues.each { |gl_issue| route_new_issue(gl_issue) }
+    end
 
-        router = ::PollRouter.new(config: @config, project_config: @project_config,
-                                  logger: @logger, token: @token, pool: NullPool)
-        next if router.route(gl_issue, @client) == :next
+    def route_new_issue(gl_issue)
+      return if too_recent?(gl_issue)
 
-        process_issue(gl_issue)
-      end
+      router = ::PollRouter.new(config: @config, project_config: @project_config,
+                                logger: @logger, token: @token, pool: NullPool)
+      return if router.route(gl_issue, @client) == :next
+
+      process_issue(gl_issue)
     end
 
     def too_recent?(gl_issue)
@@ -210,9 +227,9 @@ module Autodev
     # Narrowed to the waiting state on purpose. A `pending` row over budget has
     # been refused here silently since Autodev #34 and has `dispatch_dormant_audit`
     # to reach a human; logging that population every cycle would be noise. A
-    # request in `needs_clarification` has neither — no pass sweeps the state — so
-    # a human's answer sitting unread behind a spent budget would otherwise leave
-    # no trace anywhere.
+    # request in `needs_clarification` reaches a human through
+    # `ClarificationWatch`'s `clarification_budget_spent` flag since Autodev #86;
+    # this line is what the log says about it on every cycle meanwhile.
     def log_budget_spent(existing)
       return unless existing.status == 'needs_clarification'
 
@@ -399,6 +416,11 @@ module Autodev
 
       @logger.info("Deferring post-completion for issue ##{issue.issue_iid}: MR is #{state}", project: @path)
       true
+    end
+
+    def dispatch_clarification_watch
+      ClarificationWatch.new(client: @client, path: @path, config: @config, project_config: @project_config,
+                             logger: @logger, seen_iids: @seen_iids, listed_at: @listed_at).run
     end
 
     # === poll_retries equivalent ===

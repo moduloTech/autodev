@@ -74,6 +74,11 @@ module Config # rubocop:disable Metrics/ModuleLength
     # what the specific mechanisms cannot see. Read by
     # PipelineMonitor::WatchBound, which does not restate the number.
     'pipeline_watch_max_days' => 14,
+    # How long a question may wait unanswered before `ClarificationWatch` flags
+    # the request for the operator (Autodev #86). The row keeps waiting either
+    # way: the bound raises a signal, it ends nothing. 14 is the pipeline watch's
+    # figure, and the one production case that stayed unnoticed waited 131 days.
+    'clarification_max_days' => 14,
     'log_dir' => File.join(CONFIG_DIR, 'logs'),
     'log_level' => 'INFO',
     'projects' => [],
@@ -175,6 +180,14 @@ module Config # rubocop:disable Metrics/ModuleLength
   def self.infra_recheck_max(project_config, config = nil)
     value = project_config&.[]('infra_recheck_max') || config&.[]('infra_recheck_max') ||
             ::PipelineMonitor::DEFAULT_INFRA_RECHECK_MAX
+    value.to_i
+  end
+
+  # Autodev #86. `0` is kept as written (`0 ||` does not fall through in Ruby),
+  # which is what lets a project switch the bound off under a global value.
+  def self.clarification_max_days(project_config, config = nil)
+    value = project_config&.[]('clarification_max_days') || config&.[]('clarification_max_days') ||
+            DEFAULTS['clarification_max_days']
     value.to_i
   end
 
