@@ -46,13 +46,15 @@ class RefreshProjectBriefingsJobTest < ActiveSupport::TestCase
     assert_equal 'ok', second.reload.briefing_text
   end
 
+  # The row stays writable, so a job or briefer that widened its rescue would
+  # store the bug and carry on — the fixture no longer breaks both halves.
   test 'a failure that is not a refresh failure still propagates out of the job' do
     project = Project.create!(gitlab_path: 'group/one', slug: 'group__one')
-    # An invalid row makes store_success!'s update! raise — a bug, not an outage.
-    project.update_column(:default_locale, 'xx')
+    Autospec::ProjectBriefer.stub_invoker = ->(*) { raise NoMethodError, 'bug' }
 
     with_clone_failing_for('none/such') do
-      assert_raises(ActiveRecord::RecordInvalid) { RefreshProjectBriefingsJob.perform_now }
+      assert_raises(NoMethodError) { RefreshProjectBriefingsJob.perform_now }
     end
+    assert_nil project.reload.briefing_error
   end
 end

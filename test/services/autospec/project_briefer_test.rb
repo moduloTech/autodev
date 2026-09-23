@@ -159,11 +159,18 @@ module Autospec
       assert_equal 'danger-claude crashed', @project.briefing_error
     end
 
+    # Through with_git so a guard that let the call through could not be
+    # rescued by a real ls-remote failing on DNS — which is how this test
+    # used to pass with the guard disabled (sabotage run).
     def test_refresh_raises_when_gitlab_token_missing
-      stub_with # invoker is set but we won't reach it
-      assert_raises(ProjectBriefer::RefreshFailed) do
-        ProjectBriefer.new(@project, config: { 'gitlab_url' => 'https://gitlab.example.com' }).refresh!
+      forbid_danger_claude
+      error = with_git(heads: ->(argv) { flunk("git reached: #{argv.inspect}") }) do
+        assert_raises(ProjectBriefer::RefreshFailed) do
+          ProjectBriefer.new(@project, config: { 'gitlab_url' => 'https://gitlab.example.com' }).refresh!
+        end
       end
+
+      assert_equal 'gitlab_token missing in Web.config', error.message
     end
 
     # --- git: the status is read, not the object (Autodev #117) -----
@@ -386,16 +393,43 @@ module Autospec
     end
 
     # A15 — a bug escapes to Solid Queue rather than being filed under
-    # briefing_error next to network outages.
-    def test_a_failed_store_propagates_unchanged_and_is_not_stored
-      @project.update_column(:default_locale, 'xx')
-      stub_with
+    # briefing_error next to network outages. The bug is raised from the
+    # danger-claude step and the row stays writable, so a widened rescue in
+    # refresh! would succeed in storing it — and this would go red.
+    def test_a_bug_propagates_unchanged_and_is_not_stored
+      ProjectBriefer.stub_invoker = ->(*) { raise NoMethodError, 'bug' }
 
       with_git do
-        assert_raises(ActiveRecord::RecordInvalid) { briefer.refresh! }
+        assert_raises(NoMethodError) { briefer.refresh! }
       end
 
       assert_nil @project.reload.briefing_error
+    end
+
+    # "Wrapped, not widened": external! converts a spawn's SystemCallError
+    # and nothing else.
+    def test_a_bug_inside_an_external_call_is_not_converted
+      ShellHelpers.stub(:run_cmd_status, ->(*) { raise NoMethodError, 'bug' }) do
+        assert_raises(NoMethodError) { briefer.refresh! }
+      end
+
+      assert_nil @project.reload.briefing_error
+    end
+
+    def test_only_an_exact_staging_ref_is_staging
+      stub_with
+      heads = ["abc\trefs/heads/feature/staging", '', FakeStatus.new(true)]
+      with_git(heads: heads, symref: ["ref: refs/heads/master\tHEAD", '', FakeStatus.new(true)]) { briefer.refresh! }
+
+      assert_equal 'master', cloned_branch
+    end
+
+    def test_every_git_call_is_bounded_against_a_stall
+      stub_with
+      with_git(heads: GIT_OK, symref: GIT_OK) { briefer.refresh! }
+
+      assert_equal 3, @git_calls.size
+      @git_calls.each { |argv| assert_includes argv, 'http.lowSpeedTime=60', argv.inspect }
     end
 
     private

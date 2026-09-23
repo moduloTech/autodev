@@ -132,12 +132,28 @@ New check in `Autodev::HealthReport::CHECKS`, so it shows on `/healthz` and
   stops no delivery. `/healthz` keeps answering 200 (MonitoringController maps
   only `down` to 503).
 - **Staleness, not `briefing_error`, raises it.** One failed hourly run with a
-  fresh previous briefing is the noise the calibration excludes. `briefing_error`
-  is carried in the meta sample so the card names the cause.
+  fresh previous briefing is the noise the calibration excludes. The sample says
+  whether an error is stored, **never its text** — amended after the
+  confidentiality review proved a fake danger-claude's `sk-ant-…` / `ghp_…`
+  output reaching an unauthenticated `/healthz` body: `Redactor` scrubs URL
+  credentials and GitLab tokens only, and MonitoringController promises a
+  payload with "no secrets, no filesystem paths".
 - **Not expected where recurring jobs do not run.** `config/recurring.yml`'s
   `development:` block is empty, so in a local env every briefing is stale by
   construction. The check reuses `HealthReport`'s existing `poller_expected`
   flag (default `!Rails.env.local?`), which states exactly that.
+
+## Amended after review
+
+- **git gets a stall bound.** The adversarial review held a TLS server that
+  reads the request and never answers: `git ls-remote` was still blocked at
+  330 s. `http.lowSpeedLimit=1` + `http.lowSpeedTime=15` aborted that at 15 s
+  (measured, git 2.50.1); a handshake that never completes is bounded by curl's
+  300 s connect timeout (measured). Shipped at 60 s.
+- **`staging` is the whole ref.** `ls-remote --heads <url> staging` matches the
+  last path components, so `feature/staging` alone read as a staging branch —
+  latent (both production repositories have a real `staging`), but it would
+  have failed every hour.
 
 ## Out of scope
 

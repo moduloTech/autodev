@@ -58,7 +58,7 @@ class HealthReportProjectBriefingsTest < ActionDispatch::IntegrationTest # ruboc
 
     assert_equal :warn, card[:status]
     assert_equal '1 project briefing(s) not refreshed for over 6h', card[:detail]
-    assert_equal ['g/stale (7.0h)'], card[:meta][:sample]
+    assert_equal 'g/stale (7.0h)', card[:meta][:sample]
   end
 
   test 'boundary: 5h59 is fresh' do
@@ -72,7 +72,7 @@ class HealthReportProjectBriefingsTest < ActionDispatch::IntegrationTest # ruboc
     project('g/over', generated_ago: (6 * 3600) + 60)
 
     assert_equal :warn, card[:status]
-    assert_equal ['g/over (6.0h)'], card[:meta][:sample]
+    assert_equal 'g/over (6.0h)', card[:meta][:sample]
   end
 
   # Strict `<`: exactly six hours old is still inside the window.
@@ -90,7 +90,7 @@ class HealthReportProjectBriefingsTest < ActionDispatch::IntegrationTest # ruboc
     project('g/old', created_ago: 7 * 3600)
 
     assert_equal :warn, card[:status]
-    assert_equal ['g/old (7.0h)'], card[:meta][:sample]
+    assert_equal 'g/old (7.0h)', card[:meta][:sample]
   end
 
   # Any write to the row moves `updated_at` — a failed refresh storing its
@@ -110,10 +110,20 @@ class HealthReportProjectBriefingsTest < ActionDispatch::IntegrationTest # ruboc
     assert_equal :warn, card[:status]
   end
 
-  test 'the sample carries the refresh error' do
+  test 'the sample says an error is stored' do
     project('g/broken', generated_ago: 7 * 3600, error: 'git clone (main) failed: fatal: x')
 
-    assert_equal ['g/broken (7.0h: git clone (main) failed: fatal: x)'], card[:meta][:sample]
+    assert_equal 'g/broken (7.0h, error stored)', card[:meta][:sample]
+  end
+
+  # `/healthz` serves this payload, unauthenticated when `monitoring.token` is
+  # unset: a subprocess's output is not scrubbed for every secret shape, so it
+  # never reaches the card (Autodev #117 confidentiality review).
+  test 'the card never quotes what the stored error says' do
+    project('g/leaky', generated_ago: 7 * 3600, error: 'danger-claude failed (exit 1): key sk-ant-api03-SECRET')
+
+    refute_includes card.to_s, 'sk-ant'
+    refute_includes card.to_s, 'danger-claude failed'
   end
 
   def seven_projects_six_stale
@@ -132,25 +142,22 @@ class HealthReportProjectBriefingsTest < ActionDispatch::IntegrationTest # ruboc
   test 'counts: the sample stops at five, stalest first' do
     seven_projects_six_stale
 
-    assert_equal 5, card[:meta][:sample].size
-    assert_match %r{\Ag/stale5 \(12\.0h: }, card[:meta][:sample].first
-  end
+    entries = card[:meta][:sample].split(' | ')
 
-  test 'counts: a sampled error is cut at 120 characters' do
-    seven_projects_six_stale
-
-    excerpts = card[:meta][:sample].map { |entry| entry[/: (e+)\)\z/, 1].size }
-
-    assert_equal [120] * 5, excerpts
+    assert_equal 5, entries.size
+    assert_equal 'g/stale5 (12.0h, error stored)', entries.first
   end
 
   # One failed run behind a fresh briefing is noise; the count still shows it.
   test 'a fresh briefing with an error stays ok and is counted as failing' do
-    project('g/flaky', generated_ago: 3600, error: 'danger-claude failed (exit 1): boom')
-    project('g/fine', generated_ago: 3600)
+    # Asymmetric on purpose: 2 failing out of 5, so counting the healthy rows
+    # instead (3) cannot pass for counting the failing ones.
+    2.times { |i| project("g/flaky#{i}", generated_ago: 3600, error: 'danger-claude failed (exit 1): boom') }
+    project('g/blank', generated_ago: 3600, error: "  \n")
+    2.times { |i| project("g/fine#{i}", generated_ago: 3600) }
 
     assert_equal :ok, card[:status]
-    assert_equal({ count: 2, stale_after_seconds: 6 * 3600, failing: 1 }, card[:meta])
+    assert_equal({ count: 5, stale_after_seconds: 6 * 3600, failing: 2 }, card[:meta])
   end
 
   # Recurring jobs do not run in a local env, so every briefing there is stale

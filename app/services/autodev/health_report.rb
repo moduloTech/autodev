@@ -71,7 +71,6 @@ module Autodev
     # the gitlab_requests windows: an observability figure nobody tunes.
     BRIEFING_STALE_AFTER = 6 * 3600
     BRIEFING_SAMPLE_SIZE = 5
-    BRIEFING_ERROR_EXCERPT = 120
 
     # "the review is broken for everybody" detection (Autodev #60, item 1) — the
     # alert missing behind Autodev #49. `review_failure_count` is per ticket and
@@ -465,7 +464,13 @@ module Autodev
     #
     # Staleness raises it, not `briefing_error`: one failed hourly run behind a
     # fresh briefing is the noise BRIEFING_STALE_AFTER was calibrated to
-    # exclude; the error only travels in the sample so the card names a cause.
+    # exclude. The sample says *whether* an error is stored, never what it says:
+    # `briefing_error` quotes git's and danger-claude's own output, which
+    # Redactor scrubs only for URL credentials and GitLab tokens, and this
+    # payload is served by `/healthz` — unauthenticated when `monitoring.token`
+    # is unset, under MonitoringController's "no secrets, no filesystem paths"
+    # contract (Autodev #117 review). The cause is read in the column and in
+    # the job's log line.
     #
     # `warn`, never `down`: a stale briefing degrades AutoSpec's context, it
     # stops no delivery — `/healthz` keeps answering 200. And nothing is
@@ -485,7 +490,7 @@ module Autodev
       meta = { count: count, stale_after_seconds: BRIEFING_STALE_AFTER, failing: failing_briefing_count }
       return build(:ok, "#{count} briefing(s) fresh", meta) if stale.empty?
 
-      meta[:sample] = stale.first(BRIEFING_SAMPLE_SIZE).map { |project| stale_briefing_entry(project) }
+      meta[:sample] = stale.first(BRIEFING_SAMPLE_SIZE).map { |project| stale_briefing_entry(project) }.join(' | ')
       build(:warn, "#{stale.size} project briefing(s) not refreshed for over " \
                    "#{BRIEFING_STALE_AFTER / 3600}h", meta)
     end
@@ -499,15 +504,16 @@ module Autodev
     end
 
     def failing_briefing_count
-      Project.where("TRIM(COALESCE(briefing_error, '')) <> ''").count
+      # SQLite's one-argument TRIM strips spaces only; name the whitespace so
+      # this agrees with the sample's `strip`.
+      Project.where("TRIM(COALESCE(briefing_error, ''), ' ' || char(9) || char(10) || char(13)) <> ''").count
     end
 
     def stale_briefing_entry(project)
       age = ((@now - (project.briefing_generated_at || project.created_at)) / 3600.0).round(1)
-      error = project.briefing_error.to_s.strip
-      return "#{project.gitlab_path} (#{age}h)" if error.empty?
+      return "#{project.gitlab_path} (#{age}h)" if project.briefing_error.to_s.strip.empty?
 
-      "#{project.gitlab_path} (#{age}h: #{error[0, BRIEFING_ERROR_EXCERPT]})"
+      "#{project.gitlab_path} (#{age}h, error stored)"
     end
 
     # --- helpers -----------------------------------------------------------

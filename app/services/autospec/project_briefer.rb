@@ -58,6 +58,18 @@ module Autospec
     # How much of a command's output a stored failure keeps.
     DETAIL_LIMIT = 400
 
+    # git has no timeout of its own, and a GitLab that accepts the request
+    # and then goes silent held a worker thread for as long as it stayed
+    # silent (measured past 330 s, Autodev #117 review). curl's low-speed
+    # abort ends that stall: measured on git 2.50.1 against a TLS server that
+    # reads the request and never answers, a 15 s window aborted at 15 s. A
+    # handshake that never completes is already bounded by curl's own
+    # 300 s connect timeout (measured). 60 s is a stall no healthy depth-1
+    # clone ever shows.
+    GIT_STALL_OPTIONS = %w[-c http.lowSpeedLimit=1 -c http.lowSpeedTime=60].freeze
+
+    STAGING_REF = 'refs/heads/staging'
+
     PROMPT = <<~PROMPT
       You are AutoSpec's project-briefing generator.
 
@@ -139,9 +151,13 @@ module Autospec
     # branch". A failed one says nothing about the branch — guessing
     # from it cloned `main` on a `master` repository and blamed the
     # branch for what was the network.
+    #
+    # The ref is matched whole: `ls-remote … staging` matches on the last
+    # path components, so a repository with only `feature/staging` read as
+    # having a staging branch and failed its clone every hour.
     def pick_branch
-      out = git!('ls-remote (staging)', 'ls-remote', '--heads', clone_url, 'staging')
-      return 'staging' if out.length.positive?
+      out = git!('ls-remote (staging)', 'ls-remote', '--heads', clone_url, STAGING_REF)
+      return 'staging' if out.lines.any? { |line| line.split("\t")[1].to_s.strip == STAGING_REF }
 
       default_branch
     end
@@ -161,7 +177,7 @@ module Autospec
     # failure, and reading it as a boolean is how a failed clone once
     # passed for a success and surfaced as an ENOENT with no cause.
     def git!(label, *args)
-      out, err, ok = external!("git #{label}") { ShellHelpers.run_cmd_status(['git', *args]) }
+      out, err, ok = external!("git #{label}") { ShellHelpers.run_cmd_status(['git', *GIT_STALL_OPTIONS, *args]) }
       raise RefreshFailed, Redactor.scrub("git #{label} failed: #{head(err)}") unless ok
 
       out
