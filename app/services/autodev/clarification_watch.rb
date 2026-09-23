@@ -22,19 +22,23 @@ module Autodev
   # reach boot recovery, which would move every parked row to `pending`.
   class ClarificationWatch
     include ExternalState
+    include ClarificationReach
 
     # Rank order, strongest first. A flag overwrites a weaker one, never a stronger one.
-    REASONS = %w[clarification_reassigned clarification_label_moved
-                 clarification_budget_spent clarification_unanswered].freeze
+    #
+    # A spent budget ranks first because it is the one case no GitLab gesture
+    # moves: `PollDispatcher#process_issue` refuses the row on
+    # `exceeded_retries?` before any reply is read, so a reach card shown over
+    # it prescribed a reassignment that only swapped the card for this one a
+    # cycle later (adversarial review of the alpha-55 lot).
+    REASONS = %w[clarification_budget_spent clarification_reassigned
+                 clarification_label_moved clarification_unanswered].freeze
     REACH_REASONS = %w[clarification_reassigned clarification_label_moved].freeze
 
-    # The per-row boundary. `StaleTransitionError` is the closure refused on a
-    # row that moved meanwhile (Autodev #97); the transport family is spelled out
-    # as `ExternalState#notify_stop` spells it, for the reason given there. One
-    # row's failure never stops the rest of the watch or the passes after it.
-    ROW_ERRORS = [::Gitlab::Error::ResponseError, ::ApiUnavailableError, ::StaleTransitionError,
-                  ::SystemCallError, ::Timeout::Error, ::SocketError, ::OpenSSL::SSL::SSLError,
-                  ::EOFError].freeze
+    # The per-row boundary: the read's family, plus `StaleTransitionError`, the
+    # closure refused on a row that moved meanwhile (Autodev #97). One row's
+    # failure never stops the rest of the watch or the passes after it.
+    ROW_ERRORS = [*READ_ERRORS, ::StaleTransitionError].freeze
 
     # rubocop:disable Metrics/ParameterLists -- DormantAudit's six plus
     # `seen_iids` / `listed_at`, the list this pass reads and the audit does not.
@@ -76,52 +80,6 @@ module Autodev
       @logger.error("Clarification watch on ##{issue.issue_iid} declined for this cycle: " \
                     "#{e.class}: #{e.message}", project: @path)
       0
-    end
-
-    # :reachable, :closed, a reach reason, or :unknown when nothing can be said.
-    #
-    # A row in the list is reachable by construction: the list is "open,
-    # assigned to autodev, carrying a todo label". A row absent from it left
-    # that population, and one read says how — every cycle while it stays out,
-    # a reach flag included. Not re-reading a flagged row (the first version,
-    # to save 288 reads per row per day) froze the flag on GitLab's first
-    # answer: a ticket leaving in two steps kept the first step's explanation,
-    # the gesture it prescribes changed nothing on the card, and a flagged
-    # ticket closed on GitLab never closed the row (truthfulness and adversarial
-    # reviews). The population that pays is the rows out of the list, 0 today.
-    def reach_verdict(issue)
-      return :unknown if @seen_iids.nil? || parked_after_the_list?(issue)
-      return :reachable if @seen_iids.include?(issue.issue_iid.to_i)
-
-      read_reach(@client.issue(@path, issue.issue_iid))
-    end
-
-    # `SpecChecker#post_clarification` parks the row (`spec_unclear!`, then the
-    # stamp) before it reposes the entry label, so a row stamped after the list
-    # was fetched is absent from it for that reason alone — and a read in that
-    # window sees `label_doing` and flags `clarification_label_moved` falsely
-    # (adversarial review). The next cycle's list settles it.
-    def parked_after_the_list?(issue) = !@listed_at.nil? && issue.clarification_requested_at&.>=(@listed_at)
-
-    # The explanation of `clarification_label_moved` does not claim a human
-    # moved the label: `repose_entry_label` swallows its own failure, so autodev
-    # itself can be the cause.
-    def read_reach(gl_issue)
-      return :closed if externally_closed?(gl_issue)
-      return 'clarification_reassigned' unless assigned_to_autodev?(gl_issue)
-      return 'clarification_label_moved' unless carries_todo_label?(gl_issue)
-
-      :reachable
-    end
-
-    # Any value of `labels_todo` is an entry label, not only the first: both of
-    # powerpanne's are in live use. A project with no todo label has no entry
-    # label to lose, so the arm abstains rather than flag every row.
-    def carries_todo_label?(gl_issue)
-      todo = Array(@project_config['labels_todo'])
-      return true if todo.empty?
-
-      Array(::GitlabHelpers.field(gl_issue, :labels)).intersect?(todo)
     end
 
     # `close_externally`'s own return is whatever the activity post answered,
@@ -169,8 +127,9 @@ module Autodev
     end
 
     # Written only when it changes the row, so a cycle where nothing changed
-    # writes nothing — no row, and no activity entry that would feed
-    # `Issue.without_activity_since`. A nil reason is a cleared reach flag.
+    # writes no flag and no activity entry that would feed
+    # `Issue.without_activity_since` — the read's own stamp is the one write
+    # such a cycle can make. A nil reason is a cleared reach flag.
     def settle(issue, reason)
       return 0 if reason == current_reason(issue)
       return lost_race(issue) unless write_matched?(issue, reason)

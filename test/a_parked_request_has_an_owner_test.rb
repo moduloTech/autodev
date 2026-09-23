@@ -174,15 +174,53 @@ class AParkedRequestHasAnOwnerTest < Minitest::Test # rubocop:disable Metrics/Cl
   # Autodev #62: a read that did not answer is never a verdict.
   def test_a_failed_read_leaves_the_row_untouched
     issue = parked
-    error = Gitlab::Error::ResponseError.new(
-      FakeResponse.new('boom', 502, FakeRequest.new('https://gitlab.example', '/api/v4/issues'))
-    )
-    watch(client: StubClient.new({}, raises: { issue.issue_iid => error })).run
+    watch(client: StubClient.new({}, raises: { issue.issue_iid => gitlab_error(502) })).run
 
     issue.reload
 
     assert_equal 'needs_clarification', issue.status
     refute issue.needs_attention
+  end
+
+  # Adversarial review of the alpha-55 lot: the read's failure used to drop the
+  # whole row for the cycle, so the two arms that read only the database never
+  # ran. A ticket GitLab answers 404 on — deleted, or moved out of reach — kept
+  # a spent budget and a two-month-old question "waiting on your input" forever,
+  # the silence #86 exists to end. The failed read now says nothing about the
+  # reach, and the database arms still judge.
+  def test_a_failed_read_still_flags_a_spent_budget
+    issue = parked(retry_count: 4)
+    watch(client: StubClient.new({}, raises: { issue.issue_iid => gitlab_error(404) })).run
+
+    assert_equal 'clarification_budget_spent', issue.reload.attention_reason
+  end
+
+  def test_a_failed_read_still_flags_an_unanswered_question
+    issue = parked(clarification_requested_at: NOW - 60.days)
+    watch(client: StubClient.new({}, raises: { issue.issue_iid => gitlab_error(404) })).run
+
+    assert_equal 'clarification_unanswered', issue.reload.attention_reason
+  end
+
+  # Nothing was learnt, so the reach flag GitLab last answered with stays.
+  def test_a_failed_read_keeps_a_reach_flag
+    issue = parked(needs_attention: true, attention_reason: 'clarification_reassigned')
+    watch(client: StubClient.new({}, raises: { issue.issue_iid => Net::ReadTimeout.new })).run
+
+    assert_equal 'clarification_reassigned', issue.reload.attention_reason
+  end
+
+  def test_a_failed_read_is_logged
+    issue = parked
+    watch(client: StubClient.new({}, raises: { issue.issue_iid => gitlab_error(404) })).run
+
+    assert(@logger.messages.any? { |line| line.include?("##{issue.issue_iid}") && line.include?('ResponseError') })
+  end
+
+  def gitlab_error(code)
+    Gitlab::Error::ResponseError.new(
+      FakeResponse.new('boom', code, FakeRequest.new('https://gitlab.example', '/api/v4/issues'))
+    )
   end
 
   # The Claude gate closed, so `dispatch_new_issues` fetched nothing: absence
@@ -243,8 +281,8 @@ class AParkedRequestHasAnOwnerTest < Minitest::Test # rubocop:disable Metrics/Cl
     refute issue.reload.needs_attention
   end
 
-  # Still reassigned: re-read, and nothing written — the pass stays quiet on a
-  # cycle where nothing changed.
+  # Still reassigned: re-read, and nothing written but the read's own stamp —
+  # no flag, no activity entry, on a cycle where nothing changed.
   def test_a_still_reassigned_row_is_read_and_left_as_it_is
     issue = parked(needs_attention: true, attention_reason: 'clarification_reassigned')
     client = StubClient.new({ issue.issue_iid => ticket(assignee_ids: [HUMAN_ID]) })
@@ -252,8 +290,98 @@ class AParkedRequestHasAnOwnerTest < Minitest::Test # rubocop:disable Metrics/Cl
     updates = issue_updates { watch(client: client).run }
 
     assert_equal [issue.issue_iid], client.reads
-    assert_empty updates
+    assert_equal(['clarification_read_at'], updates.map { |sql| sql[/SET "(\w+)"/, 1] })
     assert_empty warn_events(issue)
+  end
+
+  # --- the re-read cadence: fifteen minutes, set by the owner on 23/09/2026 ---
+  #
+  # Adversarial review of the alpha-55 lot: read every cycle, a row out of the
+  # list cost 720 reads a day at production's `poll_interval: 120`, forever,
+  # since flag-and-keep means nobody has to close it — and the September backlog
+  # of nine such rows would have cost more than all of autodev's GitLab traffic.
+
+  def test_the_cadence_is_fifteen_minutes
+    assert_equal 15.minutes, Autodev::ClarificationWatch::READ_INTERVAL
+  end
+
+  def test_a_read_stamps_the_row
+    issue = parked
+    watch(client: StubClient.new({ issue.issue_iid => ticket(assignee_ids: [HUMAN_ID]) })).run
+
+    assert_equal NOW, issue.reload.clarification_read_at
+  end
+
+  def test_a_row_read_less_than_fifteen_minutes_ago_is_not_read_again
+    issue = parked(needs_attention: true, attention_reason: 'clarification_reassigned',
+                   clarification_read_at: NOW - 14.minutes)
+    client = StubClient.new({ issue.issue_iid => ticket(state: 'closed') })
+
+    watch(client: client).run
+
+    assert_empty client.reads
+    assert_equal 'clarification_reassigned', issue.reload.attention_reason
+  end
+
+  # The bound is reached on the minute it names, as `age_reason`'s is on its day.
+  def test_a_row_read_fifteen_minutes_ago_is_read_again
+    issue = parked(needs_attention: true, attention_reason: 'clarification_reassigned',
+                   clarification_read_at: NOW - 15.minutes)
+    client = StubClient.new({ issue.issue_iid => ticket(state: 'closed') })
+
+    watch(client: client).run
+
+    assert_equal [issue.issue_iid], client.reads
+    assert_equal 'closed', issue.reload.status
+  end
+
+  # Spacing the read spaces only the reach: the database arms still judge.
+  def test_a_row_not_read_this_cycle_still_flags_a_spent_budget
+    issue = parked(retry_count: 4, clarification_read_at: NOW - 1.minute)
+    client = StubClient.new
+
+    watch(client: client).run
+
+    assert_empty client.reads
+    assert_equal 'clarification_budget_spent', issue.reload.attention_reason
+  end
+
+  # A failed read is stamped too, so a ticket GitLab answers 404 on costs one
+  # read and one error line per fifteen minutes, not per cycle.
+  def test_a_failed_read_stamps_the_row
+    issue = parked
+    watch(client: StubClient.new({}, raises: { issue.issue_iid => gitlab_error(404) })).run
+
+    assert_equal NOW, issue.reload.clarification_read_at
+  end
+
+  # Back in the list, the stamp goes: a row that leaves it again is read at
+  # once, so the first flag on a departure is never late.
+  def test_a_row_back_in_the_list_loses_its_stamp
+    issue = parked(clarification_read_at: NOW - 1.minute)
+    watch(seen: [issue.issue_iid]).run
+
+    assert_nil issue.reload.clarification_read_at
+  end
+
+  def test_a_row_in_the_list_with_no_stamp_writes_nothing
+    issue = parked
+
+    updates = issue_updates { watch(seen: [issue.issue_iid]).run }
+
+    assert_empty updates
+  end
+
+  # Mutation M24 of the adversarial review: removing the `todo.empty?` guard
+  # left the whole suite green. Without it `[].intersect?([])` is false and every
+  # row of a project with no entry label would be flagged `label_moved`.
+  def test_a_project_with_no_todo_label_never_flags_label_moved
+    issue = parked
+    client = StubClient.new({ issue.issue_iid => ticket(labels: ['Anything']) })
+
+    watch(client: client, project_config: PROJECT_CONFIG.merge('labels_todo' => [])).run
+
+    refute issue.reload.needs_attention
   end
 
   # The race the adversarial review confirmed: `post_clarification` parks the
@@ -366,9 +494,22 @@ class AParkedRequestHasAnOwnerTest < Minitest::Test # rubocop:disable Metrics/Cl
   # --- one reason per row, ranked, and written only when it changes -----------
 
   def test_the_order_of_the_reasons_is_the_contract
-    assert_equal %w[clarification_reassigned clarification_label_moved
-                    clarification_budget_spent clarification_unanswered],
+    assert_equal %w[clarification_budget_spent clarification_reassigned
+                    clarification_label_moved clarification_unanswered],
                  Autodev::ClarificationWatch::REASONS
+  end
+
+  # Adversarial review of the alpha-55 lot: ranked below the reach reasons, a
+  # spent budget hid behind `clarification_reassigned`, whose card prescribes
+  # "reassign it to autodev, it resumes at once". `PollDispatcher#process_issue`
+  # refuses the row on `exceeded_retries?` before any reply is read, so the
+  # gesture only swapped the card for the budget one a cycle later. The reset
+  # the budget card prescribes is the one gesture that moves such a row.
+  def test_a_spent_budget_outranks_a_reassigned_ticket
+    issue = parked(retry_count: 4)
+    watch(client: StubClient.new({ issue.issue_iid => ticket(assignee_ids: [HUMAN_ID]) })).run
+
+    assert_equal 'clarification_budget_spent', issue.reload.attention_reason
   end
 
   # Test 8, first half.
@@ -389,10 +530,10 @@ class AParkedRequestHasAnOwnerTest < Minitest::Test # rubocop:disable Metrics/Cl
   end
 
   def test_a_weaker_flag_never_overwrites_a_stronger_one
-    issue = parked(retry_count: 4, needs_attention: true, attention_reason: 'clarification_reassigned')
+    issue = parked(retry_count: 4, needs_attention: true, attention_reason: 'clarification_budget_spent')
     watch(client: StubClient.new({ issue.issue_iid => ticket(assignee_ids: [HUMAN_ID]) })).run
 
-    assert_equal 'clarification_reassigned', issue.reload.attention_reason
+    assert_equal 'clarification_budget_spent', issue.reload.attention_reason
   end
 
   def test_a_stronger_flag_overwrites_a_weaker_one

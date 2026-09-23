@@ -100,10 +100,12 @@ Per row, in this order:
    flag `clarification_unanswered`. A NULL `clarification_requested_at` is not aged (it already
    reads as answered, `ClarificationResume#answered?`).
 
-A row carries **one** `attention_reason`. Ranking, strongest first: `clarification_reassigned`,
-`clarification_label_moved`, `clarification_budget_spent`, `clarification_unanswered`. A flag
-overwrites a weaker one, never a stronger one, and is written only when it changes the row — so
-the pass writes nothing on a cycle where nothing changed.
+A row carries **one** `attention_reason`. Ranking, strongest first: `clarification_budget_spent`,
+`clarification_reassigned`, `clarification_label_moved`, `clarification_unanswered` (amended after
+the adversarial review of the alpha-55 lot, which first ranked the budget third: shown over a spent
+budget, the reassigned card prescribed a reassignment that `exceeded_retries?` then refused). A flag
+overwrites a weaker one, never a stronger one, and is written only when it changes the row — so a
+cycle where nothing changed writes no flag and no activity entry, only the read's stamp.
 
 A flag write is a compare-and-set that repeats `status = 'needs_clarification'`, plus one
 `ActivityLogger.warn_event` (database only, no GitLab note) and one log line.
@@ -111,8 +113,20 @@ A flag write is a compare-and-set that repeats `status = 'needs_clarification'`,
 ### Cost
 
 - Nominal: **zero** GitLab calls. A healthy row is in `seen_iids`.
-- A row out of the population: **one** `client.issue` read per cycle, 288 per day, for as long as
-  it stays out. 0 such rows in production on 23/09/2026, one in four months.
+- A row out of the population: **one** `client.issue` read at once when it leaves, then at most
+  one per `READ_INTERVAL` (15 minutes) while it stays out, clocked on `issues.clarification_read_at`
+  — about 96 a day per row. 0 such rows in production on 23/09/2026, one in four months.
+- *Amended after the adversarial review of the alpha-55 lot.* This line first said one read per
+  cycle and "288 per day": that is the rate at the default `poll_interval: 300`, while production
+  runs at 120 s, so it was 720 a day per row — and the population grows, since flag-and-keep means
+  nobody has to close a reassigned ticket. The database copy of 04/09/2026 held twelve parked rows,
+  nine of them assigned to humans by 23/09; a repeat of that backlog read every cycle would have cost
+  6 480 reads a day, more than all of autodev's GitLab traffic on 22/09 (6 060). The owner set the
+  cadence to fifteen minutes on 23/09/2026. A read that fails, or is not due, answers `:unknown`: the
+  reach flag stays and the budget and age arms still judge the row (a failed read used to drop the
+  row for the cycle, so a ticket GitLab answered 404 on was never flagged at all). The same review
+  moved `clarification_budget_spent` to the top of the rank order, since no GitLab gesture moves a
+  row whose budget is spent.
 - The first version read a flagged row once and never again, to save those reads. Both
   post-implementation reviews reproduced what that cost: a ticket leaving in two steps kept the
   first step's explanation, the gesture the card prescribes changed nothing on it, and a flagged
