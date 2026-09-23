@@ -34,10 +34,15 @@ module Autodev
       )
     end
 
+    # The attention trio goes with the wait (Autodev #86): every flag
+    # `ClarificationWatch` sets is about the wait that just ended, and a
+    # restarted request left flagged would be excluded from
+    # `dispatch_done_unassigned` once delivered.
     def resume!(issue)
       @logger.info("Issue ##{issue.issue_iid}: clarification received, re-queuing", project: @path)
       issue.clarification_received!
-      issue.update(clarification_requested_at: nil, error_message: nil)
+      issue.update(clarification_requested_at: nil, error_message: nil,
+                   needs_attention: false, attention_reason: nil, attention_detail: nil)
       ::ActivityLogger.post(::ActivityLogger::Ctx.new(@client, @path, @logger),
                             issue, :clarification_received)
     end

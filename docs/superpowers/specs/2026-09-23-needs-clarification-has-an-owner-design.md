@@ -23,7 +23,7 @@ Three cases therefore have no owner, and the ticket asks that they be treated as
 
 - `issues` by status: 62 `closed`, 85 `done`, 1 `implementing`, **0** `needs_clarification`.
 - 18 entries into `needs_clarification` on record since 12/05/2026. Since #75 shipped (28/08), one
-  (row 157, answered 2 h 28 min later through the nominal path).
+  (row 157, answered 2 h 27 min later through the nominal path).
 - Row 68 (powerpanne/core #14856) sat in case 1 for 131 days (asked 15/05/2026, answered
   16/05/2026, reassigned to a human 11/06/2026). It was re-armed this morning by reassigning the
   ticket to autodev: `clarification_received` at 05:26:04 UTC, now `implementing`.

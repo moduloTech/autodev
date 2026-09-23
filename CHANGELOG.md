@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A request parked in `needs_clarification` now has an owner (Autodev #86).** No pass selected the state: it is in neither `PollDispatcher::ACTIVE_STATUSES` nor `Issue::STALLED_STATES`, and its one reader, `dispatch_new_issues`, only sees tickets still assigned to autodev and still carrying a todo label — and only ever resumes. Three cases therefore reached nobody: the ticket reassigned to a human (or its entry label gone), the retry budget spent, and a question nobody answers. The first was live in production for 131 days: powerpanne/core #14856 (row 68), asked 15/05/2026, answered 16/05, reassigned to a human 11/06, found by hand on 23/09 — and re-armed that morning by reassigning the ticket to autodev.
+
+  `Autodev::ClarificationWatch`, run by `dispatch_existing` right after `dispatch_unassignment`, signals all three the same way: `needs_attention` with `clarification_reassigned`, `clarification_label_moved`, `clarification_budget_spent` or `clarification_unanswered` (in that rank order, one reason per row), **no GitLab comment**, and the row **keeps waiting**. The owner chose flag-and-keep over closing on 23/09/2026, and the reason is measured rather than preferred: re-entry from `closed` needs a todo label posed *after* `finished_at` (`LabelHandover#todo_reapplied_after?`), and a parked ticket already carries one, so closing would have turned "reassign it to autodev" — the gesture that just re-armed #14856 — into a silent no-op. Only a ticket closed on GitLab closes the row, as for an active one. The watch card now explains the flag instead of "waiting on your reply", and shows no delivery contact line.
+
+  Nominal cost is **zero GitLab calls**: since Autodev #75 a healthy parked row is in the list `dispatch_new_issues` already fetched, so only a row absent from it is read, once, and not again once flagged. The age bound is `clarification_max_days` (default 14, `0` = off, range `0`…`365`), on `clarification_requested_at` rather than on activity, and a flag is written only when it changes the row — so the pass writes nothing on a cycle where nothing changed. A resume clears the flag; `ResetReclaim` ignores these reasons, since autodev never handed such a ticket back. Measured on production 23/09/2026: 0 rows parked today, 18 entries into the state since May, one since #75 shipped (answered in 2 h 27 min).
+
 ## [1.0.0-alpha.54] - 2026-09-04
 
 ### Fixed
