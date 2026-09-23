@@ -37,18 +37,22 @@ module Autodev
                   ::EOFError].freeze
 
     # rubocop:disable Metrics/ParameterLists -- DormantAudit's six plus
-    # `seen_iids`, the one input this pass has that the audit does not.
+    # `seen_iids` / `listed_at`, the list this pass reads and the audit does not.
     #
     # `seen_iids`: the iids `dispatch_new_issues` received from GitLab this
     # cycle, or nil when that pass did not run (Claude gate closed) — then an
-    # absence means nothing and the reach arm is skipped.
-    def initialize(client:, path:, config:, project_config:, logger:, seen_iids:, now: Time.current)
+    # absence means nothing and the reach arm is skipped. `listed_at`: when that
+    # list was fetched, taken before the fetch; a row parked after it cannot be
+    # in it, so its absence is not evidence either.
+    def initialize(client:, path:, config:, project_config:, logger:, seen_iids:, listed_at: nil,
+                   now: Time.current)
       @client = client
       @path = path
       @config = config
       @project_config = project_config
       @logger = logger
       @seen_iids = seen_iids&.to_set(&:to_i)
+      @listed_at = listed_at
       @now = now
     end
     # rubocop:enable Metrics/ParameterLists
@@ -74,20 +78,30 @@ module Autodev
       0
     end
 
-    # :reachable, :closed, a reach reason, or nil when nothing can be said.
+    # :reachable, :closed, a reach reason, or :unknown when nothing can be said.
     #
     # A row in the list is reachable by construction: the list is "open,
     # assigned to autodev, carrying a todo label". A row absent from it left
-    # that population, and one read says how. A row already carrying a reach
-    # flag is not read again: re-reading flagged rows every cycle would cost 288
-    # reads per row per day for a flag already on the operator's board.
+    # that population, and one read says how — every cycle while it stays out,
+    # a reach flag included. Not re-reading a flagged row (the first version,
+    # to save 288 reads per row per day) froze the flag on GitLab's first
+    # answer: a ticket leaving in two steps kept the first step's explanation,
+    # the gesture it prescribes changed nothing on the card, and a flagged
+    # ticket closed on GitLab never closed the row (truthfulness and adversarial
+    # reviews). The population that pays is the rows out of the list, 0 today.
     def reach_verdict(issue)
-      return if @seen_iids.nil?
+      return :unknown if @seen_iids.nil? || parked_after_the_list?(issue)
       return :reachable if @seen_iids.include?(issue.issue_iid.to_i)
-      return if REACH_REASONS.include?(current_reason(issue))
 
       read_reach(@client.issue(@path, issue.issue_iid))
     end
+
+    # `SpecChecker#post_clarification` parks the row (`spec_unclear!`, then the
+    # stamp) before it reposes the entry label, so a row stamped after the list
+    # was fetched is absent from it for that reason alone — and a read in that
+    # window sees `label_doing` and flags `clarification_label_moved` falsely
+    # (adversarial review). The next cycle's list settles it.
+    def parked_after_the_list?(issue) = !@listed_at.nil? && issue.clarification_requested_at&.>=(@listed_at)
 
     # The explanation of `clarification_label_moved` does not claim a human
     # moved the label: `repose_entry_label` swallows its own failure, so autodev
@@ -97,7 +111,7 @@ module Autodev
       return 'clarification_reassigned' unless assigned_to_autodev?(gl_issue)
       return 'clarification_label_moved' unless carries_todo_label?(gl_issue)
 
-      nil
+      :reachable
     end
 
     # Any value of `labels_todo` is an entry label, not only the first: both of
@@ -119,13 +133,14 @@ module Autodev
       1
     end
 
-    # One reason per row. The reach clear only lifts a reach flag; budget and
-    # age flags are cleared by a resume or an operator reset, and a foreign
-    # reason (`dormant_exhausted`, left by a CLI `--reset`) only ever gives way
-    # to a clarification reason — it ranks below all four.
+    # One reason per row. A fresh reach reading replaces a reach flag outright,
+    # even with a weaker one — it is the ticket as it is now; budget and age
+    # flags are cleared by a resume or an operator reset, and a foreign reason
+    # (`dormant_exhausted`, left by a CLI `--reset`) only ever gives way to a
+    # clarification reason — it ranks below all four.
     def target_reason(issue, reach)
       current = current_reason(issue)
-      kept = reach == :reachable && REACH_REASONS.include?(current) ? nil : current
+      kept = reach != :unknown && REACH_REASONS.include?(current) ? nil : current
       fired = [(reach if REASONS.include?(reach)), budget_reason(issue), age_reason(issue)].compact
       strongest = fired.min_by { |reason| rank(reason) }
       strongest && rank(strongest) < rank(kept) ? strongest : kept

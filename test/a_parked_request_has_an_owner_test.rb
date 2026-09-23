@@ -76,10 +76,10 @@ class AParkedRequestHasAnOwnerTest < Minitest::Test # rubocop:disable Metrics/Cl
                    clarification_requested_at: NOW - 1.day }.merge(overrides))
   end
 
-  def watch(client: StubClient.new, seen: [], project_config: PROJECT_CONFIG, config: CONFIG)
+  def watch(client: StubClient.new, seen: [], project_config: PROJECT_CONFIG, config: CONFIG, listed_at: nil)
     Autodev::ClarificationWatch.new(client: client, path: PATH, config: config,
                                     project_config: project_config, logger: @logger,
-                                    seen_iids: seen, now: NOW)
+                                    seen_iids: seen, listed_at: listed_at, now: NOW)
   end
 
   def warn_events(issue)
@@ -196,15 +196,99 @@ class AParkedRequestHasAnOwnerTest < Minitest::Test # rubocop:disable Metrics/Cl
     assert_empty client.reads
   end
 
-  # Once flagged, the row is not re-read every cycle: 288 reads per row per day
-  # for a flag that is already on the operator's board.
-  def test_an_already_reach_flagged_absent_row_is_not_read_again
-    parked(needs_attention: true, attention_reason: 'clarification_reassigned')
-    client = StubClient.new
+  # A reach flag is re-read while the row stays out of the list (truthfulness
+  # and adversarial reviews of #86). The first version did not re-read it, to
+  # save 288 reads per row per day, and the flag then froze on whatever GitLab
+  # said the first time: a ticket leaving in two steps kept the first step's
+  # explanation, the gesture that explanation prescribes changed nothing on the
+  # card, and a flagged ticket closed on GitLab never closed the row.
+  def test_a_ticket_leaving_in_two_steps_is_described_by_the_second
+    issue = parked(needs_attention: true, attention_reason: 'clarification_label_moved')
+    client = StubClient.new({ issue.issue_iid => ticket(assignee_ids: [HUMAN_ID], labels: []) })
 
     watch(client: client).run
 
+    assert_equal [issue.issue_iid], client.reads
+    assert_equal 'clarification_reassigned', issue.reload.attention_reason
+  end
+
+  # The gesture `clarification_reassigned` prescribes, done without the entry
+  # label: the fresh reading replaces the old one even though it ranks lower.
+  def test_a_reassigned_row_given_back_without_its_label_becomes_label_moved
+    issue = parked(needs_attention: true, attention_reason: 'clarification_reassigned')
+    client = StubClient.new({ issue.issue_iid => ticket(labels: []) })
+
+    watch(client: client).run
+
+    assert_equal 'clarification_label_moved', issue.reload.attention_reason
+  end
+
+  def test_a_reach_flagged_row_whose_ticket_was_closed_is_closed
+    issue = parked(needs_attention: true, attention_reason: 'clarification_reassigned')
+    client = StubClient.new({ issue.issue_iid => ticket(state: 'closed', assignee_ids: [HUMAN_ID]) })
+
+    watch(client: client).run
+
+    assert_equal 'closed', issue.reload.status
+  end
+
+  # Read healthy while absent from the list: it parked after the list was
+  # fetched, or GitLab's list lagged. Reachable is reachable.
+  def test_a_reach_flagged_row_read_healthy_is_cleared
+    issue = parked(needs_attention: true, attention_reason: 'clarification_reassigned')
+    client = StubClient.new({ issue.issue_iid => ticket })
+
+    watch(client: client).run
+
+    refute issue.reload.needs_attention
+  end
+
+  # Still reassigned: re-read, and nothing written — the pass stays quiet on a
+  # cycle where nothing changed.
+  def test_a_still_reassigned_row_is_read_and_left_as_it_is
+    issue = parked(needs_attention: true, attention_reason: 'clarification_reassigned')
+    client = StubClient.new({ issue.issue_iid => ticket(assignee_ids: [HUMAN_ID]) })
+
+    updates = issue_updates { watch(client: client).run }
+
+    assert_equal [issue.issue_iid], client.reads
+    assert_empty updates
+    assert_empty warn_events(issue)
+  end
+
+  # The race the adversarial review confirmed: `post_clarification` parks the
+  # row (`spec_unclear!`, then the stamp) before it reposes the entry label. A
+  # row parked after the list was fetched is absent from it for that reason
+  # alone, and a read in that window sees `label_doing` — a false
+  # `clarification_label_moved`, and an activity entry nothing prunes.
+  def test_a_row_parked_after_the_list_was_fetched_is_not_read
+    issue = parked(clarification_requested_at: NOW - 10.seconds)
+    client = StubClient.new({ issue.issue_iid => ticket(labels: ['Development::Doing']) })
+
+    watch(client: client, listed_at: NOW - 1.minute).run
+
     assert_empty client.reads
+    refute issue.reload.needs_attention
+  end
+
+  # The same instant is "after": the stamp and the fetch are both taken before
+  # anything they describe, so equality proves nothing either way.
+  def test_a_row_stamped_at_the_very_instant_of_the_fetch_is_not_read
+    issue = parked(clarification_requested_at: NOW - 1.minute)
+    client = StubClient.new({ issue.issue_iid => ticket(labels: ['Development::Doing']) })
+
+    watch(client: client, listed_at: NOW - 1.minute).run
+
+    assert_empty client.reads
+  end
+
+  def test_a_row_parked_before_the_list_was_fetched_is_read
+    issue = parked(clarification_requested_at: NOW - 2.minutes)
+    client = StubClient.new({ issue.issue_iid => ticket(labels: ['Development::Doing']) })
+
+    watch(client: client, listed_at: NOW - 1.minute).run
+
+    assert_equal 'clarification_label_moved', issue.reload.attention_reason
   end
 
   def test_a_reach_flag_is_cleared_once_the_row_is_back_in_the_list
@@ -306,7 +390,7 @@ class AParkedRequestHasAnOwnerTest < Minitest::Test # rubocop:disable Metrics/Cl
 
   def test_a_weaker_flag_never_overwrites_a_stronger_one
     issue = parked(retry_count: 4, needs_attention: true, attention_reason: 'clarification_reassigned')
-    watch.run
+    watch(client: StubClient.new({ issue.issue_iid => ticket(assignee_ids: [HUMAN_ID]) })).run
 
     assert_equal 'clarification_reassigned', issue.reload.attention_reason
   end

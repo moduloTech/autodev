@@ -88,7 +88,7 @@ module Autodev
       # Nil until `dispatch_new_issues` records what it fetched, so a cycle that
       # skipped it hands the watch no list at all rather than an empty one
       # (Autodev #86) — an empty list reads every parked row as gone.
-      @seen_iids = nil
+      @seen_iids = @listed_at = nil
       claude_available? ? dispatch_new_issues : log_usage_pause
       return if @config['dry_run']
 
@@ -150,6 +150,7 @@ module Autodev
     # from it as "this ticket left the todo population", and a parked row dropped
     # here for its age has not left it.
     def dispatch_new_issues
+      @listed_at = Time.current
       gl_issues = ::GitlabHelpers.fetch_assignee_issues(
         @client, @path, @project_config['labels_todo'] || [], ::GitlabHelpers.current_user_id(@client)
       )
@@ -419,7 +420,7 @@ module Autodev
 
     def dispatch_clarification_watch
       ClarificationWatch.new(client: @client, path: @path, config: @config, project_config: @project_config,
-                             logger: @logger, seen_iids: @seen_iids).run
+                             logger: @logger, seen_iids: @seen_iids, listed_at: @listed_at).run
     end
 
     # === poll_retries equivalent ===

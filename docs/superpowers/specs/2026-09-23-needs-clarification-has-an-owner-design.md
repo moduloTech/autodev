@@ -81,13 +81,18 @@ Per row, in this order:
 1. **Reach arm** — only when `seen_iids` is not nil.
    - Row in `seen_iids` → it is reachable. If it carries a reach flag
      (`clarification_reassigned` / `clarification_label_moved`), clear it.
-   - Row not in `seen_iids` and not already carrying a reach flag → one `@client.issue` read:
+   - Row stamped (`clarification_requested_at`) at or after the instant the list was fetched
+     (`listed_at`, taken before the fetch) → nothing can be said: it parked after the list, and
+     `post_clarification` reposes the entry label only after `spec_unclear!`, so a read in that
+     window would see `label_doing` (adversarial review).
+   - Otherwise, row not in `seen_iids` → one `@client.issue` read, **every cycle while it stays
+     out**, a reach flag included; a fresh reading replaces a reach flag even with a weaker one:
      - closed on GitLab → `close_externally` (`ExternalState`, the existing closure).
      - not assigned to autodev → flag `clarification_reassigned`.
      - assigned, no `labels_todo` label → flag `clarification_label_moved`. The explanation does not
        claim a human did it: `repose_entry_label` swallows its own failure, so autodev can be the
        cause.
-     - assigned and carrying a todo label → nothing (the row parked after the list was fetched).
+     - assigned and carrying a todo label → reachable (a reach flag is cleared).
    - A failed read (`Gitlab::Error::ResponseError`, `ApiUnavailableError`) declines the row for the
      cycle. It never reads as a verdict (Autodev #62).
 2. **Budget arm** — `retry_count > Config.max_retries` → flag `clarification_budget_spent`.
@@ -106,12 +111,13 @@ A flag write is a compare-and-set that repeats `status = 'needs_clarification'`,
 ### Cost
 
 - Nominal: **zero** GitLab calls. A healthy row is in `seen_iids`.
-- A row leaving the population: **one** `client.issue` read, then none once flagged. A read that
-  failed is retried next cycle.
-- Accepted limit: a row flagged `clarification_reassigned` whose ticket is later closed on GitLab
-  stays flagged in `needs_clarification`. It is on the operator's board, and the dashboard close
-  button ends it. Re-reading flagged rows every cycle would cost 288 reads per row per day for
-  that.
+- A row out of the population: **one** `client.issue` read per cycle, 288 per day, for as long as
+  it stays out. 0 such rows in production on 23/09/2026, one in four months.
+- The first version read a flagged row once and never again, to save those reads. Both
+  post-implementation reviews reproduced what that cost: a ticket leaving in two steps kept the
+  first step's explanation, the gesture the card prescribes changed nothing on it, and a flagged
+  ticket closed on GitLab never closed the row. A flag that cannot follow the ticket is not a
+  truthful signal, so the reads are paid.
 
 ### Clearing
 
