@@ -16,7 +16,7 @@ module Autodev
   class HealthReport # rubocop:disable Metrics/ClassLength
     CHECKS = %i[poller workers queue claude_usage danger_claude issues_error
                 mr_review review_skill mr_review_token stuck_issues database
-                migrations gitlab_requests].freeze
+                migrations gitlab_requests project_briefings].freeze
 
     # `danger_claude`'s severity mapping (Autodev #108): a quota outage is not
     # a fault of the tool — `claude_usage` already carries that alarm — but the
@@ -56,6 +56,22 @@ module Autodev
     # tunes to change behaviour.
     GITLAB_REQUESTS_HOUR_WINDOW = 3600
     GITLAB_REQUESTS_DAY_WINDOW = 86_400
+
+    # "A briefing is no longer being refreshed" (Autodev #117). Calibrated on
+    # production, not guessed: gaps between two successful refreshes, per
+    # project, 21/08 → 23/09/2026 (1 427 `Refreshed briefing` lines):
+    #
+    #   * 99 % of the gaps are ≤ 2h — the job is hourly;
+    #   * the unexplained noise (night hours) tops out at **5.6h**;
+    #   * the three real incidents are **9.1h** (28/08, danger-claude failing
+    #     hourly), **10.1h** and **12.9h** (the Docker outage of 02-03/09).
+    #
+    # 6h sits above the noise and below the smallest incident, so it flags all
+    # three and none of the noise. Fixed, not configurable — same ruling as
+    # the gitlab_requests windows: an observability figure nobody tunes.
+    BRIEFING_STALE_AFTER = 6 * 3600
+    BRIEFING_SAMPLE_SIZE = 5
+    BRIEFING_ERROR_EXCERPT = 120
 
     # "the review is broken for everybody" detection (Autodev #60, item 1) — the
     # alert missing behind Autodev #49. `review_failure_count` is per ticket and
@@ -442,6 +458,56 @@ module Autodev
       return 0.0 unless total.positive?
 
       (failures.to_f / total * 100).round(2)
+    end
+
+    # Is AutoSpec's per-project briefing still being refreshed? (Autodev #117.)
+    # A failed refresh used to leave nothing but a briefing quietly growing old.
+    #
+    # Staleness raises it, not `briefing_error`: one failed hourly run behind a
+    # fresh briefing is the noise BRIEFING_STALE_AFTER was calibrated to
+    # exclude; the error only travels in the sample so the card names a cause.
+    #
+    # `warn`, never `down`: a stale briefing degrades AutoSpec's context, it
+    # stops no delivery — `/healthz` keeps answering 200. And nothing is
+    # expected where recurring jobs do not run (`config/recurring.yml`'s
+    # development block is empty), which is what `poller_expected` states.
+    def check_project_briefings
+      return build(:ok, 'briefing refresh not scheduled here') unless @poller_expected
+
+      count = Project.count
+      return build(:ok, 'no projects') if count.zero?
+
+      project_briefings_verdict(count)
+    end
+
+    def project_briefings_verdict(count)
+      stale = stale_briefings.to_a
+      meta = { count: count, stale_after_seconds: BRIEFING_STALE_AFTER, failing: failing_briefing_count }
+      return build(:ok, "#{count} briefing(s) fresh", meta) if stale.empty?
+
+      meta[:sample] = stale.first(BRIEFING_SAMPLE_SIZE).map { |project| stale_briefing_entry(project) }
+      build(:warn, "#{stale.size} project briefing(s) not refreshed for over " \
+                   "#{BRIEFING_STALE_AFTER / 3600}h", meta)
+    end
+
+    # `created_at` stands in for a project never refreshed, and never
+    # `updated_at`: storing a refresh failure writes the row, so it would call
+    # every failing project fresh. Strict `<`, so exactly 6h is still fresh.
+    def stale_briefings
+      Project.where('COALESCE(briefing_generated_at, created_at) < ?', @now - BRIEFING_STALE_AFTER)
+             .order(Arel.sql('COALESCE(briefing_generated_at, created_at) ASC'))
+    end
+
+    def failing_briefing_count
+      Project.where("TRIM(COALESCE(briefing_error, '')) <> ''").count
+    end
+
+    def stale_briefing_entry(project)
+      age = ((@now - (project.briefing_generated_at || project.created_at)) / 3600.0).round(1)
+      error = project.briefing_error.to_s.strip
+      return "#{project.gitlab_path} (#{age}h)" if error.empty?
+
+      "#{project.gitlab_path} (#{age}h: #{error[0, BRIEFING_ERROR_EXCERPT]})"
     end
 
     # --- helpers -----------------------------------------------------------

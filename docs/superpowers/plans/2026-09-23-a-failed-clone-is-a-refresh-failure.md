@@ -33,7 +33,10 @@ Baseline: 2599 runs, 5301 assertions, 0 failures.
   `<how>` = `exit N` or `signal N` from the 4th element, `<detail>` = stripped
   stderr tail (400) if non-empty, else stripped stdout tail (400), else
   `no output`. Empty success output → unchanged `'danger-claude returned empty output'`.
-- All `RefreshFailed` messages are `Redactor.scrub`bed.
+- All `RefreshFailed` messages are `Redactor.scrub`bed **before** any truncation:
+  scrub the whole stream, then cut (`Redactor.scrub(err)[0, 400]`, tail likewise).
+  Cutting first can split a credential before its `@` and `URL_CREDENTIALS` then
+  misses it (plan adversary, verified).
 
 ### `Autodev::HealthReport` (`app/services/autodev/health_report.rb`)
 
@@ -97,3 +100,56 @@ Tests to write first (red on master):
 
 CHANGELOG `[Unreleased]`, CLAUDE.md (Error Handling row + health list), technical
 usage doc row, full suite, rubocop on touched files, sabotage, reviews.
+
+## Plan adversary — "would stay green" list, each assigned
+
+Every row below is a test to write; the lane owning the file writes it.
+
+Lane A (`test/services/autospec/project_briefer_test.rb`, new
+`test/jobs/refresh_project_briefings_job_test.rb`):
+
+- A1 guard live: clone stub `['', 'fatal: x', FakeStatus(false)]`, stub_invoker
+  **`flunk`s** (never `raise RefreshFailed`) → `RefreshFailed` `/fatal: x/`, stored
+  `/git clone \(main\) failed: fatal: x/`. Success fixtures cannot prove the guard; item 11
+  above is replaced by this. Dispatch stubs on argv content (`include?('--heads')`),
+  never `args[0]` — `run_cmd_status` passes the env Hash `{}` first.
+- A2 `--heads` fails → message `/ls-remote \(staging\)/`, `--symref` flunks, no clone argv.
+- A3 `--heads` ok non-empty → clone argv has `--branch staging`, `--symref` flunks.
+- A4 `--symref` ok without `ref:` → clone `--branch main`; with `ref: refs/heads/master\tHEAD` → `master`.
+- A5 `--symref` fails → `/ls-remote \(HEAD\)/`, no clone.
+- A6 git missing (`Errno::ENOENT` from capture3) → `RefreshFailed` naming git, stored.
+- A7 danger-claude spawn ENOENT, **real `run_with_timeout`**: stub_invoker nil, clone
+  stubbed ok (creates no dir) → `/danger-claude could not run: No such file or directory/`, stored.
+- A8 real child: tmpdir with executable fake `danger-claude` prepended to PATH, clone
+  stub `FileUtils.mkdir_p(args.last)` → `briefing_text == '# briefing'` (proves
+  `@dc_stdout`/`@dc_stderr` are mutable buffers). Second script `exit 3` with
+  stderr empty, stdout text → message has `exit 3` and the stdout.
+- A9 timeout, real child: fake `sleep 30`, `DANGER_CLAUDE_TIMEOUT` stubbed to 1 →
+  `/timed out after 1s/`, stored. (~6 s: kill grace.)
+- A10 `signal N`: a status with `exitstatus nil, termsig 9` → `/signal 9/`, no `/exit/`.
+- A11 detail precedence: stderr `E` + stdout `O` → E only; stdout `'a'*600+'END'` →
+  ends with END, ≤400; both blank → `/\): no output\z/`.
+- A12 empty success output → message == `'danger-claude returned empty output'`.
+- A13 scrub before cut: `'x'*370 + 'fatal: https://oauth2:s3cr3tt0k3nABCDEFGH@host/g/p.git'`
+  on clone stderr, on ls-remote stderr, and on the danger-claude stdout tail → stored
+  error never includes `s3cr3t`.
+- A14 `Dir.mktmpdir` raising `Errno::ENOSPC` propagates as ENOSPC, nothing stored.
+- A15 `store_success!` raising a non-RefreshFailed propagates unchanged, not stored.
+- A16 `DANGER_CLAUDE_TIMEOUT == 600`; the spawn goes through `CLEAN_ENV`
+  (`Process.spawn` receives an env with `'GEM_HOME' => nil`).
+- A17 job: two projects, clone fails for the first → first has `briefing_error =~ /git clone/`,
+  second `briefing_text == 'ok'` after `perform_now`. Reverse: a `RecordInvalid`
+  from `store_success!` propagates out of `perform_now`.
+
+Lane B (`test/services/health_report_project_briefings_test.rb`):
+
+- B1 `/healthz/project_briefings` stays 200 with body `warn` on a 7 h-old briefing —
+  **with `poller_expected: true` forced** (wrap `HealthReport.new`); in test
+  `Rails.env.local?` is true, so the default constructor hits the "not scheduled" ok.
+- B2 staleness reads `COALESCE(briefing_generated_at, created_at)`, not `updated_at`:
+  `created_at: 7.hours.ago` then `update!(briefing_error: 'x')` → warn; same for
+  `briefing_generated_at: 7.hours.ago` with a fresh `updated_at`.
+- B3 counts: 7 projects, 6 stale → detail starts `"6 project briefing(s)"`,
+  `sample.size == 5`, `meta[:count] == 7`; a 300-char error shows exactly 120.
+- B4 boundary: exactly 6 h → ok (strict `<`).
+- B5 fresh + error → ok, `failing: 1`; `poller_expected: false` → ok on a 2-day-old briefing.

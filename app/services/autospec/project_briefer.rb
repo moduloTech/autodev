@@ -24,7 +24,21 @@ module Autospec
   # for implementation. Hourly cadence keeps the briefing fresh
   # without slowing down draft creation (which is the friction
   # point we explicitly want to avoid).
-  class ProjectBriefer
+  #
+  # The class is long because PROMPT is: the spawn plumbing beside it
+  # is short, and splitting the prompt away from its only reader would
+  # hide what the briefing asks for.
+  class ProjectBriefer # rubocop:disable Metrics/ClassLength
+    # danger-claude runs through the same spawn as every other child
+    # (timeout with a process-group kill, CLEAN_ENV, the exit status as
+    # a fourth element) rather than a raw capture3 of its own.
+    include ProcessRunner
+
+    # The one error refresh! stores and the job rescues: "this refresh
+    # failed for a reason outside autodev". A bug (NoMethodError, a
+    # failed update!) is deliberately not one, so it still reaches Solid
+    # Queue's failed executions instead of being filed next to network
+    # outages (Autodev #117).
     class RefreshFailed < StandardError; end
 
     # Shallow clone depth — the briefing only needs the latest code,
@@ -33,11 +47,16 @@ module Autospec
     # via the partial clone protocol).
     CLONE_DEPTH = 1
 
-    # Hard timeout on the danger-claude invocation. The briefing
-    # prompt is short and the model has all the context locally —
-    # 5 minutes is generous. If it times out, the previous briefing
-    # stays in place.
-    DANGER_CLAUDE_TIMEOUT = 5 * 60
+    # Hard timeout on the danger-claude invocation, enforced by
+    # ProcessRunner (the previous 5 minutes was declared and never
+    # applied). Clone plus danger-claude measured at most 279 s over
+    # 713 production runs, so 600 s is about twice the worst case: it
+    # catches a hang without failing a refresh that succeeds today. If
+    # it times out, the previous briefing stays in place.
+    DANGER_CLAUDE_TIMEOUT = 10 * 60
+
+    # How much of a command's output a stored failure keeps.
+    DETAIL_LIMIT = 400
 
     PROMPT = <<~PROMPT
       You are AutoSpec's project-briefing generator.
@@ -85,6 +104,10 @@ module Autospec
     def initialize(project, config: nil)
       @project = project
       @config  = config
+      # ProcessRunner's record buffers. It appends to them on every
+      # spawn; the briefer never persists them.
+      @dc_stdout = +''
+      @dc_stderr = +''
     end
 
     def refresh!
@@ -111,25 +134,37 @@ module Autospec
     # `master`). We don't hard-code the fallback name — `--branch HEAD`
     # would lie about the branch label, so we resolve it via
     # ls-remote --symref.
+    #
+    # Only a *successful* ls-remote with no output means "no staging
+    # branch". A failed one says nothing about the branch — guessing
+    # from it cloned `main` on a `master` repository and blamed the
+    # branch for what was the network.
     def pick_branch
-      out, _err, ok = Open3.capture3('git', 'ls-remote', '--heads', clone_url, 'staging')
-      return 'staging' if ok && out.to_s.strip.length.positive?
+      out = git!('ls-remote (staging)', 'ls-remote', '--heads', clone_url, 'staging')
+      return 'staging' if out.length.positive?
 
       default_branch
     end
 
     def default_branch
-      out, _err, ok = Open3.capture3('git', 'ls-remote', '--symref', clone_url, 'HEAD')
-      return 'main' unless ok
-
-      match = %r{ref: refs/heads/([^\s\t]+)\s+HEAD}.match(out.to_s)
+      out = git!('ls-remote (HEAD)', 'ls-remote', '--symref', clone_url, 'HEAD')
+      match = %r{ref: refs/heads/([^\s\t]+)\s+HEAD}.match(out)
       match ? match[1] : 'main'
     end
 
     def run_git_clone!(work_dir, branch)
-      cmd = ['git', 'clone', '--depth', CLONE_DEPTH.to_s, '--branch', branch, clone_url, work_dir]
-      _out, err, ok = Open3.capture3(*cmd)
-      raise RefreshFailed, "git clone (#{branch}) failed: #{err.to_s[0, 400]}" unless ok
+      git!("clone (#{branch})", 'clone', '--depth', CLONE_DEPTH.to_s, '--branch', branch, clone_url, work_dir)
+    end
+
+    # Through run_cmd_status because it answers `status.success?`:
+    # capture3's third value is a Process::Status, truthy even on
+    # failure, and reading it as a boolean is how a failed clone once
+    # passed for a success and surfaced as an ENOENT with no cause.
+    def git!(label, *args)
+      out, err, ok = external!("git #{label}") { ShellHelpers.run_cmd_status(['git', *args]) }
+      raise RefreshFailed, Redactor.scrub("git #{label} failed: #{head(err)}") unless ok
+
+      out
     end
 
     def clone_url
@@ -144,14 +179,62 @@ module Autospec
     def invoke_danger_claude!(work_dir)
       return self.class.stub_invoker.call(work_dir, PROMPT) if self.class.stub_invoker
 
-      out, err, status = Open3.capture3('danger-claude', '-p', PROMPT,
-                                        chdir: work_dir, stdin_data: '')
-      raise RefreshFailed, "danger-claude failed: #{err.to_s[0, 400]}" unless status.success?
+      out, err, ok, status = run_danger_claude(work_dir)
+      raise RefreshFailed, Redactor.scrub("danger-claude failed (#{ending(status)}): #{detail(out, err)}") unless ok
 
       briefing = out.to_s.strip
       raise RefreshFailed, 'danger-claude returned empty output' if briefing.empty?
 
       briefing
+    end
+
+    def run_danger_claude(work_dir)
+      external!('danger-claude') do
+        run_with_timeout('danger-claude', ['-p', PROMPT], chdir: work_dir,
+                                                          label: 'briefing', timeout: DANGER_CLAUDE_TIMEOUT)
+      end
+    rescue ImplementationError => e
+      # ProcessRunner's timeout, already killed and already named.
+      raise RefreshFailed, Redactor.scrub(e.message)
+    end
+
+    # A spawn that cannot happen at all (binary missing, vanished
+    # `chdir:`) is a fact about the machine, not a bug: it becomes a
+    # RefreshFailed naming the command, so refresh! stores it and the
+    # job moves on to the next project instead of stopping its loop.
+    def external!(label)
+      yield
+    rescue SystemCallError => e
+      raise RefreshFailed, Redactor.scrub("#{label} could not run: #{e.message}")
+    end
+
+    # Every production failure stored an empty string after the colon:
+    # danger-claude wrote nothing on stderr. So say how it ended, and
+    # fall back on the end of stdout, where its last words are.
+    def ending(status)
+      return "exit #{status.exitstatus}" if status&.exitstatus
+      return "signal #{status.termsig}" if status&.termsig
+
+      'unknown status'
+    end
+
+    def detail(out, err)
+      [err, out].each do |stream|
+        text = tail(stream)
+        return text unless text.empty?
+      end
+      'no output'
+    end
+
+    # Scrub the whole stream, then cut: cutting first can split a
+    # credential before its `@`, and URL_CREDENTIALS then misses it.
+    def head(text)
+      Redactor.scrub(text.to_s)[0, DETAIL_LIMIT]
+    end
+
+    def tail(text)
+      scrubbed = Redactor.scrub(text.to_s).strip
+      scrubbed.length > DETAIL_LIMIT ? scrubbed[-DETAIL_LIMIT..] : scrubbed
     end
 
     def store_success!(text)
