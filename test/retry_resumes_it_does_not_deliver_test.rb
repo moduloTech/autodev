@@ -34,13 +34,13 @@ require_relative 'rails_helper'
 #
 # Which is why both branches now pose the working label and the fork is gone:
 # there is no question left for it to answer.
-class RetryResumesItDoesNotDeliverTest < ActiveSupport::TestCase
+class RetryResumesItDoesNotDeliverTest < ActiveSupport::TestCase # rubocop:disable Metrics/ClassLength
   PROJECT_PATH = 'group/foo'
   ISSUE_IID = 42
 
   # Autodev #102: the fake GitLab issue perform_retry_errored's handover check
   # now reads once before doing anything else.
-  GlIssue = Struct.new(:labels)
+  GlIssue = Struct.new(:labels, :state, :assignees)
 
   # Every call site of the end label, and the delivery each one makes. Derived
   # against the tree by the last test in this file, in the shape
@@ -127,9 +127,17 @@ class RetryResumesItDoesNotDeliverTest < ActiveSupport::TestCase
   # Autodev #102: perform_retry_errored now reads the ticket once before doing
   # anything else, to ask HandoverStop whether a human took it back. This file
   # is about the label choice, not the handover, so the client answers with
-  # `label_doing` still on — the "nobody touched it" case.
+  # `label_doing` still on — the "nobody touched it" case — open, and assigned
+  # to whoever autodev is in this process (the alpha-55 truthfulness review made
+  # the retry ask all three of `ExternalState#not_ours?`' questions).
   def untouched_client
-    Object.new.tap { |c| c.define_singleton_method(:issue) { |*| GlIssue.new(['Development::Doing']) } }
+    Object.new.tap do |c|
+      c.define_singleton_method(:user) { Struct.new(:id).new(7) }
+      c.define_singleton_method(:issue) do |*|
+        me = Struct.new(:id).new(GitlabHelpers.current_user_id(self))
+        GlIssue.new(['Development::Doing'], 'opened', [me])
+      end
+    end
   end
 
   # Which of the two labels was asked for, and nothing else: the question is the

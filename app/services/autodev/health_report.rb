@@ -352,14 +352,25 @@ module Autodev
       review_skill_verdict(state)
     end
 
+    # An `unknown` stays `ok` — a read that did not answer is not a broken
+    # configuration (Autodev #62) — but it is not "present" either: the card
+    # said "all present" over a fleet GitLab had answered nothing about
+    # (truthfulness review of the alpha-55 lot).
     def review_skill_verdict(state)
       missing = state[:missing]
-      meta = { checked: state[:checked], missing: missing.size, checked_at: iso(state[:checked_at]) }
-      return build(:ok, "#{state[:checked]} declared review skill(s), all present", meta) if missing.empty?
+      meta = { checked: state[:checked], missing: missing.size, unknown: state[:unknown],
+               checked_at: iso(state[:checked_at]) }
+      return build(:ok, review_skill_healthy_detail(state), meta) if missing.empty?
 
       meta[:sample] = missing.first(5).map { |entry| review_skill_fault(entry) }.join(' ')
       build(:warn, "#{missing.size} project(s) declare a review skill their repository does not carry — " \
                    'every request of those projects stops at the review step', meta)
+    end
+
+    def review_skill_healthy_detail(state)
+      return "#{state[:checked]} declared review skill(s), all present" if state[:unknown].zero?
+
+      "#{state[:checked]} declared review skill(s), none missing, #{state[:unknown]} could not be checked"
     end
 
     def review_skill_fault(entry)

@@ -333,6 +333,25 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
     assert_equal :ok, Autodev::HealthReport.new(config: {}).check(:review_skill)[:status]
   end
 
+  # Truthfulness review of the alpha-55 lot: green, but not "all present". The
+  # card said so on a fleet where GitLab had answered nothing, although #118
+  # records the `unknown` count in the payload for `trusted?` to read.
+  def test_an_unknown_verdict_is_not_reported_as_present
+    probe([fast], FakeClient.new(raising: Errno::ECONNREFUSED))
+    check = Autodev::HealthReport.new(config: {}).check(:review_skill)[:checks][:review_skill]
+
+    refute_includes check[:detail], 'all present'
+    assert_includes check[:detail], '1 could not be checked'
+    assert_equal 1, check[:meta][:unknown]
+  end
+
+  # A verdict recorded before #118 carries no `unknown` key: none is claimed.
+  def test_a_verdict_without_an_unknown_count_reads_as_all_checked
+    ActivityEvent.create!(kind: 'review_skill', level: 'info', payload_json: { checked: 2, missing: [] }.to_json)
+
+    assert_equal 0, Autodev::ReviewSkillProbe.state(config: {})[:unknown]
+  end
+
   # --- the probe trusts its own verdict (Autodev #118) ---------------------
   #
   # Production polls every 120 s and trusts a verdict for 600 s (`ttl`), yet it

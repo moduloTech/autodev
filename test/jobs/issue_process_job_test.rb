@@ -37,11 +37,17 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
     @issue = build_fake_issue
     @client = Object.new
     # Autodev #102: perform_retry_errored now reads the ticket once, before
-    # transitioning, to ask HandoverStop whether a human took it back. `nil`
-    # labels resolve to "untouched" here since @config's project declares no
-    # label_doing/label_done, which is what every test but the handover-specific
-    # ones (test/errored_retry_respects_a_handover_test.rb) wants.
-    @client.define_singleton_method(:issue) { |*| nil }
+    # transitioning, to ask whether a human took it back. Since the alpha-55
+    # truthfulness review that is `ExternalState#not_ours?` — closed,
+    # reassigned, handed over — so the ticket is open and assigned to whoever
+    # autodev is in this process; `nil` labels resolve to "untouched" since
+    # @config's project declares no label_doing/label_done. The handover cases
+    # live in test/errored_retry_respects_a_handover_test.rb.
+    @client.define_singleton_method(:user) { Struct.new(:id).new(7) }
+    @client.define_singleton_method(:issue) do |*|
+      me = Struct.new(:id).new(GitlabHelpers.current_user_id(self))
+      Struct.new(:state, :assignees, :labels).new('opened', [me], nil)
+    end
   end
 
   test 'invalid action raises ArgumentError' do

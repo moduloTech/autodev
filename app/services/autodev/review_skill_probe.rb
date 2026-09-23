@@ -72,7 +72,9 @@ module Autodev
         []
       end
 
-      # { missing: [verdict, …], checked: Integer, checked_at: Time|nil }.
+      # { missing: [verdict, …], checked: Integer, unknown: Integer, checked_at: Time|nil }.
+      # `unknown` counts the declared skills GitLab did not answer about; a row
+      # recorded before Autodev #118 carries no such key and reads as 0.
       # `checked_at` is nil when no usable verdict is on file (never probed,
       # unreadable, or stale) — which is exactly when the empty list is the
       # fail-open default rather than good news.
@@ -80,18 +82,22 @@ module Autodev
         event = last_event
         return unknown if event.nil? || (now - event.created_at) > ttl(config)
 
-        payload = event.payload
-        missing = payload['missing']
-        return unknown unless missing.is_a?(Array)
+        return unknown unless event.payload['missing'].is_a?(Array)
 
-        { missing: missing, checked: payload['checked'].to_i, checked_at: event.created_at }
+        state_of(event)
       rescue StandardError
         unknown
       end
 
       private
 
-      def unknown = { missing: [], checked: 0, checked_at: nil }
+      def unknown = { missing: [], checked: 0, unknown: 0, checked_at: nil }
+
+      def state_of(event)
+        payload = event.payload
+        { missing: payload['missing'], checked: payload['checked'].to_i, unknown: payload['unknown'].to_i,
+          checked_at: event.created_at }
+      end
 
       def ask(config, declaring, fleet, client)
         client ||= ::GitlabHelpers.build_gitlab_client(config['gitlab_url'], config['gitlab_token'])

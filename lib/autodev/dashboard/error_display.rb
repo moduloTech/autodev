@@ -79,8 +79,8 @@ module Dashboard
       print_metadata(row)
     end
 
-    # A flagged question is still parked (Autodev #86): its status says so, under
-    # a group heading that reads "delivered".
+    # A flagged question is still parked (Autodev #86): its status says so, next
+    # to the `[intervention manuelle]` tag it shares with the gave-up entries.
     def print_metadata(row)
       puts "  Tentative: #{row[:retry_count]}" if row[:status] == 'error'
       puts "  Statut: #{row[:status]}" if row[:status] == 'needs_clarification'

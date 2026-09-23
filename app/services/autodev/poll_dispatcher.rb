@@ -328,11 +328,7 @@ module Autodev
     # while parked in `pending` or `error` is noticed whenever it next moves,
     # not proactively — `dispatch_dormant_audit` covers that population.
     def check_external_state(issue)
-      gl_issue = @client.issue(@path, issue.issue_iid)
-      return close_externally(issue) if externally_closed?(gl_issue)
-      return stop_unassigned(issue) unless assigned_to_autodev?(gl_issue)
-
-      stop_on_handover(issue, gl_issue)
+      not_ours?(issue, @client.issue(@path, issue.issue_iid))
     # This pass transitions rows in line, so it reaches the refusal the three
     # workers already name (Autodev #97, review of the alpha-52 lot). Without the
     # clause it escaped to `dispatch`'s `rescue StandardError`, which logs and

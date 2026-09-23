@@ -35,7 +35,8 @@ module Autodev
     # the gesture it prescribes changed nothing on the card, and a flagged
     # ticket closed on GitLab never closed the row (truthfulness and adversarial
     # reviews). The population that pays is the rows out of the list, 0 on
-    # 23/09/2026, 96 reads a day each.
+    # 23/09/2026, 90 reads a day each at production's 120 s cycle (a read is
+    # due on the eighth cycle, 16 minutes on).
     def reach_verdict(issue)
       return :unknown if @seen_iids.nil? || parked_after_the_list?(issue)
       return back_in_the_list(issue) if @seen_iids.include?(issue.issue_iid.to_i)

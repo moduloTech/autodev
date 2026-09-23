@@ -115,7 +115,7 @@ A flag write is a compare-and-set that repeats `status = 'needs_clarification'`,
 - Nominal: **zero** GitLab calls. A healthy row is in `seen_iids`.
 - A row out of the population: **one** `client.issue` read at once when it leaves, then at most
   one per `READ_INTERVAL` (15 minutes) while it stays out, clocked on `issues.clarification_read_at`
-  — about 96 a day per row. 0 such rows in production on 23/09/2026, one in four months.
+  — 90 a day per row at production's 120 s cycle, a read falling due on the eighth. 0 such rows in production on 23/09/2026, one in four months.
 - *Amended after the adversarial review of the alpha-55 lot.* This line first said one read per
   cycle and "288 per day": that is the rate at the default `poll_interval: 300`, while production
   runs at 120 s, so it was 720 a day per row — and the population grows, since flag-and-keep means
