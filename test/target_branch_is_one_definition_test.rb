@@ -141,6 +141,36 @@ class TargetBranchDefinitionTest < Minitest::Test
     refute called, 'the local git probe must not run when GitLab already holds the answer'
   end
 
+  # The other half of the same rule (Autodev #118). A declared target is the
+  # answer, so the repository default is not asked for either: `resolve` used to
+  # evaluate its block *before* `declared || …`, and the probe paid one GitLab
+  # `project` read per declaring project per cycle — 1 440 a day in production on
+  # 22/09/2026 — for a value it then threw away.
+  def test_the_repository_default_is_not_resolved_when_the_project_declares_a_target
+    answer = TargetBranch.resolve(nil, client: StubClient.new, project_path: 'g/p',
+                                       project_config: { 'target_branch' => 'staging' }) do
+      flunk 'the repository default was resolved although the project declares its target'
+    end
+
+    assert_equal 'staging', answer
+  end
+
+  # And question 1 is still asked of `for_new_merge_request`, not restated
+  # inside `resolve`: laziness is that definition's property, not a copy of it.
+  def test_question_one_is_answered_by_its_one_definition
+    answer = TargetBranch.stub(:for_new_merge_request, ->(*_args) { SENTINEL_BASE }) do
+      TargetBranch.resolve(nil, client: StubClient.new, project_path: 'g/p',
+                                project_config: { 'target_branch' => 'x' }) { 'd' }
+    end
+
+    assert_equal SENTINEL_BASE, answer
+  end
+
+  def test_the_repository_default_answers_when_the_project_declares_nothing
+    assert_equal 'trunk', TargetBranch.resolve(nil, client: StubClient.new, project_path: 'g/p',
+                                                    project_config: {}) { 'trunk' }
+  end
+
   # Autodev #67: the target comes from a GitLab read, so a read that failed is not
   # a value. Falling back on the configuration here is exactly the silent
   # substitution that let the defect run for a week without a trace.

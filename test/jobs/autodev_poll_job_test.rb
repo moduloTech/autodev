@@ -122,6 +122,19 @@ class AutodevPollJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cla
     assert_equal(%w[group/foo group/bar], calls.first[1].map { |project| project['path'] })
   end
 
+  # The probe judges its own verdict's freshness against `poll_interval`
+  # (Autodev #118), so it has to be handed the cycle's configuration — the one
+  # `Config.load` answered — and not a bare hash that would read the default.
+  test 'hands the review-skill probe the configuration the cycle loaded' do
+    @stub_config['poll_interval'] = 120
+    calls = []
+    probe = ->(config:, **) { (calls << config) && [] }
+
+    Autodev::ReviewSkillProbe.stub(:probe!, probe) { run_with_stubs(usage_available: true) }
+
+    assert_equal 120, calls.first['poll_interval']
+  end
+
   # An advisory check must never be the thing that stops a poll cycle — the same
   # ruling `bin/autodev`'s `warn_rejected_numeric_settings` carries.
   test 'a review-skill probe failure does not break the cycle' do

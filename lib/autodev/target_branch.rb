@@ -97,8 +97,14 @@ module TargetBranch
   # Question 1 — a merge request that does not exist yet. `repository_default` is
   # the answer to "and if the project declares nothing?", which the caller
   # resolves because it needs the work directory.
-  def for_new_merge_request(project_config, repository_default)
-    declared(project_config) || repository_default
+  #
+  # Given as a block, it is resolved only when nothing is declared (Autodev
+  # #118). `resolve` used to pass its block's *value*, so every caller paid for
+  # the repository default before the declaration could win: a local
+  # `git symbolic-ref` for `Resolver`, a GitLab `project` read for the
+  # review-skill probe — 1 440 a day in production on 22/09/2026, all thrown away.
+  def for_new_merge_request(project_config, repository_default = nil)
+    declared(project_config) || (block_given? ? yield : repository_default)
   end
 
   # The repository's own default branch, read through the API rather than from a
@@ -153,12 +159,13 @@ module TargetBranch
   # and on a re-implementation alike. `mr_iid` nil means no merge request was ever
   # recorded for this work, and `of_merge_request` answering `nil` means the one
   # that was is over — both are question 1. The block resolves the repository
-  # default, and is not called when a merge request answered.
-  def resolve(mr_iid, client:, project_path:, project_config:)
+  # default, and is not called when a merge request answered, nor when the
+  # project declares its target.
+  def resolve(mr_iid, client:, project_path:, project_config:, &)
     carried = of_merge_request(client, project_path, mr_iid) if mr_iid
     return carried if carried
 
-    for_new_merge_request(project_config, yield)
+    for_new_merge_request(project_config, &)
   end
 
   # The target GitLab recorded on the merge request, or an abort. A merge request

@@ -41,21 +41,28 @@ module Autodev
     # between the probe and the card that reads it.
     TTL_POLL_INTERVALS = 2
     TTL_FLOOR = 600
+    # `config/recurring.yml` fires the poll at most once a minute, whatever
+    # `poll_interval` says, so the real period between two cycles is bounded by
+    # the larger of the two. A bound, not a copy of the schedule's formula.
+    MIN_CYCLE_PERIOD = 60
 
     class << self
       # Runs the live check and records the result. Called once per cycle by
       # AutodevPollJob, alongside the Claude-quota probe.
       #
       # Returns the verdicts (an array of hashes) so a caller that wants them
-      # immediately — a boot check, a test — does not have to read them back.
+      # immediately — a boot check, a test — does not have to read them back;
+      # `nil` when the recorded verdict was still trusted and nothing was asked.
+      #
+      # It used to ask on every cycle, while the verdict it records is trusted for
+      # `ttl` — 600 s against a 120 s cycle in production, where the probe was
+      # 2 880 of 6 060 GitLab requests a day on 22/09/2026 (Autodev #118).
       def probe!(config:, projects:, client: nil, logger: nil)
         declaring = Array(projects).select { |project| skill_of(project) }
         return [] if declaring.empty?
 
-        client ||= ::GitlabHelpers.build_gitlab_client(config['gitlab_url'], config['gitlab_token'])
-        verdicts = declaring.map { |project| verdict_for(client, project) }
-        record(verdicts)
-        verdicts
+        fleet = fleet_of(declaring)
+        trusted?(fleet, config) ? nil : ask(config, declaring, fleet, client)
       rescue StandardError => e
         # An advisory check must never be what breaks a poll cycle.
         logger&.warn("[review_skill_probe] probe failed: #{e.class}: #{e.message}")
@@ -83,6 +90,13 @@ module Autodev
 
       def unknown = { missing: [], checked: 0, checked_at: nil }
 
+      def ask(config, declaring, fleet, client)
+        client ||= ::GitlabHelpers.build_gitlab_client(config['gitlab_url'], config['gitlab_token'])
+        verdicts = declaring.map { |project| verdict_for(client, project) }
+        record(verdicts, fleet)
+        verdicts
+      end
+
       def skill_of(project) = ::ReviewSkillSource.declared(project)
 
       # The question is not asked here (Autodev #89). It is
@@ -105,25 +119,63 @@ module Autodev
       # Only the faults are stored. The rest of the fleet is a count: nobody reads
       # a per-project "still fine", and these rows are machinery — written on a
       # clock, read only as the newest one, dropped past the retention window.
-      def record(verdicts)
+      #
+      # `unknown` and `declared` are what `trusted?` reads: whether any verdict
+      # was an outage, and which fleet the verdict is about.
+      def record(verdicts, fleet)
+        missing = verdicts.select { |v| v[:status] == ::ReviewSkillSource::MISSING }
         ActivityEvent.create(
-          issue_id: nil, kind: KIND,
-          level: verdicts.any? { |v| v[:status] == 'missing' } ? 'warn' : 'info',
-          payload_json: JSON.generate(checked: verdicts.size,
-                                      missing: verdicts.select { |v| v[:status] == 'missing' })
+          issue_id: nil, kind: KIND, level: missing.any? ? 'warn' : 'info',
+          payload_json: JSON.generate(checked: verdicts.size, missing: missing,
+                                      unknown: verdicts.count { |v| v[:status] == ::ReviewSkillSource::UNKNOWN },
+                                      declared: fleet)
         )
       rescue StandardError
         nil # fire-and-forget: an unrecordable verdict just means "unknown"
+      end
+
+      # What a verdict is about: each declaring project, the skill it declares and
+      # the target it declares. Sorted, and strings only, so it compares equal to
+      # its own JSON round trip.
+      def fleet_of(declaring)
+        declaring.map do |project|
+          [project['path'].to_s, skill_of(project), ::TargetBranch.declared(project).to_s]
+        end.sort
+      end
+
+      # Whether the last verdict may stand for this cycle. Only good news is kept
+      # — a `missing` is re-asked every cycle, because that is when an operator is
+      # fixing the repository and watching the card, and an `unknown` is an outage
+      # that keeps the cadence it always had. And only for the fleet it was taken
+      # on: a changed declaration is what the project form's user is waiting on.
+      #
+      # Freshness is judged at the **next** cycle, with half a period to spare, so
+      # the verdict is refreshed before it expires rather than after: the card
+      # never reads `unknown` between two cycles while the poller runs. At
+      # `poll_interval: 120` that re-asks every fourth cycle; at the default 300
+      # `ttl` is two periods and every cycle re-asks. A row written before
+      # Autodev #118 carries neither key and is not trusted.
+      def trusted?(fleet, config)
+        event = last_event
+        return false if event.nil?
+
+        return false unless event.payload.values_at('declared', 'missing', 'unknown') == [fleet, [], 0]
+
+        period = [poll_interval(config), MIN_CYCLE_PERIOD].max
+        (Time.current - event.created_at) + (period * 1.5) < ttl(config)
+      rescue StandardError
+        false
       end
 
       def last_event
         ActivityEvent.where(kind: KIND).order(created_at: :desc, id: :desc).first
       end
 
-      def ttl(config)
+      def ttl(config) = [poll_interval(config) * TTL_POLL_INTERVALS, TTL_FLOOR].max
+
+      def poll_interval(config)
         resolved = config || (defined?(::Web) && ::Web.config) || {}
-        interval = (resolved['poll_interval'] || DEFAULT_POLL_INTERVAL).to_i
-        [interval * TTL_POLL_INTERVALS, TTL_FLOOR].max
+        (resolved['poll_interval'] || DEFAULT_POLL_INTERVAL).to_i
       end
     end
   end

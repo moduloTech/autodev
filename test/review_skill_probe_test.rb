@@ -25,12 +25,13 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
   include DatabaseTestHelper
 
   # Answers the repository-files read and counts what was asked. `clone` is a
-  # tripwire: nothing in this path may shell out to git.
+  # tripwire: nothing in this path may shell out to git. `requests` is every
+  # endpoint called, in order — the cost, whatever the endpoint.
   class FakeClient
     Project = Struct.new(:default_branch)
     Commit = Struct.new(:id)
 
-    attr_reader :asked, :confirmed
+    attr_reader :asked, :confirmed, :requests
 
     def initialize(present: [], raising: nil, raising_on: nil, default_branch: 'main', refs: nil)
       @present = present
@@ -42,11 +43,16 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
       @refs = refs
       @asked = []
       @confirmed = []
+      @requests = []
     end
 
-    def project(_path) = Project.new(@default_branch)
+    def project(_path)
+      @requests << :project
+      Project.new(@default_branch)
+    end
 
     def get_file(path, file_path, ref)
+      @requests << :get_file
       @asked << [path, file_path, ref]
       raise @raising if @raising
       raise Errno::ECONNREFUSED if @raising_on == file_path
@@ -59,6 +65,7 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
     # both a `Gitlab::Error::NotFound`, so the ref itself is confirmed before the
     # configuration is accused.
     def commit(path, ref)
+      @requests << :commit
       @confirmed << [path, ref]
       raise Gitlab::Error::NotFound, fake_response(404) unless @refs.nil? || @refs.include?(ref)
 
@@ -114,11 +121,16 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
 
   # The cost the ticket worried about. One request answers the question; the
   # review step's own clone is the only clone in the product's review path.
+  #
+  # Counted over **every** endpoint (Autodev #118). This used to count `asked`,
+  # which is `get_file` only, and stayed green while production paid two requests
+  # per project per cycle: the repository-default `project` read nobody needed,
+  # since the project declares its target.
   def test_one_project_costs_one_request
     client = FakeClient.new(present: [['modulosource/ff/fast/core', SKILL_PATH, 'staging']])
     probe([fast], client)
 
-    assert_equal 1, client.asked.size
+    assert_equal [:get_file], client.requests
   end
 
   def test_a_project_declaring_no_review_skill_is_not_probed_at_all
@@ -225,6 +237,7 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
   def test_the_ref_is_confirmed_only_when_the_configuration_is_about_to_be_accused
     present = FakeClient.new(present: [['modulosource/ff/fast/core', SKILL_PATH, 'staging']])
     probe([fast], present)
+    ActivityEvent.delete_all # two independent probes, not a second cycle trusting the first
     absent = FakeClient.new
     probe([fast], absent)
 
@@ -318,6 +331,226 @@ class ReviewSkillProbeTest < ActiveSupport::TestCase
     probe([fast], FakeClient.new(raising: Errno::ECONNREFUSED))
 
     assert_equal :ok, Autodev::HealthReport.new(config: {}).check(:review_skill)[:status]
+  end
+
+  # --- the probe trusts its own verdict (Autodev #118) ---------------------
+  #
+  # Production polls every 120 s and trusts a verdict for 600 s (`ttl`), yet it
+  # asked GitLab again on every cycle. A healthy verdict about the same fleet is
+  # now trusted for as long as the next cycle can still refresh it before it
+  # expires, so the health card never reads `unknown` while the poller runs.
+
+  PROD = { 'poll_interval' => 120 }.freeze
+
+  def healthy_client
+    FakeClient.new(present: [['modulosource/ff/fast/core', SKILL_PATH, 'staging']])
+  end
+
+  def probe_with(config, projects, client)
+    Autodev::ReviewSkillProbe.probe!(config: config, projects: projects, client: client,
+                                     logger: NullLogger.new)
+  end
+
+  # Runs `cycles` poll cycles `period` seconds apart and answers the indices of
+  # the cycles that asked GitLab, checking at the last second before each next
+  # cycle that the card still reads a dated verdict.
+  def cycles_that_asked(config, cycles:, period:)
+    start = Time.current
+    (0...cycles).reject do |k|
+      skipped = travel_to(start + (k * period)) { probe_with(config, [fast], healthy_client) }.nil?
+
+      assert_card_dated(start + ((k + 1) * period) - 1, config)
+      skipped
+    end
+  end
+
+  def assert_card_dated(moment, config = PROD)
+    refute_nil card_dated_at(moment, config), "the card read no verdict at #{moment}"
+  end
+
+  def probe_times = ActivityEvent.where(kind: Autodev::ReviewSkillProbe::KIND).pluck(:created_at)
+
+  def card_dated_at(moment, config = PROD)
+    travel_to(moment) { Autodev::ReviewSkillProbe.state(config: config)[:checked_at] }
+  end
+
+  def test_a_healthy_verdict_is_not_asked_again_on_the_next_cycle
+    probe_with(PROD, [fast], healthy_client)
+    client = healthy_client
+    answer = travel(120.seconds) { probe_with(PROD, [fast], client) }
+
+    assert_empty client.requests
+    assert_nil answer, 'a probe that did not run answers nil, not an empty fleet'
+  end
+
+  # The production cadence: `ttl` 600 s, cycles 120 s apart. A cycle skips only
+  # when the verdict will still be trusted at the next one with half a period
+  # to spare, which lands the re-probe on every fourth cycle.
+  def test_at_the_production_interval_gitlab_is_asked_every_fourth_cycle
+    assert_equal [0, 4, 8], cycles_that_asked(PROD, cycles: 12, period: 120)
+  end
+
+  # At the default interval `ttl` is two cycles, so there is nothing to skip:
+  # the change must be invisible there.
+  def test_at_the_default_interval_gitlab_is_asked_on_every_cycle
+    assert_equal [0, 1, 2, 3], cycles_that_asked({ 'poll_interval' => 300 }, cycles: 4, period: 300)
+  end
+
+  # `poll_interval` may be as low as 10, but the recurring schedule fires at most
+  # once a minute (`config/recurring.yml`), so the real cycles are further apart
+  # than the setting says. The margin has to be taken on the real cadence, or the
+  # verdict expires between two cycles.
+  def test_an_interval_under_a_minute_keeps_the_card_dated_at_the_real_cadence
+    asked = cycles_that_asked({ 'poll_interval' => 10 }, cycles: 20, period: 60)
+
+    assert_equal 0, asked.first
+    assert_operator asked.size, :<, 20
+  end
+
+  def test_a_skip_writes_no_row_so_the_card_keeps_the_real_probe_time
+    probe_with(PROD, [fast], healthy_client)
+    probed_at = card_dated_at(Time.current)
+    travel(120.seconds) { probe_with(PROD, [fast], healthy_client) }
+
+    assert_equal [probed_at], probe_times
+    assert_equal probed_at, card_dated_at(120.seconds.from_now)
+  end
+
+  # Only good news is kept. A fault is asked again on the next cycle — that is
+  # when an operator is watching the card and fixing the repository.
+  def test_a_missing_verdict_is_asked_again_on_the_next_cycle
+    probe_with(PROD, [fast], FakeClient.new)
+    client = healthy_client
+    travel(120.seconds) { probe_with(PROD, [fast], client) }
+
+    refute_empty client.requests
+  end
+
+  # The boundary, which pins the margin exactly: at `poll_interval: 120` a
+  # verdict aged 419 s is still trusted (419 + 180 < 600) and one aged 420 s is
+  # not. A margin of one period, or a `<=`, moves one side of it.
+  # Anchored on a whole second: `travel` truncates the microseconds, which would
+  # make an age of 420 s read as 419.x.
+  def requests_at_age(age)
+    start = Time.current.change(usec: 0)
+    travel_to(start) { probe_with(PROD, [fast], healthy_client) }
+    client = healthy_client
+    travel_to(start + age) { probe_with(PROD, [fast], client) }
+    client.requests
+  end
+
+  def test_a_verdict_aged_one_second_short_of_the_margin_is_trusted
+    assert_empty requests_at_age(419)
+  end
+
+  def test_a_verdict_aged_exactly_the_margin_is_asked_again
+    refute_empty requests_at_age(420)
+  end
+
+  # Why the margin exists: cycles do not land exactly on the period. One early
+  # (479 s) and the next late (601 s) is what a margin of one period lets
+  # through — it skips at 479, and the card reads no verdict until 601.
+  def test_a_jittered_cadence_never_leaves_the_card_without_a_verdict
+    start = Time.current
+    [0, 120, 240, 360, 479, 601, 720, 839, 961].each_cons(2) do |at, following|
+      travel_to(start + at) { probe_with(PROD, [fast], healthy_client) }
+
+      assert_card_dated(start + following - 0.5)
+    end
+  end
+
+  # Exactly, so the one-minute floor on the real cadence is what is being
+  # measured: without it the period is taken as 10 s and the re-probe lands on
+  # the tenth cycle instead of the ninth.
+  def test_an_interval_under_a_minute_is_judged_on_the_one_minute_cadence
+    assert_equal [0, 9, 18], cycles_that_asked({ 'poll_interval' => 10 }, cycles: 20, period: 60)
+  end
+
+  POWERPANNE = { 'path' => 'modulosource/powerpanne/powerpanne/core', 'target_branch' => 'master',
+                 'review_skill' => 'mr-review' }.freeze
+  POWERPANNE_SKILL = [POWERPANNE['path'], '.claude/skills/mr-review/SKILL.md', 'master'].freeze
+
+  def fleet_client
+    FakeClient.new(present: [['modulosource/ff/fast/core', SKILL_PATH, 'staging'], POWERPANNE_SKILL])
+  end
+
+  # The same fleet listed in another order is the same fleet.
+  def test_the_order_the_projects_come_in_is_not_a_change
+    probe_with(PROD, [fast, POWERPANNE], fleet_client)
+    client = fleet_client
+    travel(120.seconds) { probe_with(PROD, [POWERPANNE, fast], client) }
+
+    assert_empty client.requests
+  end
+
+  # Removing a project is a change too: the recorded verdict is about a fleet
+  # that no longer exists, even though every project left in it was covered.
+  def test_a_removed_project_is_asked_again_on_the_next_cycle
+    probe_with(PROD, [fast, POWERPANNE], fleet_client)
+    client = fleet_client
+    travel(120.seconds) { probe_with(PROD, [fast], client) }
+
+    refute_empty client.requests
+  end
+
+  # The fleet is recorded with the **declared** target, the same value on both
+  # sides of the comparison. Recording the resolved ref instead would never
+  # match an undeclared project, which would then be asked on every cycle.
+  def test_a_project_declaring_no_target_is_trusted_like_the_others
+    undeclared = fast.except('target_branch')
+    build = -> { FakeClient.new(default_branch: 'main', present: [[undeclared['path'], SKILL_PATH, 'main']]) }
+    probe_with(PROD, [undeclared], build.call)
+    client = build.call
+    travel(120.seconds) { probe_with(PROD, [undeclared], client) }
+
+    assert_empty client.requests
+  end
+
+  # `unknown` absent is not `unknown: 0`: a row that does not say whether any
+  # verdict was an outage is not good news.
+  def test_a_row_that_does_not_count_its_outages_is_not_trusted
+    declared = [['modulosource/ff/fast/core', 'prepare-mr', 'staging']]
+    ActivityEvent.create!(issue_id: nil, kind: Autodev::ReviewSkillProbe::KIND, level: 'info',
+                          payload_json: JSON.generate(checked: 1, missing: [], declared: declared))
+    client = healthy_client
+    travel(120.seconds) { probe_with(PROD, [fast], client) }
+
+    refute_empty client.requests
+  end
+
+  # An outage keeps the cadence it had: every cycle, until GitLab answers.
+  def test_an_unknown_verdict_is_asked_again_on_the_next_cycle
+    probe_with(PROD, [fast], FakeClient.new(raising: Errno::ECONNREFUSED))
+    client = healthy_client
+    travel(120.seconds) { probe_with(PROD, [fast], client) }
+
+    refute_empty client.requests
+  end
+
+  # A verdict is about the fleet it was taken on. The case the project form's
+  # user is waiting on is exactly this one: they changed the declaration.
+  def test_a_changed_declaration_is_asked_again_on_the_next_cycle
+    other = { 'path' => 'modulosource/powerpanne/powerpanne/core', 'target_branch' => 'master',
+              'review_skill' => 'mr-review' }
+    [[fast('review_skill' => 'mr-review')], [fast('target_branch' => 'master')], [fast, other]].each do |fleet|
+      setup_database
+      probe_with(PROD, [fast], healthy_client)
+      client = healthy_client
+      travel(120.seconds) { probe_with(PROD, fleet, client) }
+
+      refute_empty client.requests, "not asked again after the fleet became #{fleet.inspect}"
+    end
+  end
+
+  # A row recorded before this change says nothing about the fleet it was taken
+  # on, nor whether any verdict was `unknown`, so it is not trusted.
+  def test_a_row_recorded_before_the_fleet_was_is_not_trusted
+    ActivityEvent.create!(issue_id: nil, kind: Autodev::ReviewSkillProbe::KIND, level: 'info',
+                          payload_json: JSON.generate(checked: 1, missing: []))
+    client = healthy_client
+    travel(120.seconds) { probe_with(PROD, [fast], client) }
+
+    refute_empty client.requests
   end
 
   # The rows are machinery: written on a clock, read only as the newest one, and
