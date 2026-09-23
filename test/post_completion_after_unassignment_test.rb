@@ -57,7 +57,7 @@ class PostCompletionAfterUnassignmentTest < Minitest::Test
                     ['Development::Doing'])
     end
 
-    def issue_label_events(_project, _iid) = []
+    def issue_label_events(_project, _iid) = Gitlab::PaginatedResponse.new([])
     def merge_request(_project, _iid) = FakeMr.new('opened')
     def create_issue_note(_project, _iid, body) = FakeNote.new(1, body)
   end

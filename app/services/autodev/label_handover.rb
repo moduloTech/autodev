@@ -31,7 +31,8 @@ module Autodev
   # milliseconds before the row's status reaches `done`, from inside the
   # per-issue `limits_concurrency` lock the poll cycle does not hold. So the
   # author is read from GitLab's resource label events instead — but only as a
-  # second stage, because that read costs an API call. Stage 1 works off the
+  # second stage, because that read costs one API call per page of twenty
+  # events (see `events`). Stage 1 works off the
   # `labels` array already present in the issue payload the caller fetched, and
   # on a healthy ticket it produces no candidate at all: nominal cost is zero.
   #
@@ -259,8 +260,8 @@ module Autodev
 
     def presence(value) = value.to_s.strip.empty? ? nil : value.to_s
 
-    # Stage 2 — one API call, spent only on a candidate, for a row that is about
-    # to be closed. Not a recurring cost.
+    # Stage 2 — one API call per page of events (`events`), spent only on a
+    # candidate, for a row that is about to be closed. Not a recurring cost.
     #
     # The edit that produced the state we read, or nil when the events disagree
     # with it: an event carrying the other action means the labels are stale, not
@@ -280,8 +281,10 @@ module Autodev
       !actor.nil? && actor != ::GitlabHelpers.current_user_id(@client)
     end
 
-    # GitLab returns resource label events in chronological order, so the last
-    # entry naming the label is the edit that produced the state we just read.
+    # GitLab lists resource label events oldest first, so the last entry naming
+    # the label is the edit that produced the state we just read — of the
+    # *whole* history. Of one page it is merely the newest edit that page
+    # happens to hold, which is why `events` walks every page (Autodev #116).
     def last_event_for(issue_iid, name)
       events(issue_iid).select { |e| label_name(e) == name }.last
     end
@@ -304,11 +307,12 @@ module Autodev
     # answering: `verdict` and `moved_since?` reach it through
     # `decisive_event`/`last_event_for`, and `todo_reapplied_after?` calls it
     # directly. The third's `false` (nobody re-asked, stay `closed`) is the
-    # conservative answer and is self-correcting on its own — the todo label
-    # stays on the ticket and the next cycle asks again — so raising there costs
-    # only a cycle's delay, and one definition serving all three uniformly was
-    # judged better than a fallback that would only ever be right for one of
-    # them.
+    # conservative answer and is self-correcting *for an outage* — the todo
+    # label stays on the ticket and the next cycle asks again — so raising there
+    # costs only a cycle's delay, and one definition serving all three uniformly
+    # was judged better than a fallback that would only ever be right for one
+    # of them. It is not self-correcting for a read that answers wrongly every
+    # time: the next cycle repeats it. That is what the one-page read below did.
     #
     # `GitlabHelpers.answer` is the raise; each caller's own boundary is what
     # catches it, and every one of them means "decline this row this cycle",
@@ -328,8 +332,27 @@ module Autodev
     # reaches `verdict` through `Autodev::HandoverStop` and rescues
     # `ApiUnavailableError` by name, declining the retry for the cycle. So every
     # consumer's boundary catches this raise.
+    #
+    # **Every page, not the first** (Autodev #116). In gitlab-5.1.0
+    # `issue_label_events(project, iid)` is a bare `get` that takes no options,
+    # so it answers GitLab's default page of twenty — the *oldest* twenty — and
+    # all three consumers want the newest events. Measured 23/09/2026: 86 of the
+    # 142 tickets of the dev copy of production carry more than twenty (max 64). powerpanne/core#15673
+    # carries 35, and the todo label a human reposed after autodev closed the
+    # row sat on page 2, so `todo_reapplied_after?` answered false on every
+    # cycle for a month. The endpoint ignores `sort`/`order_by` (measured
+    # 22/09/2026), so there is no newest-first page to ask for instead.
+    #
+    # `auto_paginate` on the named method rather than a raw `@client.get(…,
+    # per_page: 100)`: the raw call would cost fewer pages on long histories,
+    # but `GitlabRequestCounter` names a request after the method it forwards,
+    # so the first page would be counted as `get` and the Autodev #96 breakdown
+    # would lose its `issue_label_events` line. The pages after the first are
+    # counted as `get` either way (`own_pages`). The walk sits inside `answer`,
+    # so a page that fails to arrive raises like the first one would — a verdict
+    # built from the pages that did arrive is the same defect again.
     def events(issue_iid)
-      Array(::GitlabHelpers.answer(:issue_label_events) { @client.issue_label_events(@path, issue_iid) })
+      ::GitlabHelpers.answer(:issue_label_events) { @client.issue_label_events(@path, issue_iid).auto_paginate }
     end
   end
 end

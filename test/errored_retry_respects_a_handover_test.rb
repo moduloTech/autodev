@@ -45,9 +45,9 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
     end
 
     def issue_label_events(_path, _iid)
-      return [] unless @taken_over
+      return Gitlab::PaginatedResponse.new([]) unless @taken_over
 
-      [FakeEvent.new(FakeLabel.new('Done'), 'add', FakeUser.new(AUTHOR_ID))]
+      Gitlab::PaginatedResponse.new([FakeEvent.new(FakeLabel.new('Done'), 'add', FakeUser.new(AUTHOR_ID))])
     end
 
     def create_issue_note(_path, _iid, _body) = FakeNote.new(1)

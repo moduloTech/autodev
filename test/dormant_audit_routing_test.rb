@@ -51,7 +51,7 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
       FakeIssue.new(@state, @assignee_ids.map { |id| FakeAssignee.new(id) }, @labels)
     end
 
-    def issue_label_events(_project, _iid) = @events
+    def issue_label_events(_project, _iid) = Gitlab::PaginatedResponse.new(@events)
 
     def create_issue_note(_project, _iid, body)
       @notes << body

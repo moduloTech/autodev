@@ -227,7 +227,7 @@ class ExternalStateTest < Minitest::Test # rubocop:disable Metrics/ClassLength
       @events = events
     end
 
-    def issue_label_events(_project, _iid) = @events
+    def issue_label_events(_project, _iid) = Gitlab::PaginatedResponse.new(@events)
   end
 
   FakeLabel = Struct.new(:name)
