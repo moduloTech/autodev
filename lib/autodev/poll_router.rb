@@ -214,7 +214,8 @@ class PollRouter
   # ticket before the click: comparing against `finished_at` tells the two apart,
   # so the button keeps working as an off-switch and only a fresh request wins.
   #
-  # Costs one `issue_label_events` call per cycle, for every row that is
+  # Costs one `issue_label_events` read per cycle — one request per page of
+  # twenty events, since Autodev #116 walks them all — for every row that is
   # `closed` in the DB while its GitLab issue is still open, still assigned to
   # autodev and still carrying a todo label — the population
   # `dispatch_new_issues` hands to `route`.
@@ -229,10 +230,15 @@ class PollRouter
   # the label on GitLab is the only thing that ends it.
   #
   # Measured on the 12/08/2026 production copy: 60 `closed` rows, **none** of
-  # them still open + todo-labelled on GitLab, so the recurring cost is zero
-  # calls today. That is why the cost is documented rather than bounded — a cache
-  # or an `issue_label_events`-free short-circuit would be paying complexity for
-  # an empty set. Re-measure before adding one.
+  # them still open + todo-labelled on GitLab. Re-measured 22/09/2026: one row,
+  # powerpanne/core#15673, at 720 requests a day — and it was not this case.
+  # Its todo label *was* reposed after `finished_at`; the gate could not see it
+  # because `events` read only the first page, and the re-add was on page 2
+  # (Autodev #116). A row the gate lets through leaves the population, so the
+  # recurring cost of the case described above is still zero measured rows.
+  # That is why the cost is documented rather than bounded — a cache or an
+  # `issue_label_events`-free short-circuit would be paying complexity for an
+  # empty set. Re-measure before adding one.
   def reenterable?(existing)
     return true if existing.status == 'done'
     return false unless existing.status == 'closed'

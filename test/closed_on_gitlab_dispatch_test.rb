@@ -66,7 +66,7 @@ class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/Clas
 
     def issue_label_events(_project, _iid)
       @event_calls += 1
-      @events
+      Gitlab::PaginatedResponse.new(@events)
     end
 
     def create_issue_note(_project, _iid, body)

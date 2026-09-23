@@ -8,6 +8,7 @@ require 'autodev/label_manager'
 require 'autodev/activity_logger'
 require 'autodev/issue_processor'
 require 'autodev/poll_router'
+require_relative 'gitlab_pages'
 
 # Regression: when an issue reaches `done` with an open MR carrying unresolved
 # discussions, re-adding the `To do` label should route to `checking_pipeline`
@@ -70,7 +71,9 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
 
     def issue_label_events(_project_path, _iid)
       @label_event_calls += 1
-      @label_events
+      return @label_events if @label_events.is_a?(Gitlab::PaginatedResponse)
+
+      Gitlab::PaginatedResponse.new(@label_events)
     end
 
     def merge_request(project_path, mr_iid)
@@ -375,6 +378,20 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
   def test_a_closed_row_reenters_when_the_todo_label_was_reapplied_after_the_stop
     issue = closed_issue_with_mr(mr_iid: 42)
     client = StubClient.new(mr_state: 'opened', label_events: [todo_event('2026-07-02T09:00:00Z')])
+
+    build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
+
+    assert_equal 'checking_pipeline', issue.reload.status
+  end
+
+  # Autodev #116, the powerpanne/core#15673 shape: past twenty events the todo
+  # re-add sits on page 2, and the gate has to walk there to see it. Reading
+  # page 1 alone kept this row `closed` for a month while a human waited.
+  def test_a_closed_row_reenters_when_the_reposed_todo_label_is_on_a_later_page
+    issue = closed_issue_with_mr(mr_iid: 42)
+    stale = Array.new(20) { FakeLabelEvent.new('add', FakeLabel.new('PM::Evolution'), '2026-06-01T09:00:00Z') }
+    pages = GitlabPagesClient.new([stale, [todo_event('2026-07-02T09:00:00Z')]])
+    client = StubClient.new(mr_state: 'opened', label_events: pages.get('/projects/1/issues/1/resource_label_events'))
 
     build_router.route(FakeGlIssue.new(issue.issue_iid, 'fake title'), client)
 

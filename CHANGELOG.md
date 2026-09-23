@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The label-events read read one page, the oldest, and every consumer wanted the newest (Autodev #116).** `LabelHandover#events` used `client.issue_label_events(path, iid)` as a ticket's whole label history. In gitlab-5.1.0 that method is a bare `get` taking no options, so it answers GitLab's default page of twenty — and the endpoint lists events oldest first. `last_event_for` takes the last event naming a label as the edit that produced the current state, `todo_reapplied_after?` looks for a todo label added after `finished_at`; past twenty events both read overwritten history, with no error. Not a corner case: on 23/09/2026, 86 of the 142 tracked tickets carried more than twenty label events (max 64). powerpanne/core#15673 carries 35: a human reposed its todo label on 21/08/2026 at 10:26:54 UTC, two and a half hours after autodev closed the row, and that event is on page 2 — so the reentry gate answered false on every cycle for a month, at 720 requests a day (12.5 % of autodev's GitLab traffic). `events` now calls `.auto_paginate` on the named method, inside `GitlabHelpers.answer`, so a page that fails to arrive raises like the first one would rather than leaving a verdict built on the pages that did. Reverse sort was checked first and is not available (the endpoint ignores `sort` and `order_by`). A raw `get` with `per_page: 100` was rejected: it would cost fewer pages, but the Autodev #96 counter names a request after the method it forwards, so the first page would be filed under `get` and the breakdown would lose its `issue_label_events` line. **Deploying this reenters #15673** on the first cycle, which is the intended effect. The comments of `last_event_for`, `events`, `decisive_event`, the class header and `PollRouter#reenterable?` are corrected to say what is true — the last of these had attributed #15673's recurring cost to a dashboard close. Test doubles for `issue_label_events` now return a `Gitlab::PaginatedResponse`, and the new tests walk pages through a real `Gitlab::Client` (`test/gitlab_pages.rb`) whose only replaced part is `get`.
+
 ## [1.0.0-alpha.54] - 2026-09-04
 
 ### Fixed

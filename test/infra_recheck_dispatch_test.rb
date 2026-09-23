@@ -92,7 +92,7 @@ class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassL
     # weakest of its three signals (`doing_removed`) — so this is reached on
     # an ordinary re-arm, not only on a handover. No event means nobody moved
     # anything, which is what an untouched row looks like.
-    def issue_label_events(_project, _iid) = @label_events
+    def issue_label_events(_project, _iid) = Gitlab::PaginatedResponse.new(Array(@label_events))
   end
 
   # Minimal stand-in for `Gitlab::PaginatedResponse`.

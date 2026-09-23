@@ -112,7 +112,7 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
     def issue_notes(_path, _iid, **_opts) = Paginated.new(Array(@opts[:notes]))
     def merge_request_notes(_path, _iid, **_opts) = Paginated.new(Array(@opts[:mr_notes]))
-    def issue_label_events(_path, _iid) = Array(@opts[:label_events])
+    def issue_label_events(_path, _iid) = Gitlab::PaginatedResponse.new(Array(@opts[:label_events]))
     def edit_issue_note(_path, _iid, _note_id, _body) = nil
 
     def edit_issue(path, iid, **opts)
