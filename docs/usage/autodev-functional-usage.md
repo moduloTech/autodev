@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-09-04
+date: 2026-09-24
 lang: fr
 documentclass: article
 papersize: a4
@@ -190,6 +190,17 @@ La réponse attendue dépend de la situation :
 - **Question en attente** (onglet *Question en attente*) — *« Autodev a posé une question pour préciser la demande. »* Là, c'est à **vous de répondre** : Autodev a posté une question dans le ticket GitLab et attend votre réponse pour reprendre. **Répondez-lui en commentaire sur le ticket GitLab** (le bouton **Voir la question** vous y emmène directement). Tant que personne ne répond, la demande reste en attente.
 - **Intervention manuelle requise** (onglet *Livrée (à vérifier)*) — la demande a été **livrée**, mais Autodev a atteint une limite (trop de corrections de pipeline ou de tours de relecture) et l'a livrée telle quelle. **Vérifiez la MR à la main** ; quand c'est bon, **Clôturer** la range. Quand le blocage vient d'un souci d'infrastructure (un job qui échoue en boucle), la carte indique désormais **le ou les jobs en cause** (par exemple *deploy_review*) pour vous aiguiller. Bonne nouvelle : dès que l'infrastructure est réparée et que les tests repassent au vert, Autodev **relance tout seul** ce genre de demande — vous n'avez en général rien à faire. Sous l'explication, la carte rappelle aussi **qui contacter** — un développeur du projet — pour finaliser la livraison.
 - **La demande ne progresse plus** (onglet *Livrée (à vérifier)*) — *« La demande ne progresse plus et les vérifications automatiques n'ont pas permis de la relancer. »* Autodev a repéré tout seul qu'elle était à l'arrêt et a tenté plusieurs fois de la remettre en route, sans succès. **Allez voir le ticket sur GitLab** : la plupart du temps il n'est tout simplement plus d'actualité, et il suffit de le clôturer ou de retirer Autodev des assignés. Si le travail est toujours attendu, prévenez l'équipe autodev.
+
+### Quand une question en attente n'aboutira pas seule
+
+Quatre situations empêchent l'attente d'une réponse d'aboutir d'elle-même. Autodev les repère, les signale sur la carte de l'onglet *Question en attente*, et **garde la demande en attente** — il ne la ferme pas et n'écrit rien sur GitLab. La carte dit alors ce qu'il faut faire :
+
+- **Le ticket n'est plus assigné à Autodev** — il ne lit plus le fil. Réassignez-le à Autodev, avec son label de départ : il relira le fil et reprendra aussitôt si une réponse s'y trouve déjà.
+- **Le ticket n'a plus son label de départ** — même chose : remettez le label de départ, le ticket toujours assigné à Autodev.
+- **La demande a épuisé ses tentatives** — une réponse ne la relancera pas. Il faut la **réinitialiser** depuis sa page de détail. Si entre-temps le ticket n'est plus assigné à Autodev, réassignez-le d'abord : sur un ticket qui n'est plus le sien, la réinitialisation ferme la demande au lieu de la relancer.
+- **La question attend depuis trop longtemps** (14 jours par défaut) — Autodev continue d'attendre et reprendra dès que vous répondrez ; si la demande n'est plus d'actualité, fermez-la.
+
+Si le ticket est fermé sur GitLab, Autodev ferme la demande de son côté.
 
 ## Les actions sur chaque carte
 

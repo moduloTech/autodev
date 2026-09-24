@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.55] - 2026-09-24
+
 ### Fixed
 
 - **A request parked in `needs_clarification` now has an owner (Autodev #86).** No pass selected the state: it is in neither `PollDispatcher::ACTIVE_STATUSES` nor `Issue::STALLED_STATES`, and its one reader, `dispatch_new_issues`, only sees tickets still assigned to autodev and still carrying a todo label — and only ever resumes. Three cases therefore reached nobody: the ticket reassigned to a human (or its entry label gone), the retry budget spent, and a question nobody answers. The first was live in production for 131 days: powerpanne/core #14856 (row 68), asked 15/05/2026, answered 16/05, reassigned to a human 11/06, found by hand on 23/09 — and re-armed that morning by reassigning the ticket to autodev.
@@ -26,6 +28,7 @@
 ### Changed
 
 - **RuboCop 1.86.0 → 1.91.0, which clears the 51 `Style/OneClassPerFile` offenses master carried.** All 51 were in `test/`: files defining a fixtures module and several `Minitest::Test` classes side by side. They were an artefact of 1.86 alone — the cop appeared in 1.85, and from 1.87 its default configuration excludes `test/**/*` and `spec/**/*`, which `.rubocop.yml` (setting only `Enabled: true`) inherits. Upgrading rather than splitting sixteen test files follows upstream's own ruling that the cop does not apply to tests; `.rubocop.yml` is untouched. `bundle update rubocop --conservative` moves no other gem. 1.91 tightened two existing cops, and the five lines they flagged are corrected: `Layout/ExtraSpacing` no longer accepts the column alignment in `AppLogger`'s one-line level methods and in two assertions of `test/controllers/visibility_test.rb`, and `Layout/LineLength` split `SkillReviewerTest#issue` into a multi-line method — with its `Style/OpenStructUse` directive restored by hand, since the autocorrect dropped it.
+- **Both dashboard guides follow the lot.** `docs/usage/autodev-technical-usage.md`: the ninth dispatch pass, `dispatch_clarification_watch` — its four reasons in rank order, its 15-minute re-read cadence and what a failed read does (§*Polling*, #86); both retry paths asking `ExternalState#not_ours?` before any write (§*Polling*, alpha-55 truthfulness review); the `clarification_max_days` setting (§*Champs de config*); the review-skill card's cadence and its `unknown` count (§*Santé du système*, #118) and the new `project_briefings` card (#117); the reentry gate reading every page of label events (§*Réentrées et hooks*, #116); two rows of the error catalogue for a parked request that will not resolve itself and for a retry on a ticket no longer autodev's. `docs/usage/autodev-functional-usage.md`: a section, *Quand une question en attente n'aboutira pas seule*, giving the four situations the waiting card now signals and the gesture each asks for. No screenshot retaken: the cards changed their text, not their layout.
 
 ## [1.0.0-alpha.54] - 2026-09-04
 
