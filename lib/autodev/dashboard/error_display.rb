@@ -45,7 +45,10 @@ module Dashboard
     end
 
     # "Gave-up done" issues (review limit / review failures / stagnation):
-    # delivered but flagged as needing a manual intervention on GitLab.
+    # delivered but flagged as needing a manual intervention on GitLab — and,
+    # since Autodev #86, questions still parked in `needs_clarification` that
+    # `ClarificationWatch` flagged. Those were never delivered, so their entry
+    # prints the status (`print_na_entry`).
     def fetch_needs_attention_issues(config)
       scope = ::Issue.where(needs_attention: true)
       scope = scope.where(issue_iid: config['errors_iid']) if config['errors_iid']
@@ -76,8 +79,11 @@ module Dashboard
       print_metadata(row)
     end
 
+    # A flagged question is still parked (Autodev #86): its status says so, next
+    # to the `[intervention manuelle]` tag it shares with the gave-up entries.
     def print_metadata(row)
       puts "  Tentative: #{row[:retry_count]}" if row[:status] == 'error'
+      puts "  Statut: #{row[:status]}" if row[:status] == 'needs_clarification'
       puts "  Branche: #{row[:branch_name]}" if row[:branch_name]
       puts "  MR: !#{row[:mr_iid]} #{row[:mr_url]}" if row[:mr_iid]
     end

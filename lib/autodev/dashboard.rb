@@ -111,9 +111,10 @@ module Dashboard
   # (alpha-53 review, G8). `Autodev::ResetReclaim` is what takes a ticket back
   # on GitLab before an abandoned request is resumed, and the dashboard's
   # button calls it — but `--reset` cannot reach such a row: its scope filters
-  # `status: 'error'`, while `needs_attention` is only ever true on a `done`
-  # row, because every abandon fires the `abandon` AASM event and that lands in
-  # `done`. The first version of this method wired the reclaim in anyway, "so a
+  # `status: 'error'`, while `needs_attention` is true only on a `done` row —
+  # every abandon fires the `abandon` AASM event, which lands there — or, since
+  # Autodev #86, on a row `ClarificationWatch` flagged in `needs_clarification`,
+  # which `ResetReclaim` skips anyway. The first version of this method wired the reclaim in anyway, "so a
   # future widening inherits it"; the loop was unreachable, its `rescue` was
   # unreachable, and this repository has spent four tickets (#78, #87, #99 and
   # the guard above) on code that looked like a protection and was not. If this

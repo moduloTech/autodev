@@ -133,9 +133,12 @@ module Web
         # A delivered-but-flagged card (needs_attention) has no dedicated owner
         # by design — decision was a single common message rather than naming
         # a person or branching on attention_reason. Not shown on plain errors
-        # or pending clarifications, only on the 4 needs_attention reasons.
+        # or on pending clarifications: a flagged question (Autodev #86) was
+        # never delivered, so "finalise this delivery" would send the reader
+        # to the wrong person for the wrong job.
         def render_attention_contact(row)
           return unless row[:needs_attention]
+          return if row[:status].to_s == 'needs_clarification'
 
           div(class: 'cause-contact') { t_web(:web_errors_contact) }
         end
@@ -157,13 +160,24 @@ module Web
           :web_errors_cause_failure
         end
 
+        # A flagged question (Autodev #86) explains its flag, not the wait: the
+        # generic "autodev is waiting on your reply" is exactly what stops being
+        # true once the ticket left autodev or the budget is spent. The headline
+        # (`cause_key`) stays the question's, since the row is still parked.
         def explain_key(row)
           return :web_errors_explain_post_completion if row[:post_completion_error]
-          return :web_errors_explain_clarification   if row[:status] == 'needs_clarification'
+          return :web_errors_explain_clarification if clarification_unflagged?(row)
           return :"web_errors_explain_attention_#{row[:attention_reason]}" if row[:needs_attention]
           return :web_errors_explain_auth if auth_failure?(row)
 
           :web_errors_explain_failure
+        end
+
+        # A flag without a reason has no copy of its own; the waiting text is
+        # still true of it, a `web_errors_explain_attention_` raw key is not.
+        def clarification_unflagged?(row)
+          row[:status] == 'needs_clarification' &&
+            (!row[:needs_attention] || row[:attention_reason].to_s.empty?)
         end
 
         # An AuthenticationError (Claude 401) is stored with its class name in

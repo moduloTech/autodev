@@ -199,7 +199,14 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     log_retry_activity(issue, config, project_config)
   end
 
+  # Truthfulness review of the alpha-55 lot. A reset sends a row with no merge
+  # request here, and `IssueProcessor` asks nobody whose ticket it is — so a
+  # parked request reset from its budget card, its ticket reassigned to a human
+  # meanwhile, was cloned, implemented and labelled on their work. Asked before
+  # the stamp is cleared, so a read that fails leaves the row for the next cycle.
   def perform_retry_stuck(issue, config, project_config)
+    return if handed_over?(issue, config, project_config)
+
     issue.update(next_retry_at: nil)
     log_retry_activity(issue, config, project_config)
     ::IssueProcessor.new(**worker_kwargs(config, project_config)).process(issue)
@@ -208,13 +215,16 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   private
 
   # Autodev #102. `error` is outside `dispatch_unassignment`'s ACTIVE_STATUSES
-  # sweep, so this is the only place the question gets asked before autodev
-  # writes on the ticket again. A read that could not answer declines the retry
+  # sweep, and so is `pending`, so this is the only place the question gets
+  # asked before autodev writes on the ticket again. The question is the whole
+  # of `ExternalState#not_ours?` — closed on GitLab, no longer assigned,
+  # handed over via the labels — since the alpha-55 truthfulness review: #102
+  # asked the third alone, and a reassigned ticket keeps its labels. A read that could not answer declines the retry
   # for this cycle and leaves the row exactly as it was — the Autodev #67 rule,
   # and the choice Autodev #93 made for `UntouchedSinceGiveup`: an unreadable
   # ticket is never permission to take it.
   #
-  # Costs one GitLab read per errored retry — not per poll cycle. `manage_labels`
+  # Costs one GitLab read per retry, errored or stuck — not per poll cycle. `manage_labels`
   # does read the issue, but inside `apply_label_doing`, i.e. after the
   # transition, which is too late to be the one this needs.
   #
@@ -229,7 +239,7 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     stopper = ::Autodev::HandoverStop.new(client: client, path: project_config['path'],
                                           project_config: project_config,
                                           logger: ::Autodev::JobLogger.new(logger))
-    !stopper.stop_on_handover(issue, gl_issue).nil?
+    stopper.not_ours?(issue, gl_issue)
   rescue ::ApiUnavailableError => e
     logger.warn("Declining the retry of ##{issue.issue_iid}: could not read the ticket " \
                 "(#{e.class}: #{e.message})")

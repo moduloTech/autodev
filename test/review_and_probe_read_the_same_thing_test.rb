@@ -185,7 +185,10 @@ class ReviewAndProbeReadTheSameThingTest < Minitest::Test
 
   # --- the two askers, each on its own client ------------------------------
 
+  # Each call is an independent probe, not the next cycle of the previous one:
+  # the previous verdict is dropped, or the probe would trust it (Autodev #118).
   def probe(config, client)
+    ActivityEvent.where(kind: Autodev::ReviewSkillProbe::KIND).delete_all
     Autodev::ReviewSkillProbe.probe!(config: {}, projects: [config], client: client,
                                      logger: NullLogger.new).first
   end

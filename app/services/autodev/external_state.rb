@@ -51,6 +51,27 @@ module Autodev
       close_row!(issue, :unassigned_stop)
     end
 
+    # The three questions, in their order, off one read the caller already
+    # holds. True when the ticket is not ours — the row is then closed and the
+    # stop announced, unless it can no longer close, which still answers "not
+    # ours": the caller must not act on it either way.
+    #
+    # `PollDispatcher#check_external_state` asks it of an active row every
+    # cycle; `IssueProcessJob`'s two retry paths ask it before they relaunch a
+    # row that sat outside that sweep. The retry used to ask only the label
+    # question, so a ticket reassigned to a human with its labels untouched was
+    # relaunched on their work (truthfulness review of the alpha-55 lot).
+    def not_ours?(issue, gl_issue)
+      if externally_closed?(gl_issue)
+        close_externally(issue)
+      elsif !assigned_to_autodev?(gl_issue)
+        stop_unassigned(issue)
+      elsif stop_on_handover(issue, gl_issue).nil?
+        return false
+      end
+      true
+    end
+
     # Autodev is still the assignee and the ticket is still open — but did
     # somebody move it on with the labels? Returns the verdict that closed the
     # row, or nil, so `DormantAudit` can tell a handover apart from "still ours"

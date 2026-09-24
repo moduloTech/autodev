@@ -63,7 +63,7 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
 
     def issue_label_events(_project, _iid)
       @event_calls += 1
-      @events
+      Gitlab::PaginatedResponse.new(@events)
     end
   end
 
@@ -361,7 +361,10 @@ class LabelHandoverTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     assert_equal 0, @client.event_calls
   end
 
-  def test_a_candidate_costs_exactly_one_api_call
+  # One call to the *named method*: the pages after the first, when there are
+  # any, are the gem's `get`, and `LabelEventsReadEveryPageTest` counts those
+  # (Autodev #116). A one-page history costs one request in total.
+  def test_a_candidate_costs_exactly_one_call_to_the_named_method
     verdict(labels: ['Development::Awaiting CR'],
             events: [ev('add', 'Development::Awaiting CR', HUMAN_ID)])
 

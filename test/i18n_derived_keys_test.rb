@@ -216,7 +216,11 @@ module KeySites # rubocop:disable Metrics/ModuleLength
     'app/services/autodev/external_state.rb Locales.t' => "`notify_stop`'s key",
     'app/helpers/web/i18n_helpers.rb Locales.t' => "`t_web`'s delegation — the `web_` literals",
     'lib/autodev/numeric_settings.rb Locales.t' => '`MESSAGE_KEYS`, two literal `cli_` symbols',
-    'app/services/autodev/ticket_reclaim.rb Locales.t' => "`reclaim!`'s `message_key:` argument"
+    'app/services/autodev/ticket_reclaim.rb Locales.t' => "`reclaim!`'s `message_key:` argument",
+    # The flag the watch writes is the key of its activity line (Autodev #86).
+    'app/services/autodev/clarification_watch.rb ActivityLogger.warn_event' =>
+      '`ClarificationWatch::REASONS` (`activity_<reason>`), iterated by ' \
+      '`test_every_clarification_reason_has_its_activity_line_and_explanation`'
   }.freeze
 
   LITERAL_SYMBOL = /\A:([a-z_]\w*)\z/
@@ -229,10 +233,14 @@ module KeySites # rubocop:disable Metrics/ModuleLength
   COLUMN_WRITE = /attention_reason:\s*([^,)\n]+)/
   DEPTH = { '(' => 1, '[' => 1, '{' => 1, ')' => -1, ']' => -1, '}' => -1 }.freeze
 
-  # `lib/autodev/issue_abandonment.rb` writes `attention_reason: reason.to_s`;
-  # `reason` is the `abandon_issue` argument, covered at its call sites. Every
-  # other non-literal write is `nil`, which is a clearing write and no key.
-  DYNAMIC_COLUMN_WRITES = ['lib/autodev/issue_abandonment.rb'].freeze
+  # file => where the values of its non-literal `attention_reason:` write are
+  # enumerated. Every other non-literal write is `nil`, a clearing write and no key.
+  DYNAMIC_COLUMN_WRITES = {
+    'lib/autodev/issue_abandonment.rb' => 'the `abandon_issue` argument, covered at its call sites',
+    # Autodev #86: the flag is chosen by rank, so the write takes a variable.
+    'app/services/autodev/clarification_watch.rb' => '`ClarificationWatch::REASONS`, merged into ' \
+                                                     '`ScannedI18nKeysTest#attention_reasons`'
+  }.freeze
 
   # { vocabulary => { symbol => origin } }
   def vocabularies = scan[:found]
@@ -284,14 +292,16 @@ module KeySites # rubocop:disable Metrics/ModuleLength
       next if raw == 'nil'
 
       value = column_literal(raw)
-      undeclared << "#{rel} attention_reason:" if value.nil? && !DYNAMIC_COLUMN_WRITES.include?(rel)
+      undeclared << "#{rel} attention_reason:" if value.nil? && !DYNAMIC_COLUMN_WRITES.key?(rel)
       sink[value] = "the `attention_reason:` write in #{rel}" if value
     end
   end
 
+  # A quoted string or a symbol. A bare identifier is a variable, not a value:
+  # read as a literal, `attention_reason: reason` demanded keys for the word
+  # `reason` and hid the write from the declaration below (Autodev #86).
   def column_literal(raw)
-    value = raw.delete_prefix(':').gsub(/\A['"]|['"]\z/, '')
-    value.match?(/\A[a-z_][a-z0-9_]*\z/) ? value : nil
+    raw[/\A(?::|'|")([a-z_][a-z0-9_]*)['"]?\z/, 1]
   end
 
   # Not preceded by a word character, a dot or `def`, so `def close_row!(…)` and
@@ -438,7 +448,12 @@ class ScannedI18nKeysTest < Minitest::Test
   # flags the row and posts nothing on GitLab (`ActivityLogger.warn_event` only,
   # DB side). Declared here rather than filtered out silently.
   NO_GITLAB_COMMENT = {
-    'dormant_exhausted' => 'the dormant audit posts no GitLab comment — it only flags the row'
+    'dormant_exhausted' => 'the dormant audit posts no GitLab comment — it only flags the row',
+    # Autodev #86: an operator signal, the requester is not written to.
+    'clarification_reassigned' => 'the clarification watch posts no GitLab comment — it only flags the row',
+    'clarification_label_moved' => 'the clarification watch posts no GitLab comment — it only flags the row',
+    'clarification_budget_spent' => 'the clarification watch posts no GitLab comment — it only flags the row',
+    'clarification_unanswered' => 'the clarification watch posts no GitLab comment — it only flags the row'
   }.freeze
 
   def test_every_attention_reason_has_its_three_sinks
@@ -449,6 +464,27 @@ class ScannedI18nKeysTest < Minitest::Test
                      'Every attention reason needs its GitLab comment (bare key), its activity ' \
                      'line (`activity_<reason>`) and its watch-card explanation ' \
                      "(`web_errors_explain_attention_<reason>`).\nMissing:"
+  end
+
+  # A declaration for a reason nothing writes any more would excuse nothing and
+  # read like it excuses something — the stale-entry rule of Autodev #73.
+  def test_no_gitlab_comment_declares_only_reasons_the_code_writes
+    stale = NO_GITLAB_COMMENT.keys - attention_reasons.keys
+
+    assert_empty stale, "NO_GITLAB_COMMENT names reasons no code writes: #{stale.join(', ')}"
+  end
+
+  # Autodev #86. The watch writes its flag from a variable, so neither the call
+  # scan nor the column scan can read the values: they come from
+  # `ClarificationWatch::REASONS`, and each needs its activity line and its
+  # watch-card explanation in both languages.
+  def test_every_clarification_reason_has_its_activity_line_and_explanation
+    reasons = Autodev::ClarificationWatch::REASONS
+
+    assert_localized keys_for(reasons, 'activity_%s', 'ClarificationWatch::REASONS')
+      .merge(keys_for(reasons, 'web_errors_explain_attention_%s', 'ClarificationWatch::REASONS')),
+                     'Every clarification reason needs an `activity_<reason>` line and a ' \
+                     "`web_errors_explain_attention_<reason>` explanation.\nMissing:"
   end
 
   # The raw door (Autodev #73): a key handed straight to `Locales.t`, with no
@@ -505,7 +541,8 @@ class ScannedI18nKeysTest < Minitest::Test
   def attention_reasons
     KeySites.vocabularies[:attention_reason].merge(
       KeySites.vocabularies[:stagnation_type]
-              .transform_keys { |type| "stagnation_#{type}" }
+              .transform_keys { |type| "stagnation_#{type}" },
+      Autodev::ClarificationWatch::REASONS.to_h { |reason| [reason, 'ClarificationWatch::REASONS'] }
     )
   end
 

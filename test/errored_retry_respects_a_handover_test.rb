@@ -22,7 +22,7 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
   PROJECT_CONFIG = { 'path' => 'group/project', 'labels_todo' => ['To do'],
                      'label_doing' => 'Doing', 'label_done' => 'Done' }.freeze
 
-  FakeGlIssue = Struct.new(:labels)
+  FakeGlIssue = Struct.new(:labels, :assignees, :state)
   FakeLabel = Struct.new(:name)
   FakeUser = Struct.new(:id)
   FakeEvent = Struct.new(:label, :action, :user)
@@ -33,21 +33,22 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
   # resolves against the resource label events. `raises:` models a GitLab read
   # that could not answer at all.
   class StubClient
-    def initialize(taken_over: false, raises: nil)
+    def initialize(taken_over: false, raises: nil, assignee_id: AUTODEV_ID)
       @taken_over = taken_over
       @raises = raises
+      @assignee_id = assignee_id
     end
 
     def issue(_path, _iid)
       raise @raises if @raises
 
-      FakeGlIssue.new(@taken_over ? ['Done'] : ['Doing'])
+      FakeGlIssue.new(@taken_over ? ['Done'] : ['Doing'], [FakeUser.new(@assignee_id)], 'opened')
     end
 
     def issue_label_events(_path, _iid)
-      return [] unless @taken_over
+      return Gitlab::PaginatedResponse.new([]) unless @taken_over
 
-      [FakeEvent.new(FakeLabel.new('Done'), 'add', FakeUser.new(AUTHOR_ID))]
+      Gitlab::PaginatedResponse.new([FakeEvent.new(FakeLabel.new('Done'), 'add', FakeUser.new(AUTHOR_ID))])
     end
 
     def create_issue_note(_path, _iid, _body) = FakeNote.new(1)
@@ -65,6 +66,18 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
 
     assert_equal 'closed', @issue.status, 'a ticket somebody holds must not be relaunched'
     assert_empty labels_written, 'and autodev must not repose its working label on it'
+  end
+
+  # Truthfulness review of the alpha-55 lot: the retry asked only the label
+  # question, so a ticket simply reassigned to a human — labels untouched — was
+  # relaunched on their work. It now asks the three questions
+  # `PollDispatcher#check_external_state` asks, through the same definition.
+  def test_a_ticket_reassigned_to_a_human_is_not_relaunched
+    run_retry_with_handover(assignee_id: AUTHOR_ID)
+    @issue.reload
+
+    assert_equal 'closed', @issue.status, 'a ticket somebody holds must not be relaunched'
+    assert_empty labels_written
   end
 
   def test_an_untouched_ticket_is_relaunched_exactly_as_before
