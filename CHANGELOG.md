@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A GitLab network cut during an MR fix or a pipeline fix is no longer announced as a failed correction (Autodev #125).** Before this, the row went to `error` with no retry scheduled, and the ticket received a public "échec correction MR" / `pipeline_fix_error` comment. A transport failure only became an `ApiUnavailableError` (the round replayed next cycle) when the call went through `GitlabHelpers.answer`, and several calls under the two rounds guarded themselves with `rescue Gitlab::Error::ResponseError`, which does not catch `Net::OpenTimeout`. Measured in production:
+  - A#144 on 25/09 at 12:29 UTC: `issue_links` timed out.
+  - A#139 at 06:55 UTC: `resolve_merge_request_discussion` timed out.
+  - Since 02/09, 31 `error` events on 15 rows came from a transport failure. Of the 22 that can be attributed, 7 were `issue_links` (every one of its recorded cuts), 5 `create_issue_note` and 3 `resolve_merge_request_discussion`.
+
+  Each call is fixed where it is:
+  - **Reads.** `IssueFormatter.append_links` and `PipelineMonitor::ApiHelpers#fetch_job_trace` go through `answer`. A cut raises `ApiUnavailableError` and the round is replayed. The HTTP behaviour is unchanged (the #67 capability gap, the trace placeholder).
+  - **The round's own writes.** `MrFixer#resolve_discussion`, `FailureHandler#retrigger_if_needed` and `IssueNotifier#hand_ticket_back` swallow the whole transport family. `resolve_discussion` now returns whether the thread was resolved, so the success line counts only threads GitLab actually closed (#79). `hand_ticket_back` answers `false`, so the abandon notice does not claim a handback that did not happen (#60).
+  - **Announcements after the transition.** The MR-fix and pipeline-fix success notices, and the label and notice of `abandon_issue`, go through the new `IssueNotifier#after_conclusion`. A cut there costs that write and nothing else. It used to put a row whose correction was already pushed into `error`.
+  - **Deliberately not widened: `notify_issue`.** `QuestionHandler#post_answer` delivers its answer through it before transitioning, and swallowing a cut there would mark a ticket answered with no answer posted.
+  - **Rejected: a conversion in `GitlabRequestCounter`,** which would change what 14 `rescue ApiUnavailableError` boundaries receive.
+  - **Rejected: a safety net at the round's boundary,** which would read a local `Errno::ENOENT` as an outage.
+- **`error_message` names autodev's call site when an error is raised inside a gem (Autodev #125).** It kept `backtrace.first(10)`, and for a `Net::OpenTimeout` all ten lines are net-http, httparty and gitlab. `BacktraceExcerpt` keeps those ten lines, then adds up to ten more frames that belong to autodev, in the three `error_message` writers (MrFixer, PipelineMonitor, IssueProcessor) and in their log lines.
+- **`gitlab_transport_failures.caller_location` names the call that was cut (Autodev #125).** It was `caller_locations(2, 1)` taken inside the proxy, and every row read in production said `gitlab_request_counter.rb:50:in 'GitlabRequestCounter#method_missing'`. It is now the first autodev frame outside the counter, page turns of a paginated read included.
+- **A human resume gives the dormant budget back (Autodev #125, comment of 25/09).** `dormant_recheck_count` was only ever incremented, so a row had three `DormantAudit` recoveries for its whole life. A#139, A#144 and A#148 were at 3/3, and A#139 was given up as `dormant_exhausted` without being recovered once. The counter and its clock are now reset where the other budgets are:
+  - the label resume (`reenter_via_reimplementation`, and `reenter_via_pipeline_check` when reached from `handle_reenter`);
+  - the Reset button (`Issue.reset_for_retry!` with `reset_budget: true`).
+
+  They are not reset by `DormantAudit`'s own revive, by the automatic infra recheck or by `ReviewArrearsSweep`. The cap is what stops a row that keeps falling dormant from consuming GitLab reads (#47, #103).
+
 ## [1.0.0-alpha.55] - 2026-09-24
 
 ### Fixed
