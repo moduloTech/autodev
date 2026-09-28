@@ -48,9 +48,9 @@ module IssueNotifier
   #
   # The author stays the answer everywhere else, which is every row autodev was
   # assigned to in the ordinary way — the column is NULL there and nothing about
-  # those paths changes.
+  # those paths changes. The rule itself lives on `Issue#handback_target`.
   def handback_target(issue)
-    issue.displaced_assignee_id || issue.issue_author_id
+    issue.handback_target
   end
 
   def autodev_tag

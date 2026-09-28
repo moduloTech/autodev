@@ -31,7 +31,7 @@ class ActivityEvent < ApplicationRecord
   # would silently stop logging the first time anyone introduces an unlisted
   # kind, which is strictly worse than this comment being stale.
   KINDS = %w[transition danger_claude poller error usage heartbeat review_skill mr_review_token
-             discussions_snapshot].freeze
+             held_ticket discussions_snapshot].freeze
   LEVELS = %w[info warn error].freeze
 
   # The kinds that exist for the machinery, not for a reader: liveness and
@@ -42,7 +42,7 @@ class ActivityEvent < ApplicationRecord
   # both invisible (`user_visible` below) and disposable
   # (Autodev::ActivityEventJanitor, Autodev #57): a row nobody asked to see and
   # nobody will read again is a row we may delete.
-  MACHINERY_KINDS = %w[poller error usage heartbeat review_skill mr_review_token].freeze
+  MACHINERY_KINDS = %w[poller error usage heartbeat review_skill mr_review_token held_ticket].freeze
 
   belongs_to :issue, optional: true
 

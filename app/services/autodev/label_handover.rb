@@ -40,7 +40,10 @@ module Autodev
   # the bug already costs; a wrong stop closes a live ticket and posts a comment
   # blaming somebody who did nothing.
   class LabelHandover
-    Verdict = Struct.new(:reason, :label)
+    # `actor_id` is the GitLab user whose label event decided the verdict — nil
+    # on a mere suspicion. `ExternalState#stop_on_handover` hands the ticket to
+    # them (Autodev #126): they are the one who took the work on.
+    Verdict = Struct.new(:reason, :label, :actor_id)
 
     SCOPE_SEPARATOR = '::'
 
