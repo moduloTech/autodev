@@ -23,7 +23,8 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # AR-written Issue, breaking any `date(created_at)`/`datetime(created_at)`
   # SQL the way it broke the activity_events sparkline.
   %i[started_at finished_at next_retry_at clarification_requested_at pipeline_poll_since
-     infra_recheck_at clarification_read_at created_at].each do |col|
+     infra_recheck_at clarification_read_at labels_written_at label_events_seen_until
+     created_at].each do |col|
     attribute col, :datetime
   end
 
@@ -81,9 +82,9 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     state :answering_question, :needs_clarification
     state :done, :error, :closed
 
-    # `stamp_pipeline_watch!` is first on purpose: it only assigns, and
-    # `persist_status_change!` right after is the save that writes it.
-    after_all_transitions :stamp_pipeline_watch!, :persist_status_change!,
+    # The two stamps are first on purpose: they only assign, and
+    # `persist_status_change!` right after is the save that writes them.
+    after_all_transitions :stamp_pipeline_watch!, :stamp_label_events_floor!, :persist_status_change!,
                           :emit_activity_event!, :emit_audit_log!
 
     # === Happy path ===
@@ -246,6 +247,16 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # remaining bypass.
   def stamp_pipeline_watch!
     self.checking_pipeline_since = aasm.to_state == :checking_pipeline ? Time.current : nil
+  end
+
+  # A close accounts for every label event before it (Autodev #101): whoever
+  # closed the row — a handover, an unassignment, the dashboard — the evidence
+  # up to here has been acted on. Without the stamp, a dashboard reset of a
+  # handed-over row would replay the very event that closed it on its first
+  # label write, and close it again. Only ever moved forward: every other
+  # transition leaves the floor where the last scan put it.
+  def stamp_label_events_floor!
+    self.label_events_seen_until = Time.current if aasm.to_state == :closed
   end
 
   # Sequel had `save_changes` which only emits an UPDATE for dirty columns;

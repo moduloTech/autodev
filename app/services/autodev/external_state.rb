@@ -82,7 +82,7 @@ module Autodev
     def stop_on_handover(issue, gl_issue)
       return unless issue.may_close?
 
-      verdict = label_handover.verdict(gl_issue, issue.issue_iid)
+      verdict = label_handover.verdict(gl_issue, issue.issue_iid, row: issue)
       return unless verdict
 
       key = :"handover_#{verdict.reason}"

@@ -40,6 +40,8 @@ module Autodev
   # the bug already costs; a wrong stop closes a live ticket and posts a comment
   # blaming somebody who did nothing.
   class LabelHandover
+    include ErasedScan
+
     Verdict = Struct.new(:reason, :label)
 
     SCOPE_SEPARATOR = '::'
@@ -65,14 +67,20 @@ module Autodev
     # outage on the *second* read (who did it) must not erase that evidence into
     # "nothing happened" — see `events` for the full account and for which
     # boundary declines the row per caller.
-    def verdict(gl_issue, issue_iid)
+    #
+    # `row:` (the `Issue`) opens the second door (Autodev #101): when autodev has
+    # rewritten the labels since the events were last read, the current labels
+    # may no longer carry the evidence — `apply_label_doing` removes a
+    # `label_done` a human just posed — so the events are scanned for a handover
+    # that write erased. See `erased_handover`. Without `row:` only the labels
+    # are read, as before; `ExternalState#stop_on_handover`, the one production
+    # caller, always passes it.
+    def verdict(gl_issue, issue_iid, row: nil)
       suspicion = suspect(Array(::GitlabHelpers.field(gl_issue, :labels)))
-      return unless suspicion
+      event = suspicion && decisive_event(issue_iid, suspicion)
+      return suspicion if event && by_someone_else?(event)
 
-      event = decisive_event(issue_iid, suspicion)
-      return unless event && by_someone_else?(event)
-
-      suspicion
+      erased_handover(issue_iid, row)
     end
 
     # The same question as `verdict`, bounded in time (Autodev #88): did somebody
@@ -351,8 +359,20 @@ module Autodev
     # counted as `get` either way (`own_pages`). The walk sits inside `answer`,
     # so a page that fails to arrive raises like the first one would — a verdict
     # built from the pages that did arrive is the same defect again.
+    #
+    # Memoised per instance and per ticket (Autodev #101): stage 2 and the
+    # erased-handover scan can both want the events in one verdict, and they
+    # must read the same fetch. `@read_started_at` is taken before the call —
+    # the floor the scan advances to. A read that raises memoises nothing.
     def events(issue_iid)
-      ::GitlabHelpers.answer(:issue_label_events) { @client.issue_label_events(@path, issue_iid).auto_paginate }
+      (@events ||= {}).fetch(issue_iid) do
+        started = Time.current
+        @events[issue_iid] = ::GitlabHelpers.answer(:issue_label_events) do
+          @client.issue_label_events(@path, issue_iid).auto_paginate
+        end
+        (@read_started_at ||= {})[issue_iid] = started
+        @events[issue_iid]
+      end
     end
   end
 end
