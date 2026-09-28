@@ -24,6 +24,8 @@ class PollRouter
   # invisible for the same reason: the substitute is a plausible destination. The
   # read now raises and `PollRouter#route` skips this issue for the cycle.
   module ResumeHandler
+    DORMANT_BUDGET_RESET = { dormant_recheck_count: 0, dormant_recheck_at: nil }.freeze
+
     private
 
     def handle_reenter(gl_issue, existing)
@@ -32,7 +34,7 @@ class PollRouter
       return if @config['dry_run']
 
       case reenter_destination(existing)
-      when :pipeline_check then reenter_via_pipeline_check(existing)
+      when :pipeline_check then reenter_via_pipeline_check(existing, reset_dormant: true)
       when :skip_merged    then skip_reentry_already_merged(existing)
       when :wait           then defer_reentry(existing)
       else                      reenter_via_reimplementation(gl_issue, existing)
@@ -122,14 +124,26 @@ class PollRouter
     # record of which one did: a human reposing the todo label (nil — nobody to
     # attribute it to), `resume_recovered_infra`, and `ReviewArrearsSweep`, whose
     # idempotence depends on recognising its own re-arms and nobody else's.
-    def reenter_via_pipeline_check(existing, origin: nil)
+    #
+    # `reset_dormant:` gives back the dormant budget (Autodev #125, D3), and only
+    # `handle_reenter` passes it: the trigger is the human label resume, not a
+    # nil `origin`, because `resume_recovered_infra` reaches this method with
+    # `origin` nil too. A human reposing the label gives back every budget —
+    # `dormant_recheck_count` included, or a row at the cap re-enters already
+    # exhausted and its next dormant episode ends in `dormant_exhausted` without
+    # a single audit (A#139, A#144, A#148 at 3/3). The two automatic callers keep
+    # it: the cap is what stops a row that keeps falling dormant from consuming
+    # GitLab reads (#47, #103), and a reset on every automatic recovery would
+    # reopen that loop.
+    def reenter_via_pipeline_check(existing, origin: nil, reset_dormant: false)
       existing.reenter_to_check_pipeline!(origin)
       existing.update(review_count: reentry_review_count(existing), review_failure_count: 0,
                       stagnation_signatures: nil, fix_round: 0, discussion_fix_round: 0,
                       pipeline_retrigger_count: 0,
                       error_message: nil, finished_at: nil, activity_note_id: nil,
                       needs_attention: false, attention_reason: nil, attention_detail: nil,
-                      infra_recheck_count: 0, infra_recheck_at: nil)
+                      infra_recheck_count: 0, infra_recheck_at: nil,
+                      **(reset_dormant ? DORMANT_BUDGET_RESET : {}))
       apply_label_doing(existing.issue_iid)
       announce_reentry(existing)
     end
@@ -152,13 +166,16 @@ class PollRouter
           "(will route to #{reviewed ? 'fixing_discussions' : 'the review'})"
     end
 
+    # Only ever a human reposing the label, so the dormant budget is given back
+    # with the others (Autodev #125) — see `reenter_via_pipeline_check`.
     def reenter_via_reimplementation(gl_issue, existing)
       existing.reenter!
       existing.update(review_count: 0, review_failure_count: 0, stagnation_signatures: nil,
                       fix_round: 0, discussion_fix_round: 0, error_message: nil,
                       finished_at: nil, started_at: nil,
                       pipeline_retrigger_count: 0, activity_note_id: nil,
-                      needs_attention: false, attention_reason: nil, attention_detail: nil)
+                      needs_attention: false, attention_reason: nil, attention_detail: nil,
+                      **DORMANT_BUDGET_RESET)
       log_activity(existing, :reenter)
       enqueue_issue_processing(gl_issue, existing)
     end
