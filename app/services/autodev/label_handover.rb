@@ -75,7 +75,10 @@ module Autodev
       event = decisive_event(issue_iid, suspicion)
       return unless event && by_someone_else?(event)
 
-      suspicion
+      # The decisive event's author, not the first human in the history: when
+      # two people touched the ticket, the one whose edit produced the label we
+      # read is the one who took the work on (Autodev #126).
+      Verdict.new(suspicion.reason, suspicion.label, actor_of(event))
     end
 
     # The same question as `verdict`, bounded in time (Autodev #88): did somebody
@@ -280,9 +283,11 @@ module Autodev
     end
 
     def by_someone_else?(event)
-      actor = ::GitlabHelpers.field(::GitlabHelpers.field(event, :user), :id)
+      actor = actor_of(event)
       !actor.nil? && actor != ::GitlabHelpers.current_user_id(@client)
     end
+
+    def actor_of(event) = ::GitlabHelpers.field(::GitlabHelpers.field(event, :user), :id)
 
     # GitLab lists resource label events oldest first, so the last entry naming
     # the label is the edit that produced the state we just read — of the

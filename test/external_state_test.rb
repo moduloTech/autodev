@@ -222,12 +222,23 @@ class ExternalStateTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   FakeLabelledIssue = Struct.new(:state, :assignees, :labels)
 
   class HandoverClient < StubClient
+    attr_reader :edits
+
     def initialize(events)
       super()
       @events = events
+      @edits = []
     end
 
     def issue_label_events(_project, _iid) = Gitlab::PaginatedResponse.new(@events)
+
+    # Recording, not a no-op (Autodev #126): a handover now hands the ticket to
+    # whoever moved the label, and a silent stub would let that edit go wrong
+    # unseen.
+    def edit_issue(_project, _iid, **attrs)
+      @edits << attrs
+      nil
+    end
   end
 
   FakeLabel = Struct.new(:name)
@@ -244,6 +255,7 @@ class ExternalStateTest < Minitest::Test # rubocop:disable Metrics/ClassLength
 
     assert host.stop_on_handover(issue, moved_issue(['Development::Awaiting CR']))
     assert_equal 'closed', issue.reload.status
+    assert_equal [{ assignee_ids: [999] }], @client.edits
   end
 
   def test_the_handover_notice_names_the_label
@@ -261,5 +273,6 @@ class ExternalStateTest < Minitest::Test # rubocop:disable Metrics/ClassLength
 
     refute host.stop_on_handover(issue, moved_issue(['Development::Doing', 'PM::Evolution']))
     assert_equal 'checking_pipeline', issue.reload.status
+    assert_empty @client.edits
   end
 end

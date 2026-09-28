@@ -33,10 +33,13 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
   # resolves against the resource label events. `raises:` models a GitLab read
   # that could not answer at all.
   class StubClient
+    attr_reader :edits
+
     def initialize(taken_over: false, raises: nil, assignee_id: AUTODEV_ID)
       @taken_over = taken_over
       @raises = raises
       @assignee_id = assignee_id
+      @edits = []
     end
 
     def issue(_path, _iid)
@@ -52,6 +55,14 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
     end
 
     def create_issue_note(_path, _iid, _body) = FakeNote.new(1)
+
+    # Recording, not a no-op (Autodev #126): a handover now hands the ticket to
+    # whoever moved the label, and a silent stub would let that edit go wrong
+    # unseen.
+    def edit_issue(_path, _iid, **attrs)
+      @edits << attrs
+      nil
+    end
   end
 
   def setup
@@ -61,11 +72,12 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
   end
 
   def test_a_taken_over_ticket_is_not_relaunched
-    run_retry_with_handover(taken_over: true)
+    client = run_retry_with_handover(taken_over: true)
     @issue.reload
 
     assert_equal 'closed', @issue.status, 'a ticket somebody holds must not be relaunched'
     assert_empty labels_written, 'and autodev must not repose its working label on it'
+    assert_equal [{ assignee_ids: [AUTHOR_ID] }], client.edits, 'the ticket goes to whoever moved it'
   end
 
   # Truthfulness review of the alpha-55 lot: the retry asked only the label
@@ -139,6 +151,7 @@ class ErroredRetryRespectsAHandoverTest < Minitest::Test
         job.send(:perform_retry_errored, @issue, CONFIG, PROJECT_CONFIG)
       end
     end
+    client
   end
 
   def label_recorder

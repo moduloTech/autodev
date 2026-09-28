@@ -32,7 +32,11 @@ module IssueNotifier
     @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [target])
     log "Handed issue ##{issue.issue_iid} back to user #{target}"
     true
-  rescue Gitlab::Error::ResponseError => e
+  # Transport family, same reason and same spelling as `manage_labels` (Autodev
+  # #126): `false` is already what a refused edit answers, and a timed-out one
+  # changed no hands either — so the abandon notice does not claim it did.
+  rescue Gitlab::Error::ResponseError, SystemCallError, Timeout::Error, SocketError,
+         OpenSSL::SSL::SSLError, EOFError => e
     log_error "Failed to hand issue ##{issue.issue_iid} back: #{e.message}"
     false
   end
@@ -59,7 +63,11 @@ module IssueNotifier
 
   def notify_issue(iid, message)
     @client.create_issue_note(@project_path, iid, message)
-  rescue Gitlab::Error::ResponseError => e
+  # Transport family (Autodev #126): every terminal sequence posts its note
+  # between the handback and `finished_at`, so a reset connection here left the
+  # row unstamped and its activity entry unwritten.
+  rescue Gitlab::Error::ResponseError, SystemCallError, Timeout::Error, SocketError,
+         OpenSSL::SSL::SSLError, EOFError => e
     log_error "Failed to post comment on ##{iid}: #{e.message}"
   end
 
