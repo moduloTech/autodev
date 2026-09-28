@@ -99,7 +99,9 @@ class MrFixer
     # The resolution is the claim that the review point is dealt with, and since
     # Autodev #79 it is only ever made behind a verdict something other than the
     # fixing session produced. Returns the discussion when the thread was
-    # resolved, nil when it was left open for the next round.
+    # resolved, nil when it was left open for the next round — including when
+    # the verdict was yes and GitLab did not take the resolution (Autodev #125):
+    # the thread is still open, so the success line must not count it.
     def fix_single_discussion(discussion, work_dir, branch, mr_iid, env)
       thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: env[:target_branch])
       base_sha = head_sha(work_dir) if verify_fixes?
@@ -108,8 +110,7 @@ class MrFixer
       check = verify_fixes? ? verify_fix(discussion, thread_context, work_dir, base_sha) : FixCheck.passed
       return record_unverified(discussion, check) unless check.addressed
 
-      resolve_discussion(mr_iid, discussion[:id])
-      discussion
+      discussion if resolve_discussion(mr_iid, discussion[:id])
     end
 
     # One consequence, three sentences: which of them a reader gets decides
@@ -213,10 +214,17 @@ class MrFixer
     # rounds before a `stagnation_discussions` give-up legible instead of
     # sudden — but it gets its own key, so neither a reader nor a counter can
     # take it for a delivery.
+    #
+    # `discussions_fixed!` has already fired and the push has landed, so the
+    # notice announces a verdict and cannot undo it (Autodev #125): a cut on it
+    # used to reach `execute_fix_cycle`'s `rescue StandardError` and put a pushed
+    # correction in `error`, under a comment declaring it failed.
     def report_round(issue, count, round)
       return log_activity(issue, :discussions_none_resolved, round: round) unless count.positive?
 
-      notify_localized(issue.issue_iid, :mr_fix_success, count: count, mr_url: issue.mr_url, round: round)
+      after_conclusion(:mr_fix_success) do
+        notify_localized(issue.issue_iid, :mr_fix_success, count: count, mr_url: issue.mr_url, round: round)
+      end
       log_activity(issue, :discussions_fixed, count: count, round: round)
     end
   end

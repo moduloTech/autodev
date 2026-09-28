@@ -146,10 +146,21 @@ class MrFixer
   # A write, not a read: failing to mark a thread resolved leaves it unresolved,
   # which the next round re-reads. No verdict is inferred from the failure, so it
   # does not go through `GitlabHelpers.answer`.
+  #
+  # It answers whether the thread was resolved, because the round's success line
+  # counts resolved threads (Autodev #79) and a thread GitLab never closed must
+  # not be counted. The whole transport family is swallowed, not HTTP alone
+  # (Autodev #125): on A#139 a timeout here escaped to the round's `rescue
+  # StandardError` and a correction that had been made and verified was
+  # announced as failed. Spelled out rather than splatted, so the #62 scanner
+  # recognises the clause (Autodev #119).
   def resolve_discussion(mr_iid, discussion_id)
     @client.resolve_merge_request_discussion(@project_path, mr_iid, discussion_id, resolved: true)
     log "Resolved discussion #{discussion_id}"
-  rescue Gitlab::Error::ResponseError => e
-    log_error "Failed to resolve discussion #{discussion_id}: #{e.message}"
+    true
+  rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
+         ::OpenSSL::SSL::SSLError, ::EOFError => e
+    log_error "Failed to resolve discussion #{discussion_id}: #{e.class}: #{e.message}"
+    false
   end
 end
