@@ -67,6 +67,16 @@ reads the status alone, so a job queued across a reentry and a second delivery
 would otherwise deploy that delivery, and the next cycle would reserve and deploy
 it again.
 
+Review round (adversarial, neutral, concurrency): presence of a stamp is not
+enough — the job carries the stamp it was reserved under (epoch seconds) and
+runs only when the row holds that one, because the held job may also run after
+the next cycle re-reserved; `limits_concurrency` keeps one key FIFO only while
+its one-hour semaphore lives. An enqueue that raises lifts the stamp (the job is
+in the queue database, the stamp in the primary). The failure write and its
+comment are conditional on `running_post_completion`, so a Reset mid-hook keeps
+the old failure off the reset row. An empty command and a NUL byte are
+`ArgumentError`s out of `Process.spawn` and take the same sink.
+
 Not backfilled. Every unstamped row the pass selects is a delivery whose hook
 has not run, which is exactly the population the pass selects today; the
 difference is that it now selects each one once.

@@ -26,7 +26,9 @@ class PipelineMonitor
     end
 
     def valid_pc_command?(issue, cmd)
-      return true if cmd.is_a?(Array) && cmd.all?(String)
+      # `any?`: `[].all?(String)` is true, and an empty array reaches `Process.spawn`
+      # as an `ArgumentError` (adversarial review).
+      return true if cmd.is_a?(Array) && cmd.any? && cmd.all?(String)
 
       store_pc_error(issue, "post_completion config must be an array of strings, got: #{cmd.inspect}",
                      :post_completion_invalid_config, command: cmd.inspect)
@@ -81,10 +83,12 @@ class PipelineMonitor
     # misconfiguration of all, and one the exit/timeout handlers never see. It is
     # a failure of the command like the others, so it takes the same sink. The
     # rescue covers the spawn alone: a `SystemCallError` from the wait or the kill
-    # is not "could not start".
+    # is not "could not start". `ArgumentError` is the same event in another class:
+    # an argument carrying a NUL byte is refused before any `exec` (adversarial
+    # review).
     def spawn_pc(issue, cmd, work_dir, env, pipes)
       Process.spawn(env, *cmd, chdir: work_dir, in: :close, **pipes, pgroup: true)
-    rescue SystemCallError => e
+    rescue SystemCallError, ArgumentError => e
       store_pc_error(issue, "post_completion could not start: #{e.class}: #{e.message}",
                      :post_completion_not_started, command: cmd.join(' '), reason: Redactor.scrub(e.message))
       nil
@@ -143,9 +147,18 @@ class PipelineMonitor
     # what the comment may say — the command (scrubbed: an argument may hold a
     # credential) and the outcome's one figure — and never the stdout/stderr the
     # stored message keeps.
+    #
+    # The write is conditional on the row still running its hook (concurrency
+    # review): a dashboard Reset accepts a row in `running_post_completion`, and
+    # it lifts the reservation and the error (`Issue::POST_COMPLETION_CLEARED`).
+    # Writing unconditionally put the old delivery's failure back onto the reset
+    # row, and announced it on the ticket. Nothing written, nothing said.
     def store_pc_error(issue, error_msg, key, **vars)
       log_error "Issue ##{issue.issue_iid}: #{error_msg}"
-      Issue.where(id: issue.id).update(post_completion_error: error_msg)
+      written = Issue.where(id: issue.id, status: 'running_post_completion')
+                     .update_all(post_completion_error: error_msg)
+      return log("Issue ##{issue.issue_iid}: row left running_post_completion, failure not recorded") if written.zero?
+
       notify_localized(issue.issue_iid, key, suffix: :post_completion_failed_footer, mr_url: issue.mr_url,
                                              **vars.merge(command: Redactor.scrub(vars[:command].to_s)))
     end

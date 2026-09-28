@@ -24,7 +24,15 @@ class PostCompletionRunsOnceTest < Minitest::Test
   def test_two_cycles_enqueue_one_hook
     issue = delivered
 
-    assert_equal [[PROJECT_CONFIG['path'], issue.issue_iid, :post_completion]], cycles(2)
+    assert_equal([[PROJECT_CONFIG['path'], issue.issue_iid, :post_completion]], cycles(2).map { |a| a.first(3) })
+  end
+
+  # The job carries the stamp it was reserved under, so it can tell it apart.
+  def test_the_job_carries_its_reservation
+    issue = delivered
+    enqueued = cycles(1)
+
+    assert_equal issue.reload.post_completion_dispatched_at.to_i, enqueued.first.last
   end
 
   # The dispatcher owns the reservation: the row is stamped before any job runs.
@@ -102,6 +110,19 @@ class PostCompletionRunsOnceTest < Minitest::Test
     issue = delivered(needs_attention: true, attention_reason: 'stagnation_pipeline')
 
     refute dispatcher.send(:reserve_post_completion?, issue)
+  end
+
+  # Concurrency review: the stamp and the job live in two databases. An enqueue
+  # that fails must not leave a reservation no job will ever serve.
+  def test_a_failed_enqueue_lifts_the_reservation
+    issue = delivered
+
+    IssueProcessJob.stub(:perform_later, ->(*) { raise ActiveRecord::StatementTimeout }) do
+      assert_raises(ActiveRecord::StatementTimeout) { dispatcher.send(:dispatch_done_unassigned) }
+    end
+
+    assert_nil issue.reload.post_completion_dispatched_at
+    assert_equal 1, cycles(1).size
   end
 
   def test_a_stamped_row_costs_no_gitlab_read

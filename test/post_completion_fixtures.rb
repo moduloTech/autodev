@@ -99,13 +99,14 @@ module PostCompletionFixtures
 
   # Runs the job's `post_completion` action with the hook itself replaced by the
   # block, so what is measured is the job's own guard and its `ensure`.
-  def perform_hook(issue, &)
+  # `reservation` defaults to the row's own stamp: a job enqueued for it.
+  def perform_hook(issue, reservation = issue.post_completion_dispatched_at&.to_i, &)
     monitor = Object.new
     monitor.define_singleton_method(:run_post_completion, &)
     GitlabHelpers.stub(:build_gitlab_client, Object.new) do
       ActivityLogger.stub(:post, nil) do
         PipelineMonitor.stub(:new, monitor) do
-          IssueProcessJob.new.send(:perform_post_completion, issue, CONFIG, PROJECT_CONFIG)
+          IssueProcessJob.new.send(:perform_post_completion, issue, CONFIG, PROJECT_CONFIG, reservation)
         end
       end
     end
@@ -118,4 +119,41 @@ module PostCompletionFixtures
     Issue.where(id: issue.id).update_all(status: 'done')
     issue.reload
   end
+end
+
+# Shared by the two files that pin what a failed `post_completion` produces
+# (Autodev #94): `test/a_failed_post_completion_says_so_test.rb` (every cause
+# reaches the sink) and `test/the_post_completion_comment_says_what_it_may_test.rb`
+# (what the comment carries, and what it never does). The command is really
+# spawned; only the clone is stubbed, the one step that needs a GitLab remote.
+module PostCompletionFailureFixtures
+  PATH = 'group/project'
+  SECRET = 'glpat-SECRETSECRETSECRET'
+  # What the command prints, assembled by `printf` so that the command's own text
+  # (which the comment does carry) never contains it.
+  MARKER = 'MARKER-OUTPUT'
+  PRINTS_MARKER = "printf '%s-%s' MARKER OUTPUT"
+
+  class RecordingClient
+    def notes = (@notes ||= [])
+    def create_issue_note(_project, iid, body) = notes << [iid, body]
+  end
+
+  def setup
+    setup_database
+    @client = RecordingClient.new
+    # The state the job puts the row in before it runs the hook.
+    @issue = create_issue(project_path: PATH, status: 'running_post_completion', mr_iid: 42, branch_name: 'feat/x',
+                          mr_url: 'https://gitlab.example/group/project/-/merge_requests/42', locale: 'en')
+  end
+
+  def monitor(timeout: 60, clone: ->(dir, _branch) { FileUtils.mkdir_p(dir) })
+    PipelineMonitor.new(client: @client, config: { 'gitlab_url' => 'https://gitlab.example' },
+                        project_config: { 'path' => PATH, 'post_completion_timeout' => timeout },
+                        logger: StubLogger.new, token: 'x').tap do |m|
+      m.define_singleton_method(:clone_and_checkout, &clone)
+    end
+  end
+
+  def comments = @client.notes.map(&:last)
 end

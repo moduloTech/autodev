@@ -96,6 +96,25 @@ class APostCompletionReservationIsOneDeliverysTest < Minitest::Test
     assert_equal 0, runs
   end
 
+  # Adversarial review: the other order — the held job runs after the next cycle
+  # has reserved the new delivery. It finds a stamp, but not its own.
+  def test_a_held_job_running_after_the_new_reservation_does_not_deploy
+    issue = delivered
+    held = cycles(1).first.last
+    redeliver(issue)
+    # A redelivery takes minutes (a pipeline, a review): the stamp is epoch seconds.
+    fresh = Time.stub(:current, 10.minutes.from_now) { cycles(1).first.last }
+
+    assert_equal [:fresh], runs_of(issue, held => :held, fresh => :fresh)
+  end
+
+  # Runs one job per stamp, in order, and names the ones whose hook ran.
+  def runs_of(issue, stamps)
+    stamps.each_with_object([]) do |(stamp, name), runs|
+      perform_hook(issue.reload, stamp) { |*| runs << name }
+    end
+  end
+
   # Plan review: a job still queued across a reentry and a second delivery. The
   # held job must not deploy the new delivery, which the next cycle reserves for
   # itself — exactly one run in total.

@@ -397,9 +397,11 @@ module Autodev
 
       state = @client.merge_request(@path, issue.mr_iid).state
       return if mr_state_defers_hook?(issue, state)
-      return unless reserve_post_completion?(issue)
 
-      IssueProcessJob.perform_later(@path, issue.issue_iid, :post_completion)
+      stamp = Time.current
+      return unless reserve_post_completion?(issue, stamp)
+
+      enqueue_post_completion(issue, stamp)
       @logger.info("Enqueued post-completion for issue ##{issue.issue_iid}", project: @path)
     rescue ::Gitlab::Error::ResponseError => e
       @logger.error("Failed to check post-completion for ##{issue.issue_iid}: #{e.message}",
@@ -529,12 +531,27 @@ module Autodev
              .positive?
     end
 
+    # The reservation is in the primary database and the job in the queue one, so
+    # the two writes are not atomic (concurrency review). An enqueue that raises
+    # after the stamp would leave a reserved row no job serves and no later cycle
+    # selects — the deploy would silently never run. The stamp is lifted and the
+    # error travels on, so the next cycle tries again.
+    #
+    # The job carries its stamp (epoch seconds) so it can tell its reservation
+    # from a later one — see `IssueProcessJob#perform_post_completion`.
+    def enqueue_post_completion(issue, stamp)
+      IssueProcessJob.perform_later(@path, issue.issue_iid, :post_completion, stamp.to_i)
+    rescue StandardError
+      ::Issue.where(id: issue.id).update_all(post_completion_dispatched_at: nil)
+      raise
+    end
+
     # Compare-and-set, like `reserve_infra_recheck?`: the loser of a race between
     # two cycles touches no row and enqueues nothing.
-    def reserve_post_completion?(issue)
+    def reserve_post_completion?(issue, stamp = Time.current)
       ::Issue.where(id: issue.id, project_path: @path, status: 'done', needs_attention: false,
                     post_completion_dispatched_at: nil)
-             .update_all(post_completion_dispatched_at: Time.current)
+             .update_all(post_completion_dispatched_at: stamp)
              .positive?
     end
 
