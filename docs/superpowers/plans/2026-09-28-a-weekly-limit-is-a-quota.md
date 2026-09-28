@@ -18,10 +18,13 @@ Error Handling table.
   `hit your ${h}`.
 - The unrecognised weekly wording sent 5 rows through the generic failure
   handlers: `error`, `next_retry_at` NULL, public `echec correction MR` /
-  `echec de la correction du pipeline` comments on PP#16030, #14007, #16269,
-  #16423. DormantAudit revived them; A#144 and A#68 reached `dormant_exhausted`.
-- The usage probe classified 1000+ probes `broken` since 2026-09-27 04:46
-  (`danger_claude` card down, `claude_usage` ok).
+  `echec de la correction du pipeline` comments on PP#14856 (2026-09-24),
+  #16030, #14007, #16269, #16423. DormantAudit revived them into the same limit;
+  A#142, #144 and #145 reached `dormant_exhausted` that way (A#68 got past the
+  3am reset and was exhausted later, on docker_build timeouts).
+- Every usage probe still on record (1014, the oldest kept 2026-09-27 04:46 —
+  the start is past retention) classified `broken` (`danger_claude` card down,
+  `claude_usage` ok).
 - The probe spawns with no `chdir`, so from the LaunchAgent's
   `WorkingDirectory` `/Users/modulotech`: danger-claude mounts the service
   account's home into the container, and mise inside reads
@@ -36,14 +39,16 @@ Error Handling table.
   `retry_count` untouched, invisible to DormantAudit's error arm while the
   budget is not already spent — see Out of scope). The defect is the
   non-recognition only.
-- The four false public failures get a reply comment after the fix.
+- The false public failures get a reply comment after the fix (the owner
+  ruled on four; the truthfulness review found a fifth, PP#14856).
 
 ## Changes
 
-1. `RateLimitDetector::PATTERN`: `you['’]ve hit your (?:[\w-]+ ){0,2}limit`
-   (any one- or two-word qualifier: session, weekly, fast, usage, monthly
-   spend…) plus the existing `rate limit` / `usage limit`. `UsageChecker`
-   inherits it.
+1. `RateLimitDetector::PATTERN`: `you['’]ve hit your (?:[\w'’-]+ ){0,3}limit`
+   (any one- to three-word qualifier, apostrophes allowed: session, weekly,
+   fast, monthly spend, org's monthly spend…) plus the existing `rate limit` /
+   `usage limit`. `UsageChecker` inherits it. Revised after review: the
+   binary's `org's` / `channel's monthly spend limit` are three words.
 2. `RateLimitDetector::RESET_PATTERN`: optional `Mon D,` date before the hour.
    `parse_reset_time(text, now: Time.now.utc)`:
    - hour-only: unchanged (today, +1 day when past);
@@ -53,8 +58,14 @@ Error Handling table.
    - an unknown month name or an impossible day (`Feb 30`) → `nil` (the 3600s
      default), never a silently normalised date.
    - The `RateLimitError` message shows the date when the reset is ≥ 24h away.
-3. `UsageProbeSpawn#spawn_probe`: run the probe in a fresh empty directory under
-   `/tmp` (created per probe, removed after), not in the process cwd.
+3. `UsageProbeSpawn#send_probe`: run the probe in one stable directory,
+   `/tmp/autodev-usage-probe`, emptied before each probe, not in the process
+   cwd. Stable rather than one per probe (revised after the adversarial
+   review): Claude Code keys `~/.claude/projects/<cwd>` on the cwd, in the
+   persisted danger-claude volume.
+4. Revised after review: an impossible 12-hour time reads as no reset instead
+   of raising `ArgumentError`, and a dated reset may be last year's (a
+   "Dec 31" read on January 1st).
 
 ## Tests
 

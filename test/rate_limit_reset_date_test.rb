@@ -5,8 +5,8 @@ require 'autodev/rate_limit_detector'
 
 # RateLimitDetector.parse_reset_time on a reset that names its date — Autodev
 # #127. A weekly limit more than a day from its reset reads "resets Oct 1, 3am
-# (UTC)"; before #127 the date was not read, so the pause ended at the next
-# 03:00 instead of on the 1st.
+# (UTC)"; before #127 the hour-only pattern did not match it at all, so the
+# pause fell back to the one-hour default until the 1st.
 class RateLimitResetDateTest < Minitest::Test
   NOW = Time.utc(2026, 9, 28, 14, 0, 0)
 
@@ -73,5 +73,20 @@ class RateLimitResetDateTest < Minitest::Test
 
     assert_equal Time.utc(2026, 10, 1, 3), RateLimitDetector.parse_reset_time(wording, now: Time.utc(2026, 10, 2, 2))
     assert_equal Time.utc(2027, 10, 1, 3), RateLimitDetector.parse_reset_time(wording, now: Time.utc(2026, 10, 2, 4))
+  end
+
+  # Read just after New Year, "Dec 31" is last year's, not a year's pause.
+  def test_a_date_just_passed_across_new_year_is_last_years
+    reset = RateLimitDetector.parse_reset_time('resets Dec 31, 11pm (UTC)', now: Time.utc(2027, 1, 1, 0, 30))
+
+    assert_equal Time.utc(2026, 12, 31, 23), reset
+  end
+
+  # An hour a 12-hour clock does not have reads as no reset — Time.utc would
+  # raise, and a quota would take the failure path again.
+  def test_an_impossible_time_reads_no_reset_rather_than_raising
+    ['resets Oct 1, 13pm (UTC)', 'resets Oct 1, 3:75am (UTC)', 'resets 0am (UTC)'].each do |text|
+      assert_nil RateLimitDetector.parse_reset_time(text, now: NOW), text
+    end
   end
 end

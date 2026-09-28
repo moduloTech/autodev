@@ -6,7 +6,8 @@ require 'autodev/usage_checker'
 
 # The usage probe during the weekly limit — Autodev #127.
 #
-# From 2026-09-27 04:46 every probe classified `broken` (1000+ in a row, the
+# Every probe still on record (the oldest kept is 2026-09-27 04:46; the limit
+# was hit on 2026-09-26) classified `broken` (1000+ in a row, the
 # `danger_claude` card down, `claude_usage` ok) on a quota. The output below is
 # the persisted diagnostic, verbatim: claude's answer, then mise complaining
 # about `~/.config/mise/config.toml` — the service account's global config,
@@ -45,29 +46,19 @@ class UsageProbeWeeklyLimitTest < Minitest::Test
   # ~/.autodev/config.yml, nor inheriting whatever mise config sits there.
   def probe_where = checker(['/bin/sh', '-c', 'echo "cwd=$(pwd -P)"; echo "entries=$(ls -A | wc -l)"; exit 1']).verdict
 
-  def test_the_probe_runs_under_tmp_and_not_in_the_process_cwd
+  def test_the_probe_runs_in_its_own_directory_under_tmp_and_not_in_the_process_cwd
     cwd = probe_where[:diagnostic][/cwd=(\S+)/, 1]
 
     refute_equal File.realpath(Dir.pwd), cwd
-    assert cwd.start_with?("#{File.realpath('/tmp')}/"), "#{cwd} is not under /tmp, where real calls run"
+    assert_equal File.realpath(UsageProbeSpawn::WORK_DIR), cwd
   end
 
-  def test_the_probe_directory_is_empty_and_removed_after_the_probe
-    diagnostic = probe_where[:diagnostic]
-    cwd = diagnostic[/cwd=(\S+)/, 1]
+  # One stable path (Claude Code keys its per-project state on the cwd), so
+  # whatever a previous probe left there is emptied first.
+  def test_the_probe_directory_is_emptied_before_each_probe
+    FileUtils.mkdir_p(UsageProbeSpawn::WORK_DIR)
+    File.write(File.join(UsageProbeSpawn::WORK_DIR, '.mise.toml'), "[tools]\n")
 
-    assert_match(/entries=\s*0\b/, diagnostic)
-    refute Dir.exist?(cwd), "the probe directory #{cwd} outlived the probe"
-  end
-
-  def test_the_probe_directory_is_removed_after_a_timeout_too
-    marker = File.join(Dir.tmpdir, "autodev-probe-cwd-#{Process.pid}")
-    UsageChecker.new(logger: NullLogger.new, command: ['/bin/sh', '-c', "pwd -P > '#{marker}'; sleep 5"],
-                     timeout: 0.5, kill_grace: 0.2).verdict
-    cwd = File.read(marker).strip
-
-    refute Dir.exist?(cwd), "the probe directory #{cwd} outlived a timed-out probe"
-  ensure
-    FileUtils.rm_f(marker) if marker
+    assert_match(/entries=\s*0\b/, probe_where[:diagnostic])
   end
 end

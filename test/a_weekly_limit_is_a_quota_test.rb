@@ -10,7 +10,8 @@ require 'autodev/issue_processor'
 
 # Autodev #127 — A#144's path, end to end from danger-claude's answer.
 #
-# On 2026-09-26 at 02:59 UTC, four rows asked danger-claude for a correction
+# On 2026-09-26 at 02:59 UTC, four rows (and A#68 on 2026-09-24, with the
+# hour-only form of the same message) asked danger-claude for a correction
 # and got back claude's JSON envelope carrying "You've hit your weekly limit ·
 # resets Oct 1, 3am (UTC)", with a non-zero exit. The wording was not
 # recognised, so `danger_claude_prompt` raised a plain ImplementationError:

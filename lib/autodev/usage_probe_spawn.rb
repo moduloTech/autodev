@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'timeout'
-require 'tmpdir'
 
 # The bounded, stdin-writing spawn behind UsageChecker#verdict.
 #
@@ -22,9 +22,13 @@ module UsageProbeSpawn
   POLL_INTERVAL = 0.2 # seconds between liveness checks while waiting on the probe
 
   # Where the probe runs — danger-claude mounts its working directory into the
-  # container. Under /tmp like every real call's clone (ProcessRunner's
-  # `/tmp/autodev_*`), so the container runtime already shares it.
-  WORK_ROOT = '/tmp'
+  # container. Under /tmp like every real call's clone (`/tmp/autodev_*`, built
+  # by IssueProcessor, SkillReviewer and PostCompletion), so the container
+  # runtime already shares it. One stable path, not one per probe: Claude Code
+  # keys its per-project state (~/.claude/projects/<cwd>, persisted in the
+  # danger-claude volume) on the cwd, and ~500 probes a day would each have
+  # left a project of their own there.
+  WORK_DIR = '/tmp/autodev-usage-probe'
 
   private
 
@@ -47,8 +51,12 @@ module UsageProbeSpawn
   end
   private_constant :Pipes
 
+  # Emptied before every probe rather than removed after: a probe that timed
+  # out may leave its container running with the directory still mounted.
   def send_probe
-    Dir.mktmpdir('autodev-probe-', WORK_ROOT) { |work_dir| probe_in(work_dir) }
+    FileUtils.rm_rf(WORK_DIR)
+    FileUtils.mkdir_p(WORK_DIR, mode: 0o700)
+    probe_in(WORK_DIR)
   end
 
   def probe_in(work_dir)
@@ -63,11 +71,11 @@ module UsageProbeSpawn
     pipes&.close_all
   end
 
-  # An empty directory of its own, never the process cwd (Autodev #127). That
+  # A directory of its own, emptied, never the process cwd (Autodev #127). That
   # cwd is the LaunchAgent's WorkingDirectory, the service account's home: the
   # probe mounted it — ~/.autodev/config.yml included — into a container to ask
   # claude one word, and mise inside read its global config as an untrusted
-  # project file and added four lines of noise to every diagnostic.
+  # project file and added its errors to every diagnostic.
   def spawn_probe(pipes, work_dir)
     Process.spawn(DangerClaudeRunner::CLEAN_ENV, *@command,
                   chdir: work_dir, in: pipes.stdin_r, out: pipes.stdout_w, err: pipes.stderr_w, pgroup: true)

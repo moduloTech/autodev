@@ -57,7 +57,7 @@ class RateLimitDetectorTest < Minitest::Test
   # Every wording below is verbatim from production (issues.error_message,
   # dc_stdout, activity_events) or from the Claude Code 2.1.283 binary. The
   # weekly one went unrecognised on 2026-09-24 and 2026-09-26: five rows took
-  # the generic failure path, four of them with a public "echec" comment.
+  # the generic failure path, each with a public "echec" comment.
   SEEN_WORDINGS = [
     "You've hit your limit · resets 7pm (UTC)",
     "You've hit your session limit · resets 4:30am (UTC)",
@@ -76,7 +76,7 @@ class RateLimitDetectorTest < Minitest::Test
     end
   end
 
-  # The probe's verbatim output since 2026-09-27: the mise noise follows the
+  # The probe's verbatim output (every usage row on record): the mise noise follows the
   # message, which must not hide it.
   def test_the_weekly_wording_followed_by_mise_noise_triggers
     out = "You've hit your weekly limit · resets Oct 1, 3am (UTC)\n\n" \
@@ -89,10 +89,14 @@ class RateLimitDetectorTest < Minitest::Test
     RateLimitDetector.check!("Set the upload limit to 10MB\n", '')
   end
 
-  # Two words at most between "your" and "limit": a sentence claude writes
-  # about the code under work is not a quota.
-  def test_a_three_word_qualifier_does_not_trigger
+  # Three words at most between "your" and "limit" — Claude Code's longest is
+  # "org's monthly spend" — so a sentence about the code under work is not a quota.
+  def test_a_four_word_qualifier_does_not_trigger
     RateLimitDetector.check!("You've hit your max open merge request limit\n", '')
+  end
+
+  def test_a_three_word_possessive_qualifier_triggers
+    assert_raises(RateLimitError) { RateLimitDetector.check!("You've hit your org's monthly spend limit", '') }
   end
 
   def test_a_short_or_four_letter_month_reaches_the_pause
