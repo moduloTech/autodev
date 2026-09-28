@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'timeout'
+require 'tmpdir'
 
 # The bounded, stdin-writing spawn behind UsageChecker#verdict.
 #
@@ -19,6 +20,11 @@ require 'timeout'
 # UsageChecker#initialize).
 module UsageProbeSpawn
   POLL_INTERVAL = 0.2 # seconds between liveness checks while waiting on the probe
+
+  # Where the probe runs — danger-claude mounts its working directory into the
+  # container. Under /tmp like every real call's clone (ProcessRunner's
+  # `/tmp/autodev_*`), so the container runtime already shares it.
+  WORK_ROOT = '/tmp'
 
   private
 
@@ -42,8 +48,12 @@ module UsageProbeSpawn
   private_constant :Pipes
 
   def send_probe
+    Dir.mktmpdir('autodev-probe-', WORK_ROOT) { |work_dir| probe_in(work_dir) }
+  end
+
+  def probe_in(work_dir)
     pipes = Pipes.open
-    pid = spawn_probe(pipes)
+    pid = spawn_probe(pipes, work_dir)
     pipes.close_child_ends
     write_stdin(pipes.stdin_w)
     out_thread = Thread.new { pipes.stdout_r.read }
@@ -53,9 +63,14 @@ module UsageProbeSpawn
     pipes&.close_all
   end
 
-  def spawn_probe(pipes)
+  # An empty directory of its own, never the process cwd (Autodev #127). That
+  # cwd is the LaunchAgent's WorkingDirectory, the service account's home: the
+  # probe mounted it — ~/.autodev/config.yml included — into a container to ask
+  # claude one word, and mise inside read its global config as an untrusted
+  # project file and added four lines of noise to every diagnostic.
+  def spawn_probe(pipes, work_dir)
     Process.spawn(DangerClaudeRunner::CLEAN_ENV, *@command,
-                  in: pipes.stdin_r, out: pipes.stdout_w, err: pipes.stderr_w, pgroup: true)
+                  chdir: work_dir, in: pipes.stdin_r, out: pipes.stdout_w, err: pipes.stderr_w, pgroup: true)
   end
 
   def write_stdin(stdin_w)
