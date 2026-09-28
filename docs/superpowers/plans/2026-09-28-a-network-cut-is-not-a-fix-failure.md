@@ -156,8 +156,7 @@ Tests:
 3. **The human paths reset the pair.** `reenter_via_reimplementation` does, and
    so does `reenter_via_pipeline_check` with `origin: nil`.
 4. **The automatic paths do not.** `resume_recovered_infra` on a row with
-   `dormant_recheck_count: 2` keeps it at 2. So does `reenter_via_pipeline_check`
-   with an origin set.
+   `dormant_recheck_count: 2` keeps it at 2 (it passes no origin — the trigger cannot be `origin`). So does `ReviewArrearsSweep`'s resume.
 5. **No reset on revive.** Take the `dormant_audit_routing_test.rb:172` case
    (`implementing`, `mr_iid: nil`, 4 h) and its `mr_iid: 42` variant: after
    `audit`, `dormant_recheck_count == 1`.

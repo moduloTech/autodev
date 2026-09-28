@@ -133,7 +133,9 @@ outside its own file, taken from the same helper.
 Reset `dormant_recheck_count: 0, dormant_recheck_at: nil` on the two human
 gestures that already reset the other budgets:
 - the label resume, i.e. `ResumeHandler#reenter_via_reimplementation`, and
-  `#reenter_via_pipeline_check` when `origin` is nil;
+  `#reenter_via_pipeline_check` when reached from `handle_reenter` (an explicit
+  `reset_dormant: true`, not `origin` — `resume_recovered_infra` reaches the same
+  method with `origin` nil, `poll_router.rb:107`);
 - the Reset button, i.e. `Issue.reset_for_retry!` with `reset_budget: true`.
 
 `reenter_via_pipeline_check` has two more callers, and neither resets the counter:
