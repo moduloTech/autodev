@@ -38,8 +38,8 @@ Repaired in production data, not in code.
 
 ## Decisions
 
-1. **The three GitLab write helpers never raise a transport failure.** `LabelManager#manage_labels`,
-   `IssueNotifier#hand_ticket_back` and `IssueNotifier#notify_issue` rescue the transport family
+1. **The two GitLab write helpers that follow a transition never raise a transport failure.**
+   `LabelManager#manage_labels` and `IssueNotifier#hand_ticket_back` rescue the transport family
    (`GitlabHelpers::TRANSPORT_ERRORS`, spelled out on `ExternalState#notify_stop`'s #115
    precedent), not only `Gitlab::Error::ResponseError`. They already had the contract "a failed
    write is logged and the caller carries on" for an HTTP error; a TCP timeout is the same outage
@@ -52,12 +52,16 @@ Repaired in production data, not in code.
    `IssueProcessor`'s `apply_label_doing`) used to abort the poll on a TCP timeout and redo the
    write next cycle; it now carries on with the label unwritten, exactly as it already did on a
    GitLab 502.
+   **`notify_issue` stays narrow** (adversarial review, reproduced against c4fac64): `post_answer`
+   and `post_clarification` post their content *before* transitioning, and the escaping error is
+   what sends them to `error` and a retry. Widened, the answer was lost and the row delivered.
 
 2. **Clore hands the ticket back when the bot holds it.** `IssuesController#close` closes first,
    then `Autodev::CloseHandback` reads the ticket and, when the bot is an assignee, reassigns it to
    `Issue#handback_target` (`displaced_assignee_id`, else the author — the rule `hand_ticket_back`
    already applies, moved onto the model so both read one definition). The row is closed whatever
-   GitLab answers (owner's decision: the off-switch is always available). The outcome
+   GitLab answers (owner's decision: the off-switch is always available). A handback is claimed
+   only when GitLab's returned payload carries the target (`GitlabHelpers.assigned_to?`). The outcome
    (`handed_back`, `not_held`, `no_target`, `failed`) is recorded in an `issue.close_handback`
    audit row and told in a flash. No GitLab comment: the ticket asks for the audit note, and a
    human gesture on the dashboard is not autodev speaking.
@@ -66,7 +70,8 @@ Repaired in production data, not in code.
    reached only while the bot is still the assignee (`not_ours?` asks that first). The
    `LabelHandover::Verdict` now carries the decisive event's author (`actor_id`), already read to
    tell a human from autodev; the ticket goes to them, else to `handback_target`. The handback
-   runs before the stop notice so the notice can say so (`abandon_reassigned` suffix, reused).
+   runs before the stop notice so the notice can say so (its own `handover_reassigned` suffix:
+   `abandon_reassigned` names a merge request the row may not have — truthfulness review).
    Owner's decision, 28/09.
 
 4. **A health card watches the stock: `held_tickets`.** `Autodev::HeldTicketProbe` runs from

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A finished request no longer leaves its GitLab ticket on the bot (Autodev #126).** Measured on 28/09/2026: 8 terminal rows (`done` / `closed`) held an open powerpanne ticket assigned to the bot — a list nobody reads, and one autodev no longer follows. Three causes were still able to produce more:
+  - **A GitLab timeout right after a terminal transition skipped the handback.** A#134 went `checking_pipeline → done` at 10:18:06 UTC on 04/09; the production log shows `Net::OpenTimeout` eight seconds later, out of `apply_label_done` → `manage_labels` → `@client.issue`. `manage_labels` and `hand_ticket_back` rescued `Gitlab::Error::ResponseError` only, so the handback, `finished_at`, the delivery note and the activity line never happened. Both now rescue the whole transport family (`GitlabHelpers::TRANSPORT_ERRORS`, spelled out), which is what they already did for an HTTP error: every remaining effect of `finalize_green_done`, `abandon_issue`, `finalize_question` and `give_up_reviewing` is attempted. `notify_issue` is deliberately **not** widened: `post_answer` and `post_clarification` post their content before they transition, and the escaping error is what sends them to `error` and a retry — swallowed, a question's answer was lost while the row was delivered anyway (adversarial review, reproduced against the base).
+  - **A label handover closed the row and kept the ticket.** A#130 and A#132 were not closed by the dashboard, as first read, but by `ExternalState#stop_on_handover` (`audit_logs`: `transition_auto`; activity: `handover_workflow_moved`): a human moved the label to `Development::Awaiting CR` without reassigning. The ticket now goes to **whoever moved the label** (the decisive label event's author, `LabelHandover::Verdict#actor_id`), else to `Issue#handback_target`, before the stop notice, which then says so (`handover_reassigned`, fr + en).
+  - **The dashboard's Clore wrote nothing on GitLab** (A#82, 24/09). The close now runs first and always — the off-switch never depends on GitLab — then `Autodev::CloseHandback` hands a bot-held ticket to `Issue#handback_target`. Outcome (`handed_back`, `not_held`, `no_target`, `failed`) in an `issue.close_handback` audit row and a flash.
+  - A handback is **claimed only when the payload GitLab returns carries the target** (`GitlabHelpers.assigned_to?`): GitLab Community answers 200 to an assignment it does not honour.
+  - `Issue#handback_target` is now the one definition of who gets a ticket back (`displaced_assignee_id`, else the author); `IssueNotifier#handback_target` delegates to it.
+
+### Added
+
+- **A `held_tickets` health card (Autodev #126).** `Autodev::HeldTicketProbe` runs from `AutodevPollJob` at most every 15 minutes — one `issues?state=opened&assignee_id=<bot>` read per project, 192 a day for the two configured projects — and records the terminal rows whose ticket is in that list (`ActivityEvent(kind: 'held_ticket')`, a machinery kind). `HealthReport#check_held_tickets` warns (200, not 503) naming up to five, re-reading each row's current status so a row that has since re-entered is never offered for Clore; a project GitLab did not answer about is counted as unread, never as "none held". Measured before release against a copy of the production `issues` table and live GitLab reads as the bot: exactly the 8 rows found by hand.
+
 ## [1.0.0-alpha.55] - 2026-09-24
 
 ### Fixed
