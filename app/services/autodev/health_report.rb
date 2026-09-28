@@ -15,7 +15,7 @@ module Autodev
   # where the top-level status is the worst severity across checks.
   class HealthReport # rubocop:disable Metrics/ClassLength
     CHECKS = %i[poller workers queue claude_usage danger_claude issues_error
-                mr_review review_skill mr_review_token stuck_issues database
+                mr_review review_skill mr_review_token stuck_issues held_tickets database
                 migrations gitlab_requests project_briefings].freeze
 
     # `danger_claude`'s severity mapping (Autodev #108): a quota outage is not
@@ -434,6 +434,45 @@ module Autodev
 
       meta[:sample] = stuck.first(5).map { |i| "##{i.issue_iid}(#{i.status})" }.join(' ')
       build(:warn, "#{stuck.size} issue(s) stuck with no path forward", meta)
+    end
+
+    # A request autodev no longer follows whose ticket is still on the bot
+    # (Autodev #126). Passive: `Autodev::HeldTicketProbe` reads GitLab from the
+    # poll cycle and this reads its record, as `check_review_skill` does.
+    #
+    # `warn`, not `down`: a forgotten ticket is somebody's backlog, not an
+    # outage, so `/healthz` keeps answering 200.
+    def check_held_tickets
+      state = HeldTicketProbe.state(now: @now)
+      return build(:ok, 'no held-ticket probe on file') if state[:checked_at].nil?
+
+      held_tickets_verdict(state)
+    end
+
+    def held_tickets_verdict(state)
+      held = state[:held]
+      meta = { checked: state[:checked], held: held.size, unknown: state[:unknown],
+               checked_at: iso(state[:checked_at]) }
+      return build(:ok, held_tickets_healthy_detail(state), meta) if held.empty?
+
+      meta[:sample] = held.first(5).map { |entry| held_ticket_entry(entry) }.join(' ')
+      build(:warn, "#{held.size} finished request(s) still hold their ticket on the bot — " \
+                   'Clore hands a done one back, GitLab a closed one', meta)
+    end
+
+    def held_ticket_entry(entry)
+      "A##{entry['id']}(#{entry['path']}##{entry['iid']},#{entry['status']})"
+    end
+
+    # A project GitLab did not answer about is never counted as holding
+    # nothing (Autodev #62): when none could be read the card says only that.
+    def held_tickets_healthy_detail(state)
+      read = state[:checked] - state[:unknown]
+      return "#{state[:unknown]} project(s) could not be read" if read <= 0
+      return "no finished request holds its ticket on the bot (#{read} project(s) read)" if state[:unknown].zero?
+
+      "no finished request holds its ticket on the #{read} project(s) read, " \
+        "#{state[:unknown]} project(s) could not be read"
     end
 
     # Reads what GitlabRequestCounter already recorded on the last
