@@ -403,11 +403,20 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # abandoned at `REVIEW_FAILURE_THRESHOLD`/`REVIEW_FAILURE_THRESHOLD` still
   # carried that after a reset and could give itself up again on the very next
   # stumble — with no way for the operator who clicked to know that.
+  # The dormant pair joined it under Autodev #125, for the same reason: a row
+  # reset at `dormant_recheck_count` 3/3 (A#139, A#144, A#148) was flagged
+  # `dormant_exhausted` at its next dormant episode without a single audit.
+  # Only under `reset_budget:`, because `revive_stalled!` — DormantAudit's own
+  # revive — calls this method too, and a counter reset on every successful
+  # revive would lift the cap that keeps a row falling dormant in a loop from
+  # consuming GitLab reads (#47, #103).
   # `clear_attention:` also clears the needs_attention trio, for the same
   # reason.
   def self.reset_for_retry!(scope, reset_budget: false, clear_attention: false)
     fields = { error_message: nil, started_at: nil }
-    fields.merge!(retry_count: 0, review_failure_count: 0) if reset_budget
+    if reset_budget
+      fields.merge!(retry_count: 0, review_failure_count: 0, dormant_recheck_count: 0, dormant_recheck_at: nil)
+    end
     fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention
 
     scope.where.not(mr_iid: nil)
