@@ -366,21 +366,38 @@ module Autodev
     # reassignment uniform, which would have let the other three in too. No nominal
     # completion path sets the flag and every give-up path does, so the clause
     # separates the two populations exactly.
+    #
+    # `post_completion_dispatched_at: nil` is the once-per-delivery clause (Autodev
+    # #114). The hook's precondition survives its own work —
+    # `start_post_completion!` -> `post_completion_done!` returns the row to
+    # `done`, and neither GitLab gate below is moved by a deploy — so without it
+    # the pass re-ran the command on every cycle, every 120 s in production, for as
+    # long as the MR stayed open. The reservation is taken here, at enqueue, not by
+    # the job at its end: a command running longer than one poll interval
+    # (`post_completion_timeout` defaults to 300 s) would otherwise be dispatched
+    # twice. It stands whatever the outcome — one attempt per delivery, the
+    # failure comment says how to replay — and `Issue::POST_COMPLETION_CLEARED`
+    # lifts it on every path back into work.
     def dispatch_done_unassigned
       pc_cmd = @project_config['post_completion']
       return unless pc_cmd.is_a?(Array) && pc_cmd.any?
 
-      ::Issue.where(project_path: @path, status: 'done', needs_attention: false)
+      ::Issue.where(project_path: @path, status: 'done', needs_attention: false,
+                    post_completion_dispatched_at: nil)
              .where.not(mr_iid: nil).find_each do |issue|
         check_post_completion_needed(issue)
       end
     end
 
+    # The reservation comes after the two gates on purpose: a row still assigned,
+    # or whose MR is `locked`, is deferred rather than served, and stamping it
+    # would turn "wait one cycle" into "never".
     def check_post_completion_needed(issue)
       return if still_assigned?(issue)
 
       state = @client.merge_request(@path, issue.mr_iid).state
       return if mr_state_defers_hook?(issue, state)
+      return unless reserve_post_completion?(issue)
 
       IssueProcessJob.perform_later(@path, issue.issue_iid, :post_completion)
       @logger.info("Enqueued post-completion for issue ##{issue.issue_iid}", project: @path)
@@ -509,6 +526,15 @@ module Autodev
              .where("infra_recheck_at IS NULL OR infra_recheck_at <= datetime('now')")
              .update_all(infra_recheck_at: Config.infra_recheck_backoff(@project_config,
                                                                         @config).seconds.from_now)
+             .positive?
+    end
+
+    # Compare-and-set, like `reserve_infra_recheck?`: the loser of a race between
+    # two cycles touches no row and enqueues nothing.
+    def reserve_post_completion?(issue)
+      ::Issue.where(id: issue.id, project_path: @path, status: 'done', needs_attention: false,
+                    post_completion_dispatched_at: nil)
+             .update_all(post_completion_dispatched_at: Time.current)
              .positive?
     end
 

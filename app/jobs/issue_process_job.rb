@@ -170,14 +170,40 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
                 .resume_recovered_infra(issue, build_client(config))
   end
 
+  # The return to `done` is unconditional, and that is a decision, not an
+  # accident (Autodev #94): a deploy that fails does not undo a delivery, so its
+  # failure is a signal (`PostCompletion#store_pc_error`), never a verdict. The
+  # `ensure` makes the decision hold on a raise too — before it, a failed clone
+  # left the row in `running_post_completion` until the next restart revived it.
+  #
+  # A job runs only on a row that still carries the reservation it was enqueued
+  # under (Autodev #114, plan review). `DISPATCHED_FROM` reads the status alone,
+  # and a reentry lifts the reservation (`Issue::POST_COMPLETION_CLEARED`): a job
+  # still queued when the row went back to work and was delivered again would
+  # otherwise find an unstamped `done` row, deploy, and leave the next cycle to
+  # reserve and deploy that same delivery a second time.
   def perform_post_completion(issue, config, project_config)
-    monitor = ::PipelineMonitor.new(**worker_kwargs(config, project_config))
+    return log_unreserved_skip(project_config, issue) unless issue.post_completion_dispatched_at
+
     issue.start_post_completion!
+    begin
+      run_hook(issue, config, project_config)
+    ensure
+      issue.post_completion_done!
+    end
+  end
+
+  def run_hook(issue, config, project_config)
     ctx = ::ActivityLogger::Ctx.new(build_client(config), project_config['path'],
                                     ::Autodev::JobLogger.new(logger))
     ::ActivityLogger.post(ctx, issue, :post_completion)
-    monitor.run_post_completion(issue, project_config['post_completion'])
-    issue.post_completion_done!
+    ::PipelineMonitor.new(**worker_kwargs(config, project_config))
+                     .run_post_completion(issue, project_config['post_completion'])
+  end
+
+  def log_unreserved_skip(project_config, issue)
+    logger.info("[issue_process] skipping post_completion for #{project_config['path']}##{issue.issue_iid}: " \
+                'the reservation it was enqueued under was lifted')
   end
 
   # Autodev #111. Entering `error` writes the retry decision (`mark_failed`

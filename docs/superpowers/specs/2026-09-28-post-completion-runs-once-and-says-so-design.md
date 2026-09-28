@@ -60,6 +60,13 @@ working state:
 A new delivery is a new deploy; a new delivery also gets a new verdict, so the
 previous one's error must not survive it.
 
+A restart does not lift it: `revive_stalled!` and `recover_on_startup!` return
+an interrupted `running_post_completion` to `done` with its stamp. And the job
+runs only on a row that still carries a reservation (plan review): `DISPATCHED_FROM`
+reads the status alone, so a job queued across a reentry and a second delivery
+would otherwise deploy that delivery, and the next cycle would reserve and deploy
+it again.
+
 Not backfilled. Every unstamped row the pass selects is a delivery whose hook
 has not run, which is exactly the population the pass selects today; the
 difference is that it now selects each one once.
@@ -67,7 +74,9 @@ difference is that it now selects each one once.
 ### 2. A GitLab comment on failure (#94)
 
 Every failure path of `run_post_completion` — invalid config, clone failure,
-non-zero exit, timeout — goes through `store_pc_error`, which now also posts one
+a command that cannot start (`Errno::ENOENT` / `EACCES` out of `Process.spawn`,
+plan review), non-zero exit, a signal (no exit code, plan review), timeout —
+goes through `store_pc_error`, which now also posts one
 localized comment on the ticket: which command, what happened (exit code /
 timeout / clone / config), that the delivery stands and the MR is untouched,
 that the command will not be re-run, where the output is (the dashboard), and

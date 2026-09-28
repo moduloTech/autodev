@@ -129,7 +129,7 @@ class PollRouter
                       pipeline_retrigger_count: 0,
                       error_message: nil, finished_at: nil, activity_note_id: nil,
                       needs_attention: false, attention_reason: nil, attention_detail: nil,
-                      infra_recheck_count: 0, infra_recheck_at: nil)
+                      infra_recheck_count: 0, infra_recheck_at: nil, **::Issue::POST_COMPLETION_CLEARED)
       apply_label_doing(existing.issue_iid)
       announce_reentry(existing)
     end
@@ -158,7 +158,8 @@ class PollRouter
                       fix_round: 0, discussion_fix_round: 0, error_message: nil,
                       finished_at: nil, started_at: nil,
                       pipeline_retrigger_count: 0, activity_note_id: nil,
-                      needs_attention: false, attention_reason: nil, attention_detail: nil)
+                      needs_attention: false, attention_reason: nil, attention_detail: nil,
+                      **::Issue::POST_COMPLETION_CLEARED)
       log_activity(existing, :reenter)
       enqueue_issue_processing(gl_issue, existing)
     end

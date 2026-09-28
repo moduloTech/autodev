@@ -23,7 +23,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # AR-written Issue, breaking any `date(created_at)`/`datetime(created_at)`
   # SQL the way it broke the activity_events sparkline.
   %i[started_at finished_at next_retry_at clarification_requested_at pipeline_poll_since
-     infra_recheck_at clarification_read_at created_at].each do |col|
+     infra_recheck_at clarification_read_at post_completion_dispatched_at created_at].each do |col|
     attribute col, :datetime
   end
 
@@ -405,8 +405,12 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # stumble — with no way for the operator who clicked to know that.
   # `clear_attention:` also clears the needs_attention trio, for the same
   # reason.
+  #
+  # Every reset also clears the `post_completion` reservation and its verdict
+  # (`POST_COMPLETION_CLEARED`): the row goes back into work, and a new delivery
+  # is a new deploy with a new outcome (Autodev #114/#94).
   def self.reset_for_retry!(scope, reset_budget: false, clear_attention: false)
-    fields = { error_message: nil, started_at: nil }
+    fields = { error_message: nil, started_at: nil, **POST_COMPLETION_CLEARED }
     fields.merge!(retry_count: 0, review_failure_count: 0) if reset_budget
     fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention
 
@@ -433,6 +437,13 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `fixing_discussions` are new here: HealthReport monitors them, but boot
   # recovery had no rule for either, so a row frozen in one survived a restart.
   REVIVE_TO_PENDING = (RECOVERABLE_ACTIVE_STATES + %w[answering_question]).freeze
+  # What every writer that takes a row back into work clears (Autodev #114/#94):
+  # `dispatch_done_unassigned` reserves a delivery's `post_completion` hook once,
+  # so the reservation must not outlive the delivery it was taken for — nor must
+  # that delivery's error, which would otherwise describe the next one. Written
+  # by `reset_for_retry!` and by both `ResumeHandler` reentries.
+  POST_COMPLETION_CLEARED = { post_completion_dispatched_at: nil, post_completion_error: nil }.freeze
+
   REVIVE_TO_PIPELINE = %w[reviewing fixing_pipeline fixing_discussions].freeze
   REVIVE_TO_DONE = %w[running_post_completion].freeze
   STALLED_STATES = (REVIVE_TO_PENDING + REVIVE_TO_PIPELINE + REVIVE_TO_DONE).freeze
