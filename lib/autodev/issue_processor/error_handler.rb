@@ -38,7 +38,7 @@ class IssueProcessor
       # Same seam, same reason: everything below this line writes (Autodev #97).
       return stop_on_stale_transition(error) if error.is_a?(StaleTransitionError)
 
-      bt = error.backtrace&.first(10)&.join("\n  ")
+      bt = ::BacktraceExcerpt.format(error)
       fields = build_error_fields(issue, error, bt)
       # The decision is already made above — passed through rather than
       # recomputed, so there is exactly one place that decides it (Autodev #103).
