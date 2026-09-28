@@ -120,10 +120,11 @@ class PollRouter
     # would otherwise re-enter at 5/5 and give itself up on the first stumble.
     #
     # `origin` travels to `Issue#emit_activity_event!` and is written on the
-    # `transition` row. Three callers fire this event and the row is the only
-    # record of which one did: a human reposing the todo label (nil — nobody to
-    # attribute it to), `resume_recovered_infra`, and `ReviewArrearsSweep`, whose
-    # idempotence depends on recognising its own re-arms and nobody else's.
+    # `transition` row. Three callers fire this event: a human reposing the todo
+    # label, `resume_recovered_infra` and `ReviewArrearsSweep`. Only the last
+    # passes an origin — its idempotence depends on recognising its own re-arms
+    # and nobody else's — so the first two both write nil and the row does not
+    # tell them apart (`PollRouter#resume_recovered_infra` passes none).
     #
     # `reset_dormant:` gives back the dormant budget (Autodev #125, D3), and only
     # `handle_reenter` passes it: the trigger is the human label resume, not a
