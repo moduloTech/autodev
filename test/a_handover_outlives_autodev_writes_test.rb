@@ -169,9 +169,10 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     row, gitlab = claimed_row(POWERPANNE)
     human!(gitlab, add: [DONE])
     human!(gitlab, remove: [DONE])
+    autodev!(gitlab, POWERPANNE, :apply_label_done, row)
     autodev!(gitlab, POWERPANNE, :apply_label_doing, row)
 
-    assert_nil scan(gitlab, row, POWERPANNE)
+    assert_nil scan(gitlab, row, POWERPANNE), 'the last edit the human made on Done is a removal'
   end
 
   def test_a_todo_reposed_after_the_move_is_a_request_for_work
@@ -219,20 +220,76 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     assert_nil scan(gitlab, row, POWERPANNE)
   end
 
-  # --- the window --------------------------------------------------------
+  def test_a_foreign_value_its_author_removed_again_is_not_a_move
+    row, gitlab = claimed_row(POWERPANNE)
+    human!(gitlab, add: [MOVED_ON])
+    human!(gitlab, remove: [MOVED_ON])
+    autodev!(gitlab, POWERPANNE, :apply_label_done, row)
+    autodev!(gitlab, POWERPANNE, :apply_label_doing, row)
 
-  # The window is `max(floor, started_at, created_at)`: each bound is pinned by
-  # a row where it is the latest of the three, with one event on each side.
-  def test_evidence_before_the_current_claim_is_ignored
-    row, gitlab = windowed_row(started_at: 2.days.ago, label_events_seen_until: nil)
-    human_done_at(gitlab, 3.days.ago)
-
-    assert_nil scan(gitlab, row, POWERPANNE), 'an event before started_at belongs to an earlier claim'
+    assert_nil scan(gitlab, row, POWERPANNE)
   end
 
-  def test_evidence_inside_the_current_claim_is_found
-    row, gitlab = windowed_row(started_at: 2.days.ago, label_events_seen_until: nil)
-    human_done_at(gitlab, 1.day.ago)
+  def test_doing_reposed_by_a_human_after_the_move_is_a_request_for_work
+    row, gitlab = claimed_row(POWERPANNE)
+    human!(gitlab, remove: [DOING])
+    human!(gitlab, add: [DONE])
+    human!(gitlab, add: [DOING])
+    autodev!(gitlab, POWERPANNE, :apply_label_doing, row, clear_scope: true)
+
+    assert_nil scan(gitlab, row, POWERPANNE), 'the human put the ticket back in Doing themselves'
+  end
+
+  def test_doing_removed_then_reposed_by_the_human_is_not_a_removal
+    row, gitlab = claimed_row(POWERPANNE)
+    human!(gitlab, remove: [DOING])
+    human!(gitlab, add: [DOING])
+    autodev!(gitlab, POWERPANNE, :apply_label_done, row)
+    autodev!(gitlab, POWERPANNE, :apply_label_doing, row)
+
+    assert_nil scan(gitlab, row, POWERPANNE), 'the last edit on Doing by the human is the one that counts'
+  end
+
+  def test_a_todo_posed_in_the_same_edit_as_the_move_neutralises_it
+    row, gitlab = claimed_row(POWERPANNE)
+    human!(gitlab, add: [DONE, 'To Do'])
+    autodev!(gitlab, POWERPANNE, :apply_label_doing, row)
+
+    assert_nil scan(gitlab, row, POWERPANNE), 'a board edit writes one event per label, all at one timestamp'
+  end
+
+  # --- the window --------------------------------------------------------
+
+  # The window is `max(floor, created_at)`: each bound is pinned by a row
+  # where it is the later of the two, with one event on each side.
+  #
+  # `started_at` is deliberately not a bound (concurrency review):
+  # `start_processing` stamps it just before the `apply_label_doing` that
+  # erases, so a human edit between the dispatch and the worker's start would
+  # have fallen outside the window.
+  def test_an_edit_made_before_the_worker_stamped_started_at_is_still_found
+    row, gitlab = claimed_row(POWERPANNE)
+    human!(gitlab, add: [DONE])
+    travel 1.second
+    ::Issue.where(id: row.id).update_all(started_at: Time.current)
+    autodev!(gitlab, POWERPANNE, :apply_label_doing, row, after: 0)
+
+    assert_equal :done_added, scan(gitlab, row, POWERPANNE)&.reason
+  end
+
+  # GitLab dates an event in milliseconds, on its own clock, when the edit
+  # commits; the floor is autodev's microseconds. An edit committed while a
+  # clean read was in flight must still be inside the next window.
+  def test_an_edit_committed_during_a_clean_read_is_inside_the_next_window
+    row, gitlab = cleanly_written_row
+    read_at = Time.current
+    # A read slower than the margin: the floor must be anchored on when the
+    # read *started*, not on when it returned.
+    gitlab.on_events_read { travel 90.seconds }
+    scan(gitlab, row, POWERPANNE)
+    gitlab.on_events_read
+    human_edit_dated(gitlab, read_at + 0.0004, add: [DONE])
+    autodev!(gitlab, POWERPANNE, :apply_label_doing, row)
 
     assert_equal :done_added, scan(gitlab, row, POWERPANNE)&.reason
   end
@@ -249,6 +306,15 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     human_done_at(gitlab, 1.hour.ago)
 
     assert_equal :done_added, scan(gitlab, row, POWERPANNE)&.reason
+  end
+
+  def test_an_event_dated_exactly_at_the_floor_is_already_accounted_for
+    row, gitlab = claimed_row(POWERPANNE)
+    floor = Time.current.change(usec: 0) - 1.hour
+    row.update_columns(label_events_seen_until: floor, labels_written_at: Time.current)
+    human_done_at(gitlab, floor)
+
+    assert_nil scan(gitlab, row, POWERPANNE)
   end
 
   def test_evidence_before_the_row_existed_is_ignored
@@ -295,6 +361,34 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     assert_nil scan(gitlab, row, POWERPANNE), 'the close accounted for every event before it'
   end
 
+  # Adversarial review: a reviewer reposes `label_done` on a `done` row — when
+  # autodev no longer holds the ticket — and an operator resets it weeks later.
+  # The reset's own write removes the label; the scan must not read the
+  # reviewer's old edit as a handover of work autodev was not doing.
+  def test_an_operator_reset_does_not_replay_what_happened_while_the_row_was_done
+    row, gitlab = claimed_row(POWERPANNE)
+    autodev!(gitlab, POWERPANNE, :apply_label_done, row)
+    row.update_columns(status: 'done')
+    human!(gitlab, add: [MOVED_ON], remove: [DONE])
+    travel 6.weeks
+    human!(gitlab, add: [DONE], remove: [MOVED_ON])
+    ::Issue.reset_for_retry!(::Issue.where(id: row.id), reset_budget: true, clear_attention: true)
+    autodev!(gitlab, POWERPANNE, :apply_label_doing, row)
+
+    refute not_ours?(row, gitlab, POWERPANNE)
+    assert_equal 'checking_pipeline', row.reload.status
+  end
+
+  def test_an_automatic_recovery_keeps_the_floor_where_it_was
+    row, = claimed_row(POWERPANNE)
+    floor = floor_of(row)
+    row.update_columns(status: 'error', retry_count: 1)
+    travel 1.hour
+    ::Issue.reset_for_retry!(::Issue.where(id: row.id))
+
+    assert_equal floor, floor_of(row), 'a recovery is not a statement about the ticket'
+  end
+
   # --- cost -------------------------------------------------------------
 
   def test_no_write_since_the_floor_costs_no_call
@@ -305,6 +399,15 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     assert_equal 0, gitlab.event_calls
   end
 
+  def test_a_write_stamped_at_the_floor_itself_is_not_due
+    row, gitlab = claimed_row(POWERPANNE)
+    at = 1.minute.ago
+    row.update_columns(labels_written_at: at, label_events_seen_until: at)
+    scan(gitlab, row, POWERPANNE)
+
+    assert_equal 0, gitlab.event_calls, 'the floor is taken before the read: a write at it preceded the read'
+  end
+
   def test_a_row_never_scanned_is_due_at_its_first_write
     row, gitlab = claimed_row(POWERPANNE)
     row.update_columns(labels_written_at: 1.minute.ago, label_events_seen_until: nil)
@@ -313,21 +416,27 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     assert_equal 1, gitlab.event_calls
   end
 
-  def test_a_clean_scan_advances_the_floor_to_the_moment_before_the_read
+  def test_a_clean_scan_advances_the_floor_to_a_margin_before_the_read
     row, gitlab = cleanly_written_row
     before_read = Time.current
     gitlab.on_events_read { travel 10.seconds }
 
     assert_nil scan(gitlab, row, POWERPANNE)
-    assert_in_delta before_read, floor_of(row), 1, 'the floor is the moment before the read, not after it'
+    assert_in_delta before_read - Autodev::LabelHandover::ErasedScan::FLOOR_MARGIN, floor_of(row), 1,
+                    'the floor is a margin before the moment the read started, not after it'
   end
 
-  def test_a_clean_scan_is_not_repeated_without_a_new_write
+  # A write within the margin of the read re-arms the scan once, for one poll
+  # cycle; after that the floor has passed it and nothing is read again.
+  def test_a_clean_scan_is_not_repeated_past_the_margin_without_a_new_write
     row, gitlab = cleanly_written_row
     scan(gitlab, row, POWERPANNE)
+    travel 2.minutes
+    scan(gitlab, ::Issue.find(row.id), POWERPANNE)
+    travel 2.minutes
     scan(gitlab, ::Issue.find(row.id), POWERPANNE)
 
-    assert_equal 1, gitlab.event_calls, 'a second verdict with no write since reads nothing'
+    assert_equal 2, gitlab.event_calls, 'one re-read inside the margin, none after'
   end
 
   def test_a_write_during_the_read_makes_the_next_verdict_scan_again
@@ -432,10 +541,14 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     stamped = row.reload.label_events_seen_until
 
     refute_nil stamped
-    travel 1.hour
+    # A sentinel rather than a clock: `CURRENT_TIMESTAMP` is SQLite's own, which
+    # `travel` does not move, so two runs a millisecond apart stamp the same
+    # second whether or not the guard exists (sabotage).
+    sentinel = Time.utc(2026, 1, 2, 3, 4, 5)
+    row.update_columns(label_events_seen_until: sentinel)
     migration.up
 
-    assert_equal stamped, row.reload.label_events_seen_until, 'a re-run on boot only fills NULL'
+    assert_equal sentinel, row.reload.label_events_seen_until, 'a re-run on boot only fills NULL'
   end
 
   private
@@ -480,6 +593,14 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     autodev!(gitlab, POWERPANNE, :apply_label_done, row, after: 0)
     autodev!(gitlab, POWERPANNE, :apply_label_doing, row, after: 0)
     [row, gitlab]
+  end
+
+  # A person's edit whose events GitLab dates at `time` — its commit time, not
+  # the moment autodev sees it.
+  def human_edit_dated(gitlab, time, **edit)
+    before = gitlab.instance_variable_get(:@events).size
+    gitlab.human_edit(**edit)
+    gitlab.instance_variable_get(:@events).drop(before).each { |event| event['created_at'] = time.utc.iso8601(3) }
   end
 
   def human_done_at(gitlab, time) = gitlab.push_event('add', DONE, HUMAN_ID, time.utc.iso8601(3))

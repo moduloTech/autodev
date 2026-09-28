@@ -416,9 +416,19 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # stumble — with no way for the operator who clicked to know that.
   # `clear_attention:` also clears the needs_attention trio, for the same
   # reason.
+  #
+  # The operator reset also stamps `label_events_seen_until` (Autodev #101,
+  # adversarial review): the human asking for the reset *is* the answer to
+  # "has anybody taken this ticket", so the label events before it are
+  # accounted for. Without the stamp, a reviewer who reposed `label_done`
+  # weeks earlier on a `done` row — when autodev no longer held the ticket —
+  # was found by `LabelHandover::ErasedScan` right after the reset's own
+  # `apply_label_doing` removed that label, and the row was closed with a note
+  # blaming them. The two automatic callers pass no `reset_budget:` and keep
+  # the floor where it was: a recovery is not a statement about the ticket.
   def self.reset_for_retry!(scope, reset_budget: false, clear_attention: false)
     fields = { error_message: nil, started_at: nil }
-    fields.merge!(retry_count: 0, review_failure_count: 0) if reset_budget
+    fields.merge!(retry_count: 0, review_failure_count: 0, label_events_seen_until: Time.current) if reset_budget
     fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention
 
     scope.where.not(mr_iid: nil)

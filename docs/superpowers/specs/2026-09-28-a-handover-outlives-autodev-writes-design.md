@@ -40,8 +40,9 @@ The ticket names three readings. The owner chose the conditional one on
   rows and called this cost marginal. It no longer is.
 - **Conditional** (this spec): the current state can only be erased by an
   autodev write, so the events are read only when autodev has written labels
-  since the last time they were read. Cost: at most one events read (1–2 pages)
-  per autodev label write, **≤ ~100 requests a week**.
+  since the last time they were read. Cost: one events read (1–2 pages) per autodev
+  label write, two when the write came within the floor's margin of a read,
+  **≤ ~200 requests a week**.
 - **Memorised last-seen labels**: the difference it would trigger on is created
   by autodev's own write, so it reduces to the conditional reading with an extra
   JSON column.
@@ -57,8 +58,14 @@ Two columns on `issues`, both nullable `datetime`:
   and the stamp loses the trigger. Missing a handover is the lesser harm; the
   class's rule is "everything unknown resolves to do not stop".
 - `label_events_seen_until` — the floor: every label event before it has been
-  accounted for. Advanced to `t0` (captured **before** the events read) whenever
-  a verdict reads the events and finds no handover. Also stamped to `now` when
+  accounted for. Advanced to `t0 − 60 s` (`t0` captured **before** the events
+  read) whenever a verdict reads the events and finds no handover. The margin
+  exists because an event's `created_at` is GitLab's commit time in
+  milliseconds, not autodev's clock, so an edit landing during the read can be
+  dated at or before `t0` (concurrency review). Also stamped by an operator
+  reset (`reset_for_retry!(reset_budget: true)`): without it, a reviewer's edit
+  made while the row sat in `done` was replayed as a handover after the reset's
+  own write (adversarial review). Also stamped to `now` when
   a row enters `closed` (an AASM `after_all_transitions` assignment, the same
   way `stamp_pipeline_watch!` works). Evidence before a close has been acted on,
   whoever closed the row. Without this, a dashboard reset of a handed-over row
@@ -71,10 +78,12 @@ one stamped at the floor itself preceded the read. No compare-and-set is needed.
 (A first draft used `>=`, which re-read the events on every cycle whenever the
 write and the floor fell in the same instant.)
 
-Window: events with `created_at > max(label_events_seen_until, started_at,
-created_at)` of the row. `started_at` is stamped at `IssueProcessor#start_processing`,
-which is a fresh claim (reset, reentry to `pending`, retry, clarification
-answered). `created_at` bounds a new row to the life of the row. The migration
+Window: events with `created_at > max(label_events_seen_until, created_at)` of
+the row. `created_at` bounds a new row to the life of the row. A first draft also
+bounded it by `started_at`. The concurrency review showed that
+`IssueProcessor#start_processing` stamps it just *before* the `apply_label_doing`
+that erases, so a human edit made between the dispatch and the worker's start
+fell outside the window. The migration
 backfills `label_events_seen_until = now` on existing rows, so the first write
 after deploy does not replay months of history.
 

@@ -11,6 +11,17 @@ module Autodev
     # the four configured labels and `events` — so "someone else", "in my scope"
     # and "the ticket's history" mean exactly what they mean in stages 1 and 2.
     module ErasedScan
+      # How far behind the moment of a clean read the floor is put back. The
+      # floor is autodev's clock in microseconds; an event's `created_at` is
+      # GitLab's, in milliseconds, stamped when its edit committed. An edit
+      # landing while the read is in flight can therefore carry a `created_at`
+      # at or before the read's start, and a floor set there would put it
+      # outside every later window — for good once autodev erases the label
+      # (concurrency review). Re-reading a minute of events already seen is
+      # harmless: the same events give the same answer. Its cost is at most one
+      # more read after a write that preceded a read by less than this.
+      FLOOR_MARGIN = 60 # seconds
+
       private
 
       # Stage 3 (Autodev #101) — the handover a label write of autodev's erased.
@@ -25,15 +36,16 @@ module Autodev
       # one way the evidence disappears: at most one read per autodev label write.
       #
       # Nil when nothing was erased, or when the scan is not due. A scan that finds
-      # nothing advances the floor to the moment *before* the read, so a write
-      # landing during the read is still after the floor and fires the next cycle.
+      # nothing advances the floor to `FLOOR_MARGIN` before the read, so a write
+      # landing during the read is after the floor and fires the next cycle, and
+      # an edit committed during it is still inside the next window.
       def erased_handover(issue_iid, row)
-        clocks = row && label_clocks(row)
+        clocks = label_clocks(row)
         return unless clocks && scan_due?(clocks)
 
-        floor = clocks.values_at(:seen_until, :started_at, :created_at).compact.max
+        floor = clocks.values_at(:seen_until, :created_at).compact.max
         found = erased_evidence(window(events(issue_iid), floor))
-        advance_floor(row, @read_started_at.fetch(issue_iid)) unless found
+        advance_floor(row, @read_started_at.fetch(issue_iid) - FLOOR_MARGIN) unless found
         found
       end
 
@@ -43,9 +55,8 @@ module Autodev
       def label_clocks(row)
         return unless row.is_a?(::Issue) && row.persisted?
 
-        values = ::Issue.where(id: row.id)
-                        .pick(:labels_written_at, :label_events_seen_until, :started_at, :created_at)
-        values && %i[written_at seen_until started_at created_at].zip(values).to_h
+        values = ::Issue.where(id: row.id).pick(:labels_written_at, :label_events_seen_until, :created_at)
+        values && %i[written_at seen_until created_at].zip(values).to_h
       end
 
       # Strictly after: the floor is taken before the read, so a write that
@@ -67,9 +78,14 @@ module Autodev
                .update_all(label_events_seen_until: read_at)
       end
 
-      # The window starts at the latest of the floor, the current claim
-      # (`started_at`, stamped by `IssueProcessor#start_processing`; NULL after a
-      # reset to `checking_pipeline`, hence `compact`) and the row's own birth.
+      # The window starts at the later of the floor and the row's own birth.
+      # Not at `started_at`, though a fresh claim looks like the natural bound:
+      # `IssueProcessor#start_processing` stamps it just *before* the
+      # `apply_label_doing` that erases, so a human edit made between the
+      # dispatch and the worker's start fell before the window and was lost —
+      # the very case this scan exists for (concurrency review). What an older
+      # claim leaves behind is bounded otherwise: a close stamps the floor, and
+      # a todo label posed since neutralises what precedes it.
       # An event with no readable `created_at` is never evidence.
       def window(all, floor)
         all.select do |event|
