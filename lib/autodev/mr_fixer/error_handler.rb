@@ -36,7 +36,7 @@ class MrFixer
       # Before every write below — the row belongs to a human now (Autodev #97).
       return stop_on_stale_transition(error) if error.is_a?(StaleTransitionError)
 
-      bt = error.backtrace&.first(10)&.join("\n  ")
+      bt = ::BacktraceExcerpt.format(error)
       # No retry scheduled — same asymmetry as PipelineMonitor's generic
       # handler, and the same recovery: DormantAudit's error arm (Autodev #103).
       safe_mark_failed!(issue, next_retry_at: nil)

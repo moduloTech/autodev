@@ -81,11 +81,14 @@ class GitlabRequestCounter < SimpleDelegator
     result # a return value that refuses the reassignment is still the answer
   end
 
+  # A page turn reaches `method_missing` from inside the gem's
+  # `PaginatedResponse` (see `own_pages`), so a fixed depth named the gem, or
+  # this file, instead of the autodev call that started the read (Autodev #125).
   def call_and_track_failures(name, kind, ...)
     __getobj__.public_send(name, ...)
   rescue *::GitlabHelpers::TRANSPORT_ERRORS => e
-    ::GitlabTransportFailure.record!(kind: kind, endpoint: name.to_s, error: e,
-                                     caller_location: caller_locations(2, 1)&.first&.to_s)
+    location = ::BacktraceExcerpt.first_own_location(caller_locations, skip: [__FILE__])
+    ::GitlabTransportFailure.record!(kind: kind, endpoint: name.to_s, error: e, caller_location: location)
     raise
   end
 end

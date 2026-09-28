@@ -47,7 +47,7 @@ class PipelineMonitor
     def handle_failure_error(issue, error)
       return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
 
-      bt = error.backtrace&.first(10)&.join("\n  ")
+      bt = ::BacktraceExcerpt.format(error)
       log_error "Pipeline evaluation/fix failed: #{error.class}: #{error.message}"
       log_error "  #{bt}" if bt
       # No retry scheduled — the asymmetry with IssueProcessor's backoff is a
