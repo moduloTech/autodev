@@ -42,10 +42,13 @@ class ALabelHandoverHandsTheTicketBackTest < Minitest::Test # rubocop:disable Me
   class RecordingClient
     attr_reader :log, :notes
 
-    def initialize(labels: [AWAITING_CR], events: [], edit_error: nil)
+    # `honoured: false` is GitLab answering 200 to an assignment it did not
+    # apply — the payload it returns does not carry the new assignee.
+    def initialize(labels: [AWAITING_CR], events: [], edit_error: nil, honoured: true)
       @labels = labels
       @events = events
       @edit_error = edit_error
+      @honoured = honoured
       @log = []
       @notes = []
     end
@@ -58,7 +61,13 @@ class ALabelHandoverHandsTheTicketBackTest < Minitest::Test # rubocop:disable Me
       @log << [:edit, attrs]
       raise @edit_error.call if @edit_error
 
-      FakeIssue.new('opened', [], @labels)
+      FakeIssue.new('opened', assignees_after(attrs), @labels)
+    end
+
+    def assignees_after(attrs)
+      return [FakeAssignee.new(AUTODEV_ID)] unless @honoured
+
+      Array(attrs[:assignee_ids]).map { |id| FakeAssignee.new(id) }
     end
 
     def create_issue_note(_path, _iid, body)
@@ -106,7 +115,7 @@ class ALabelHandoverHandsTheTicketBackTest < Minitest::Test # rubocop:disable Me
   end
 
   def stop_notices(client) = client.notes.select { |n| n.start_with?(stop_notice_base) }
-  def reassigned_sentence = Locales.t(:abandon_reassigned, locale: :fr)
+  def reassigned_sentence = Locales.t(:handover_reassigned, locale: :fr)
 
   # --- A2: the verdict names who moved the ticket -------------------------
 
@@ -207,6 +216,23 @@ class ALabelHandoverHandsTheTicketBackTest < Minitest::Test # rubocop:disable Me
     Host.new(client, @logger).stop_on_handover(active, gl_moved)
 
     assert_equal ["#{stop_notice_base}\n\n#{reassigned_sentence}"], stop_notices(client)
+  end
+
+  # The notice claims what the payload GitLab returned says, not what was sent.
+  def test_an_assignment_gitlab_does_not_honour_is_not_announced
+    client = RecordingClient.new(events: moved_by(MOVER_ID), honoured: false)
+    issue = active
+    Host.new(client, @logger).stop_on_handover(issue, gl_moved)
+
+    assert_equal [{ assignee_ids: [MOVER_ID] }], client.assignee_edits
+    assert_equal [stop_notice_base], stop_notices(client)
+    assert_equal 'closed', issue.reload.status
+  end
+
+  # The suffix names no merge request: a handover also stops rows that never
+  # reached one (alpha-56 truthfulness review).
+  def test_the_handover_sentence_claims_no_merge_request
+    %i[fr en].each { |locale| refute_match(/\bMR\b|merge request/i, Locales.t(:handover_reassigned, locale: locale)) }
   end
 
   def stop_with_timed_out_handback(issue)

@@ -446,7 +446,17 @@ module Autodev
       state = HeldTicketProbe.state(now: @now)
       return build(:ok, 'no held-ticket probe on file') if state[:checked_at].nil?
 
-      held_tickets_verdict(state)
+      held_tickets_verdict(state.merge(held: still_finished(state[:held])))
+    end
+
+    # The probe's list is up to `INTERVAL` old, and the card tells an operator to
+    # Clore what it names — so a row that has since re-entered (todo label
+    # reposed, bot reassigned) must drop out now, not at the next probe, or the
+    # advice cancels a live request (adversarial review). One indexed read; the
+    # status shown is today's.
+    def still_finished(held)
+      current = Issue.where(id: held.map { |entry| entry['id'] }, status: %w[done closed]).pluck(:id, :status).to_h
+      held.filter_map { |entry| entry.merge('status' => current[entry['id']]) if current.key?(entry['id']) }
     end
 
     def held_tickets_verdict(state)
@@ -455,10 +465,17 @@ module Autodev
                checked_at: iso(state[:checked_at]) }
       return build(:ok, held_tickets_healthy_detail(state), meta) if held.empty?
 
-      meta[:sample] = held.first(5).map { |entry| held_ticket_entry(entry) }.join(' ')
-      build(:warn, "#{held.size} finished request(s) still hold their ticket on the bot — " \
-                   'Clore hands a done one back, GitLab a closed one', meta)
+      meta[:sample] = held_tickets_sample(held)
+      build(:warn, "#{held.size} finished request(s) still hold their ticket on the bot" \
+                   "#{held_tickets_unread_clause(state)} — Clore hands a done one back, GitLab a closed one", meta)
     end
+
+    # With a project unread the count is a floor, and the card says so.
+    def held_tickets_unread_clause(state)
+      state[:unknown].positive? ? " (at least: #{state[:unknown]} project(s) could not be read)" : ''
+    end
+
+    def held_tickets_sample(held) = held.first(5).map { |entry| held_ticket_entry(entry) }.join(' ')
 
     def held_ticket_entry(entry)
       "A##{entry['id']}(#{entry['path']}##{entry['iid']},#{entry['status']})"

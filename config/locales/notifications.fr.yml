@@ -23,6 +23,7 @@ fr:
   review_findings_unanchored: ":warning: %{tag} : j'ai relu %{mr_url} et la revue demande des corrections, mais aucun de ses constats n'a pu etre ancre sur le diff (GitLab a refuse la position, ou le constat n'en portait pas). Les constats sont dans le commentaire de synthese de la merge request, en texte : aucun fil de discussion ne les porte, donc rien ne les suivra et je ne peux pas annoncer cette merge request comme relue. J'arrete de suivre cette demande : traitez les constats, rendez la merge request ancrable, puis remettez le label de depart et reassignez-moi."
   gitlab_refused_request: ":warning: %{tag} : GitLab refuse l'appel `%{what}` que je dois faire sur %{mr_url} — HTTP %{status}, %{count} fois avec la meme reponse. La requete est correcte de mon cote et la reponse ne changera pas d'elle-meme : j'arrete de suivre cette demande. Je ne diagnostique pas la cause a votre place, je vous rapporte ce que GitLab repond : %{answer}. Corrigez ce que GitLab refuse, puis remettez le label de depart et reassignez-moi."
   abandon_reassigned: ":arrow_right: Je t'ai reassigne le ticket : autodev ne le suit plus. A toi de reprendre la main sur la MR."
+  handover_reassigned: ":arrow_right: Je vous ai reassigne le ticket : autodev ne le suit plus."
   unassigned_stop: |-
     :stop_sign: %{tag} : je ne suis plus assigne a ce ticket, j'arrete le travail en cours.
 

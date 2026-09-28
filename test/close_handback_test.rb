@@ -86,11 +86,17 @@ class CloseHandbackTest < Minitest::Test
     assert_equal 'Stéphane Meunier', perform(row, client).target_name
   end
 
-  def test_the_target_name_falls_back_to_the_id_when_gitlab_names_nobody
-    client = StubClient.new(assignee_ids: [AUTODEV_ID])
-    client.edit_response = FakeIssue.new([])
+  # GitLab answered 200 and its payload does not carry the target — nobody, or
+  # the bot still: accepted, not honoured (GitLab Community, a deactivated
+  # account). Not a handback, so not claimed as one.
+  def test_an_assignment_gitlab_does_not_honour_is_a_failure
+    [[], [FakeUser.new(AUTODEV_ID, 'autodev')]].each do |returned|
+      client = StubClient.new(assignee_ids: [AUTODEV_ID]).tap { |c| c.edit_response = FakeIssue.new(returned) }
+      result = perform(row, client)
 
-    assert_equal AUTHOR_ID.to_s, perform(row, client).target_name
+      assert_equal [:failed, AUTHOR_ID, true],
+                   [result.outcome, result.target_id, result.error.include?("user #{AUTHOR_ID}")]
+    end
   end
 
   def test_the_displaced_assignee_wins_over_the_author

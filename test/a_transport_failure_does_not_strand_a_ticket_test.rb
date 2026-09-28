@@ -191,14 +191,16 @@ class ATransportFailureDoesNotStrandATicketTest < Minitest::Test # rubocop:disab
     assert_delivered(green_done(labels_edit: -> { Errno::ECONNRESET.new('Connection reset by peer') }))
   end
 
-  # The delivery note itself failing to post must not abort the sequence
-  # either — `finished_at` and the activity entry come after it.
-  def test_a_delivery_note_whose_connection_resets_still_finishes_the_row
+  # `notify_issue` still raises a transport failure (see
+  # `a_note_posted_before_a_transition_still_aborts_test.rb` for why), and here
+  # that costs nothing that matters: the handback and `finished_at` are written
+  # before the delivery note, so the escaping error only loses the activity line.
+  def test_a_delivery_note_whose_connection_resets_has_already_handed_the_ticket_back
     issue = green_done(note: -> { Errno::ECONNRESET.new('Connection reset by peer') })
 
     assert_finished(issue)
-    assert_includes activity_keys(issue), 'pipeline_green_done'
-    assert_empty check_failed_lines
+    assert_handed_to(AUTHOR_ID)
+    refute_empty check_failed_lines, 'the note failure should still reach the poll boundary'
   end
 
   # --- the same shape through the three other post-transition sequences ----
@@ -296,11 +298,9 @@ class ATransportFailureDoesNotStrandATicketTest < Minitest::Test # rubocop:disab
     refute_includes reason_note, reassigned_sentence
   end
 
-  def test_a_note_that_times_out_is_logged_not_raised
+  def test_a_note_that_times_out_still_raises
     host = worker(PipelineMonitor, FakeClient.new(raise_on: { note: -> { Net::ReadTimeout.new('read') } }))
 
-    host.send(:notify_issue, 1, 'hello')
-
-    assert(@logger.messages.any? { |m| m.include?('Failed to post comment on #1') })
+    assert_raises(Net::ReadTimeout) { host.send(:notify_issue, 1, 'hello') }
   end
 end

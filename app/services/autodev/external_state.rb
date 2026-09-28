@@ -95,7 +95,7 @@ module Autodev
       @logger.info("Issue ##{issue.issue_iid}: #{verdict.reason} (#{verdict.label}), " \
                    'stopping and closing', project: @path)
       handed_back = hand_over_to(issue, verdict.actor_id || issue.handback_target)
-      notify_stop(issue, key, suffix: (:abandon_reassigned if handed_back), label: verdict.label)
+      notify_stop(issue, key, suffix: (:handover_reassigned if handed_back), label: verdict.label)
       close_row!(issue, key, label: verdict.label)
       verdict
     end
@@ -115,17 +115,24 @@ module Autodev
     # A write, so non-fatal like `notify_stop` below and spelled out for the
     # same scanner: the row closes either way, because the stop is the human's
     # decision and a GitLab outage must not keep autodev on their ticket.
+    #
+    # Read back off the payload GitLab returns, because the notice claims it.
     def hand_over_to(issue, target)
       return false unless target
 
-      @client.edit_issue(@path, issue.issue_iid, assignee_ids: [target])
-      @logger.info("Issue ##{issue.issue_iid}: handed over to user #{target}", project: @path)
-      true
+      response = @client.edit_issue(@path, issue.issue_iid, assignee_ids: [target])
+      log_handover(issue, target, ::GitlabHelpers.assigned_to?(response, target))
     rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
            ::OpenSSL::SSL::SSLError, ::EOFError => e
       @logger.error("Failed to hand ##{issue.issue_iid} over to user #{target}: #{e.message}",
                     project: @path)
       false
+    end
+
+    def log_handover(issue, target, landed)
+      @logger.info("Issue ##{issue.issue_iid}: handover to user #{target} #{landed ? 'landed' : 'not confirmed'}",
+                   project: @path)
+      landed
     end
 
     # The one terminal write. The three outcomes above differ only by the

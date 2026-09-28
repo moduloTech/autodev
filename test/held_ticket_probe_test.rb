@@ -85,8 +85,13 @@ class HeldTicketProbeTest < ActiveSupport::TestCase
                           created_at: Time.current - age)
   end
 
+  # The card re-reads each named row's status (Autodev #126, adversarial
+  # review), so the rows it names exist.
   def held_entries(count)
-    Array.new(count) { |i| { 'id' => 40 + i, 'path' => 'group/a', 'iid' => 100 + i, 'status' => 'done' } }
+    Array.new(count) do |i|
+      Issue.create!(id: 40 + i, project_path: 'group/a', issue_iid: 100 + i, status: 'done')
+      { 'id' => 40 + i, 'path' => 'group/a', 'iid' => 100 + i, 'status' => 'done' }
+    end
   end
 
   # The whole report, with the checks this test environment cannot satisfy
@@ -217,6 +222,21 @@ class HeldTicketProbeTest < ActiveSupport::TestCase
     assert_empty client.calls
   end
 
+  # The boundary itself: a probe exactly `INTERVAL` old is due, one second
+  # younger is not (the sabotage pass found `>=` → `>` survived 14 and 16 min).
+  def test_the_interval_is_a_closed_bound
+    now = Time.current
+    { Autodev::HeldTicketProbe::INTERVAL => 2, Autodev::HeldTicketProbe::INTERVAL - 1.second => 0 }.each do |age, calls|
+      ActivityEvent.where(kind: Autodev::HeldTicketProbe::KIND).delete_all
+      ActivityEvent.create!(issue_id: nil, kind: Autodev::HeldTicketProbe::KIND, level: 'info',
+                            payload_json: JSON.generate(held: [], checked: 2, unknown: 0), created_at: now - age)
+      client = FakeClient.new
+      Autodev::HeldTicketProbe.probe!(config: {}, projects: [A, B], client: client, now: now)
+
+      assert_equal calls, client.calls.size, "age #{age.inspect}"
+    end
+  end
+
   def test_a_probe_older_than_the_interval_asks_once_per_project
     probe_event(16.minutes)
     client = FakeClient.new
@@ -257,6 +277,29 @@ class HeldTicketProbeTest < ActiveSupport::TestCase
     assert_equal :warn, result[:status]
     assert_match(/\A6 /, result[:detail])
     assert_equal expected, result[:meta][:sample]
+  end
+
+  # A row that re-entered since the probe (todo reposed, bot reassigned) must
+  # not be offered for Clore: that would cancel a live request.
+  def test_a_row_that_has_since_re_entered_drops_out_of_the_card
+    probe_event(1.minute, held: held_entries(1))
+    Issue.find(40).update_columns(status: 'checking_pipeline')
+
+    assert_equal :ok, card[:status]
+  end
+
+  def test_the_card_shows_the_status_the_row_holds_now
+    probe_event(1.minute, held: held_entries(1))
+    Issue.find(40).update_columns(status: 'closed')
+
+    assert_equal 'A#40(group/a#100,closed)', card[:meta][:sample]
+  end
+
+  # With a project unread, the count is a floor and the detail says so.
+  def test_a_warn_names_the_projects_it_could_not_read
+    probe_event(1.minute, held: held_entries(1), checked: 2, unknown: 1)
+
+    assert_match(/at least: 1 project\(s\) could not be read/, card[:detail])
   end
 
   def test_the_card_names_the_unreadable_project_when_nothing_is_held

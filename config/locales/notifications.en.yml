@@ -23,6 +23,7 @@ en:
   review_findings_unanchored: ":warning: %{tag}: I reviewed %{mr_url} and the review asks for changes, but not one of its findings could be anchored to the diff (GitLab refused the position, or the finding carried none). The findings are in the merge request's summary comment, as text: no discussion thread carries them, so nothing will follow them up and I cannot announce this merge request as reviewed. I am no longer following this request: address the findings, make the merge request anchorable again, then put the starting label back and reassign me."
   gitlab_refused_request: ":warning: %{tag}: GitLab keeps refusing the `%{what}` call I have to make on %{mr_url} — HTTP %{status}, %{count} times with the same answer. The request is well formed on my side and the answer does not change on its own, so I am no longer following this request. I am not diagnosing the cause for you, I am reporting what GitLab replies: %{answer}. Fix what GitLab is objecting to, then put the starting label back and reassign me."
   abandon_reassigned: ":arrow_right: I have reassigned the ticket to you: autodev is no longer tracking it. The MR is yours to take over."
+  handover_reassigned: ":arrow_right: I have assigned the ticket to you: autodev no longer follows it."
   unassigned_stop: |-
     :stop_sign: %{tag}: I am no longer assigned to this ticket, I'm stopping the work in progress.
 

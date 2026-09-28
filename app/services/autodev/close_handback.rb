@@ -38,19 +38,33 @@ module Autodev
       # leaving it on the bot, where the health card can still see it.
       return Result.new(:no_target) unless target
 
-      response = client.edit_issue(issue.project_path, issue.issue_iid, assignee_ids: [target])
-      @logger&.info("Handed issue ##{issue.issue_iid} back to user #{target} on close")
-      Result.new(:handed_back, target, name_of(response, target))
+      hand_to(client, issue, target)
     rescue *FAILURES => e
       failed(issue, target, e)
     end
 
     private
 
+    def hand_to(client, issue, target)
+      response = client.edit_issue(issue.project_path, issue.issue_iid, assignee_ids: [target])
+      return not_landed(issue, target) unless ::GitlabHelpers.assigned_to?(response, target)
+
+      @logger&.info("Handed issue ##{issue.issue_iid} back to user #{target} on close")
+      Result.new(:handed_back, target, name_of(response, target))
+    end
+
     def held_by_bot?(client, issue)
       bot_id = ::GitlabHelpers.current_user_id(client)
-      gl_issue = client.issue(issue.project_path, issue.issue_iid)
-      Array(::GitlabHelpers.field(gl_issue, :assignees)).any? { |a| ::GitlabHelpers.field(a, :id) == bot_id }
+      ::GitlabHelpers.assigned_to?(client.issue(issue.project_path, issue.issue_iid), bot_id)
+    end
+
+    # GitLab answered 200 and the payload it returned does not carry the target:
+    # the write was accepted and not honoured (a deactivated account, GitLab
+    # Community's one-assignee rule). Not a handback, so not claimed as one.
+    def not_landed(issue, target)
+      message = "GitLab accepted the reassignment but the ticket is not assigned to user #{target}"
+      @logger&.error("Issue ##{issue.issue_iid}: #{message}")
+      Result.new(:failed, target, nil, message)
     end
 
     def name_of(response, target)
