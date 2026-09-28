@@ -69,17 +69,22 @@ class PipelineMonitor
       log "No failed jobs for pipeline ##{pipeline_id(pipeline)}, staying in checking_pipeline"
     end
 
+    # A write whose failure is not a verdict: `false` says the pipeline was not
+    # retriggered, which is what happened, the count is not advanced, and the
+    # triage runs. That holds for a request that never completed as much as for
+    # an HTTP refusal (Autodev #125), which used to escape as itself into
+    # `attempt_fix`'s `rescue StandardError`.
     def retrigger_if_needed(issue, pipeline, triage)
-      return false if triage[:verdict] == :code
-      return false if (issue.pipeline_retrigger_count || 0) >= 1
+      return false if triage[:verdict] == :code || (issue.pipeline_retrigger_count || 0) >= 1
 
       log "Pipeline failed (pre-triage: #{triage[:verdict]}), retriggering..."
       @client.retry_pipeline(@project_path, pipeline_id(pipeline))
       issue.update(pipeline_retrigger_count: (issue.pipeline_retrigger_count || 0) + 1)
       log_activity(issue, :pipeline_retrigger, verdict: triage[:verdict])
       true
-    rescue Gitlab::Error::ResponseError => e
-      log_error "Failed to retrigger pipeline: #{e.message}"
+    rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
+           ::OpenSSL::SSL::SSLError, ::EOFError => e
+      log_error "Failed to retrigger pipeline: #{e.class}: #{e.message}"
       false
     end
 

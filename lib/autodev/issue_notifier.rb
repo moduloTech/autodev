@@ -25,6 +25,10 @@ module IssueNotifier
   #
   # Named for the gesture rather than for the recipient since Autodev #98, because
   # the recipient is no longer always the author — see `handback_target`.
+  #
+  # A request that never completed did not hand anything back either, so it
+  # answers `false` like an HTTP refusal (Autodev #125) instead of escaping into
+  # the caller's `rescue StandardError` after the row has already been given up.
   def hand_ticket_back(issue)
     target = handback_target(issue)
     return false unless target
@@ -32,9 +36,28 @@ module IssueNotifier
     @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [target])
     log "Handed issue ##{issue.issue_iid} back to user #{target}"
     true
-  rescue Gitlab::Error::ResponseError => e
-    log_error "Failed to hand issue ##{issue.issue_iid} back: #{e.message}"
+  rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
+         ::OpenSSL::SSL::SSLError, ::EOFError => e
+    log_error "Failed to hand issue ##{issue.issue_iid} back: #{e.class}: #{e.message}"
     false
+  end
+
+  # What a round announces after it has already moved the row (Autodev #125):
+  # the transition is the verdict, and a GitLab write that follows it cannot
+  # undo it, so a failure costs that write and nothing else. Returns the block's
+  # value, or nil when the write was lost.
+  #
+  # Deliberately not folded into `notify_issue`: that is also how
+  # `QuestionHandler#post_answer` delivers an answer *before* transitioning, and
+  # swallowing a cut there would mark a ticket answered with no answer posted.
+  # The family is spelled out rather than splatted so the #62 scanner can read
+  # the clause (Autodev #119).
+  def after_conclusion(what)
+    yield
+  rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
+         ::OpenSSL::SSL::SSLError, ::EOFError => e
+    log_error "Lost the #{what} write after the row moved on: #{e.class}: #{e.message}"
+    nil
   end
 
   # Whoever autodev took the ticket from, and the author otherwise (Autodev #98).

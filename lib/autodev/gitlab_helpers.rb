@@ -386,15 +386,24 @@ module GitlabHelpers
     # clause is about, and there is no way to ask "do you support this" other
     # than calling it. The substitute removes a list of sibling ticket titles
     # from a prompt; it answers no question and decides nothing.
+    #
+    # A gap is an answer GitLab gave, so only an HTTP failure is swallowed. A
+    # request that never completed is not a gap (Autodev #125): it used to escape
+    # this clause as a bare `Net::OpenTimeout`, land in the fix round's `rescue
+    # StandardError` and be announced as a failed correction — every one of the
+    # seven `issue_links` cuts recorded in production. Converted, it ends the
+    # round at its boundary and the next cycle replays it.
     def append_links(lines, client, project_path, issue_iid)
-      links = client.issue_links(project_path, issue_iid)
+      links = GitlabHelpers.answer(:issue_links) { client.issue_links(project_path, issue_iid) }
       return unless links.any?
 
       lines << '## Related issues'
       lines << ''
       links.each { |link| lines << "- ##{link.iid}: #{link.title} (#{link.state})" }
       lines << ''
-    rescue Gitlab::Error::ResponseError, NoMethodError
+    rescue ApiUnavailableError => e
+      raise unless e.cause.is_a?(::Gitlab::Error::ResponseError)
+    rescue NoMethodError
       # Non-fatal: some GitLab versions don't support this
     end
   end

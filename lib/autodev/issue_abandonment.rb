@@ -61,7 +61,10 @@ module IssueAbandonment
 
     issue.update(finished_at: Time.current, needs_attention: true,
                  attention_reason: reason.to_s, attention_detail: detail)
-    apply_label_attention(issue.issue_iid)
+    # After `abandon!` the give-up is the verdict; the label and the notice only
+    # announce it, and a cut on either must not raise out of a row already done
+    # (Autodev #125).
+    after_conclusion(:label_attention) { apply_label_attention(issue.issue_iid) }
     announce_abandonment(issue, reason, vars.merge(detail: detail.to_s))
     true
   end
@@ -77,11 +80,15 @@ module IssueAbandonment
 
   # The two user-facing sinks, and the reassignment one of them reports on. The
   # GitLab comment only claims a handback when the ticket actually changed hands.
+  # Only the comment is wrapped: `hand_ticket_back` answers a cut itself, and the
+  # activity line must still be written when the comment was lost.
   def announce_abandonment(issue, reason, template_vars)
     handed_back = hand_ticket_back(issue)
-    notify_localized(issue.issue_iid, reason, mr_url: issue.mr_url,
-                                              suffix: (:abandon_reassigned if handed_back),
-                                              **template_vars)
+    after_conclusion(reason) do
+      notify_localized(issue.issue_iid, reason, mr_url: issue.mr_url,
+                                                suffix: (:abandon_reassigned if handed_back),
+                                                **template_vars)
+    end
     log_activity(issue, reason, **template_vars)
   end
 end

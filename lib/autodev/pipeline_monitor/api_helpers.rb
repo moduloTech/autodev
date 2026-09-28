@@ -47,12 +47,21 @@ class PipelineMonitor
     # against anything, and one unreadable trace must not abandon the fix of the
     # four jobs whose traces did arrive. `test/api_failure_is_not_a_verdict_test.rb`
     # holds that exemption explicitly, next to the rule.
+    #
+    # The exemption is for GitLab *answering* that the trace is unavailable, and
+    # the placeholder quotes that answer (`e.cause`), not the conversion's own
+    # "did not answer" sentence. A request that never completed is not a
+    # property of this trace (Autodev #125): it raises `ApiUnavailableError`,
+    # which `attempt_fix` lets through to `check` before `pipeline_failed_code!`,
+    # so the round is replayed next cycle rather than fixed on a missing log.
     def fetch_job_trace(job)
       jid = GitlabHelpers.field(job, :id)
-      @client.job_trace(@project_path, jid).to_s
-    rescue Gitlab::Error::ResponseError => e
-      log_error "Failed to fetch job trace: #{e.message}"
-      "(trace unavailable: #{e.message})"
+      GitlabHelpers.answer(:job_trace) { @client.job_trace(@project_path, jid) }.to_s
+    rescue ApiUnavailableError => e
+      raise unless e.cause.is_a?(::Gitlab::Error::ResponseError)
+
+      log_error "Failed to fetch job trace: #{e.cause.message}"
+      "(trace unavailable: #{e.cause.message})"
     end
 
     def pipeline_id(pipeline)
