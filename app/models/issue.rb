@@ -23,7 +23,8 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # AR-written Issue, breaking any `date(created_at)`/`datetime(created_at)`
   # SQL the way it broke the activity_events sparkline.
   %i[started_at finished_at next_retry_at clarification_requested_at pipeline_poll_since
-     infra_recheck_at clarification_read_at post_completion_dispatched_at created_at].each do |col|
+     infra_recheck_at clarification_read_at post_completion_dispatched_at labels_written_at
+     label_events_seen_until created_at].each do |col|
     attribute col, :datetime
   end
 
@@ -81,9 +82,9 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     state :answering_question, :needs_clarification
     state :done, :error, :closed
 
-    # `stamp_pipeline_watch!` is first on purpose: it only assigns, and
-    # `persist_status_change!` right after is the save that writes it.
-    after_all_transitions :stamp_pipeline_watch!, :persist_status_change!,
+    # The two stamps are first on purpose: they only assign, and
+    # `persist_status_change!` right after is the save that writes them.
+    after_all_transitions :stamp_pipeline_watch!, :stamp_label_events_floor!, :persist_status_change!,
                           :emit_activity_event!, :emit_audit_log!
 
     # === Happy path ===
@@ -253,6 +254,16 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     self.checking_pipeline_since = aasm.to_state == :checking_pipeline ? Time.current : nil
   end
 
+  # A close accounts for every label event before it (Autodev #101): whoever
+  # closed the row — a handover, an unassignment, the dashboard — the evidence
+  # up to here has been acted on. Without the stamp, a dashboard reset of a
+  # handed-over row would replay the very event that closed it on its first
+  # label write, and close it again. Only ever moved forward: every other
+  # transition leaves the floor where the last scan put it.
+  def stamp_label_events_floor!
+    self.label_events_seen_until = Time.current if aasm.to_state == :closed
+  end
+
   # Sequel had `save_changes` which only emits an UPDATE for dirty columns;
   # AR's `save` does the same automatically (via the dirty-tracking layer).
   # We use `save!` so a validation failure surfaces — the state machine
@@ -414,9 +425,19 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # Every reset also clears the `post_completion` reservation and its verdict
   # (`POST_COMPLETION_CLEARED`): the row goes back into work, and a new delivery
   # is a new deploy with a new outcome (Autodev #114/#94).
+  #
+  # The operator reset also stamps `label_events_seen_until` (Autodev #101,
+  # adversarial review): the human asking for the reset *is* the answer to
+  # "has anybody taken this ticket", so the label events before it are
+  # accounted for. Without the stamp, a reviewer who reposed `label_done`
+  # weeks earlier on a `done` row — when autodev no longer held the ticket —
+  # was found by `LabelHandover::ErasedScan` right after the reset's own
+  # `apply_label_doing` removed that label, and the row was closed with a note
+  # blaming them. The two automatic callers pass no `reset_budget:` and keep
+  # the floor where it was: a recovery is not a statement about the ticket.
   def self.reset_for_retry!(scope, reset_budget: false, clear_attention: false)
     fields = { error_message: nil, started_at: nil, **POST_COMPLETION_CLEARED }
-    fields.merge!(retry_count: 0, review_failure_count: 0) if reset_budget
+    fields.merge!(retry_count: 0, review_failure_count: 0, label_events_seen_until: Time.current) if reset_budget
     fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention
 
     scope.where.not(mr_iid: nil)

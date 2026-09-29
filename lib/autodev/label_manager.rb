@@ -188,8 +188,22 @@ module LabelManager
     return nil if wanted.sort == current.sort
 
     @client.edit_issue(@project_path, iid, labels: wanted.join(','))
+    stamp_labels_written(iid)
     log "Labels updated on ##{iid}: dropped #{current & dropped.compact}, added #{add}"
     wanted
+  end
+
+  # This write is the one thing that can erase the evidence
+  # `LabelHandover#suspect` reads off the current labels (Autodev #101):
+  # `other_workflow_labels` has `apply_label_doing` remove a `label_done` a human
+  # just posed. The stamp is what makes the next verdict read the label events,
+  # which a later write cannot erase.
+  #
+  # After the write, not before: a scan starting between a before-stamp and the
+  # write would count the write as already read. The only `edit_issue(…,
+  # labels:)` in the codebase, so every autodev label write is stamped here.
+  def stamp_labels_written(iid)
+    ::Issue.where(project_path: @project_path, issue_iid: iid).update_all(labels_written_at: Time.current)
   end
 
   def target_labels(current, remove, add)

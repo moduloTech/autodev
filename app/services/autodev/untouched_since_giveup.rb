@@ -26,6 +26,14 @@ module Autodev
   # sweep learned the third one the hard way (Autodev #98): a comment on the
   # ticket, a comment on the merge request — reviewing the merge request is
   # the gesture a reviewer actually makes — and a move of the workflow label.
+  #
+  # And a fourth, which is the third one *before* the give-up (Autodev #101):
+  # a workflow label a human moved in the poll cycle before the give-up, and
+  # that the give-up's own `apply_label_attention` erased. The label is no
+  # longer on the ticket and the edit predates `finished_at`, so the three
+  # questions above cannot see it; the resource label events still carry it.
+  # Asked here, before the reclaim, rather than found by the poll's scan one
+  # cycle after it.
   # `finished_at` is the give-up instant on every path, since Autodev #60
   # routed all of them through `abandon_issue`.
   #
@@ -45,7 +53,10 @@ module Autodev
       return false if ::GitlabHelpers.human_mr_comment_since?(@client, issue.project_path,
                                                               issue.mr_iid, issue.finished_at)
 
-      !handover(issue).moved_since?(gl_issue, issue.issue_iid, issue.finished_at)
+      handover = handover(issue)
+      return false if handover.moved_since?(gl_issue, issue.issue_iid, issue.finished_at)
+
+      handover.erased_since_floor(issue.issue_iid, issue).nil?
     end
 
     private
