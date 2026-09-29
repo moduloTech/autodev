@@ -56,6 +56,29 @@ class IssuesControllerAuditTest < ActionDispatch::IntegrationTest
     assert_equal 'start_processing', payload['event']
   end
 
+  # The alpha-56 lot: a dashboard re-entry from `done` starts a new delivery.
+  # The reservation it leaves behind is what `dispatch_done_unassigned` selects
+  # on (`post_completion_dispatched_at: nil`), and the floor is the operator's.
+  def test_a_dashboard_reentry_from_done_frees_the_next_delivery_s_hook
+    freeze_time
+    done = delivered_issue
+    post "/issues/#{done.id}/transition", params: { event: 'reenter_to_check_pipeline' }
+
+    assert_equal ['checking_pipeline', nil, nil, Time.current.to_i], delivery_fields(done.reload)
+  ensure
+    travel_back
+  end
+
+  def delivery_fields(row)
+    [row.status, row.post_completion_dispatched_at, row.post_completion_error, row.label_events_seen_until.to_i]
+  end
+
+  def delivered_issue
+    Issue.create!(project_path: 'group/proj', issue_iid: 503, status: 'done', mr_iid: 9,
+                  post_completion_dispatched_at: 1.day.ago, post_completion_error: 'old deploy failed',
+                  label_events_seen_until: 20.days.ago)
+  end
+
   def test_transition_rejects_forbidden_event_and_writes_no_audit_log
     post "/issues/#{@issue.id}/transition", params: { event: 'commit_complete' }
 

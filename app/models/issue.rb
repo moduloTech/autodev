@@ -84,8 +84,8 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
     # The two stamps are first on purpose: they only assign, and
     # `persist_status_change!` right after is the save that writes them.
-    after_all_transitions :stamp_pipeline_watch!, :stamp_label_events_floor!, :persist_status_change!,
-                          :emit_activity_event!, :emit_audit_log!
+    after_all_transitions :stamp_pipeline_watch!, :stamp_label_events_floor!, :clear_delivery_on_reentry!,
+                          :persist_status_change!, :emit_activity_event!, :emit_audit_log!
 
     # === Happy path ===
 
@@ -270,6 +270,33 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # transition leaves the floor where the last scan put it.
   def stamp_label_events_floor!
     self.label_events_seen_until = Time.current if aasm.to_state == :closed
+  end
+
+  # A re-entry starts a new delivery, whoever fires it (the alpha-56 lot's
+  # integration review). The label resume, `resume_recovered_infra`,
+  # `ReviewArrearsSweep` and the dashboard's transition menu all fire these two
+  # events; only the first two used to clear the previous delivery's
+  # `post_completion` reservation, so a dashboard re-entry left the next
+  # delivery's hook unreserved for ever (Autodev #114/#94).
+  #
+  # `reenter` rebuilds the branch, so the `pending_resolutions` it carried go
+  # with it (Autodev #125, amendment 1); `reenter_to_check_pipeline` keeps the MR
+  # and its branch, and keeps them.
+  #
+  # A manual re-entry is also the operator's answer to "has anybody taken this
+  # ticket", like the Reset (Autodev #101): the floor moves to now, so a label
+  # move a reviewer made while the row sat in `done` is not replayed as a
+  # handover on autodev's first label write. An automatic one is not a
+  # statement about the ticket and leaves the floor alone.
+  REENTRY_EVENTS = %i[reenter reenter_to_check_pipeline].freeze
+
+  def clear_delivery_on_reentry!
+    event = aasm.current_event.to_s.delete_suffix('!').to_sym
+    return unless REENTRY_EVENTS.include?(event)
+
+    assign_attributes(POST_COMPLETION_CLEARED)
+    self.pending_resolutions = nil if event == :reenter
+    self.label_events_seen_until = Time.current if @_audit_origin == :manual
   end
 
   # Sequel had `save_changes` which only emits an UPDATE for dirty columns;
@@ -487,7 +514,8 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `dispatch_done_unassigned` reserves a delivery's `post_completion` hook once,
   # so the reservation must not outlive the delivery it was taken for — nor must
   # that delivery's error, which would otherwise describe the next one. Written
-  # by `reset_for_retry!` and by both `ResumeHandler` reentries.
+  # by `reset_for_retry!` and by the two re-entry events themselves
+  # (`clear_delivery_on_reentry!`), whichever path fires them.
   POST_COMPLETION_CLEARED = { post_completion_dispatched_at: nil, post_completion_error: nil }.freeze
 
   REVIVE_TO_PIPELINE = %w[reviewing fixing_pipeline fixing_discussions].freeze
