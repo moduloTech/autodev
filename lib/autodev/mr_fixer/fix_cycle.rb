@@ -174,7 +174,18 @@ class MrFixer
       settled = settled_resolutions(pending, discussions)
       still_pending = settled.reject { |id, _| resolve_discussion(issue.mr_iid, id) }
       write_pending_resolutions(issue, still_pending) unless still_pending == pending
+      count_lost_again(issue) if still_pending.any?
       discussions.reject { |discussion| settled.key?(discussion[:id]) }
+    end
+
+    # A resolution GitLab keeps refusing (a 403 rather than a cut) would
+    # otherwise loop for ever: the round fixes nothing, `transition_no_discussions`
+    # counts nothing, and the next green pipeline sends the row straight back.
+    # Counting the round is what puts that loop under `fix_round_ceiling`
+    # (Autodev #99), which gives the request up under its own reason; a cut
+    # that heals costs one count per poll it lasted.
+    def count_lost_again(issue)
+      issue.update(discussion_fix_round: issue.discussion_fix_round + 1)
     end
 
     # The remembered threads GitLab still lists and nobody wrote on since.

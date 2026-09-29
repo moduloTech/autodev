@@ -215,7 +215,7 @@ For question/investigation tickets (no code changes needed): `question_detected!
 
 ### MrFixer
 
-Handles `fixing_discussions`: clones the MR branch, fetches unresolved discussions, fixes each one via `danger-claude -p` + `-c`, **verifies the correction**, pushes, then resolves the threads that passed (directly when there is nothing to push). A resolution GitLab did not take is remembered in `pending_resolutions` with the time of its verdict, and the next round resolves it before fixing anything, unless a note on the thread is newer than the verdict. Includes discussion stagnation detection. Fires `discussions_fixed!` → `checking_pipeline`.
+Handles `fixing_discussions`: clones the MR branch, fetches unresolved discussions, fixes each one via `danger-claude -p` + `-c`, **verifies the correction**, pushes, then resolves the threads that passed (directly when there is nothing to push). A resolution GitLab did not take is remembered in `pending_resolutions` with the time of its verdict, and the next round resolves it before fixing anything, unless a note on the thread is newer than the verdict; a remembered resolution that fails again advances `discussion_fix_round`, so one GitLab refuses for good ends at `fix_round_ceiling` rather than looping. Includes discussion stagnation detection. Fires `discussions_fixed!` → `checking_pipeline`.
 
 The fetch itself lives in `MrDiscussions` (`lib/autodev/mr_discussions.rb`), shared with `PipelineMonitor` — one definition of "the unresolved threads of an MR" since Autodev #62, because the two copies were free to diverge and one of them was the delivery verdict. `MrFixer` maps its own `build_discussion` shape (title + notes, for the prompt) over the shared list.
 

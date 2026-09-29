@@ -338,20 +338,9 @@ end
 
 # --- Amendment 1: resolutions after the push, and remembered ---------------
 
-# The adversarial review's blocker. A verified correction whose resolution was
-# cut could never be resolved afterwards: the next round found the correction
-# already on the branch, measured an empty diff (`:unchanged`), left the thread
-# open, and `stagnation_threshold` rounds later gave the request up on a
-# stagnation that was really one lost write. And a round that aborted after a
-# resolution but before the push left a thread closed over a correction GitLab
-# never received.
-#
-# So the resolutions come after the push, and the one that did not take is
-# remembered with the time of its verdict: the next round makes it directly,
-# unless somebody wrote on the thread since.
-class PendingResolutionTest < Minitest::Test
-  include MrFixRoundHarness
-  include DatabaseTestHelper
+# Shared by the two classes below: verified rounds over a scripted GitLab.
+module PendingResolutionHarness
+  include NetworkCutFixtures
 
   # Verification on, with a threshold low enough that the stagnation the
   # blocker led to is two rounds away.
@@ -400,6 +389,23 @@ class PendingResolutionTest < Minitest::Test
   def reply_to(discussion)
     discussion.notes << FakeNote.new(true, false, 'still wrong', nil, (Time.now.utc + 60).iso8601)
   end
+end
+
+# The adversarial review's blocker. A verified correction whose resolution was
+# cut could never be resolved afterwards: the next round found the correction
+# already on the branch, measured an empty diff (`:unchanged`), left the thread
+# open, and `stagnation_threshold` rounds later gave the request up on a
+# stagnation that was really one lost write. And a round that aborted after a
+# resolution but before the push left a thread closed over a correction GitLab
+# never received.
+#
+# So the resolutions come after the push, and the one that did not take is
+# remembered with the time of its verdict: the next round makes it directly,
+# unless somebody wrote on the thread since.
+class PendingResolutionTest < Minitest::Test
+  include MrFixRoundHarness
+  include DatabaseTestHelper
+  include PendingResolutionHarness
 
   # The blocker replay: rounds 2 and 3 find t2's correction already on the
   # branch, an empty diff and nothing to push.
@@ -852,5 +858,27 @@ class RoundWritesNetworkCutTest < Minitest::Test
       worker(IssueProcessor, client).send(:post_answer, issue.issue_iid, issue, 'the answer')
     end
     assert_equal 'answering_question', issue.reload.status
+  end
+end
+
+# The bound on a remembered resolution GitLab keeps refusing.
+class PendingResolutionBoundTest < Minitest::Test
+  include MrFixRoundHarness
+  include DatabaseTestHelper
+  include PendingResolutionHarness
+
+  # A resolution GitLab refuses for good (a 403, say) must not loop for ever
+  # between `checking_pipeline` and a fix-free round: each round that loses a
+  # remembered resolution again counts towards the round ceiling (#99).
+  def test_a_resolution_refused_for_good_reaches_the_round_ceiling
+    issue = fixing_row
+    client = cut_t2_then_heal(issue, [thread('t1'), thread('t2')])
+    client.fail = { resolve: ['t2', Net::OpenTimeout.new] }
+
+    rounds = 0
+    (rounds += 1) && empty_round(issue, client) until issue.status == 'done' || rounds > 20
+
+    assert_equal %w[done fix_rounds_exhausted], [issue.status, issue.attention_reason]
+    assert_empty @dc_calls
   end
 end
