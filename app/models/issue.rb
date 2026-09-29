@@ -420,13 +420,22 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `IssuesController#reset` dropped both the stamp and the split. Hence one
   # method rather than a fourth chance to get it wrong.
   #
-  # `reset_budget:` zeroes `retry_count` and `review_failure_count` — both are
-  # budgets, and both mean "clean slate" for an operator-driven reset.
+  # `reset_budget:` zeroes `retry_count`, `review_failure_count`,
+  # `dormant_recheck_count` and `dormant_recheck_at` — all budgets, and all
+  # mean "clean slate" for an operator-driven reset.
   # `review_failure_count` joined this list under Autodev #107: before it, the
   # dashboard's Reset button left the counter untouched, so a request
   # abandoned at `REVIEW_FAILURE_THRESHOLD`/`REVIEW_FAILURE_THRESHOLD` still
   # carried that after a reset and could give itself up again on the very next
   # stumble — with no way for the operator who clicked to know that.
+  # The dormant pair joined it under Autodev #125, for the same reason: a row
+  # reset at `dormant_recheck_count` 3/3 (A#139, A#144, A#148) was flagged
+  # `dormant_exhausted` at its next dormant episode without a single audit.
+  # Only under `reset_budget:`, because two automatic paths call this method
+  # without the flag: `revive_stalled!` — DormantAudit's own revive — and
+  # `recover_errored!` — the boot-time recovery. A counter reset on each of
+  # them would lift the cap that keeps a row falling dormant in a loop from
+  # consuming GitLab reads (#47, #103).
   # `clear_attention:` also clears the needs_attention trio, for the same
   # reason.
   #
@@ -445,7 +454,10 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # the floor where it was: a recovery is not a statement about the ticket.
   def self.reset_for_retry!(scope, reset_budget: false, clear_attention: false)
     fields = { error_message: nil, started_at: nil, **POST_COMPLETION_CLEARED }
-    fields.merge!(retry_count: 0, review_failure_count: 0, label_events_seen_until: Time.current) if reset_budget
+    if reset_budget
+      fields.merge!(retry_count: 0, review_failure_count: 0, dormant_recheck_count: 0, dormant_recheck_at: nil,
+                    label_events_seen_until: Time.current)
+    end
     fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention
 
     scope.where.not(mr_iid: nil)

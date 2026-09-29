@@ -430,7 +430,8 @@ class MrFixerApiFailureTest < Minitest::Test
   class FakeIssue
     # `discussion_fix_round` alongside `fix_round`: the ceiling in `run_fix_round`
     # counts the discussion loop alone (review of the alpha-52 lot), and this fake
-    # stands in for a real row, which carries both.
+    # stands in for a real row, which carries both. `pending_resolutions` for the
+    # same reason: the round reads it before anything else (Autodev #125).
     attr_reader :issue_iid, :mr_iid, :fix_round, :discussion_fix_round, :attrs
 
     def initialize
@@ -444,6 +445,7 @@ class MrFixerApiFailureTest < Minitest::Test
     def update(hash) = (@attrs.merge!(hash) and self)
     def discussions_fixed! = @attrs[:status] = 'checking_pipeline'
     def status = @attrs[:status]
+    def pending_resolutions = @attrs[:pending_resolutions]
   end
 
   class StubClient
@@ -569,9 +571,17 @@ ALLOWED_SWALLOWS = {
     # does not reach ActiveJob and park the row in Solid Queue's failed
     # executions, which needs a human for something the next cycle retries.
     'fix' => 'fix-round boundary',
-    # A write. Failing to mark a thread resolved leaves it unresolved, which the
-    # next round re-reads. No verdict is inferred from the failure.
-    'resolve_discussion' => 'write, not a read'
+    # A write. Failing to mark a thread resolved leaves it unresolved. No verdict
+    # is inferred from the failure: it answers `false`, and `resolve_verified`
+    # then does not count the thread, so the success line says only what GitLab
+    # resolved (Autodev #79), and remembers it in `pending_resolutions` so the
+    # next round resolves it without fixing it again (Autodev #125, amendment 1).
+    # Since Autodev #125 the clause names the whole transport family, not HTTP
+    # alone — a timeout here (A#139) used to escape to `execute_fix_cycle`'s
+    # `rescue StandardError` and fail a verified, pushed round. A timeout may
+    # have landed, so `false` can undercount by one; the next round then finds
+    # the thread gone and forgets it.
+    'resolve_discussion' => 'write, not a read: false means the thread stays open and is not counted'
   },
   'lib/autodev/mr_fixer/fix_cycle.rb' => {
     # Clone, rebase, danger-claude, push. `fetch_unresolved_discussions` is
@@ -588,11 +598,27 @@ ALLOWED_SWALLOWS = {
     # and leaves through the same re-raise as the prompt-context read — nothing
     # is rebased, nothing is force-pushed, and `fix_round` is not advanced.
     #
+    # Re-audited for Autodev #125, which found the prompt context was not all
+    # `answer`: `IssueFormatter.append_links` (`issue_links`) guarded itself
+    # with an HTTP-only rescue, so a timeout escaped as itself into the
+    # `rescue StandardError` below and was announced as a failed correction. It
+    # now goes through `answer`, swallows only an HTTP answer (the capability
+    # gap), and a cut leaves through the same re-raise.
+    #
     # The rest of the GitLab traffic left under this method is
-    # `resolve_discussion` (a write, declared below), `ScreenshotUploader.process`
-    # (uploads, own rescues) and `log_activity` / `notify_localized`, which
-    # swallow their own failures because a note that could not be edited is not
-    # a verdict either.
+    # `resolve_discussion` (a write, declared above, which answers whether it
+    # resolved and swallows the transport family; called after `push_fixes`, or
+    # from `finalize_no_commits`, since amendment 1), `ScreenshotUploader.process`
+    # (uploads, rescues `StandardError`), `log_activity` (rescues its own
+    # failures) and `notify_localized`. That last one swallows an HTTP refusal
+    # only — `notify_issue` is deliberately unchanged, because it is also how an
+    # answer is delivered before a transition — so the two notices posted after
+    # the row has moved go through `after_conclusion`, which swallows the
+    # family: the `mr_fix_success` notice after `discussions_fixed!`, and the
+    # label and comment of `abandon_issue` after `abandon!` (the stagnation
+    # give-up). The `mr_fix_error` comment inside `handle_fix_error` is still a
+    # bare `notify_localized`: a cut on it escapes this method, which Autodev
+    # #125 leaves as it is.
     'execute_fix_cycle' => 'fix-round boundary: clone, rebase, danger-claude, push'
   },
   'lib/autodev/mr_fixer/stagnation_checker.rb' => {
@@ -627,8 +653,14 @@ ALLOWED_SWALLOWS = {
     'recheck_infra_recovery' => 'recheck boundary'
   },
   'lib/autodev/pipeline_monitor/failure_handler.rb' => {
-    # A write. `false` means "the pipeline was not retriggered", which is exactly
-    # what happened; the caller falls through to the triage it would have run.
+    # A write, with two clauses (Autodev #125, amendment 1). An HTTP answer is
+    # GitLab refusing: `false` means "the pipeline was not retriggered", which is
+    # what happened; the count is not advanced and the caller falls through to
+    # the triage it would have run. Any other member of the transport family
+    # may have reached GitLab (a `Net::ReadTimeout` comes after the request was
+    # sent), so it is counted as a retrigger and answers `true`: the poll waits
+    # for the pipeline it may have started. Both used to reach `attempt_fix`'s
+    # handler.
     'retrigger_if_needed' => 'write, not a read',
     # Everything from the triage onwards: clone, danger-claude, push. `handle_red`
     # reads the failed jobs *before* calling in here — that hoist is Autodev #62's.
@@ -652,10 +684,21 @@ ALLOWED_SWALLOWS = {
     # stagnation signature is written after `clone_and_fix` returns, so the abort
     # spends nothing.
     #
+    # Re-audited for Autodev #125: the prompt context's `issue_links` read and
+    # `fetch_job_trace` both answered a cut by escaping as themselves into the
+    # `rescue StandardError` below. Both now raise `ApiUnavailableError` on a
+    # request that never completed and keep their HTTP substitute, and both run
+    # before `pipeline_failed_code!`, so the abort leaves the row on the watch.
+    #
     # The rest of the GitLab traffic left under this method is `retry_pipeline`
-    # and `fetch_job_trace` (both declared here) plus the label / assignee / note
-    # writes of `abandon_issue`, `log_activity` and `notify_localized`, each of
-    # which swallows its own failure.
+    # (declared here, swallows the transport family), `log_activity` (rescues its
+    # own failures), the writes of `abandon_issue` — label and comment through
+    # `after_conclusion`, handback through `hand_ticket_back`, both swallowing the
+    # family — and `notify_localized`, which swallows an HTTP refusal only. The
+    # one notice posted after the row has moved, `pipeline_fix_success` after
+    # `pipeline_fix_done!`, goes through `after_conclusion`. The
+    # `pipeline_fix_error` comment inside `handle_failure_error` is still a bare
+    # `notify_localized`, and Autodev #125 leaves it as it is.
     'attempt_fix' => 'fix boundary: clone, danger-claude, push'
   },
   'lib/autodev/pipeline_monitor/reviewer.rb' => {
@@ -691,11 +734,16 @@ ALLOWED_SWALLOWS = {
     'infra_recheck_still_ours?' => 'declines the re-arm: an unreadable ticket is never permission to take it'
   },
   'lib/autodev/pipeline_monitor/api_helpers.rb' => {
-    # The one read still allowed to substitute. The substitute names itself in the
-    # value ("(trace unavailable: …)"), it is written into a log file for a human
+    # The one read still allowed to substitute, and only when GitLab answered.
+    # The substitute names itself in the value ("(trace unavailable: …)", in
+    # GitLab's own words off `e.cause`), it is written into a log file for a human
     # or for Claude to read as prose rather than compared against anything, and one
-    # unreadable trace must not abandon the fix of the jobs whose traces arrived.
-    'fetch_job_trace' => 'self-describing prose, not a verdict'
+    # trace GitLab refused must not abandon the fix of the jobs whose traces
+    # arrived. A request that never completed is not a property of that trace:
+    # since Autodev #125 it goes through `answer`, and the clause re-raises every
+    # `ApiUnavailableError` whose cause is not an HTTP response, so the round is
+    # replayed next cycle.
+    'fetch_job_trace' => 'self-describing prose for an HTTP refusal; a cut raises'
   },
   'lib/autodev/review_skill_source.rb' => {
     # Three clauses, and they are the reason this file had to enter the perimeter:

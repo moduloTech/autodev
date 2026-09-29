@@ -3,6 +3,7 @@
 require_relative 'test_helper'
 require 'autodev/gitlab_helpers'
 require 'autodev/gitlab_request_counter'
+require_relative 'gitlab_pages'
 
 # Autodev #96: GitlabRequestCounter wraps the client GitlabHelpers builds so
 # every call — read or write — is counted without any of the twelve call
@@ -142,5 +143,35 @@ class GitlabRequestCounterTest < Minitest::Test
     assert_raises(Net::OpenTimeout) { counter.flaky }
 
     assert_equal 1, GitlabRequestStat.sole.count
+  end
+
+  # --- caller_location (Autodev #125) -------------------------------------
+
+  # `Location#to_s` keeps the path the file was loaded under, which is relative
+  # when the test is run as `ruby -Itest test/…`.
+  def assert_recorded_at(line)
+    location = GitlabTransportFailure.sole.caller_location
+    path, lineno = location.to_s.split(':', 3)
+
+    assert_equal [File.expand_path(__FILE__), line.to_s], [File.expand_path(path.to_s), lineno], location
+  end
+
+  def test_a_direct_call_records_its_caller_as_the_location
+    line = __LINE__ + 1
+    assert_raises(Net::OpenTimeout) { counter.flaky }
+
+    assert_recorded_at line
+  end
+
+  # Page 2 is fetched by the gem's `PaginatedResponse`, so the frame right above
+  # the counter is the gem's — the location that names the read is further up.
+  def test_a_page_turn_records_the_autodev_caller_rather_than_the_gem
+    pages = [[{ 'id' => 1 }], [{ 'id' => 2 }]]
+    client = counter(GitlabPagesClient.new(pages, fail_on_page: 2, error: Net::ReadTimeout.new))
+
+    line = __LINE__ + 1
+    assert_raises(Net::ReadTimeout) { client.issue_label_events(1, 42).auto_paginate }
+
+    assert_recorded_at line
   end
 end
