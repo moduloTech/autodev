@@ -132,9 +132,14 @@ class PipelineMonitor
     # The two other interruptions this now covers were already handled elsewhere,
     # so nothing needs a second bound: `RateLimitError` and a `StandardError` from
     # the fix both end at `attempt_fix`'s handlers, which park the row in `error`
-    # with `next_retry_at` — bounded by `max_retries`, and a row that has left
-    # `checking_pipeline` is no longer the "same failure, poll after poll" chain
-    # stagnation measures.
+    # — with the reset time for the first, with no stamp for the second, which
+    # `DormantAudit`'s error arm re-arms at most `dormant_audit_max` times — and a
+    # row that has left `checking_pipeline` is no longer the "same failure, poll
+    # after poll" chain stagnation measures. That was not true of a failure
+    # raised before `pipeline_failed_code!` until Autodev #128: `mark_failed` had
+    # no transition from `checking_pipeline`, the row never left, and with the
+    # write moved after the attempt the only bound left was the watch's age —
+    # one public failure comment per poll for up to `pipeline_watch_max_days`.
     def check_stagnation_and_fix(issue, failed_jobs, triage)
       return defer_fix_for_usage(issue) unless claude_available?
 

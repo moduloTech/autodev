@@ -9,7 +9,8 @@ class MrFixer
       wait = error.wait_seconds
       retry_at = wait.to_i.seconds.from_now
       log_error "MR !#{issue.mr_iid}: rate limit hit, parking for #{wait}s"
-      safe_mark_failed!(issue, next_retry_at: retry_at)
+      return unless safe_mark_failed!(issue, next_retry_at: retry_at)
+
       Issue.where(id: issue.id).update_all(
         error_message: error.message,
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
@@ -23,7 +24,8 @@ class MrFixer
     # `error` must not survive into this one.
     def handle_auth_failure(issue, error)
       log_error "MR !#{issue.mr_iid}: Claude authentication failed, manual intervention required"
-      safe_mark_failed!(issue, next_retry_at: nil)
+      return unless safe_mark_failed!(issue, next_retry_at: nil)
+
       Issue.where(id: issue.id).update_all(
         error_message: "#{error.class}: #{error.message}",
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
@@ -39,7 +41,8 @@ class MrFixer
       bt = error.backtrace&.first(10)&.join("\n  ")
       # No retry scheduled — same asymmetry as PipelineMonitor's generic
       # handler, and the same recovery: DormantAudit's error arm (Autodev #103).
-      safe_mark_failed!(issue, next_retry_at: nil)
+      return unless safe_mark_failed!(issue, next_retry_at: nil)
+
       persist_and_notify_fix_error(issue, error, bt)
       log_error "MR fix failed: #{error.class}: #{error.message}"
       log_error "  #{bt}" if bt

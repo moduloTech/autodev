@@ -65,6 +65,31 @@ class DatabaseErrorHandlingTest < Minitest::Test
     assert_equal 'error', issue.status
   end
 
+  # -- Mark failed from checking_pipeline (Autodev #128) --
+  #
+  # The pipeline worker does part of its work — clone, rebase, job logs, the
+  # evaluation — before `pipeline_failed_code!`, while the row is still here. A
+  # failure there has to be able to leave, through the guarded transition.
+
+  def test_mark_failed_from_checking_pipeline
+    issue = create_issue
+    advance_to(issue, 'checking_pipeline')
+
+    assert issue.mark_failed!
+    assert_equal 'error', issue.reload.status
+    assert_nil issue.checking_pipeline_since
+  end
+
+  def test_mark_failed_from_checking_pipeline_records_its_transition
+    issue = create_issue
+    advance_to(issue, 'checking_pipeline')
+    issue.mark_failed!
+
+    payloads = ActivityEvent.where(issue_id: issue.id, kind: 'transition').map { |e| JSON.parse(e.payload_json) }
+
+    assert_includes payloads, { 'from' => 'checking_pipeline', 'to' => 'error', 'event' => 'mark_failed' }
+  end
+
   # -- Persistence callback --
 
   def test_transitions_persist_to_database

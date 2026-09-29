@@ -138,4 +138,17 @@ class ErrorHandlersDecideTheStampTest < Minitest::Test
     assert_equal 'error', issue.reload.status
     assert_nil issue.next_retry_at
   end
+
+  # Autodev #128: `mr_created!` puts the row in `checking_pipeline` before the
+  # last writes of `finalize`, so a raise there reaches this handler from a
+  # state that used to refuse `mark_failed` — the row stayed on the watch with
+  # its retry spent and an error comment. It now takes the backoff like any
+  # other failure of the initial path.
+  def test_issue_processor_process_error_after_mr_created_schedules_a_retry
+    issue = issue_with_stale_stamp(status: 'checking_pipeline', mr_iid: 42)
+    worker(IssueProcessor).send(:handle_process_error, issue, RuntimeError.new('boom'))
+
+    assert_equal 'error', issue.reload.status
+    assert_operator issue.next_retry_at, :>, Time.current
+  end
 end
