@@ -92,7 +92,10 @@ class ATransportFailureDoesNotStrandATicketTest < Minitest::Test # rubocop:disab
       @attempted << [iid, attrs]
       maybe_raise(attrs.key?(:assignee_ids) ? :assignee_edit : :labels_edit)
       @edits << [iid, attrs]
-      GlIssue.new([], 1)
+      return GlIssue.new([], 1) unless attrs.key?(:assignee_ids)
+
+      # An assignment GitLab honoured: `hand_ticket_back` reads it back.
+      Gitlab::ObjectifiedHash.new('iid' => iid, 'assignees' => attrs[:assignee_ids].map { |id| { 'id' => id } })
     end
 
     def create_issue_note(_path, _iid, body)
@@ -274,6 +277,43 @@ class ATransportFailureDoesNotStrandATicketTest < Minitest::Test # rubocop:disab
     host = worker(PipelineMonitor, FakeClient.new(raise_on: { assignee_edit: read_timeout }))
 
     assert_same false, host.send(:hand_ticket_back, watched)
+  end
+
+  # --- a handback is claimed only when GitLab honoured it (alpha-56 lot) --
+
+  # GitLab Community answers 200 to an assignment it did not apply (Autodev
+  # #126), so the answer is read back like `ExternalState#hand_over_to` and
+  # `CloseHandback` read it. `edit_issue` answers the payload given here.
+  class AnsweringClient < FakeClient
+    def initialize(assignees) = super().tap { @assignees = assignees }
+
+    def edit_issue(path, iid, **attrs)
+      super
+      Gitlab::ObjectifiedHash.new('iid' => iid, 'assignees' => @assignees.map { |id| { 'id' => id } })
+    end
+  end
+
+  def test_a_handback_gitlab_answered_without_the_target_answers_false
+    host = worker(PipelineMonitor, AnsweringClient.new([999]))
+
+    assert_same false, host.send(:hand_ticket_back, watched)
+    assert_includes @client.edits.map(&:last), { assignee_ids: [AUTHOR_ID] }, 'precondition: the edit was sent'
+  end
+
+  def test_a_handback_gitlab_answered_with_the_target_answers_true
+    host = worker(PipelineMonitor, AnsweringClient.new([AUTHOR_ID]))
+
+    assert_same true, host.send(:hand_ticket_back, watched)
+  end
+
+  def test_an_abandon_whose_handback_gitlab_did_not_honour_does_not_claim_one
+    issue = watched
+    worker(PipelineMonitor, AnsweringClient.new([999]))
+      .send(:abandon_issue, issue, :stagnation_pipeline, detail: 'deploy')
+    reason_note = @client.notes.find { |n| n.include?('deploy') }
+
+    assert reason_note, 'the abandon note was not posted'
+    refute_includes reason_note, reassigned_sentence
   end
 
   def abandon_with_timed_out_handback

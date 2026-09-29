@@ -21,27 +21,41 @@ module IssueNotifier
 
   # Returns whether the ticket actually changed hands (Autodev #60): the abandon
   # notification only claims a handback when there was somebody to hand it to and
-  # GitLab accepted the edit. Existing callers ignore the value.
+  # GitLab applied the edit. Existing callers ignore the value.
   #
   # Named for the gesture rather than for the recipient since Autodev #98, because
   # the recipient is no longer always the author — see `handback_target`.
   #
+  # "Applied" is read off the payload GitLab returns, like
+  # `ExternalState#hand_over_to` and `CloseHandback` read it: GitLab Community
+  # answers 200 to an assignment it did not honour (Autodev #126), and a 200
+  # alone used to be claimed as a handback.
+  #
   # A request that never completed answers `false` like an HTTP refusal
-  # (Autodev #125, and #126 on its own branch) instead of escaping into the caller's `rescue StandardError`
-  # after the row has already been given up. For a timeout `false` is not
-  # established — the edit may have landed — and that errs in the safe
-  # direction: the notice leaves a handback that did happen unclaimed, and
+  # (Autodev #125, #126) instead of escaping into the caller's
+  # `rescue StandardError` after the row has already been given up. For a timeout
+  # `false` is not established — the edit may have landed — and that errs in the
+  # safe direction: the notice leaves a handback that did happen unclaimed, and
   # never claims one that did not.
   def hand_ticket_back(issue)
     target = handback_target(issue)
     return false unless target
 
-    @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [target])
-    log "Handed issue ##{issue.issue_iid} back to user #{target}"
-    true
+    response = @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [target])
+    handed_back?(issue, target, response)
   rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
          ::OpenSSL::SSL::SSLError, ::EOFError => e
     log_error "Failed to hand issue ##{issue.issue_iid} back: #{e.class}: #{e.message}"
+    false
+  end
+
+  def handed_back?(issue, target, response)
+    if GitlabHelpers.assigned_to?(response, target)
+      log "Handed issue ##{issue.issue_iid} back to user #{target}"
+      return true
+    end
+
+    log_error "GitLab accepted the handback of issue ##{issue.issue_iid} but it is not assigned to user #{target}"
     false
   end
 

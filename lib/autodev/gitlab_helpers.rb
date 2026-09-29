@@ -51,8 +51,11 @@ module GitlabHelpers
   # symbol key. Canonical replacement for the ~half-dozen
   # `x.respond_to?(:f) ? x.f : x['f']` copies that had drifted apart (some tried
   # symbol keys, some only string). Falsey values are preserved (no `||`).
+  # A Struct without that member answers nil like a Hash without that key,
+  # instead of `Struct#[]`'s NameError.
   def field(obj, name)
     return obj.public_send(name) if obj.respond_to?(name)
+    return if obj.is_a?(Struct)
     return unless obj.respond_to?(:[])
     return obj[name.to_s] if !obj.respond_to?(:key?) || obj.key?(name.to_s)
 

@@ -137,6 +137,8 @@ module NetworkCutFixtures
     def edit_issue(_path, iid, **opts)
       trip(:edit_issue)
       @edits << [iid, opts]
+      # An assignment GitLab honoured: `hand_ticket_back` reads it back.
+      Gitlab::ObjectifiedHash.new('iid' => iid, 'assignees' => Array(opts[:assignee_ids]).map { |id| { 'id' => id } })
     end
 
     def retry_pipeline(_path, _pid)

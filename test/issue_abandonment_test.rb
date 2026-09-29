@@ -49,7 +49,10 @@ class IssueAbandonmentTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
 
     def edit_issue(_path, iid, **attrs)
       @edits << [iid, attrs]
-      Issue.new(labels: [], id: 1)
+      return Issue.new(labels: [], id: 1) unless attrs.key?(:assignee_ids)
+
+      # An assignment GitLab honoured: `hand_ticket_back` reads it back.
+      Gitlab::ObjectifiedHash.new('iid' => iid, 'assignees' => attrs[:assignee_ids].map { |id| { 'id' => id } })
     end
 
     def create_issue_note(_path, _iid, body)
