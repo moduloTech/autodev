@@ -161,10 +161,11 @@ class AHumanCloseDuringAPipelineFixHoldsTest < Minitest::Test
   include DatabaseTestHelper
   include PipelineFailureHarness
 
-  # Closed from the dashboard while the clone ran: the transition is legal from
-  # what this object believed, the row no longer holds it, so it is refused —
-  # and the refusal now happens *before* the comment. It used to be a silent
-  # no-op followed by a public failure comment on a closed ticket.
+  # Closed from the dashboard while the clone ran: nothing overwritten, nothing
+  # announced. This one pins the outcome only — it would hold as well if the
+  # transition were refused as illegal; the two tests below pin that it is the
+  # stale guard that refuses it. It used to be a silent no-op followed by a
+  # public failure comment on a closed ticket.
   def test_a_close_during_the_fix_is_neither_overwritten_nor_announced
     issue = watched_row
     Issue.where(id: issue.id).update_all(status: 'closed')

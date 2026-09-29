@@ -114,16 +114,16 @@ class SafeMarkFailedDecidesTheStampTest < Minitest::Test
     refute_predicate issue, :changed?
   end
 
+  # At error level: the refusal is the one trace of a failure autodev chose not
+  # to record, and it must reach the stream an operator watches.
   def test_a_refused_transition_says_so_in_the_log
     host = runner
-    logger = host.instance_variable_get(:@logger)
+    errors = []
+    host.instance_variable_get(:@logger).define_singleton_method(:error) { |msg, **| errors << msg }
 
     host.send(:safe_mark_failed!, parked_issue(next_retry_at: nil), next_retry_at: nil)
 
-    refusals = logger.messages.select { |m| m.include?('refused') }
-
-    assert_equal 1, refusals.size, logger.messages.inspect
-    assert_includes refusals.first, 'needs_clarification'
+    assert_equal 1, errors.count { |m| m.include?('refused') && m.include?('needs_clarification') }, errors.inspect
   end
 
   def test_the_refusal_names_the_issue
