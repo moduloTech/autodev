@@ -86,20 +86,30 @@ class PipelineMonitor
 
       log "Pipeline failed (pre-triage: #{triage[:verdict]}), retriggering..."
       @client.retry_pipeline(@project_path, pipeline_id(pipeline))
-      log_activity(issue, :pipeline_retrigger, verdict: triage[:verdict])
-      count_retrigger(issue)
-    rescue ::Gitlab::Error::ResponseError => e
+      count_retrigger(issue, verdict: triage[:verdict])
+    # Two answers to a failure, by whether the request can have reached GitLab.
+    # An HTTP refusal and a connection that never opened (`Net::OpenTimeout`, a
+    # refused or unreachable host, a name that did not resolve) sent nothing:
+    # `false`, and the triage runs. Those are nearly all of production's cuts
+    # (2 052 `Net::OpenTimeout` and 13 `ECONNREFUSED` recorded, against 34 HTTP
+    # failures), so counting them as sent spent the one retrigger on a pipeline
+    # nobody retried (adversarial review of amendment 1). Anything later — a read
+    # timeout, a reset, a peer hanging up — may have landed, so it is counted as
+    # sent and the next poll looks.
+    rescue ::Gitlab::Error::ResponseError, ::Net::OpenTimeout, ::Errno::ECONNREFUSED, ::Errno::EHOSTUNREACH,
+           ::Errno::ENETUNREACH, ::SocketError => e
       log_error "Failed to retrigger pipeline: #{e.class}: #{e.message}"
       false
-    rescue ::SystemCallError, ::Timeout::Error, ::SocketError, ::OpenSSL::SSL::SSLError, ::EOFError => e
+    rescue ::SystemCallError, ::Timeout::Error, ::OpenSSL::SSL::SSLError, ::EOFError => e
       count_retrigger(issue, unanswered: e)
     end
 
     # Answers whether the retrigger is on the record, which is what
     # `retrigger_if_needed` answers. The unanswered one writes no activity entry:
     # "pipeline retriggered" is exactly what is not established for it.
-    def count_retrigger(issue, unanswered: nil)
+    def count_retrigger(issue, verdict: nil, unanswered: nil)
       log_error "Retrigger unanswered, counted as sent: #{unanswered.class}: #{unanswered.message}" if unanswered
+      log_activity(issue, :pipeline_retrigger, verdict: verdict) unless unanswered
       issue.update(pipeline_retrigger_count: (issue.pipeline_retrigger_count || 0) + 1)
     end
 

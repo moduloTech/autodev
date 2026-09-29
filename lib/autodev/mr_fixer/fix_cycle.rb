@@ -174,8 +174,16 @@ class MrFixer
       settled = settled_resolutions(pending, discussions)
       still_pending = settled.reject { |id, _| resolve_discussion(issue.mr_iid, id) }
       write_pending_resolutions(issue, still_pending) unless still_pending == pending
-      count_lost_again(issue) if still_pending.any?
+      lost_again(issue, discussions, still_pending) if still_pending.any?
       discussions.reject { |discussion| settled.key?(discussion[:id]) }
+    end
+
+    # Said per thread, like the first loss: otherwise the round reads "no
+    # discussion to fix" over a thread still open on GitLab.
+    def lost_again(issue, discussions, still_pending)
+      discussions.select { |discussion| still_pending.key?(discussion[:id]) }
+                 .each { |discussion| note_lost_resolution(issue, discussion) }
+      count_lost_again(issue)
     end
 
     # A resolution GitLab keeps refusing (a 403 rather than a cut) would
@@ -197,14 +205,23 @@ class MrFixer
     # A time that cannot be read counts as a reply: resolving a thread a human
     # may have answered is the claim that cannot be taken back, fixing it once
     # more is not.
+    #
+    # A system note is not a reply. GitLab adds one to the thread at the very
+    # push that follows the verdict ("changed this line in version N of the
+    # diff" — on production MR !11313, one second after autodev's push) whenever
+    # the correction touched the commented line, so counting it re-fixed exactly
+    # the threads whose correction had landed (adversarial review of amendment 1).
     def replied_since?(discussion, verdict_at)
       verdict = Time.iso8601(verdict_at.to_s)
-      replied = discussion[:notes].any? { |note| (at = note_time(note)).nil? || at > verdict }
+      replied = discussion[:notes].reject { |note| system_note?(note) }
+                                  .any? { |note| (at = note_time(note)).nil? || at > verdict }
       log "Discussion #{discussion[:id]}: replied to since its verdict — fixing it again" if replied
       replied
     rescue ArgumentError
       true
     end
+
+    def system_note?(note) = note.respond_to?(:system) && note.system
 
     def note_time(note)
       value = note.respond_to?(:created_at) ? note.created_at : nil

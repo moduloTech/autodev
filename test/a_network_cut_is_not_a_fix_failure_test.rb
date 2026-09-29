@@ -25,7 +25,7 @@ require 'autodev/poll_router'
 module NetworkCutFixtures
   FakePipeline = Struct.new(:id, :status)
   FakeMr = Struct.new(:state, :head_pipeline, :target_branch)
-  FakeNote = Struct.new(:resolvable, :resolved, :body, :author, :created_at, :position)
+  FakeNote = Struct.new(:resolvable, :resolved, :body, :author, :created_at, :position, :system)
   FakeDiscussion = Struct.new(:id, :notes)
   FakeIssuePayload = Struct.new(:iid, :title, :description, :state, :labels)
   FakeUser = Struct.new(:id, :username)
@@ -50,6 +50,8 @@ module NetworkCutFixtures
   # at us (spec, "Frozen contract").
   CUTS = [Errno::ECONNRESET, Errno::EHOSTUNREACH, Errno::ECONNREFUSED, Net::OpenTimeout,
           Net::ReadTimeout, SocketError, OpenSSL::SSL::SSLError, EOFError].freeze
+  # The members of `CUTS` that fail before a request is sent.
+  NOT_SENT = [Errno::EHOSTUNREACH, Errno::ECONNREFUSED, Net::OpenTimeout, SocketError].freeze
 
   SUCCESS_NOTICE = /\A:wrench:/
   CODE_JOBS = [{ 'id' => 51, 'name' => 'rspec', 'stage' => 'test', 'status' => 'failed',
@@ -636,6 +638,16 @@ class PipelineFixNetworkCutTest < Minitest::Test
     assert_empty reached, 'the triage waits for the next poll'
   end
 
+  # A connection that never opened sent nothing — nearly all of production's
+  # cuts are `Net::OpenTimeout` — so the one retrigger is not spent on it.
+  def test_a_retrigger_that_never_connected_answers_false_and_spends_nothing
+    issue = watched_row
+    mon = monitor(ScriptedClient.new(fail: { retry_pipeline: Net::OpenTimeout.new }))
+
+    assert_same false, mon.send(:retrigger_if_needed, issue, FakePipeline.new(9, 'failed'), { verdict: :uncertain })
+    assert_equal 0, issue.reload.pipeline_retrigger_count
+  end
+
   def test_retrigger_if_needed_answers_true_on_a_timeout
     issue = watched_row
     mon = monitor(ScriptedClient.new(fail: { retry_pipeline: Net::ReadTimeout.new }))
@@ -792,11 +804,12 @@ class RoundWritesNetworkCutTest < Minitest::Test
 
   # 10. The whole family, on each of the four, each answering its contracted
   # value — and a programming error still travelling as itself from each. The
-  # retrigger answers `true` since Amendment 1: every member of `CUTS` is a
-  # non-HTTP failure, which may have reached GitLab, so it counts as sent.
+  # retrigger answers by whether the request can have reached GitLab: `false`
+  # for a connection that never opened, `true` (counted as sent) for the rest.
   def four_writes
     { resolve_discussion: [false, method(:resolve_under)], hand_ticket_back: [false, method(:hand_back_under)],
-      retrigger_if_needed: [true, method(:retrigger_under)], after_conclusion: [nil, method(:conclude_under)] }
+      retrigger_if_needed: [->(klass) { !NOT_SENT.include?(klass) }, method(:retrigger_under)],
+      after_conclusion: [nil, method(:conclude_under)] }
   end
 
   def resolve_under(cut)
@@ -820,8 +833,9 @@ class RoundWritesNetworkCutTest < Minitest::Test
     four_writes.each do |name, (expected, call)|
       CUTS.each do |klass|
         result = call.call(klass.new)
+        want = expected.respond_to?(:call) ? expected.call(klass) : expected
 
-        expected.nil? ? assert_nil(result, "#{name} on #{klass}") : assert_same(expected, result, "#{name} on #{klass}")
+        want.nil? ? assert_nil(result, "#{name} on #{klass}") : assert_same(want, result, "#{name} on #{klass}")
       end
     end
   end
@@ -866,6 +880,55 @@ class PendingResolutionBoundTest < Minitest::Test
   include MrFixRoundHarness
   include DatabaseTestHelper
   include PendingResolutionHarness
+
+  # GitLab's own "changed this line in version N of the diff" note lands on the
+  # thread at the push that follows the verdict; it is not somebody replying.
+  def test_a_system_note_after_the_verdict_is_not_a_reply
+    issue = fixing_row
+    threads = [thread('t1'), thread('t2')]
+    client = cut_t2_then_heal(issue, threads)
+    threads.last.notes << FakeNote.new(true, false, 'changed this line in version 2 of the diff', nil,
+                                       (Time.now.utc + 60).iso8601, nil, true)
+
+    empty_round(issue, client)
+
+    assert_equal [%w[t1 t2], [], 'checking_pipeline'], [client.resolved, @dc_calls, issue.status]
+  end
+
+  # A remembered resolution refused again is said, not reported as "nothing to fix".
+  def test_a_resolution_lost_again_is_said
+    issue = fixing_row
+    client = cut_t2_then_heal(issue, [thread('t1'), thread('t2')])
+    client.fail = { resolve: ['t2', Net::OpenTimeout.new] }
+    @sink[:activity].clear
+
+    empty_round(issue, client)
+
+    assert_includes @sink[:activity].map(&:first), :discussion_resolution_deferred
+  end
+
+  # A note whose time cannot be read counts as a reply: fixed again, not closed.
+  def test_an_unreadable_note_time_counts_as_a_reply
+    issue = fixing_row
+    threads = [thread('t1'), thread('t2')]
+    client = cut_t2_then_heal(issue, threads)
+    threads.last.notes << FakeNote.new(true, false, 'hm', nil, 'not a time', nil, nil)
+
+    empty_round(issue, client)
+
+    assert_equal [:fix], @dc_calls
+  end
+
+  # A column that does not hold a JSON object reads as nothing remembered.
+  def test_an_unreadable_column_reads_as_nothing_remembered
+    issue = fixing_row
+    issue.update(pending_resolutions: '[not json')
+    client = ScriptedClient.new(threads: [thread('t1')])
+
+    verified_round(issue, client, diff: DIFF, commits: true)
+
+    assert_equal [%w[t1], 'checking_pipeline'], [client.resolved, issue.status]
+  end
 
   # A resolution GitLab refuses for good (a 403, say) must not loop for ever
   # between `checking_pipeline` and a fix-free round: each round that loses a
