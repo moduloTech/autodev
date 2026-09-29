@@ -120,8 +120,64 @@ class SafeMarkFailedDecidesTheStampTest < Minitest::Test
 
     host.send(:safe_mark_failed!, parked_issue(next_retry_at: nil), next_retry_at: nil)
 
-    assert(logger.messages.any? { |m| m.include?('needs_clarification') && m.include?('refused') },
-           "no log line names the refusal: #{logger.messages.inspect}")
+    refusals = logger.messages.select { |m| m.include?('refused') }
+
+    assert_equal 1, refusals.size, logger.messages.inspect
+    assert_includes refusals.first, 'needs_clarification'
+  end
+
+  def test_the_refusal_names_the_issue
+    host = runner
+    issue = parked_issue(next_retry_at: nil)
+
+    host.send(:safe_mark_failed!, issue, next_retry_at: nil)
+
+    assert(host.instance_variable_get(:@logger).messages.any? { |m| m.include?("##{issue.issue_iid}") })
+  end
+
+  # The persisted value, not merely "some clean value": read off the object,
+  # never after a reload, which would only ever show the database.
+  def test_a_refused_transition_restores_the_persisted_stamp_in_memory
+    stamp = Time.zone.parse('2026-05-14 00:00:00')
+    issue = parked_issue(next_retry_at: stamp)
+
+    runner.send(:safe_mark_failed!, issue, next_retry_at: 5.minutes.from_now)
+
+    assert_equal stamp, issue.next_retry_at
+    refute_predicate issue, :next_retry_at_changed?
+  end
+
+  # Only the column it assigned is put back: the caller's other unsaved state is
+  # its own, and a `reload` would erase it (or raise on a deleted row).
+  def test_a_refused_transition_leaves_the_callers_other_attributes_alone
+    issue = parked_issue(next_retry_at: nil)
+    issue.retry_count = 5
+
+    runner.send(:safe_mark_failed!, issue, next_retry_at: nil)
+
+    assert_equal 5, issue.retry_count
+    assert_predicate issue, :retry_count_changed?
+  end
+
+  # #97 on the accepted path: a transition legal from what the object believed,
+  # on a row a human has moved since, is refused loudly — never answered `false`,
+  # which the callers would read as "not a failure" and walk away from silently.
+  def test_a_stale_transition_still_raises
+    issue = active_issue
+    Issue.where(id: issue.id).update_all(status: 'closed')
+
+    assert_raises(StaleTransitionError) { runner.send(:safe_mark_failed!, issue, next_retry_at: nil) }
+    assert_equal 'closed', issue.reload.status
+  end
+
+  # The forced-`error` fallback is gone, not dormant: an `InvalidTransition`
+  # (were `whiny_transitions` ever turned on) travels, and writes nothing.
+  def test_an_invalid_transition_is_not_turned_into_a_forced_error
+    issue = parked_issue(next_retry_at: nil)
+    issue.define_singleton_method(:mark_failed!) { raise AASM::InvalidTransition.new(self, :mark_failed, :default) }
+
+    assert_raises(AASM::InvalidTransition) { runner.send(:safe_mark_failed!, issue, next_retry_at: nil) }
+    assert_equal 'needs_clarification', Issue.find(issue.id).status
   end
 
   private

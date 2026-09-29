@@ -20,9 +20,7 @@ require 'autodev/issue_processor'
 #
 # Pinned here: the outcome of whole polls, over a real state machine and a real
 # row. Stubbed: the clone, the job logs, the pre-triage and danger-claude.
-class APipelineFailureLandsInErrorTest < Minitest::Test
-  include DatabaseTestHelper
-
+module PipelineFailureHarness
   FakePipeline = Struct.new(:id, :status)
   FakeMr = Struct.new(:state, :head_pipeline, :target_branch)
   CODE_JOBS = [{ 'name' => 'rspec', 'stage' => 'test', 'status' => 'failed',
@@ -81,6 +79,14 @@ class APipelineFailureLandsInErrorTest < Minitest::Test
   def poll_cycle
     Issue.where(status: 'checking_pipeline').where.not(mr_iid: nil).find_each { |row| monitor.check(row) }
   end
+
+  def stale_guard_stopped? = @sink[:errors].any? { |m| m.start_with?('Stopping:') }
+  def refusal_logged? = @sink[:errors].any? { |m| m.include?('refused') }
+end
+
+class APipelineFailureLandsInErrorTest < Minitest::Test
+  include DatabaseTestHelper
+  include PipelineFailureHarness
 
   # --- the defect -----------------------------------------------------------
 
@@ -146,8 +152,14 @@ class APipelineFailureLandsInErrorTest < Minitest::Test
     assert_equal 'error', issue.reload.status
     assert_nil issue.next_retry_at
   end
+end
 
-  # --- a human gesture still holds (Autodev #97) ----------------------------
+# A human gesture still holds (Autodev #97): with `checking_pipeline` a source,
+# the transition is legal from what the object believed, so a close that landed
+# meanwhile is refused by the stale guard — before any write or comment.
+class AHumanCloseDuringAPipelineFixHoldsTest < Minitest::Test
+  include DatabaseTestHelper
+  include PipelineFailureHarness
 
   # Closed from the dashboard while the clone ran: the transition is legal from
   # what this object believed, the row no longer holds it, so it is refused —
@@ -162,6 +174,33 @@ class APipelineFailureLandsInErrorTest < Minitest::Test
     assert_equal 'closed', issue.reload.status
     assert_nil issue.error_message
     assert_equal 0, fix_error_comments
+  end
+
+  # Why nothing was written matters as much as the fact: it must be the #97
+  # refusal answering at `check`'s boundary, not a silent `false` from a
+  # transition that was never legal.
+  def test_a_close_during_the_fix_is_stopped_by_the_stale_guard
+    issue = watched_row
+    Issue.where(id: issue.id).update_all(status: 'closed')
+
+    monitor.check(issue)
+
+    assert_predicate self, :stale_guard_stopped?, "logged: #{@sink[:errors].inspect}"
+    refute_predicate self, :refusal_logged?, "logged: #{@sink[:errors].inspect}"
+  end
+
+  # The realistic window: the close lands while the clone runs, so the refusal
+  # comes from `pipeline_failed_code!` — and still nothing is announced.
+  def test_a_close_landing_while_the_clone_runs_is_neither_overwritten_nor_announced
+    issue = watched_row
+    mon = monitor(raise_at: :none)
+    mon.define_singleton_method(:prepare_work_dir) { |*| Issue.where(id: issue.id).update_all(status: 'closed') }
+
+    mon.check(issue)
+
+    assert_equal 'closed', issue.reload.status
+    assert_equal 0, fix_error_comments
+    assert_predicate self, :stale_guard_stopped?, "logged: #{@sink[:errors].inspect}"
   end
 end
 
