@@ -160,9 +160,14 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
     # === Error handling ===
 
+    # `checking_pipeline` is a source since Autodev #128: `PipelineMonitor` does
+    # part of a correction — the clone, the rebase, the job logs, the evaluation —
+    # before `pipeline_failed_code!`, so a failure there is raised while the row is
+    # still here. Without it the refusal was silent (`whiny_transitions: false`),
+    # the row stayed on the watch, and the failure comment went out on every poll.
     event :mark_failed do
       transitions from: %i[cloning checking_spec implementing committing
-                           pushing creating_mr reviewing
+                           pushing creating_mr reviewing checking_pipeline
                            fixing_discussions fixing_pipeline
                            running_post_completion answering_question],
                   to: :error

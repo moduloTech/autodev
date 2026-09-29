@@ -182,12 +182,30 @@ module DangerClaudeRunner
   # scheduling a retry passes the moment; one scheduling none passes `nil`,
   # clearing the column rather than leaving a stamp from a previous life in
   # `error` to make the row selected on every cycle forever (15888's mirror).
+  #
+  # Answers whether the row entered `error`, and every caller writes nothing
+  # more when it did not (Autodev #128). `whiny_transitions: false` answers a
+  # refused event with `false`, never with `AASM::InvalidTransition`, so the
+  # fallback that used to sit here — force `status: 'error'` — could not run,
+  # and each caller went on to store its error and post its comment on a row
+  # that had not moved. It must not be revived either: a refusal comes from a
+  # state that is not a failure to record — `needs_clarification`, where the
+  # requester has just been asked a question (Autodev #75), `done`, `closed` —
+  # and a bare `update` would also bypass the Autodev #97 guard, which
+  # `StaleTransitionError` still enforces on the accepted path.
+  # rubocop:disable Naming/PredicateMethod -- same reading as `abandon_issue`:
+  # the boolean says "the transition happened", which is what callers need in
+  # order not to run their writes after a no-op; a `?` would read as a question.
   def safe_mark_failed!(issue, next_retry_at:)
     issue.next_retry_at = next_retry_at
-    issue.mark_failed!
-  rescue AASM::InvalidTransition
-    issue.update(status: 'error', next_retry_at: next_retry_at)
+    return true if issue.mark_failed!
+
+    issue.restore_attributes([:next_retry_at])
+    log_error "Issue ##{issue.issue_iid}: mark_failed refused from #{issue.status} — " \
+              'nothing written, nothing posted'
+    false
   end
+  # rubocop:enable Naming/PredicateMethod
 
   def log(msg) = @logger.info(msg, project: @project_path)
 
