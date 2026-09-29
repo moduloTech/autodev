@@ -43,8 +43,9 @@ module Autodev
     include ErasedScan
 
     # `actor_id` is the GitLab user whose label event decided the verdict — nil
-    # on a mere suspicion. `ExternalState#stop_on_handover` hands the ticket to
-    # them (Autodev #126): they are the one who took the work on.
+    # on a mere suspicion, set on every verdict `verdict` returns, the erased
+    # ones of `ErasedScan` included. `ExternalState#stop_on_handover` hands the
+    # ticket to them (Autodev #126): they are the one who took the work on.
     Verdict = Struct.new(:reason, :label, :actor_id)
 
     SCOPE_SEPARATOR = '::'

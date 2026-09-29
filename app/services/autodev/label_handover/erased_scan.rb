@@ -28,9 +28,10 @@ module Autodev
       # give-up's own `apply_label_attention`, and a `done` row is never
       # scanned again, so without this the gate re-armed the row, reclaimed
       # the ticket, and the scan the reclaim's write triggered closed it one
-      # cycle later — two contradictory comments, the ticket left on autodev
-      # (`close_row!` hands nothing back). Same rules, floor and cost as
-      # stage 3 of `verdict`: nil when the scan is not due.
+      # cycle later — two contradictory comments (and, before Autodev #126
+      # made the stop hand the ticket over, the ticket left on autodev).
+      # Same rules, floor and cost as stage 3 of `verdict`: nil when the scan
+      # is not due.
       def erased_since_floor(issue_iid, row) = erased_handover(issue_iid, row)
 
       private
@@ -114,8 +115,14 @@ module Autodev
         erased_done(theirs) || erased_move(theirs) || erased_doing(theirs)
       end
 
+      # Every erased verdict names the author of the event that decided it,
+      # like stage 1 does (Autodev #126): `stop_on_handover` hands the ticket to
+      # them, and the same gesture must reach the same person whether or not
+      # autodev's write erased it before the read.
       def erased_done(theirs)
-        Verdict.new(:done_added, label_done) if label_done && standing_add?(theirs, label_done)
+        return unless label_done && standing_add?(theirs, label_done)
+
+        Verdict.new(:done_added, label_done, actor_of(last_edit(theirs, label_done)))
       end
 
       # The newest foreign value in autodev's scope whose add still stands.
@@ -126,7 +133,7 @@ module Autodev
           name = label_name(event)
           next unless name && scope_of(name) == scope && !configured_labels.include?(name)
 
-          return Verdict.new(:workflow_moved, name) if standing_add?(theirs, name)
+          return Verdict.new(:workflow_moved, name, actor_of(last_edit(theirs, name))) if standing_add?(theirs, name)
         end
         nil
       end
@@ -137,11 +144,11 @@ module Autodev
       def erased_doing(theirs)
         return unless label_doing
 
-        last = theirs.select { |event| label_name(event) == label_doing }.last
+        last = last_edit(theirs, label_doing)
         return unless last && action(last) == 'remove'
         return if todo_posed?(theirs)
 
-        Verdict.new(:doing_removed, label_doing)
+        Verdict.new(:doing_removed, label_doing, actor_of(last))
       end
 
       def todo_posed?(theirs)
@@ -153,12 +160,14 @@ module Autodev
       # somebody else at or after it (a board move writes one event per label, all
       # with the same timestamp) means the ticket was handed back, not taken.
       def standing_add?(theirs, name)
-        last = theirs.select { |event| label_name(event) == name }.last
+        last = last_edit(theirs, name)
         return false unless last && action(last) == 'add'
 
         at = event_time(last)
         theirs.none? { |event| asked_for_work?(event) && event_time(event) >= at }
       end
+
+      def last_edit(theirs, name) = theirs.select { |event| label_name(event) == name }.last
 
       def asked_for_work?(event)
         action(event) == 'add' && (labels_todo + [label_doing]).compact.include?(label_name(event))

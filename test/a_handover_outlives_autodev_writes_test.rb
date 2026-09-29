@@ -27,6 +27,8 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
 
   AUTODEV_ID = 7
   HUMAN_ID = 999
+  SECOND_HUMAN_ID = 888
+  AUTHOR_ID = 555
   PATH = 'group/project'
 
   DOING = 'Development::Doing'
@@ -45,12 +47,13 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
   # is an event naming who made it and when. `edit_issue` is autodev's write,
   # `human_edit` a person's.
   class RecordingGitlab
-    attr_reader :labels, :notes, :event_calls
+    attr_reader :labels, :notes, :event_calls, :assignments
 
     def initialize(labels)
       @labels = labels.dup
       @events = []
       @notes = []
+      @assignments = []
       @event_calls = 0
       @on_events_read = nil
     end
@@ -69,6 +72,7 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
       record(labels.split(','), AUTODEV_ID) if labels
       return unless assignee_ids
 
+      @assignments << assignee_ids
       Gitlab::ObjectifiedHash.new('iid' => iid, 'assignees' => assignee_ids.map { |id| { 'id' => id } })
     end
 
@@ -130,7 +134,8 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     not_ours?(row, gitlab, POWERPANNE)
 
     assert_equal 'closed', row.reload.status
-    assert_equal expected_note(:handover_done_added, DONE), gitlab.notes.first
+    assert_equal "#{expected_note(:handover_done_added, DONE)}\n\n#{Locales.t(:handover_reassigned, locale: :fr)}",
+                 gitlab.notes.first, 'the erased verdict names the human, so the ticket is handed to them'
   end
 
   def test_a_board_move_erased_by_autodev_names_where_the_ticket_went
@@ -160,6 +165,51 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     autodev!(gitlab, POWERPANNE, :apply_label_doing, row)
 
     assert_equal :doing_removed, scan(gitlab, row, POWERPANNE)&.reason
+  end
+
+  # --- who the erased handover names (the alpha-56 lot, #101 × #126) --
+
+  # `ExternalState#stop_on_handover` hands the ticket to `verdict.actor_id`,
+  # else to `handback_target` (the displaced assignee, else the author). The
+  # author here is a third person, so a verdict that lost its actor reads as
+  # AUTHOR_ID, never as HUMAN_ID.
+  def test_an_erased_done_names_the_human_who_posed_it
+    row, gitlab = erased_row { |g| human!(g, add: [DONE]) }
+
+    assert_equal [:done_added, HUMAN_ID], reason_and_actor(scan(gitlab, row, POWERPANNE))
+  end
+
+  def test_an_erased_move_names_the_human_who_made_it
+    row, gitlab = erased_row(clear_scope: true) { |g| human!(g, add: [MOVED_ON], remove: [DOING]) }
+
+    assert_equal [:workflow_moved, HUMAN_ID], reason_and_actor(scan(gitlab, row, POWERPANNE))
+  end
+
+  def test_an_erased_doing_removal_names_the_human_who_removed_it
+    row, gitlab = erased_row { |g| human!(g, remove: [DOING]) }
+
+    assert_equal [:doing_removed, HUMAN_ID], reason_and_actor(scan(gitlab, row, POWERPANNE))
+  end
+
+  def test_an_erased_handover_hands_the_ticket_to_the_human_not_the_author
+    row, gitlab = erased_row { |g| human!(g, add: [DONE]) }
+    not_ours?(row, gitlab, POWERPANNE)
+
+    assert_equal 'closed', row.reload.status
+    assert_equal [[HUMAN_ID]], gitlab.assignments
+  end
+
+  # The erased verdict and the visible one name the same person for the same
+  # gesture: whether autodev's write came before the read must not decide who
+  # gets the ticket.
+  def test_the_same_gesture_names_the_same_person_erased_or_visible
+    erased_row_, erased_gitlab = erased_row { |g| human!(g, add: [DONE], actor: SECOND_HUMAN_ID) }
+    visible_row, visible_gitlab = claimed_row(POWERPANNE)
+    visible_row.update_columns(issue_author_id: AUTHOR_ID)
+    human!(visible_gitlab, add: [DONE], actor: SECOND_HUMAN_ID)
+
+    assert_equal scan(visible_gitlab, visible_row.reload, POWERPANNE).actor_id,
+                 scan(erased_gitlab, erased_row_, POWERPANNE).actor_id
   end
 
   def test_every_reason_the_scan_returns_has_a_locale_key
@@ -616,6 +666,18 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
   def autodev!(gitlab, config, write, row, **opts)
     travel(opts.delete(:after) || 1.minute)
     manager(gitlab, config).send(write, row.issue_iid, **opts)
+  end
+
+  def reason_and_actor(verdict) = [verdict&.reason, verdict&.actor_id]
+
+  # A claimed row authored by somebody else than the human, whose gesture
+  # (the block) autodev's own `apply_label_doing` then erases.
+  def erased_row(**write_opts)
+    row, gitlab = claimed_row(POWERPANNE)
+    row.update_columns(issue_author_id: AUTHOR_ID)
+    yield gitlab
+    autodev!(gitlab, POWERPANNE, :apply_label_doing, row, **write_opts)
+    [row.reload, gitlab]
   end
 
   # A row whose clocks are set by hand, with autodev having just written.
