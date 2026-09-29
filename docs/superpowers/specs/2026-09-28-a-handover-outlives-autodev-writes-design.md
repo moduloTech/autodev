@@ -137,6 +137,24 @@ and 2 alone.
 Without it, the erased-handover scan is skipped (old behaviour). Its one
 production caller, `ExternalState#stop_on_handover`, always passes it.
 
+## The re-arm gate asks before it writes (decided 29/09/2026)
+
+A human edit in the poll cycle before a give-up is erased by the give-up's own
+`apply_label_attention`, predates `finished_at`, and sits on a `done` row that
+nothing scans. `UntouchedSinceGiveup` looked only after `finished_at`, so it
+re-armed the row and reclaimed the ticket, and the scan triggered by the
+reclaim's write closed the row one cycle later. The result was two
+contradictory comments, and the ticket left on autodev, because `close_row!`
+hands nothing back.
+
+The owner compared four answers. Leaving it did the harm above. Stamping the
+floor at re-arm lost the handover, as on master. Handing the ticket back at the
+close kept the two comments. Asking the scan in the gate was chosen: the gate
+declines the re-arm (`LabelHandover#erased_since_floor`, its fourth question).
+A clean answer advances the floor, so the reclaim's write replays nothing.
+Cost: one events read per gate evaluation. Production has counted 54 give-ups
+and 10 sweep re-arms since July.
+
 ## Point 3 of the ticket: one source
 
 On the conditional path, detection and authorship are both read from the events.

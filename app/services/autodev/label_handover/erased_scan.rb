@@ -22,6 +22,17 @@ module Autodev
       # more read after a write that preceded a read by less than this.
       FLOOR_MARGIN = 60 # seconds
 
+      # The scan alone, for a caller that must ask before it writes rather
+      # than after: `UntouchedSinceGiveup`, the gate both re-arms share. A
+      # human edit in the poll cycle before a give-up is erased by the
+      # give-up's own `apply_label_attention`, and a `done` row is never
+      # scanned again, so without this the gate re-armed the row, reclaimed
+      # the ticket, and the scan the reclaim's write triggered closed it one
+      # cycle later — two contradictory comments, the ticket left on autodev
+      # (`close_row!` hands nothing back). Same rules, floor and cost as
+      # stage 3 of `verdict`: nil when the scan is not due.
+      def erased_since_floor(issue_iid, row) = erased_handover(issue_iid, row)
+
       private
 
       # Stage 3 (Autodev #101) — the handover a label write of autodev's erased.

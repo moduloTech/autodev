@@ -91,7 +91,8 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
       Gitlab::ObjectifiedHash.new('id' => @notes.size)
     end
 
-    def issue_notes(*) = Gitlab::PaginatedResponse.new([])
+    def issue_notes(*, **) = Gitlab::PaginatedResponse.new([])
+    def merge_request_notes(*, **) = Gitlab::PaginatedResponse.new([])
     def edit_issue_note(*) = nil
 
     private
@@ -389,6 +390,40 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     assert_equal floor, floor_of(row), 'a recovery is not a statement about the ticket'
   end
 
+  # --- the re-arm gate -------------------------------------------------
+  #
+  # A human edit in the poll cycle before a give-up is erased by the give-up's
+  # own `apply_label_attention`, and a `done` row is never scanned again. The
+  # re-arm gate (`UntouchedSinceGiveup`, shared by the infra recheck and the
+  # review-arrears sweep) looked only after `finished_at`, so it reclaimed the
+  # ticket and the next cycle's scan closed the row — "je reprends" then
+  # "j'arrête", with the ticket left on autodev. It now asks before.
+
+  def test_the_re_arm_gate_declines_a_ticket_whose_handover_the_give_up_erased
+    row, gitlab = claimed_row(POWERPANNE)
+    human!(gitlab, add: [DONE])
+    given_up(gitlab, row)
+
+    refute_includes gitlab.labels, DONE, "precondition: the give-up's write erased the evidence"
+    refute gate(gitlab).call(row.reload, gitlab.issue(PATH, row.issue_iid)), 'somebody took it before the give-up'
+  end
+
+  def test_the_re_arm_gate_still_re_arms_a_ticket_nobody_touched
+    row, gitlab = claimed_row(POWERPANNE)
+    given_up(gitlab, row)
+
+    assert gate(gitlab).call(row.reload, gitlab.issue(PATH, row.issue_iid))
+  end
+
+  def test_a_clean_gate_moves_the_floor_so_the_reclaim_write_replays_nothing
+    row, gitlab = claimed_row(POWERPANNE)
+    given_up(gitlab, row)
+    gate(gitlab).call(row.reload, gitlab.issue(PATH, row.issue_iid))
+
+    assert_operator floor_of(row), :>=, ::Issue.find(row.id).labels_written_at - 60,
+                    'the give-up write is inside what the gate read'
+  end
+
   # --- cost -------------------------------------------------------------
 
   def test_no_write_since_the_floor_costs_no_call
@@ -602,6 +637,16 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
     gitlab.human_edit(**edit)
     gitlab.instance_variable_get(:@events).drop(before).each { |event| event['created_at'] = time.utc.iso8601(3) }
   end
+
+  # The give-up's own write and state, as `abandon_issue` leaves them.
+  def given_up(gitlab, row)
+    autodev!(gitlab, POWERPANNE, :apply_label_attention, row, after: 30.seconds)
+    row.update_columns(status: 'done', finished_at: Time.current, needs_attention: true,
+                       attention_reason: 'stagnation_pipeline')
+    travel 1.hour
+  end
+
+  def gate(gitlab) = Autodev::UntouchedSinceGiveup.new(client: gitlab, project_config: POWERPANNE)
 
   def human_done_at(gitlab, time) = gitlab.push_event('add', DONE, HUMAN_ID, time.utc.iso8601(3))
 
