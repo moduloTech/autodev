@@ -30,7 +30,11 @@ module NetworkCutFixtures
   FakeIssuePayload = Struct.new(:iid, :title, :description, :state, :labels)
   FakeUser = Struct.new(:id, :username)
   FakeLink = Struct.new(:iid, :title, :state)
-  HandbackIssue = Struct.new(:issue_iid, :displaced_assignee_id, :issue_author_id)
+  HandbackIssue = Struct.new(:issue_iid, :displaced_assignee_id, :issue_author_id) do
+    # `IssueNotifier#handback_target` asks the row since Autodev #126; the rule
+    # is `Issue#handback_target`'s.
+    def handback_target = displaced_assignee_id || issue_author_id
+  end
   RetriggerIssue = Struct.new(:issue_iid, :pipeline_retrigger_count) do
     # Answers like `ActiveRecord#update` on a row that saved.
     def update(**attrs) = attrs.each { |name, value| self[name] = value } && true

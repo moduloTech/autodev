@@ -62,9 +62,14 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
                                   'assignees' => [{ 'id' => AUTODEV_ID }])
     end
 
-    def edit_issue(_path, _iid, labels:)
-      record(labels.split(','), AUTODEV_ID)
-      nil
+    # A reassignment writes no label event. `ExternalState#stop_on_handover`
+    # makes one when it hands the ticket to whoever took it (Autodev #126), and
+    # reads the assignees back off the answer.
+    def edit_issue(_path, iid, labels: nil, assignee_ids: nil)
+      record(labels.split(','), AUTODEV_ID) if labels
+      return unless assignee_ids
+
+      Gitlab::ObjectifiedHash.new('iid' => iid, 'assignees' => assignee_ids.map { |id| { 'id' => id } })
     end
 
     def human_edit(add: [], remove: [], actor: HUMAN_ID)
