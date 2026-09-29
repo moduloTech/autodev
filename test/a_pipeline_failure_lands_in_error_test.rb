@@ -133,7 +133,7 @@ class APipelineFailureLandsInErrorTest < Minitest::Test
 
   # --- the other two handlers on the same path ------------------------------
 
-  def test_a_rate_limit_during_the_evaluation_parks_the_row_until_the_reset
+  def test_a_rate_limit_during_the_correction_parks_the_row_until_the_reset
     issue = watched_row
 
     reset = 10.minutes.from_now

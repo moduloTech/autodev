@@ -138,8 +138,8 @@ class PipelineMonitor
     # after poll" chain stagnation measures. That was not true of a failure
     # raised before `pipeline_failed_code!` until Autodev #128: `mark_failed` had
     # no transition from `checking_pipeline`, the row never left, and with the
-    # write moved after the attempt nothing bounded the loop at all — one public
-    # failure comment per poll.
+    # write moved after the attempt the only bound left was the watch's age —
+    # one public failure comment per poll for up to `pipeline_watch_max_days`.
     def check_stagnation_and_fix(issue, failed_jobs, triage)
       return defer_fix_for_usage(issue) unless claude_available?
 

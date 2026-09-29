@@ -29,8 +29,12 @@ is posted again.
 - The sixth poll (08:45) ended on `stagnation_pipeline`. That bound no longer
   exists: since Autodev #71 (8850b44, 17/08/2026) the stagnation signature is
   written **after** `clone_and_fix` returns, and a raise skips the write. On
-  today's code the loop is unbounded — nothing moves the row, `DormantAudit`
-  never sees it (it is active and produces activity every poll).
+  today's code the only bound left is the watch's age: `abandon_expired_watch`
+  still gives up after `pipeline_watch_max_days` (14), since the refused
+  transition left `checking_pipeline_since` untouched — up to ~10 000 public
+  comments at production's 120 s cycle. `DormantAudit` never sees the row (it
+  is active and produces activity every poll). (Corrected on adversarial
+  review: the first draft said "unbounded".)
 - The comment above `check_stagnation_and_fix` already claims that a
   `RateLimitError` or `StandardError` from the fix "park the row in `error` with
   `next_retry_at`". From `checking_pipeline` that claim was false.
@@ -42,7 +46,7 @@ is posted again.
 | `PipelineMonitor::ErrorHandler` (`handle_rate_limit`, `handle_auth_failure`, `handle_failure_error`) via `attempt_fix` | `checking_pipeline` (everything before `pipeline_failed_code!`), `fixing_pipeline` | **`checking_pipeline`** |
 | same, via `Reviewer#handle_review_interruption` | `reviewing` | — |
 | `MrFixer::ErrorHandler` | `fixing_discussions` | — |
-| `IssueProcessor::ErrorHandler` | `cloning` … `creating_mr`, `answering_question`, and **`needs_clarification`** after `spec_unclear!` (`spec_checker.rb:113`) if a later write raises | **`needs_clarification`** |
+| `IssueProcessor::ErrorHandler` | `cloning` … `creating_mr`, `answering_question`, **`needs_clarification`** after `spec_unclear!` (`spec_checker.rb:113`) if a later write raises, and **`checking_pipeline`** after `mr_created!` (`issue_processor.rb:109`) if `persist_finalize` / `log_activity` / `notify_localized` raises (found on adversarial review) | **`needs_clarification`**, **`checking_pipeline`** |
 
 ## Decision (owner, 29/09/2026)
 
@@ -76,7 +80,18 @@ Poll 1: `checking_pipeline → error`, `next_retry_at` NULL, one comment. The
 `next_retry_at: now`), `perform_retry_errored` → `retry_pipeline!` →
 `checking_pipeline`; if the failure recurs, one more comment per revival, up to
 `dormant_audit_max` (3) → `needs_attention` (`dormant_exhausted`). One comment
-per real attempt, hours apart, bounded — instead of one per poll, unbounded.
+per real attempt, at least `pending_window` apart (15 min in production:
+`max(3 × 120 s, 900 s)`), three at most — instead of one per poll for up to
+14 days.
+
+**The revival budget is per row, not per incident** (adversarial review).
+`dormant_recheck_count` is only ever incremented (`DormantAudit#audit`), so the
+three revivals are shared across the row's whole life and with the pending and
+active arms; a fourth unrelated pre-fix failure, weeks later, flags the row
+`dormant_exhausted` (an operator signal, no GitLab comment) instead of reviving
+it. This is not new in kind — `MrFixer#handle_fix_error` has always sent rows
+down the same path — and Autodev #125 resets the budget on a human resume. See
+the owner decision recorded below.
 
 A `RateLimitError` from the evaluation now also parks the row in `error` with
 `next_retry_at` = the reset time, as it already did from every other state.
@@ -86,6 +101,17 @@ A human close during a fix from `checking_pipeline` now raises
 in-memory state, the row no longer holds it), which `check` answers with
 `stop_on_stale_transition` — no `error_message`, no comment. Before, the refusal
 was silent and the comment went out on a closed ticket.
+
+### Other consequences of the new source
+
+- `IssueProcessor` after `mr_created!`: a raise there used to leave the row on
+  the watch with `retry_count` incremented, a backoff stamp and an error
+  comment; it now lands in `error` with that backoff and is retried through
+  `retry_pipeline!`. Pinned by a test.
+- The dashboard's transition menu (`permitted_events_for`) now offers the
+  manual `mark_failed` on a `checking_pipeline` row, as it already did on every
+  other active state. Fired without a stamp, the row is revived by the dormant
+  audit like any other stampless `error`.
 
 ## Out of scope
 
