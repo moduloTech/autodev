@@ -5,6 +5,7 @@ require 'autodev/danger_claude_runner'
 require 'autodev/mr_fixer'
 require 'autodev/pipeline_monitor'
 require 'autodev/issue_processor'
+require 'autodev/poll_router'
 
 # Autodev #125 — a network cut to GitLab during a fix round is not a fix failure.
 #
@@ -30,7 +31,10 @@ module NetworkCutFixtures
   FakeUser = Struct.new(:id, :username)
   FakeLink = Struct.new(:iid, :title, :state)
   HandbackIssue = Struct.new(:issue_iid, :displaced_assignee_id, :issue_author_id)
-  RetriggerIssue = Struct.new(:issue_iid, :pipeline_retrigger_count)
+  RetriggerIssue = Struct.new(:issue_iid, :pipeline_retrigger_count) do
+    # Answers like `ActiveRecord#update` on a row that saved.
+    def update(**attrs) = attrs.each { |name, value| self[name] = value } && true
+  end
 
   # Duplicated from `test/api_failure_is_not_a_verdict_test.rb` rather than
   # shared: every test file has to pass run on its own (Autodev #64).
@@ -57,7 +61,17 @@ module NetworkCutFixtures
     )
   end
 
-  def thread(id) = FakeDiscussion.new(id, [FakeNote.new(true, false, "please fix #{id}")])
+  # Dated well before any round of this file, so a verdict reached by a round is
+  # always newer than the review comment it answers.
+  REVIEWED_AT = '2026-01-01T00:00:00Z'
+
+  def thread(id) = FakeDiscussion.new(id, [FakeNote.new(true, false, "please fix #{id}", nil, REVIEWED_AT)])
+
+  def server_error
+    Gitlab::Error::InternalServerError.new(
+      FakeResponse.new('500 Internal Server Error', 500, FakeRequest.new('https://gitlab.example', '/api/v4/x'))
+    )
+  end
 
   # Every GitLab call the two rounds make, each answering until `fail` names it.
   # `fail[:create_issue_note]` is a pair `[pattern, error]`, so a test can cut
@@ -76,7 +90,12 @@ module NetworkCutFixtures
       @retries = 0
     end
 
-    def merge_request_discussions(_path, _iid, **_opts) = FakePaginated.new(@threads)
+    # A resolved thread leaves the list, as it does on GitLab, so a round that
+    # follows another reads what the previous one left open.
+    def merge_request_discussions(_path, _iid, **_opts)
+      FakePaginated.new(@threads.reject { |t| @resolved.include?(t.id) })
+    end
+
     def issue_notes(_path, _iid, **_opts) = FakePaginated.new([])
     def pipeline_jobs(_path, _pid, **_opts) = CODE_JOBS
     def user = FakeUser.new(1, 'autodev')
@@ -168,9 +187,9 @@ module MrFixRoundHarness
   # the round, the prompt-context read, the resolution, the notices and the
   # error handler — everything that talks to GitLab. The verification is off
   # (`fix_verification_max: 0`): this file is about GitLab, not about #79.
-  def fixer(client, stubs = {})
+  def fixer(client, stubs = {}, project_config = UNVERIFIED)
     MrFixer.allocate.tap do |fix|
-      configure(fix, client, { 'fix_verification_max' => 0 })
+      configure(fix, client, project_config)
       silence(fix, @sink)
       local_steps.merge(stubs).each { |name, body| fix.define_singleton_method(name) { |*, **| body.call } }
     end
@@ -182,8 +201,10 @@ module MrFixRoundHarness
       danger_claude_commit: -> {}, new_commits?: -> { true }, push_fixes: -> {} }
   end
 
-  def run_round(issue, client, stubs = {})
-    SkillsInjector.stub(:inject, { all_skills: [] }) { fixer(client, stubs).fix(issue) }
+  UNVERIFIED = { 'fix_verification_max' => 0 }.freeze
+
+  def run_round(issue, client, stubs = {}, project_config = UNVERIFIED)
+    SkillsInjector.stub(:inject, { all_skills: [] }) { fixer(client, stubs, project_config).fix(issue) }
     issue.reload
   end
 
@@ -315,6 +336,184 @@ class MrFixRoundControlTest < Minitest::Test
   end
 end
 
+# --- Amendment 1: resolutions after the push, and remembered ---------------
+
+# The adversarial review's blocker. A verified correction whose resolution was
+# cut could never be resolved afterwards: the next round found the correction
+# already on the branch, measured an empty diff (`:unchanged`), left the thread
+# open, and `stagnation_threshold` rounds later gave the request up on a
+# stagnation that was really one lost write. And a round that aborted after a
+# resolution but before the push left a thread closed over a correction GitLab
+# never received.
+#
+# So the resolutions come after the push, and the one that did not take is
+# remembered with the time of its verdict: the next round makes it directly,
+# unless somebody wrote on the thread since.
+class PendingResolutionTest < Minitest::Test
+  include MrFixRoundHarness
+  include DatabaseTestHelper
+
+  # Verification on, with a threshold low enough that the stagnation the
+  # blocker led to is two rounds away.
+  VERIFIED = { 'fix_verification_max' => 10, 'stagnation_threshold' => 2 }.freeze
+  DIFF = "diff --git a/app/x.rb b/app/x.rb\n+  guard_clause\n"
+
+  def setup
+    setup_database
+    @sink = new_sink
+    @dc_calls = []
+  end
+
+  # `diff` is what each correction of the round changed, and `commits` whether
+  # the round left anything to push. The verification pass says `addressed`
+  # whenever it is asked, so an empty diff is the only way to fail it here.
+  def verified_round(issue, client, diff:, commits:, **stubs)
+    calls = @dc_calls
+    addressed = VerificationContract.parse(JSON.generate(verdict: 'addressed', reason: 'the guard was added'))
+    steps = { head_sha: -> { 'sha-before' }, correction_diff: -> { diff }, run_verification: -> { addressed },
+              new_commits?: -> { commits }, run_fix_prompt: -> { calls << :fix } }
+    run_round(issue, client, steps.merge(stubs), VERIFIED)
+  end
+
+  def back_to_fixing(issue)
+    issue._review_count_over_zero = true
+    issue._unresolved_discussions_empty = false
+    issue.pipeline_green!
+  end
+
+  def cut_t2_then_heal(issue, threads)
+    client = ScriptedClient.new(threads: threads, fail: { resolve: ['t2', Net::OpenTimeout.new] })
+    verified_round(issue, client, diff: DIFF, commits: true)
+    client.fail = {}
+    @dc_calls.clear
+    client
+  end
+
+  def pending(issue) = JSON.parse(issue.pending_resolutions || '{}')
+
+  # A round after the correction reached the branch: nothing left to change.
+  def empty_round(issue, client)
+    back_to_fixing(issue)
+    verified_round(issue, client, diff: '', commits: false)
+  end
+
+  def reply_to(discussion)
+    discussion.notes << FakeNote.new(true, false, 'still wrong', nil, (Time.now.utc + 60).iso8601)
+  end
+
+  # The blocker replay: rounds 2 and 3 find t2's correction already on the
+  # branch, an empty diff and nothing to push.
+  def test_a_lost_resolution_is_made_at_the_next_round_without_a_fix # rubocop:disable Minitest/MultipleAssertions
+    issue = fixing_row
+    client = cut_t2_then_heal(issue, [thread('t1'), thread('t2')])
+
+    2.times { empty_round(issue, client) }
+
+    refute_includes @sink[:activity].map(&:first), :stagnation_discussions
+    assert_equal 'checking_pipeline', issue.status
+    assert_equal %w[t1 t2], client.resolved
+    assert_empty @dc_calls, 'the correction is already on the branch: nothing is fixed twice'
+    assert_nil issue.pending_resolutions
+  end
+
+  def test_a_lost_resolution_is_remembered_with_the_time_of_its_verdict
+    before = Time.now.utc.floor
+    issue = fixing_row
+    cut_t2_then_heal(issue, [thread('t1'), thread('t2')])
+
+    assert_equal ['t2'], pending(issue).keys
+    assert_operator Time.iso8601(pending(issue)['t2']), :>=, before
+    assert_includes @sink[:activity], [:discussion_resolution_deferred, { title: 'please fix t2' }]
+  end
+
+  # Somebody wrote on the thread after the verdict: the old verdict does not
+  # answer what they said, so the thread is read and fixed like any other.
+  def test_a_reply_after_the_verdict_is_fixed_normally
+    issue = fixing_row
+    replied = thread('t2')
+    client = cut_t2_then_heal(issue, [thread('t1'), replied])
+    reply_to(replied)
+
+    empty_round(issue, client)
+
+    assert_equal [:fix], @dc_calls, 'a reply is read again, not closed on the old verdict'
+    assert_equal ['t1'], client.resolved
+    assert_nil issue.pending_resolutions
+  end
+
+  # GitLab still does not take it: it stays remembered, and still nothing is
+  # fixed twice.
+  def test_a_resolution_lost_twice_stays_remembered
+    issue = fixing_row
+    client = cut_t2_then_heal(issue, [thread('t1'), thread('t2')])
+    remembered = pending(issue)
+    client.fail = { resolve: ['t2', Net::OpenTimeout.new] }
+
+    empty_round(issue, client)
+
+    assert_equal remembered, pending(issue)
+    assert_empty @dc_calls
+    assert_equal 'checking_pipeline', issue.status
+  end
+
+  # A thread somebody closed by hand, or deleted, is no longer ours to resolve.
+  def test_a_remembered_thread_gitlab_no_longer_lists_is_forgotten
+    issue = fixing_row
+    client = cut_t2_then_heal(issue, [thread('t1'), thread('t2')])
+    client.resolved << 't2'
+
+    empty_round(issue, client)
+
+    assert_nil issue.pending_resolutions
+  end
+
+  # The pre-existing defect: resolving inside the loop closed threads whose
+  # correction then never reached GitLab.
+  def test_nothing_is_resolved_when_the_push_fails
+    issue = fixing_row
+    client = ScriptedClient.new(threads: [thread('t1')])
+
+    run_round(issue, client, push_fixes: -> { raise GitError, 'push rejected' })
+
+    assert_equal 'error', issue.status
+    assert_empty client.resolved, 'a thread may not be closed over a correction that was not pushed'
+  end
+
+  # The only thread's resolution was cut: "no correction validated" would be
+  # false, and the per-thread entry already says what happened.
+  def test_a_lone_lost_resolution_is_not_reported_as_nothing_validated
+    client = ScriptedClient.new(threads: [thread('t1')], fail: { resolve: ['t1', Net::OpenTimeout.new] })
+
+    issue = verified_round(fixing_row, client, diff: DIFF, commits: true)
+    keys = @sink[:activity].map(&:first)
+
+    assert_includes keys, :discussion_resolution_deferred
+    refute_includes keys, :discussions_none_resolved
+    assert_equal 'checking_pipeline', issue.status
+  end
+end
+
+# The branch is rebuilt from scratch on a reimplementation, so a remembered
+# verdict about a correction on the old branch no longer holds.
+class ReimplementationForgetsPendingResolutionsTest < Minitest::Test
+  include DatabaseTestHelper
+
+  FakeGlIssue = Struct.new(:iid, :title)
+
+  def setup = setup_database
+
+  def test_a_reimplementation_clears_the_pending_resolutions
+    issue = create_issue(status: 'done', pending_resolutions: JSON.generate('t2' => '2026-09-29T10:00:00Z'))
+    router = PollRouter.allocate
+    %i[log_activity enqueue_issue_processing].each { |name| router.define_singleton_method(name) { |*| nil } }
+
+    router.send(:reenter_via_reimplementation, FakeGlIssue.new(issue.issue_iid, 'a request'), issue)
+
+    assert_equal 'pending', issue.reload.status
+    assert_nil issue.pending_resolutions
+  end
+end
+
 # --- 4, 5, 11: the pipeline fix round --------------------------------------
 
 class PipelineFixNetworkCutTest < Minitest::Test
@@ -369,6 +568,21 @@ class PipelineFixNetworkCutTest < Minitest::Test
     assert_empty error_notes(client)
   end
 
+  # The row being back on the watch is not enough on its own: a round that fixed
+  # and pushed ends there too. So no fix may have been attempted at all — no
+  # round counted, nothing pushed, no danger-claude call.
+  def test_an_issue_links_cut_attempts_no_fix
+    issue = watched_row
+    fixes = []
+
+    poll(issue, ScriptedClient.new(fail: { issue_links: Net::OpenTimeout.new }),
+         fix_each_job: -> { fixes << :danger_claude })
+
+    assert_equal 0, issue.fix_round
+    refute_includes @sink[:activity].map(&:first), :pipeline_fix_pushed
+    assert_empty fixes, 'no danger-claude call under a round that could not read its context'
+  end
+
   # 5. The pushed fix went through `pipeline_fix_done!`; the notice is after it.
   def test_a_cut_on_the_success_notice_does_not_undo_the_pushed_fix # rubocop:disable Minitest/MultipleAssertions
     issue = watched_row
@@ -400,9 +614,10 @@ class PipelineFixNetworkCutTest < Minitest::Test
     refute(@sink[:errors].any? { |m| m.include?('did not answer') })
   end
 
-  # 8. A write that is not a verdict: the pipeline was not retriggered, which is
-  # exactly what `false` says, and the triage it would have skipped runs.
-  def test_a_retrigger_cut_answers_false_and_the_triage_continues
+  # 8. Amendment 1. A `Net::ReadTimeout` comes after the request was sent, so the
+  # retrigger may well have reached GitLab: it is counted as one, and the poll
+  # waits for the pipeline it may have started rather than triaging the old one.
+  def test_a_retrigger_timeout_counts_as_a_retrigger_and_waits
     issue = watched_row
     client = ScriptedClient.new(fail: { retry_pipeline: Net::ReadTimeout.new })
     reached = []
@@ -411,16 +626,32 @@ class PipelineFixNetworkCutTest < Minitest::Test
 
     mon.send(:triage_and_fix, issue, FakePipeline.new(9, 'failed'), CODE_JOBS)
 
-    assert_equal 0, issue.reload.pipeline_retrigger_count
-    assert_equal [:infra_skip?], reached
+    assert_equal 1, issue.reload.pipeline_retrigger_count
+    assert_empty reached, 'the triage waits for the next poll'
   end
 
-  def test_retrigger_if_needed_answers_false_on_a_cut
+  def test_retrigger_if_needed_answers_true_on_a_timeout
     issue = watched_row
     mon = monitor(ScriptedClient.new(fail: { retry_pipeline: Net::ReadTimeout.new }))
 
+    assert_same true, mon.send(:retrigger_if_needed, issue, FakePipeline.new(9, 'failed'), { verdict: :uncertain })
+    assert_equal 1, issue.reload.pipeline_retrigger_count
+  end
+
+  # An HTTP answer is GitLab refusing: nothing was retriggered, and the triage
+  # it would have skipped runs.
+  def test_a_retrigger_refusal_answers_false_and_the_triage_continues
+    issue = watched_row
+    client = ScriptedClient.new(fail: { retry_pipeline: server_error })
+    reached = []
+    mon = monitor(client, pre_triage: -> { { verdict: :uncertain } })
+    mon.define_singleton_method(:infra_skip?) { |*| (reached << :infra_skip?) && true }
+
     assert_same false, mon.send(:retrigger_if_needed, issue, FakePipeline.new(9, 'failed'), { verdict: :uncertain })
+    mon.send(:triage_and_fix, issue, FakePipeline.new(9, 'failed'), CODE_JOBS)
+
     assert_equal 0, issue.reload.pipeline_retrigger_count
+    assert_equal [:infra_skip?], reached
   end
 end
 
@@ -554,10 +785,12 @@ class RoundWritesNetworkCutTest < Minitest::Test
   end
 
   # 10. The whole family, on each of the four, each answering its contracted
-  # value — and a programming error still travelling as itself from each.
+  # value — and a programming error still travelling as itself from each. The
+  # retrigger answers `true` since Amendment 1: every member of `CUTS` is a
+  # non-HTTP failure, which may have reached GitLab, so it counts as sent.
   def four_writes
     { resolve_discussion: [false, method(:resolve_under)], hand_ticket_back: [false, method(:hand_back_under)],
-      retrigger_if_needed: [false, method(:retrigger_under)], after_conclusion: [nil, method(:conclude_under)] }
+      retrigger_if_needed: [true, method(:retrigger_under)], after_conclusion: [nil, method(:conclude_under)] }
   end
 
   def resolve_under(cut)

@@ -118,6 +118,7 @@ class MrFixer
     DiscussionSnapshot.capture(context: :pre_mr_fix, client: @client,
                                project_path: @project_path, mr_iid: issue.mr_iid,
                                logger: @logger, issue: issue)
+    discussions = settle_pending_resolutions(issue, discussions)
     return transition_no_discussions(issue) if discussions.empty?
 
     log "Found #{discussions.size} unresolved discussion(s) on MR !#{issue.mr_iid}"
@@ -144,8 +145,9 @@ class MrFixer
   end
 
   # A write, not a read: failing to mark a thread resolved leaves it unresolved,
-  # which the next round re-reads. No verdict is inferred from the failure, so it
-  # does not go through `GitlabHelpers.answer`.
+  # and the caller remembers it in `pending_resolutions` so the next round
+  # resolves it without fixing it again (Autodev #125, amendment 1). No verdict
+  # is inferred from the failure, so it does not go through `GitlabHelpers.answer`.
   #
   # It answers whether the thread was resolved, because the round's success line
   # counts resolved threads (Autodev #79) and a thread GitLab never closed must
@@ -154,6 +156,10 @@ class MrFixer
   # StandardError` and a correction that had been made and verified was
   # announced as failed. Spelled out rather than splatted, so the #62 scanner
   # recognises the clause (Autodev #119).
+  #
+  # `false` is not established for a timeout: the request may have landed and
+  # the thread be closed. That errs in the safe direction — the success line
+  # undercounts by one, and the next round finds the thread gone and forgets it.
   def resolve_discussion(mr_iid, discussion_id)
     @client.resolve_merge_request_discussion(@project_path, mr_iid, discussion_id, resolved: true)
     log "Resolved discussion #{discussion_id}"

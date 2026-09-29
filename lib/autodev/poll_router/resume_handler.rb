@@ -169,9 +169,13 @@ class PollRouter
 
     # Only ever a human reposing the label, so the dormant budget is given back
     # with the others (Autodev #125) — see `reenter_via_pipeline_check`.
+    #
+    # `pending_resolutions` goes too (Autodev #125, amendment 1): each entry says
+    # a thread's correction is on the branch, and this path rebuilds the branch.
     def reenter_via_reimplementation(gl_issue, existing)
       existing.reenter!
       existing.update(review_count: 0, review_failure_count: 0, stagnation_signatures: nil,
+                      pending_resolutions: nil,
                       fix_round: 0, discussion_fix_round: 0, error_message: nil,
                       finished_at: nil, started_at: nil,
                       pipeline_retrigger_count: 0, activity_note_id: nil,

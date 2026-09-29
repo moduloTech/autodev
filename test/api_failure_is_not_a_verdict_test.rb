@@ -430,7 +430,8 @@ class MrFixerApiFailureTest < Minitest::Test
   class FakeIssue
     # `discussion_fix_round` alongside `fix_round`: the ceiling in `run_fix_round`
     # counts the discussion loop alone (review of the alpha-52 lot), and this fake
-    # stands in for a real row, which carries both.
+    # stands in for a real row, which carries both. `pending_resolutions` for the
+    # same reason: the round reads it before anything else (Autodev #125).
     attr_reader :issue_iid, :mr_iid, :fix_round, :discussion_fix_round, :attrs
 
     def initialize
@@ -444,6 +445,7 @@ class MrFixerApiFailureTest < Minitest::Test
     def update(hash) = (@attrs.merge!(hash) and self)
     def discussions_fixed! = @attrs[:status] = 'checking_pipeline'
     def status = @attrs[:status]
+    def pending_resolutions = @attrs[:pending_resolutions]
   end
 
   class StubClient
@@ -569,13 +571,16 @@ ALLOWED_SWALLOWS = {
     # does not reach ActiveJob and park the row in Solid Queue's failed
     # executions, which needs a human for something the next cycle retries.
     'fix' => 'fix-round boundary',
-    # A write. Failing to mark a thread resolved leaves it unresolved, which the
-    # next round re-reads. No verdict is inferred from the failure: it answers
-    # `false`, and `fix_single_discussion` then does not count the thread, so the
-    # success line says only what GitLab resolved (Autodev #79). Since Autodev
-    # #125 the clause names the whole transport family, not HTTP alone — a
-    # timeout here (A#139) used to escape to `execute_fix_cycle`'s `rescue
-    # StandardError` and fail a verified, pushed round.
+    # A write. Failing to mark a thread resolved leaves it unresolved. No verdict
+    # is inferred from the failure: it answers `false`, and `resolve_verified`
+    # then does not count the thread, so the success line says only what GitLab
+    # resolved (Autodev #79), and remembers it in `pending_resolutions` so the
+    # next round resolves it without fixing it again (Autodev #125, amendment 1).
+    # Since Autodev #125 the clause names the whole transport family, not HTTP
+    # alone — a timeout here (A#139) used to escape to `execute_fix_cycle`'s
+    # `rescue StandardError` and fail a verified, pushed round. A timeout may
+    # have landed, so `false` can undercount by one; the next round then finds
+    # the thread gone and forgets it.
     'resolve_discussion' => 'write, not a read: false means the thread stays open and is not counted'
   },
   'lib/autodev/mr_fixer/fix_cycle.rb' => {
@@ -602,7 +607,8 @@ ALLOWED_SWALLOWS = {
     #
     # The rest of the GitLab traffic left under this method is
     # `resolve_discussion` (a write, declared above, which answers whether it
-    # resolved and swallows the transport family), `ScreenshotUploader.process`
+    # resolved and swallows the transport family; called after `push_fixes`, or
+    # from `finalize_no_commits`, since amendment 1), `ScreenshotUploader.process`
     # (uploads, rescues `StandardError`), `log_activity` (rescues its own
     # failures) and `notify_localized`. That last one swallows an HTTP refusal
     # only — `notify_issue` is deliberately unchanged, because it is also how an
@@ -647,11 +653,14 @@ ALLOWED_SWALLOWS = {
     'recheck_infra_recovery' => 'recheck boundary'
   },
   'lib/autodev/pipeline_monitor/failure_handler.rb' => {
-    # A write. `false` means "the pipeline was not retriggered", which is exactly
+    # A write, with two clauses (Autodev #125, amendment 1). An HTTP answer is
+    # GitLab refusing: `false` means "the pipeline was not retriggered", which is
     # what happened; the count is not advanced and the caller falls through to
-    # the triage it would have run. Since Autodev #125 that is also the answer to
-    # a request that never completed — the clause names the whole transport
-    # family, where it used to let a timeout reach `attempt_fix`'s handler.
+    # the triage it would have run. Any other member of the transport family
+    # may have reached GitLab (a `Net::ReadTimeout` comes after the request was
+    # sent), so it is counted as a retrigger and answers `true`: the poll waits
+    # for the pipeline it may have started. Both used to reach `attempt_fix`'s
+    # handler.
     'retrigger_if_needed' => 'write, not a read',
     # Everything from the triage onwards: clone, danger-claude, push. `handle_red`
     # reads the failed jobs *before* calling in here — that hoist is Autodev #62's.

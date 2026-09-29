@@ -33,6 +33,7 @@ fr:
   activity_discussion_unverified: ":mag: Correction non concluante, discussion laissee ouverte : %{title} — %{reason}"
   activity_discussion_unchanged: ":mag: Aucune modification produite, discussion laissee ouverte : %{title}"
   activity_discussion_unverifiable: ":mag: Verification impossible, discussion laissee ouverte : %{title} (%{error})"
+  activity_discussion_resolution_deferred: ":hourglass: Correction validee et poussee, mais GitLab n'a pas pris la resolution : %{title} (resolue au round suivant, sans nouvelle correction)"
   activity_discussions_deferred: ":hourglass: %{count} discussion(s) reportee(s) au round suivant"
   activity_discussions_fixed: ":white_check_mark: %{count} discussion(s) corrigee(s) (round %{round})"
   activity_discussions_none_resolved: ":mag: Round %{round} : aucune correction validee, discussions laissees ouvertes"

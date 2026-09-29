@@ -396,8 +396,9 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `IssuesController#reset` dropped both the stamp and the split. Hence one
   # method rather than a fourth chance to get it wrong.
   #
-  # `reset_budget:` zeroes `retry_count` and `review_failure_count` — both are
-  # budgets, and both mean "clean slate" for an operator-driven reset.
+  # `reset_budget:` zeroes `retry_count`, `review_failure_count`,
+  # `dormant_recheck_count` and `dormant_recheck_at` — all budgets, and all
+  # mean "clean slate" for an operator-driven reset.
   # `review_failure_count` joined this list under Autodev #107: before it, the
   # dashboard's Reset button left the counter untouched, so a request
   # abandoned at `REVIEW_FAILURE_THRESHOLD`/`REVIEW_FAILURE_THRESHOLD` still
@@ -406,9 +407,10 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # The dormant pair joined it under Autodev #125, for the same reason: a row
   # reset at `dormant_recheck_count` 3/3 (A#139, A#144, A#148) was flagged
   # `dormant_exhausted` at its next dormant episode without a single audit.
-  # Only under `reset_budget:`, because `revive_stalled!` — DormantAudit's own
-  # revive — calls this method too, and a counter reset on every successful
-  # revive would lift the cap that keeps a row falling dormant in a loop from
+  # Only under `reset_budget:`, because two automatic paths call this method
+  # without the flag: `revive_stalled!` — DormantAudit's own revive — and
+  # `recover_errored!` — the boot-time recovery. A counter reset on each of
+  # them would lift the cap that keeps a row falling dormant in a loop from
   # consuming GitLab reads (#47, #103).
   # `clear_attention:` also clears the needs_attention trio, for the same
   # reason.

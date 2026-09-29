@@ -69,23 +69,38 @@ class PipelineMonitor
       log "No failed jobs for pipeline ##{pipeline_id(pipeline)}, staying in checking_pipeline"
     end
 
-    # A write whose failure is not a verdict: `false` says the pipeline was not
-    # retriggered, which is what happened, the count is not advanced, and the
-    # triage runs. That holds for a request that never completed as much as for
-    # an HTTP refusal (Autodev #125), which used to escape as itself into
-    # `attempt_fix`'s `rescue StandardError`.
+    # A write whose failure is not a verdict, and whose two failures say
+    # different things (Autodev #125, amendment 1).
+    #
+    # An HTTP answer is GitLab refusing: the pipeline was not retriggered, so
+    # `false`, the count is not advanced, and the triage runs.
+    #
+    # Any other member of the transport family may have reached GitLab — a
+    # `Net::ReadTimeout` comes after the request was sent — so "not retriggered"
+    # is not established. It counts as a retrigger and answers `true`: the poll
+    # waits for the pipeline it may have started rather than fixing the one it
+    # may have replaced, and the count caps it at one either way. Both used to
+    # escape as themselves into `attempt_fix`'s `rescue StandardError`.
     def retrigger_if_needed(issue, pipeline, triage)
       return false if triage[:verdict] == :code || (issue.pipeline_retrigger_count || 0) >= 1
 
       log "Pipeline failed (pre-triage: #{triage[:verdict]}), retriggering..."
       @client.retry_pipeline(@project_path, pipeline_id(pipeline))
-      issue.update(pipeline_retrigger_count: (issue.pipeline_retrigger_count || 0) + 1)
       log_activity(issue, :pipeline_retrigger, verdict: triage[:verdict])
-      true
-    rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
-           ::OpenSSL::SSL::SSLError, ::EOFError => e
+      count_retrigger(issue)
+    rescue ::Gitlab::Error::ResponseError => e
       log_error "Failed to retrigger pipeline: #{e.class}: #{e.message}"
       false
+    rescue ::SystemCallError, ::Timeout::Error, ::SocketError, ::OpenSSL::SSL::SSLError, ::EOFError => e
+      count_retrigger(issue, unanswered: e)
+    end
+
+    # Answers whether the retrigger is on the record, which is what
+    # `retrigger_if_needed` answers. The unanswered one writes no activity entry:
+    # "pipeline retriggered" is exactly what is not established for it.
+    def count_retrigger(issue, unanswered: nil)
+      log_error "Retrigger unanswered, counted as sent: #{unanswered.class}: #{unanswered.message}" if unanswered
+      issue.update(pipeline_retrigger_count: (issue.pipeline_retrigger_count || 0) + 1)
     end
 
     # An :infra/deploy verdict can't be fixed by the branch's code, so we wait in

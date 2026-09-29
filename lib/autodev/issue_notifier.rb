@@ -26,9 +26,12 @@ module IssueNotifier
   # Named for the gesture rather than for the recipient since Autodev #98, because
   # the recipient is no longer always the author — see `handback_target`.
   #
-  # A request that never completed did not hand anything back either, so it
-  # answers `false` like an HTTP refusal (Autodev #125) instead of escaping into
-  # the caller's `rescue StandardError` after the row has already been given up.
+  # A request that never completed answers `false` like an HTTP refusal
+  # (Autodev #125) instead of escaping into the caller's `rescue StandardError`
+  # after the row has already been given up. For a timeout `false` is not
+  # established — the edit may have landed — and that errs in the safe
+  # direction: the notice leaves a handback that did happen unclaimed, and
+  # never claims one that did not.
   def hand_ticket_back(issue)
     target = handback_target(issue)
     return false unless target
