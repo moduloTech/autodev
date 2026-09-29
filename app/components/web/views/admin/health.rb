@@ -99,8 +99,12 @@ module Web
 
           div(style: 'display: flex; flex-wrap: wrap; gap: 6px;') do
             meta.each do |key, value|
+              # `overflow-wrap: anywhere` counts in the item's min-content width, so a
+              # long unbroken token (a `held_tickets` sample names
+              # `A#1(group/project#15880,done)`) wraps inside the card instead of
+              # spilling into the next one.
               span(style: 'font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); ' \
-                          'padding: 1px 6px; border-radius: 4px;') do
+                          'padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; max-width: 100%;') do
                 plain "#{key}: #{value}"
               end
             end
