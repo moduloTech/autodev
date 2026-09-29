@@ -10,12 +10,13 @@ require_relative 'test_helper'
 # `recheck_infra` is the one action where a surviving precondition costs a real
 # budget unit — a recheck that finds CI still broken leaves the row `done`, so a
 # duplicate spends another attempt (`9/5`) — which is why it needed a
-# reservation. `post_completion`'s precondition survives too (see LATENT below),
-# but there is no budget there to overspend, so it needed no reservation; this
-# is the branch review's own correction (my spec's enumeration omitted it,
-# which is exactly how the false "recheck_infra is the *one* action" claim got
-# through). If a future action joins either category, this test is where
-# somebody finds out.
+# reservation. `post_completion`'s precondition survives too — found by the
+# branch review of #110, whose spec's enumeration omitted it, which is exactly
+# how the false "recheck_infra is the *one* action" claim got through — and it
+# was first declared LATENT: no budget to overspend. Autodev #114 reserved it
+# instead, because the cost was not a budget but a deploy re-run on every cycle.
+# If a future action joins either category, this test is where somebody finds
+# out.
 class ADuplicateJobFindsNothingToDoTest < Minitest::Test
   # An action is "self-clearing" when performing it necessarily moves the row out
   # of every state it is dispatched from. Stated per action, with the transition
@@ -36,45 +37,34 @@ class ADuplicateJobFindsNothingToDoTest < Minitest::Test
     retry_stuck: 'IssueProcessor#process leaves pending'
   }.freeze
 
-  # The exception, and the reason it needs a reservation instead.
+  # The exceptions, and the reason each needs a reservation instead.
   RESERVED = {
     recheck_infra: 'a recheck that does not recover leaves the row `done`, so the ' \
-                   'state guard cannot tell a duplicate apart — PollDispatcher#reserve_infra_recheck? does'
-  }.freeze
-
-  # A third category, found by branch review and not by this file's first
-  # version: `post_completion`'s precondition ALSO survives its own work.
-  # `start_post_completion!` -> `post_completion_done!` (`app/models/issue.rb:
-  # 117-118`) returns the row to `done`, and `dispatch_done_unassigned`'s own
-  # gates (`still_assigned?`, `mr_state_defers_hook?`) are unaffected by that
-  # round trip, so a duplicate job is NOT skipped by DISPATCHED_FROM — the pass
-  # re-runs the deploy command every poll interval it is still unassigned.
-  #
-  # Not RESERVED like `recheck_infra`, because there is no budget here to
-  # overspend: no counter, no cap, no `9/5`-shaped harm — just a repeated
-  # `post_completion` command. And latent rather than fixed: no configured
-  # project declares `post_completion` (CLAUDE.md), so the defect has never
-  # fired in production. Tracked as its own ticket, out of scope here.
-  LATENT = {
-    post_completion: 'start_post_completion! -> post_completion_done! returns the row to `done`; ' \
-                     'no budget to overspend, so no 9/5-shaped harm — latent because no project ' \
-                     'configures the hook, and fixed under a separate ticket'
+                   'state guard cannot tell a duplicate apart — PollDispatcher#reserve_infra_recheck? does',
+    post_completion: 'start_post_completion! -> post_completion_done! returns the row to `done`, and neither ' \
+                     'GitLab gate of dispatch_done_unassigned is moved by a deploy, so the pass re-ran the ' \
+                     'command every cycle (Autodev #114) — PollDispatcher#reserve_post_completion? stamps ' \
+                     'post_completion_dispatched_at once per delivery'
   }.freeze
 
   # What this guard proves is that every action is **declared**, never that a
   # declaration is **true** (the `test/api_failure_is_not_a_verdict_test.rb` /
   # `test/i18n_derived_keys_test.rb` limit): the reason is an English sentence
   # nothing verifies, which is exactly how `post_completion` survived under
-  # SELF_CLEARING — a declaration that read as true and was not.
+  # SELF_CLEARING — a declaration that read as true and was not. The behaviour
+  # behind each RESERVED entry is held by its own file
+  # (`test/infra_recheck_reservation_test.rb`, `test/post_completion_runs_once_test.rb`).
   def test_every_dispatched_action_is_declared_self_clearing_reserved_or_latent
-    declared = SELF_CLEARING.keys + RESERVED.keys + LATENT.keys
+    declared = SELF_CLEARING.keys + RESERVED.keys
 
     assert_equal IssueProcessJob::DISPATCHED_FROM.keys.sort, declared.sort,
                  'a new action must declare whether its precondition survives its own work'
   end
 
-  def test_the_reserved_action_is_reserved_by_the_dispatcher
+  def test_the_reserved_actions_are_reserved_by_the_dispatcher
     assert Autodev::PollDispatcher.private_method_defined?(:reserve_infra_recheck?),
            'recheck_infra is declared as reserved, so the reservation must exist'
+    assert Autodev::PollDispatcher.private_method_defined?(:reserve_post_completion?),
+           'post_completion is declared as reserved, so the reservation must exist'
   end
 end

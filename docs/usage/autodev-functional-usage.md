@@ -2,7 +2,7 @@
 title: "Autodev — Guide utilisateur"
 subtitle: "Comment confier une demande à Autodev et suivre son travail"
 author: "Modulotech"
-date: 2026-09-24
+date: 2026-09-28
 lang: fr
 documentclass: article
 papersize: a4
@@ -471,4 +471,4 @@ Non, plus depuis cette version. Si Autodev surveille les tests d'une demande pen
 Les **membres** d'un projet sont synchronisés automatiquement depuis GitLab : toute personne ayant accès au dépôt devient contributeur. Les **responsables (owners)** — ceux qui valident les demandes rédigées dans AutoSpec — sont désignés **à la main**, dans l'onglet *Équipe* de la page du projet, par un administrateur ou un responsable déjà en place. La synchronisation GitLab ne touche jamais à cette liste. Tant qu'aucun responsable n'a été désigné sur un projet, un administrateur doit poser le premier.
 
 **Et le hook *post-completion* qui apparaît parfois en erreur ?**
-C'est une action de finalisation après livraison (par exemple, mise à jour d'un changelog). Si elle échoue, la demande reste tout de même livrée — mais elle apparaîtra dans l'onglet **Livrée (à vérifier)** pour signaler le problème de finalisation.
+C'est une action de finalisation après livraison (par exemple, un déploiement). Elle n'est lancée **qu'une fois par livraison**. Si elle échoue, la demande reste tout de même livrée : Autodev laisse un commentaire sur le ticket pour dire quelle commande a échoué et comment, la demande apparaît dans l'onglet **Livrée (à vérifier)**, et la commande n'est pas relancée d'elle-même. Pour la rejouer, remettez le label de départ sur le ticket et réassignez-le à Autodev.
