@@ -21,7 +21,8 @@ module IssueNotifier
 
   # Returns whether the ticket actually changed hands (Autodev #60): the abandon
   # notification only claims a handback when there was somebody to hand it to and
-  # GitLab applied the edit. Existing callers ignore the value.
+  # GitLab applied the edit: `IssueAbandonment#announce_abandonment` reads it to
+  # decide the `abandon_reassigned` suffix; the other callers ignore it.
   #
   # Named for the gesture rather than for the recipient since Autodev #98, because
   # the recipient is no longer always the author — see `handback_target`.

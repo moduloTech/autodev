@@ -275,9 +275,10 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # A re-entry starts a new delivery, whoever fires it (the alpha-56 lot's
   # integration review). The label resume, `resume_recovered_infra`,
   # `ReviewArrearsSweep` and the dashboard's transition menu all fire these two
-  # events; only the first two used to clear the previous delivery's
-  # `post_completion` reservation, so a dashboard re-entry left the next
-  # delivery's hook unreserved for ever (Autodev #114/#94).
+  # events. The first three went through `ResumeHandler`, whose own `update`
+  # cleared the previous delivery's `post_completion` reservation; the
+  # dashboard fires the event alone, so the reservation stood and the next
+  # delivery's hook never ran (Autodev #114/#94).
   #
   # `reenter` rebuilds the branch, so the `pending_resolutions` it carried go
   # with it (Autodev #125, amendment 1); `reenter_to_check_pipeline` keeps the MR
