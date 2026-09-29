@@ -113,6 +113,12 @@ was silent and the comment went out on a closed ticket.
   other active state. Fired without a stamp, the row is revived by the dormant
   audit like any other stampless `error`.
 
+### Owner decision on the revival budget (29/09/2026)
+
+Kept as it is for #128. Whether the dormant budget should renew once a row
+makes progress concerns all three `DormantAudit` arms, so it is a ticket of its
+own, scheduled for the alpha-57 lot.
+
 ## Out of scope
 
 - The #125 control test `test_control_a_local_system_call_error_is_still_a_fix_failure`
