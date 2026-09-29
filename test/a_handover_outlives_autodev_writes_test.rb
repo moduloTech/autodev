@@ -212,6 +212,48 @@ class AHandoverOutlivesAutodevWritesTest < Minitest::Test # rubocop:disable Metr
                  scan(erased_gitlab, erased_row_, POWERPANNE).actor_id
   end
 
+  # With two people in the history, the one named is the one whose edit
+  # decided — not the last foreign event of any kind, not the first person
+  # (plan adversary of the alpha-56 round).
+  def test_an_erased_done_names_its_author_among_two_people
+    row, gitlab = erased_row do |g|
+      human!(g, add: ['PM::X'], actor: SECOND_HUMAN_ID)
+      human!(g, add: [DONE])
+      human!(g, add: ['PM::Y'], actor: SECOND_HUMAN_ID)
+    end
+
+    assert_equal [:done_added, HUMAN_ID], reason_and_actor(scan(gitlab, row, POWERPANNE))
+  end
+
+  def test_an_erased_doing_removal_names_its_author_among_two_people
+    row, gitlab = erased_row do |g|
+      human!(g, add: ['PM::X'], actor: SECOND_HUMAN_ID)
+      human!(g, remove: [DOING])
+      human!(g, add: ['PM::Y'], actor: SECOND_HUMAN_ID)
+    end
+
+    assert_equal [:doing_removed, HUMAN_ID], reason_and_actor(scan(gitlab, row, POWERPANNE))
+  end
+
+  def test_an_erased_move_names_its_author_not_a_later_foreign_edit
+    row, gitlab = erased_row(clear_scope: true) do |g|
+      human!(g, add: [MOVED_ON], remove: [DOING], actor: SECOND_HUMAN_ID)
+      human!(g, add: ['PM::Y'])
+    end
+
+    assert_equal [:workflow_moved, SECOND_HUMAN_ID], reason_and_actor(scan(gitlab, row, POWERPANNE))
+  end
+
+  def test_an_erased_done_names_whoever_posed_it_last
+    row, gitlab = erased_row do |g|
+      human!(g, add: [DONE], actor: SECOND_HUMAN_ID)
+      human!(g, remove: [DONE])
+      human!(g, add: [DONE])
+    end
+
+    assert_equal [:done_added, HUMAN_ID], reason_and_actor(scan(gitlab, row, POWERPANNE))
+  end
+
   def test_every_reason_the_scan_returns_has_a_locale_key
     %i[done_added workflow_moved doing_removed].each do |reason|
       assert_includes Autodev::LabelHandover::EXPECTED_ACTION.keys, reason

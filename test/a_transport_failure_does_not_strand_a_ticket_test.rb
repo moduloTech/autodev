@@ -304,6 +304,16 @@ class ATransportFailureDoesNotStrandATicketTest < Minitest::Test # rubocop:disab
     host = worker(PipelineMonitor, AnsweringClient.new([AUTHOR_ID]))
 
     assert_same true, host.send(:hand_ticket_back, watched)
+    assert(@logger.messages.any? { |m| m.include?("back to user #{AUTHOR_ID}") })
+  end
+
+  # The target, not "anybody but the bot": a payload naming a third person is
+  # not the handback that was asked for (plan adversary of the alpha-56 round).
+  def test_a_handback_gitlab_answered_with_somebody_else_answers_false
+    host = worker(PipelineMonitor, AnsweringClient.new([555]))
+
+    assert_same false, host.send(:hand_ticket_back, watched)
+    assert(@logger.messages.any? { |m| m.include?("not assigned to user #{AUTHOR_ID}") })
   end
 
   def test_an_abandon_whose_handback_gitlab_did_not_honour_does_not_claim_one

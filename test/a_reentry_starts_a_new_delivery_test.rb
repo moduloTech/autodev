@@ -78,6 +78,34 @@ class AReentryStartsANewDeliveryTest < Minitest::Test
     assert_equal RESOLUTIONS, fire(delivered_row, :reenter_to_check_pipeline).pending_resolutions
   end
 
+  # Out of scope on purpose (the plan): the manual transition gives back no
+  # budget. The label resume and the Reset do; this is master's behaviour and
+  # changing it is a product decision.
+  BUDGETS = { retry_count: 3, review_failure_count: 2, dormant_recheck_count: 3, infra_recheck_count: 4 }.freeze
+
+  %i[reenter reenter_to_check_pipeline].each do |event|
+    define_method(:"test_a_manual_#{event}_gives_back_no_budget") do
+      row = delivered_row
+      row.update_columns(**BUDGETS)
+
+      reentered = fire(row, event, origin: :manual)
+
+      assert_equal(BUDGETS.values, BUDGETS.keys.map { |k| reentered[k] })
+    end
+  end
+
+  # `ReviewArrearsSweep` fires the event with its origin as an argument.
+  def test_an_event_fired_with_an_origin_still_clears_and_records_it
+    row = delivered_row
+    row.reenter_to_check_pipeline!(PollRouter::REVIEW_ARREARS_ORIGIN)
+    row.reload
+    payload = JSON.parse(ActivityEvent.where(issue_id: row.id, kind: 'transition').last.payload_json)
+
+    assert_equal [nil, nil, RESOLUTIONS], [row.post_completion_dispatched_at, row.post_completion_error,
+                                           row.pending_resolutions]
+    assert_equal PollRouter::REVIEW_ARREARS_ORIGIN.to_s, payload['origin']
+  end
+
   # Another event leaves every one of these fields where it was.
   def test_another_event_touches_none_of_them
     row = delivered_row

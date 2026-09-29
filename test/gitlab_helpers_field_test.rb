@@ -42,6 +42,17 @@ class GitlabHelpersFieldTest < Minitest::Test
     assert_nil GitlabHelpers.field({ 'other' => 1 }, :status)
   end
 
+  # Like a Hash without the key (alpha-56 lot): `Struct#[]` raises NameError on
+  # an unknown member, and a Struct-shaped value asked about a field it does not
+  # carry is a value without that field.
+  def test_returns_nil_for_a_struct_without_that_member
+    assert_nil GitlabHelpers.field(Struct.new(:id).new(1), :assignees)
+  end
+
+  def test_a_struct_member_is_still_read
+    assert_equal 1, GitlabHelpers.field(Struct.new(:id).new(1), :id)
+  end
+
   def test_reader_wins_over_indexing
     # An object that answers both the reader and []: the reader is authoritative.
     dual = Class.new do

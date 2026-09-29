@@ -79,8 +79,20 @@ path resets, and removing them would make that update read as incomplete.
 holding a reservation, an error and pending resolutions clears the first two on
 both events and the third on `reenter` only; with `_audit_origin = :manual` the
 floor is stamped, without it the floor is unchanged. Through the controller:
-`POST /issues/:id/transition?event=reenter_to_check_pipeline` leaves the row
-selectable by `dispatch_done_unassigned` once it is `done` again.
+`POST /issues/:id/transition?event=reenter_to_check_pipeline` lifts the
+reservation (`post_completion_dispatched_at` nil, which is
+`dispatch_done_unassigned`'s once-per-delivery clause) and stamps the floor.
+Also pinned after the plan review: a manual re-entry gives back no budget, and
+the event fired with an origin argument (`ReviewArrearsSweep`) clears too.
+
+**Amended by the plan review.** The first version claimed the row becomes
+selectable by `dispatch_done_unassigned` again. That holds for a delivered row
+only: the pass also selects `needs_attention: false`, and the dashboard's
+re-entry does not clear the flag (only the label resume, the Reset and the
+close do). A row autodev gave up on, re-entered from the dashboard and then
+delivered, stays flagged and is not selected. Whether a manual re-entry should
+clear `needs_attention` is the same product question as the budgets above and
+is left to the owner.
 
 ## F3 — `hand_ticket_back` claims only a handback GitLab honoured (#125 × #126)
 

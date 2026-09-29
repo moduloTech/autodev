@@ -15,13 +15,17 @@ require_relative 'rails_helper'
 # the six classes must name all six.
 class OneTransportFamilyTest < Minitest::Test
   ROOT = File.expand_path('..', __dir__)
-  FAMILY = GitlabHelpers::TRANSPORT_ERRORS.map { |klass| klass.name.split('::').last }.freeze
+  FAMILY = GitlabHelpers::TRANSPORT_ERRORS.map(&:name).freeze
   QUORUM = 3
 
   # Split across two clauses on purpose: an HTTP refusal and a connection that
   # never opened do not count a retrigger, any later cut does (Autodev #125).
+  # Exempt is that one clause, by the exact classes it names — a new partial
+  # clause in the same file is not — and its file's clauses together must still
+  # name the whole family (`test_an_exempt_split_still_covers_the_family`).
   EXEMPT = {
-    'lib/autodev/pipeline_monitor/failure_handler.rb' => 'the retrigger split of Autodev #125'
+    'lib/autodev/pipeline_monitor/failure_handler.rb' =>
+      %w[SystemCallError Timeout::Error OpenSSL::SSL::SSLError EOFError]
   }.freeze
 
   # Each clause runs from `rescue` (or the constant) to the `=>` or the closing
@@ -35,12 +39,14 @@ class OneTransportFamilyTest < Minitest::Test
     end
   end
 
-  def named(body) = FAMILY.select { |name| body.match?(/\b#{Regexp.escape(name)}\b/) }
+  # Fully qualified, with or without the leading `::`: `Error` alone would match
+  # `Gitlab::Error::ResponseError`.
+  def named(body) = FAMILY.select { |name| body.match?(/(?<![\w:])(?:::)?#{Regexp.escape(name)}\b/) }
 
   def test_every_site_that_spells_the_family_spells_all_of_it
     partial = clauses.filter_map do |path, body|
       found = named(body)
-      next if found.size < QUORUM || found.size == FAMILY.size || EXEMPT.key?(path)
+      next if found.size < QUORUM || found.size == FAMILY.size || EXEMPT[path] == found
 
       "#{path}: missing #{(FAMILY - found).join(', ')}"
     end
@@ -58,9 +64,17 @@ class OneTransportFamilyTest < Minitest::Test
     end
   end
 
-  def test_every_exemption_still_names_part_of_the_family
+  def test_every_exemption_still_matches_its_clause
+    EXEMPT.each do |path, names|
+      assert clauses.any? { |p, body| p == path && named(body) == names }, "#{path} no longer needs its exemption"
+    end
+  end
+
+  def test_an_exempt_split_still_covers_the_family
     EXEMPT.each_key do |path|
-      assert clauses.any? { |p, body| p == path && named(body).size >= 2 }, "#{path} no longer needs its exemption"
+      union = clauses.select { |p, _| p == path }.flat_map { |_, body| named(body) }.uniq
+
+      assert_equal FAMILY.sort, union.sort, "#{path}'s clauses together no longer name the whole family"
     end
   end
 end
