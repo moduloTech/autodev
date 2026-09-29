@@ -307,6 +307,17 @@ class ATransportFailureDoesNotStrandATicketTest < Minitest::Test # rubocop:disab
     assert(@logger.messages.any? { |m| m.include?("back to user #{AUTHOR_ID}") })
   end
 
+  # The target `handback_target` chose, which is not always the author: a row
+  # `ReviewArrearsSweep` took from somebody goes back to them (Autodev #98).
+  def test_a_handback_to_a_displaced_assignee_is_read_against_them
+    displaced = 77
+
+    assert_same true, worker(PipelineMonitor, AnsweringClient.new([displaced]))
+      .send(:hand_ticket_back, watched(displaced_assignee_id: displaced))
+    assert_same false, worker(PipelineMonitor, AnsweringClient.new([AUTHOR_ID]))
+      .send(:hand_ticket_back, watched(displaced_assignee_id: displaced))
+  end
+
   # The target, not "anybody but the bot": a payload naming a third person is
   # not the handback that was asked for (plan adversary of the alpha-56 round).
   def test_a_handback_gitlab_answered_with_somebody_else_answers_false

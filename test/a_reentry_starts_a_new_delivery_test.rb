@@ -106,6 +106,23 @@ class AReentryStartsANewDeliveryTest < Minitest::Test
     assert_equal PollRouter::REVIEW_ARREARS_ORIGIN.to_s, payload['origin']
   end
 
+  # The clear is written whatever this object believed (adversarial review of
+  # the alpha-56 round): the dashboard loads the row, `dispatch_done_unassigned`
+  # reserves it in between, and a nil assigned over a nil it read is not a
+  # change dirty tracking would write — the new reservation outlived the
+  # re-entry, and the next delivery's hook was never reserved again.
+  def test_a_reservation_taken_after_the_row_was_read_does_not_outlive_the_reentry
+    row = create_issue(status: 'done', mr_iid: 11, pending_resolutions: RESOLUTIONS)
+    stale = ::Issue.find(row.id)
+    ::Issue.where(id: row.id, post_completion_dispatched_at: nil)
+           .update_all(post_completion_dispatched_at: Time.current, post_completion_error: 'raced')
+
+    reloaded = fire(stale, :reenter, origin: :manual)
+
+    assert_equal [nil, nil, nil], [reloaded.post_completion_dispatched_at, reloaded.post_completion_error,
+                                   reloaded.pending_resolutions]
+  end
+
   # Another event leaves every one of these fields where it was.
   def test_another_event_touches_none_of_them
     row = delivered_row

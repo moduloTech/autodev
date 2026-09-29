@@ -82,8 +82,10 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     state :answering_question, :needs_clarification
     state :done, :error, :closed
 
-    # The two stamps are first on purpose: they only assign, and
+    # The three assigning hooks come first on purpose: they only assign, and
     # `persist_status_change!` right after is the save that writes them.
+    # `clear_delivery_on_reentry!` must also run before `emit_audit_log!`, which
+    # clears the `_audit_origin` it reads to recognise a manual re-entry.
     after_all_transitions :stamp_pipeline_watch!, :stamp_label_events_floor!, :clear_delivery_on_reentry!,
                           :persist_status_change!, :emit_activity_event!, :emit_audit_log!
 
@@ -295,8 +297,13 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     event = aasm.current_event.to_s.delete_suffix('!').to_sym
     return unless REENTRY_EVENTS.include?(event)
 
-    assign_attributes(POST_COMPLETION_CLEARED)
-    self.pending_resolutions = nil if event == :reenter
+    cleared = event == :reenter ? POST_COMPLETION_CLEARED.merge(pending_resolutions: nil) : POST_COMPLETION_CLEARED
+    assign_attributes(cleared)
+    # Written whatever this object read: a nil assigned over the nil it loaded
+    # is no change to dirty tracking, and a reservation `dispatch_done_unassigned`
+    # took since the load would outlive the re-entry (adversarial review of the
+    # alpha-56 round).
+    cleared.each_key { |column| attribute_will_change!(column.to_s) }
     self.label_events_seen_until = Time.current if @_audit_origin == :manual
   end
 
