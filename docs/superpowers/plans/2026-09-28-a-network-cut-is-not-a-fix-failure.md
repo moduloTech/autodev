@@ -168,3 +168,94 @@ Tests:
 - the full suite and RuboCop on the whole tree
 - sabotage
 - three reviews
+
+## Amendment 1 (2026-09-29): resolutions after the push, and remembered
+
+The adversarial review reproduced a blocker, with a harness in the scratchpad.
+A thread was verified, then its resolution was cut. That thread can never be
+resolved:
+- the next round finds its correction already on the branch, so the diff is
+  empty and the verdict is `:unchanged`;
+- after `stagnation_threshold` rounds, the row ends in `stagnation_discussions`.
+
+A second defect predates this branch: resolutions were made **before** the push,
+so a round that aborts after a resolution leaves a thread resolved whose
+correction was never pushed.
+
+Owner's decision (2026-09-29): resolve after the push, and remember a
+resolution that did not take.
+
+Frozen contract:
+- **The column.** A new migration adds `issues.pending_resolutions` (`:text`,
+  `if_not_exists: true`, as in `db/migrate/20260923000001_…`). It holds a JSON
+  object `{ "<discussion_id>" => "<ISO8601 UTC time the verdict was reached>" }`,
+  and NULL means empty.
+- **`fix_single_discussion`** does not resolve any more. It returns the
+  discussion when the verdict is `addressed` (or `FixCheck.passed`), and nil
+  otherwise.
+- **`run_fix_cycle`** resolves the attempted-and-addressed threads **after**
+  `push_fixes`, or directly when there are no new commits
+  (`finalize_no_commits`), through `resolve_discussion` (true/false).
+  - Resolved threads are counted.
+  - A thread whose resolution did not take is recorded in `pending_resolutions`
+    with the time of its verdict.
+  - It also gets one activity entry, `discussion_resolution_deferred`, with the
+    thread title. The wording is fr+en in `config/locales/activity.*.yml`, and
+    must say the correction was validated and pushed but GitLab did not take
+    the resolution, so the next round will resolve it without re-fixing.
+- **`report_round`.** When `count` is 0 and at least one resolution was
+  deferred, it must not write `discussions_none_resolved`, which would be false.
+  It writes nothing more at round level, because the per-thread entries already
+  say it. When `count` is positive, the success notice counts only resolved
+  threads, as before.
+- **At the start of a round**, in `process_discussions` before the empty check,
+  a pending id is handled against the unresolved threads GitLab returns:
+  - The id is among them, and **no note on that discussion is newer than the
+    recorded time**: resolve it directly, with no fix and no verification.
+    - If that succeeds, drop it from the list this round will fix, and drop it
+      from pending.
+    - If it fails, keep it in pending, and leave it out of this round's fix
+      list, because the correction is already on the branch.
+  - The id is among them, but a note is newer than the recorded time (a human
+    replied): drop it from pending, and let the round fix it normally.
+  - The id is not among them: it is resolved or gone, so drop it from pending.
+
+  Persist the column once. If nothing is left to fix, the existing
+  `transition_no_discussions` path applies.
+- **Clearing.** `ResumeHandler#reenter_via_reimplementation` clears the column,
+  because the branch is rebuilt.
+- **`retrigger_if_needed`.** A non-HTTP transport failure (the family minus
+  `Gitlab::Error::ResponseError`) may have reached GitLab, since a
+  `Net::ReadTimeout` comes after the request was sent. So it is counted as a
+  retrigger: advance `pipeline_retrigger_count`, log it, and return `true` (wait
+  for the next poll). An HTTP `ResponseError` is GitLab's refusal, so it keeps
+  answering `false`. The truthfulness review found that the old comment ("false
+  says the pipeline was not retriggered, which is what happened") is not
+  established for a timeout.
+- **Comments.** On `resolve_discussion` and `hand_ticket_back`, the comment
+  says that a timeout may have landed, and that `false` errs in the safe
+  direction (an undercount, a handback left unclaimed).
+- **Cosmetic.** The `app/models/issue.rb` comment above `reset_for_retry!`
+  still says "zeroes `retry_count` and `review_failure_count`" and must name
+  all four fields. Its new paragraph must also name `recover_errored!`, which
+  calls the method without the budget flag as well.
+
+Tests (red before, where they apply):
+- **The blocker replay.** Adapt the adversarial probe (`MrFixRoundHarness`,
+  verification on). Two threads, and t2's resolution is cut. Round 2 has GitLab
+  returning [t2], an empty diff and no new commits. t2 is resolved at the start
+  of round 2 without any danger-claude call, the row reaches `checking_pipeline`,
+  and no `stagnation_discussions` follows.
+- **A human replied after the verdict.** Same setup, but t2 carries a note newer
+  than the recorded time: it is fixed normally, not auto-resolved.
+- **Resolution comes after the push.** When the push fails, no thread was
+  resolved (`client.resolved == []`) and the row is `error`, which is unchanged.
+- **The single-thread case.** The only thread's resolution is cut: the activity
+  shows `discussion_resolution_deferred`, and no `discussions_none_resolved`.
+- **A retrigger `Net::ReadTimeout`** returns `true` and the count is 1. A 500
+  `ResponseError` returns `false` and the count is 0. Replace the old test 8
+  expectation.
+- **Reimplementation** clears `pending_resolutions`.
+- **The sabotage gap.** `test_an_issue_links_cut_leaves_the_row_on_the_watch`
+  must also assert that no fix was attempted: `fix_round` is 0, there is no
+  `:pipeline_fix_pushed`, and there was no danger-claude call.
