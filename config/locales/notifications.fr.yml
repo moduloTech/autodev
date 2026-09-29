@@ -30,6 +30,7 @@ fr:
   post_completion_invalid_config: ":warning: %{tag} : la commande de fin de traitement n'a pas pu etre lancee sur %{mr_url} — le projet declare `%{command}`, qui n'est pas une liste de chaines."
   post_completion_failed_footer: "La livraison reste acquise : la merge request n'est pas touchee et cette demande reste terminee. Je ne relancerai pas la commande de moi-meme ; le detail est dans le tableau de bord d'autodev. Pour la rejouer, remettez le label de depart et reassignez-moi."
   abandon_reassigned: ":arrow_right: Je t'ai reassigne le ticket : autodev ne le suit plus. A toi de reprendre la main sur la MR."
+  handover_reassigned: ":arrow_right: Je vous ai reassigne le ticket : autodev ne le suit plus."
   unassigned_stop: |-
     :stop_sign: %{tag} : je ne suis plus assigne a ce ticket, j'arrete le travail en cours.
 

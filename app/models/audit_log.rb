@@ -12,6 +12,7 @@ class AuditLog < ApplicationRecord
     issue.reset_manual
     issue.transition_manual
     issue.transition_auto
+    issue.close_handback
     issue.deploy_review
     deploy_review.manual
     membership.granted

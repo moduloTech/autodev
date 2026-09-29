@@ -32,7 +32,11 @@ module IssueNotifier
     @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [target])
     log "Handed issue ##{issue.issue_iid} back to user #{target}"
     true
-  rescue Gitlab::Error::ResponseError => e
+  # Transport family, same reason and same spelling as `manage_labels` (Autodev
+  # #126): `false` is already what a refused edit answers, and a timed-out one
+  # changed no hands either — so the abandon notice does not claim it did.
+  rescue Gitlab::Error::ResponseError, SystemCallError, Timeout::Error, SocketError,
+         OpenSSL::SSL::SSLError, EOFError => e
     log_error "Failed to hand issue ##{issue.issue_iid} back: #{e.message}"
     false
   end
@@ -48,9 +52,9 @@ module IssueNotifier
   #
   # The author stays the answer everywhere else, which is every row autodev was
   # assigned to in the ordinary way — the column is NULL there and nothing about
-  # those paths changes.
+  # those paths changes. The rule itself lives on `Issue#handback_target`.
   def handback_target(issue)
-    issue.displaced_assignee_id || issue.issue_author_id
+    issue.handback_target
   end
 
   def autodev_tag
@@ -59,6 +63,15 @@ module IssueNotifier
 
   def notify_issue(iid, message)
     @client.create_issue_note(@project_path, iid, message)
+  # Deliberately NOT widened to the transport family, unlike the two writes
+  # above (Autodev #126, adversarial review). Two callers post their content
+  # *before* they transition — `post_answer` (the answer, then
+  # `question_answered!`) and `post_clarification` (the questions, then
+  # `spec_unclear!`) — and a TCP failure escaping here is what sends them to
+  # `IssueProcessor#process`'s rescue, `error` and a retry. Swallowed, the
+  # answer was lost and the row delivered anyway, or parked waiting on
+  # questions nobody posted. The terminal sequences do not need it: each writes
+  # the handback and `finished_at` before its note.
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to post comment on ##{iid}: #{e.message}"
   end

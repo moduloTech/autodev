@@ -42,7 +42,10 @@ module Autodev
   class LabelHandover
     include ErasedScan
 
-    Verdict = Struct.new(:reason, :label)
+    # `actor_id` is the GitLab user whose label event decided the verdict — nil
+    # on a mere suspicion. `ExternalState#stop_on_handover` hands the ticket to
+    # them (Autodev #126): they are the one who took the work on.
+    Verdict = Struct.new(:reason, :label, :actor_id)
 
     SCOPE_SEPARATOR = '::'
 
@@ -78,7 +81,10 @@ module Autodev
     def verdict(gl_issue, issue_iid, row: nil)
       suspicion = suspect(Array(::GitlabHelpers.field(gl_issue, :labels)))
       event = suspicion && decisive_event(issue_iid, suspicion)
-      return suspicion if event && by_someone_else?(event)
+      # The decisive event's author, not the first human in the history: when
+      # two people touched the ticket, the one whose edit produced the label we
+      # read is the one who took the work on (Autodev #126).
+      return Verdict.new(suspicion.reason, suspicion.label, actor_of(event)) if event && by_someone_else?(event)
 
       erased_handover(issue_iid, row)
     end
@@ -285,9 +291,11 @@ module Autodev
     end
 
     def by_someone_else?(event)
-      actor = ::GitlabHelpers.field(::GitlabHelpers.field(event, :user), :id)
+      actor = actor_of(event)
       !actor.nil? && actor != ::GitlabHelpers.current_user_id(@client)
     end
+
+    def actor_of(event) = ::GitlabHelpers.field(::GitlabHelpers.field(event, :user), :id)
 
     # GitLab lists resource label events oldest first, so the last entry naming
     # the label is the edit that produced the state we just read — of the

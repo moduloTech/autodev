@@ -163,6 +163,15 @@ class IssueAbandonmentTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
     end
   end
 
+  # `IssueNotifier#handback_target` delegates to `Issue#handback_target` since
+  # Autodev #126; this pins that the delegation still reaches the edit.
+  def test_a_displaced_assignee_gets_the_ticket_back_rather_than_the_author
+    issue = watched(displaced_assignee_id: 55)
+    abandon(issue, :stagnation_pipeline)
+
+    assert_equal([{ assignee_ids: [55] }], @client.edits.map(&:last).select { |a| a.key?(:assignee_ids) })
+  end
+
   def test_an_authorless_ticket_is_abandoned_without_a_reassignment
     issue = watched(issue_author_id: nil)
     abandon(issue, :stagnation_pipeline)

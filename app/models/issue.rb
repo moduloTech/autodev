@@ -199,6 +199,14 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     end
   end
 
+  # Who gets the ticket when autodev lets go of it: whoever autodev took it from,
+  # and the author otherwise (Autodev #98). One definition since Autodev #126,
+  # because the dashboard's Clore and a label handover hand tickets back too, and
+  # they do it outside `IssueNotifier`.
+  def handback_target
+    displaced_assignee_id || issue_author_id
+  end
+
   # -- Guard methods (read the instance flags set by the workflow) --
 
   def issue_closed?

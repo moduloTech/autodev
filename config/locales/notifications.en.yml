@@ -30,6 +30,7 @@ en:
   post_completion_invalid_config: ":warning: %{tag}: the post-completion command could not run on %{mr_url} — the project declares `%{command}`, which is not a list of strings."
   post_completion_failed_footer: "The delivery stands: the merge request is untouched and this request stays done. I will not run the command again on my own; the details are in the autodev dashboard. To replay it, put the starting label back and reassign me."
   abandon_reassigned: ":arrow_right: I have reassigned the ticket to you: autodev is no longer tracking it. The MR is yours to take over."
+  handover_reassigned: ":arrow_right: I have assigned the ticket to you: autodev no longer follows it."
   unassigned_stop: |-
     :stop_sign: %{tag}: I am no longer assigned to this ticket, I'm stopping the work in progress.
 

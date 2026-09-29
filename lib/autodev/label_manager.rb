@@ -170,7 +170,16 @@ module LabelManager
     # The workflow labels autodev OWNS and removed — never the scope residue,
     # which `remember_entry_label` must not mistake for an entry label.
     current & remove.compact
-  rescue Gitlab::Error::ResponseError => e
+  # The whole transport family, not `Gitlab::Error::ResponseError` alone
+  # (Autodev #126): a `Net::OpenTimeout` on the `issue` read above escaped
+  # `finalize_green_done` right after its transition, so the handback, the note
+  # and `finished_at` never ran and A#134 stayed `done` on the bot's list. A TCP
+  # timeout is the outage a 502 is, and the contract was already "log it and
+  # let the caller carry on". Spelled out for `ExternalState#notify_stop`'s
+  # reason (#115): the scanner of `test/api_failure_is_not_a_verdict_test.rb`
+  # matches literal class names. A programming error still travels.
+  rescue Gitlab::Error::ResponseError, SystemCallError, Timeout::Error, SocketError,
+         OpenSSL::SSL::SSLError, EOFError => e
     # `[]`, not the value of `log_error` — which is `Logger#error`'s `true`. The
     # method's contract is "the workflow labels it removed", and a failed write
     # removed none; `apply_label_doing` hands this straight to

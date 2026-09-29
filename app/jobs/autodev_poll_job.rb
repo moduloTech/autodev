@@ -50,6 +50,7 @@ class AutodevPollJob < ApplicationJob
     wrapped_logger = ::Autodev::JobLogger.new(logger)
     probe_review_skills(config, projects)
     probe_mr_review_token(config, projects)
+    probe_held_tickets(config, projects)
     projects.each do |project_config|
       ::Autodev::PollDispatcher.new(config: config, project_config: project_config,
                                     logger: wrapped_logger, usage_ok: usage_ok).dispatch
@@ -89,6 +90,16 @@ class AutodevPollJob < ApplicationJob
     ::Autodev::MrReviewTokenProbe.probe!(config: config, projects: projects, logger: logger)
   rescue StandardError => e
     logger.warn("[autodev_poll] mr-review token probe failed: #{e.class}: #{e.message}")
+  end
+
+  # The watch on finished requests whose ticket is still on the bot (Autodev
+  # #126), recorded for the health card to read. Same shape and same reason as
+  # the probes above. It paces itself: one list read per project at most every
+  # `HeldTicketProbe::INTERVAL`, whatever the poll interval.
+  def probe_held_tickets(config, projects)
+    ::Autodev::HeldTicketProbe.probe!(config: config, projects: projects, logger: logger)
+  rescue StandardError => e
+    logger.warn("[autodev_poll] held-ticket probe failed: #{e.class}: #{e.message}")
   end
 
   # Poller liveness heartbeat — the dashboard health surface (Autodev::HealthReport)

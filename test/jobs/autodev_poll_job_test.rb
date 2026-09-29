@@ -147,6 +147,30 @@ class AutodevPollJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cla
     assert_equal %w[group/foo group/bar], dispatched
   end
 
+  # Autodev #126: the held-ticket watch runs beside the two other probes, for
+  # the same reason — the card that reads it is passive.
+  test 'probes the held tickets once per cycle, over the cycle projects and configuration' do
+    @stub_config['poll_interval'] = 120
+    calls = []
+    probe = ->(config:, projects:, logger: nil) { (calls << [config, projects, logger]) && nil }
+
+    Autodev::HeldTicketProbe.stub(:probe!, probe) { run_with_stubs(usage_available: true) }
+
+    assert_equal 1, calls.size
+    assert_equal(%w[group/foo group/bar], calls.first[1].map { |project| project['path'] })
+    assert_equal 120, calls.first[0]['poll_interval']
+  end
+
+  test 'a held-ticket probe failure does not break the cycle' do
+    probe = ->(**) { raise StandardError, 'gitlab down' }
+
+    dispatched = Autodev::HeldTicketProbe.stub(:probe!, probe) do
+      run_with_stubs(usage_available: true)
+    end
+
+    assert_equal %w[group/foo group/bar], dispatched
+  end
+
   test 'records a cycle error and re-raises when the cycle blows up' do
     fake_checker = build_fake_checker(true)
     assert_raises(StandardError) do

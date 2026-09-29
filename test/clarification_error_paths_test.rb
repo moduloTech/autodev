@@ -359,3 +359,45 @@ class SweepDrainsOldestFirstTest < Minitest::Test
     assert_equal %w[2026-05-15 2026-06-29 2026-07-22], sweep
   end
 end
+
+# --- 5. a note posted before a transition still aborts (Autodev #126) --------
+# Autodev #126, adversarial review of the lot. Widening the label and handback
+# writes to the transport family was right because every caller runs them after
+# its transition. `notify_issue` has two callers that post their *content*
+# before transitioning, and for them an escaping TCP failure is the mechanism
+# that keeps the row honest: it reaches `IssueProcessor#process`'s rescue, the
+# row goes to `error` and the retry re-posts. Swallowed, the answer to a
+# question was lost while the row went `done` and the ticket to its author, and
+# a clarification parked waiting on questions nobody had posted.
+class ANotePostedBeforeATransitionStillAbortsTest < Minitest::Test
+  include DatabaseTestHelper
+  include ClarificationErrorPathFixtures
+
+  class ResettingNotes < ClarificationErrorPathFixtures::StubClient
+    def create_issue_note(*) = raise(Errno::ECONNRESET, 'Connection reset by peer')
+  end
+
+  def setup = setup_database
+
+  def row(status)
+    Issue.create!(project_path: 'group/project', issue_iid: 17, status: status, issue_author_id: 42)
+  end
+
+  def test_an_answer_that_could_not_be_posted_does_not_deliver_the_question
+    issue = row('answering_question')
+    client = ResettingNotes.new(labels: ['Development::Doing'])
+
+    assert_raises(Errno::ECONNRESET) { processor(client).send(:post_answer, 17, issue, 'The answer') }
+    assert_equal 'answering_question', issue.reload.status
+    assert_empty(client.edits.select { |edit| edit.key?(:assignee_ids) })
+  end
+
+  def test_questions_that_could_not_be_posted_do_not_park_the_request
+    issue = row('checking_spec')
+    client = ResettingNotes.new(labels: ['Development::Doing'])
+
+    assert_raises(Errno::ECONNRESET) { processor(client).send(:post_clarification, ['Which one?'], 17, issue) }
+    assert_equal 'checking_spec', issue.reload.status
+    assert_nil issue.clarification_requested_at
+  end
+end

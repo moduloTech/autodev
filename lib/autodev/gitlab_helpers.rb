@@ -115,6 +115,17 @@ module GitlabHelpers
     @current_user_id ||= client.user.id
   end
 
+  # Does this issue payload name `user_id` among its assignees? One answer for
+  # "does the bot hold it" and for reading back an assignment write (Autodev
+  # #126): GitLab Community holds one assignee and can accept an edit it does
+  # not honour (see `Autodev::TicketReclaim`), so a handback is claimed only
+  # when the payload GitLab returns says it landed. `nil` (no payload) is no.
+  def assigned_to?(gl_issue, user_id)
+    return false if gl_issue.nil? || user_id.nil?
+
+    Array(field(gl_issue, :assignees)).any? { |assignee| field(assignee, :id) == user_id }
+  end
+
   def download_gitlab_images(text, gitlab_url:, project_path:, token:, dest_dir:)
     state = { image_dir: File.join(dest_dir, '.autodev-images'), downloaded: false }
     opts = { gitlab_url: gitlab_url, project_path: project_path, token: token }
