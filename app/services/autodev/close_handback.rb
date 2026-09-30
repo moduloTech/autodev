@@ -31,11 +31,13 @@ module Autodev
     end
 
     def perform(issue)
-      target = issue.handback_target
       client = ::GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @config['gitlab_token'])
-      return Result.new(:not_held) unless held_by_bot?(client, issue)
+      bot_id = ::GitlabHelpers.current_user_id(client)
+      target = issue.handback_target(except: bot_id)
+      return Result.new(:not_held) unless held_by?(client, issue, bot_id)
       # An `assignee_ids: [nil]` edit would unassign the ticket: worse than
-      # leaving it on the bot, where the health card can still see it.
+      # leaving it on the bot, where the health card can still see it. The bot
+      # as target (an Autospec ticket) is the same case: nobody to give it to.
       return Result.new(:no_target) unless target
 
       hand_to(client, issue, target)
@@ -53,8 +55,7 @@ module Autodev
       Result.new(:handed_back, target, name_of(response, target))
     end
 
-    def held_by_bot?(client, issue)
-      bot_id = ::GitlabHelpers.current_user_id(client)
+    def held_by?(client, issue, bot_id)
       ::GitlabHelpers.assigned_to?(client.issue(issue.project_path, issue.issue_iid), bot_id)
     end
 

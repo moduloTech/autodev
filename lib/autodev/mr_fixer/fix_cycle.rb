@@ -174,16 +174,19 @@ class MrFixer
       settled = settled_resolutions(pending, discussions)
       still_pending = settled.reject { |id, _| resolve_discussion(issue.mr_iid, id) }
       write_pending_resolutions(issue, still_pending) unless still_pending == pending
-      lost_again(issue, discussions, still_pending) if still_pending.any?
-      discussions.reject { |discussion| settled.key?(discussion[:id]) }
+      remaining = discussions.reject { |discussion| settled.key?(discussion[:id]) }
+      lost_again(issue, discussions, still_pending, count: remaining.empty?) if still_pending.any?
+      remaining
     end
 
     # Said per thread, like the first loss: otherwise the round reads "no
-    # discussion to fix" over a thread still open on GitLab.
-    def lost_again(issue, discussions, still_pending)
+    # discussion to fix" over a thread still open on GitLab. Counted only when
+    # nothing is left to fix: otherwise the fix cycle that follows closes the
+    # round with its own count, and this one would make it two.
+    def lost_again(issue, discussions, still_pending, count:)
       discussions.select { |discussion| still_pending.key?(discussion[:id]) }
                  .each { |discussion| note_lost_resolution(issue, discussion) }
-      count_lost_again(issue)
+      count_lost_again(issue) if count
     end
 
     # A resolution GitLab keeps refusing (a 403 rather than a cut) would

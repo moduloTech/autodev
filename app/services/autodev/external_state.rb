@@ -94,13 +94,19 @@ module Autodev
       key = :"handover_#{verdict.reason}"
       @logger.info("Issue ##{issue.issue_iid}: #{verdict.reason} (#{verdict.label}), " \
                    'stopping and closing', project: @path)
-      handed_back = hand_over_to(issue, verdict.actor_id || issue.handback_target)
+      handed_back = hand_over_to(issue, verdict.actor_id || handback_target(issue))
       notify_stop(issue, key, suffix: (:handover_reassigned if handed_back), label: verdict.label)
       close_row!(issue, key, label: verdict.label)
       verdict
     end
 
     private
+
+    # The bot is never a target: an Autospec ticket has it for author, and an
+    # edit to itself would read back as a handover that landed.
+    def handback_target(issue)
+      issue.handback_target(except: ::GitlabHelpers.current_user_id(@client))
+    end
 
     def label_handover
       LabelHandover.new(client: @client, path: @path,

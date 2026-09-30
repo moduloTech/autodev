@@ -7,7 +7,7 @@ require 'autodev/gitlab_helpers'
 # still hold. `CloseHandback` is the GitLab half: it hands the ticket to
 # `Issue#handback_target` when, and only when, the bot is an assignee, and
 # reports what happened instead of raising, so the close never depends on it.
-class CloseHandbackTest < Minitest::Test
+class CloseHandbackTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
   PATH = 'group/project'
@@ -121,6 +121,24 @@ class CloseHandbackTest < Minitest::Test
 
     assert_equal :no_target, result.outcome
     assert_empty client.edits, 'an assignee_ids: [nil] edit would unassign the ticket'
+  end
+
+  # An Autospec ticket: the bot is its author and nobody was displaced. Handing
+  # it to its author is an edit to the bot itself, which GitLab reads back as
+  # landed — Clore said "rendu" over a ticket that never left the bot.
+  def test_a_ticket_the_bot_authored_has_nobody_to_go_to
+    client = StubClient.new(assignee_ids: [AUTODEV_ID])
+    result = perform(row(issue_author_id: AUTODEV_ID), client)
+
+    assert_equal :no_target, result.outcome
+    assert_empty client.edits
+  end
+
+  def test_a_ticket_the_bot_authored_still_goes_to_whoever_it_displaced
+    client = StubClient.new(assignee_ids: [AUTODEV_ID])
+    result = perform(row(issue_author_id: AUTODEV_ID, displaced_assignee_id: DISPLACED_ID), client)
+
+    assert_equal [:handed_back, DISPLACED_ID], [result.outcome, result.target_id]
   end
 
   def test_an_unreachable_gitlab_is_a_failed_handback

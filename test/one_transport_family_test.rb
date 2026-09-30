@@ -23,8 +23,14 @@ class OneTransportFamilyTest < Minitest::Test
   # Exempt is that one clause, by the exact classes it names — a new partial
   # clause in the same file is not — and its file's clauses together must still
   # name the whole family (`test_an_exempt_split_still_covers_the_family`).
+  #
+  # `LabelManager#send_labels` splits the same way for its own reason: a label
+  # write whose answer never came is stamped as written (Autodev #101), one
+  # that never left is not. `manage_labels` still swallows the whole family.
   EXEMPT = {
     'lib/autodev/pipeline_monitor/failure_handler.rb' =>
+      %w[SystemCallError Timeout::Error OpenSSL::SSL::SSLError EOFError],
+    'lib/autodev/label_manager.rb' =>
       %w[SystemCallError Timeout::Error OpenSSL::SSL::SSLError EOFError]
   }.freeze
 

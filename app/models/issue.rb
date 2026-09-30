@@ -205,8 +205,15 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # and the author otherwise (Autodev #98). One definition since Autodev #126,
   # because the dashboard's Clore and a label handover hand tickets back too, and
   # they do it outside `IssueNotifier`.
-  def handback_target
-    displaced_assignee_id || issue_author_id
+  #
+  # `except:` is the bot's own id. A ticket Autospec created has the bot for
+  # author and nobody displaced, and "handing" it to its author is an edit that
+  # changes nothing while GitLab's payload reads it back as landed — the
+  # dashboard then says the ticket was given back when it never left the bot.
+  # Such a ticket has nobody to go to, which is what nil answers.
+  def handback_target(except: nil)
+    target = displaced_assignee_id || issue_author_id
+    target unless except && target == except
   end
 
   # -- Guard methods (read the instance flags set by the workflow) --

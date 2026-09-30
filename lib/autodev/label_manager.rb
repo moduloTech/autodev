@@ -196,7 +196,7 @@ module LabelManager
   def rewrite_labels(iid, current, wanted, dropped, add)
     return nil if wanted.sort == current.sort
 
-    @client.edit_issue(@project_path, iid, labels: wanted.join(','))
+    send_labels(iid, wanted)
     stamp_labels_written(iid)
     log "Labels updated on ##{iid}: dropped #{current & dropped.compact}, added #{add}"
     wanted
@@ -211,6 +211,23 @@ module LabelManager
   # After the write, not before: a scan starting between a before-stamp and the
   # write would count the write as already read. The only `edit_issue(…,
   # labels:)` in the codebase, so every autodev label write is stamped here.
+  # A write whose answer never came may still have landed — and if it removed
+  # a human's `label_done`, the stamp is the only thing left that sends the
+  # next verdict to the label events (Autodev #101), since `manage_labels`'
+  # rescue swallows the failure. So the stamp goes on for every cut after the
+  # request left; a stamp over a write that did not land only costs one scan.
+  # A connection that never opened, or an HTTP refusal, sent nothing — the
+  # same split as `FailureHandler#retrigger_if_needed`.
+  def send_labels(iid, wanted)
+    @client.edit_issue(@project_path, iid, labels: wanted.join(','))
+  rescue Gitlab::Error::ResponseError, Net::OpenTimeout, Errno::ECONNREFUSED, Errno::EHOSTUNREACH,
+         Errno::ENETUNREACH, SocketError
+    raise
+  rescue SystemCallError, Timeout::Error, OpenSSL::SSL::SSLError, EOFError
+    stamp_labels_written(iid)
+    raise
+  end
+
   def stamp_labels_written(iid)
     ::Issue.where(project_path: @project_path, issue_iid: iid).update_all(labels_written_at: Time.current)
   end

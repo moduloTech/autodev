@@ -89,9 +89,10 @@ module IssueNotifier
   #
   # The author stays the answer everywhere else, which is every row autodev was
   # assigned to in the ordinary way — the column is NULL there and nothing about
-  # those paths changes. The rule itself lives on `Issue#handback_target`.
+  # those paths changes. The rule itself lives on `Issue#handback_target`,
+  # which also refuses the bot itself as a target (an Autospec ticket's author).
   def handback_target(issue)
-    issue.handback_target
+    issue.handback_target(except: GitlabHelpers.current_user_id(@client))
   end
 
   def autodev_tag

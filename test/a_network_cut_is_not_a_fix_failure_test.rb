@@ -33,7 +33,10 @@ module NetworkCutFixtures
   HandbackIssue = Struct.new(:issue_iid, :displaced_assignee_id, :issue_author_id) do
     # `IssueNotifier#handback_target` asks the row since Autodev #126; the rule
     # is `Issue#handback_target`'s.
-    def handback_target = displaced_assignee_id || issue_author_id
+    def handback_target(except: nil)
+      target = displaced_assignee_id || issue_author_id
+      target unless except && target == except
+    end
   end
   RetriggerIssue = Struct.new(:issue_iid, :pipeline_retrigger_count) do
     # Answers like `ActiveRecord#update` on a row that saved.
@@ -751,6 +754,10 @@ class RoundWritesNetworkCutTest < Minitest::Test
 
   def setup
     setup_database
+    # `hand_ticket_back` asks for the bot's id to refuse it as a target, and the
+    # memo is module-wide: left at 7 by another file, it would make
+    # `handback_issue`'s author the bot and skip the write under test.
+    GitlabHelpers.instance_variable_set(:@current_user_id, nil)
     @sink = new_sink
   end
 
@@ -949,5 +956,21 @@ class PendingResolutionBoundTest < Minitest::Test
 
     assert_equal %w[done fix_rounds_exhausted], [issue.status, issue.attention_reason]
     assert_empty @dc_calls
+  end
+
+  # That count is for a round that fixes nothing. A round that loses a
+  # remembered resolution again *and* fixes another thread is closed by the
+  # fix cycle's own count: counting the loss too made it two, and brought
+  # `fix_round_ceiling` early (review of the alpha-56 lot).
+  def test_a_round_that_also_fixes_a_thread_counts_once
+    issue = fixing_row
+    threads = [thread('t1'), thread('t2')]
+    client = cut_t2_then_heal(issue, threads)
+    threads << thread('t3')
+    client.fail = { resolve: ['t2', Net::OpenTimeout.new] }
+    before = issue.reload.discussion_fix_round
+    back_to_fixing(issue)
+
+    assert_equal before + 1, verified_round(issue, client, diff: DIFF, commits: true).reload.discussion_fix_round
   end
 end
