@@ -74,6 +74,7 @@
 ### Changed
 
 - **The usage guides describe the post-completion hook as it now behaves (Autodev #94, #114).** `/help` says the finalisation runs once per delivery, that a failure leaves a comment on the ticket and is not re-run, and how to replay it; `/admin/help` gains the reservation in the lifecycle and the dispatch pass, and the six failure causes and the comment in the error catalogue.
+- **The usage guides cover the rest of the lot (Autodev #101, #125, #126, #127, #128).** `/help`: Clore hands the ticket back on GitLab and what its three messages mean; moving the label also reassigns the ticket to whoever moved it, even when autodev's own label write came after; a network cut during a fix is replayed, not reported; a weekly Claude limit waits for its named reset. `/admin/help`: the `held_tickets` card, `CloseHandback` on `POST /issues/:id/close`, what a re-entry from the transition menu resets, and edge-case rows for the erased-label scan, network cuts during a fix, deferred resolutions, a failure raised before a pipeline fix is dispatched, and Claude limits of any qualifier.
 
 ### Added
 
