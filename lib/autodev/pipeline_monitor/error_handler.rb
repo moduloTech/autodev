@@ -9,7 +9,8 @@ class PipelineMonitor
       wait = error.wait_seconds
       retry_at = wait.to_i.seconds.from_now
       log_error "Issue ##{issue.issue_iid}: rate limit hit, parking for #{wait}s"
-      safe_mark_failed!(issue, next_retry_at: retry_at)
+      return unless safe_mark_failed!(issue, next_retry_at: retry_at)
+
       Issue.where(id: issue.id).update_all(
         error_message: error.message, dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
       )
@@ -24,7 +25,8 @@ class PipelineMonitor
     # luck, off a residue from May.
     def handle_auth_failure(issue, error)
       log_error "Issue ##{issue.issue_iid}: Claude authentication failed, manual intervention required"
-      safe_mark_failed!(issue, next_retry_at: nil)
+      return unless safe_mark_failed!(issue, next_retry_at: nil)
+
       Issue.where(id: issue.id).update_all(
         error_message: "#{error.class}: #{error.message}",
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr
@@ -47,14 +49,16 @@ class PipelineMonitor
     def handle_failure_error(issue, error)
       return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
 
-      bt = error.backtrace&.first(10)&.join("\n  ")
+      bt = ::BacktraceExcerpt.format(error)
       log_error "Pipeline evaluation/fix failed: #{error.class}: #{error.message}"
       log_error "  #{bt}" if bt
       # No retry scheduled — the asymmetry with IssueProcessor's backoff is a
       # policy question left open (see the design doc's Out of scope), but the
       # row must not be stranded: DormantAudit's error arm recovers it (Autodev
-      # #103).
-      safe_mark_failed!(issue, next_retry_at: nil)
+      # #103). From `checking_pipeline` too since Autodev #128, where most of
+      # these are raised — before that the row never reached `error` at all.
+      return unless safe_mark_failed!(issue, next_retry_at: nil)
+
       persist_and_notify_failure(issue, error, bt)
     end
 

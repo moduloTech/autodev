@@ -21,20 +21,61 @@ module IssueNotifier
 
   # Returns whether the ticket actually changed hands (Autodev #60): the abandon
   # notification only claims a handback when there was somebody to hand it to and
-  # GitLab accepted the edit. Existing callers ignore the value.
+  # GitLab applied the edit: `IssueAbandonment#announce_abandonment` reads it to
+  # decide the `abandon_reassigned` suffix; the other callers ignore it.
   #
   # Named for the gesture rather than for the recipient since Autodev #98, because
   # the recipient is no longer always the author — see `handback_target`.
+  #
+  # "Applied" is read off the payload GitLab returns, like
+  # `ExternalState#hand_over_to` and `CloseHandback` read it: GitLab Community
+  # answers 200 to an assignment it did not honour (Autodev #126), and a 200
+  # alone used to be claimed as a handback.
+  #
+  # A request that never completed answers `false` like an HTTP refusal
+  # (Autodev #125, #126) instead of escaping into the caller's
+  # `rescue StandardError` after the row has already been given up. For a timeout
+  # `false` is not established — the edit may have landed — and that errs in the
+  # safe direction: the notice leaves a handback that did happen unclaimed, and
+  # never claims one that did not.
   def hand_ticket_back(issue)
     target = handback_target(issue)
     return false unless target
 
-    @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [target])
-    log "Handed issue ##{issue.issue_iid} back to user #{target}"
-    true
-  rescue Gitlab::Error::ResponseError => e
-    log_error "Failed to hand issue ##{issue.issue_iid} back: #{e.message}"
+    response = @client.edit_issue(@project_path, issue.issue_iid, assignee_ids: [target])
+    handed_back?(issue, target, response)
+  rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
+         ::OpenSSL::SSL::SSLError, ::EOFError => e
+    log_error "Failed to hand issue ##{issue.issue_iid} back: #{e.class}: #{e.message}"
     false
+  end
+
+  def handed_back?(issue, target, response)
+    if GitlabHelpers.assigned_to?(response, target)
+      log "Handed issue ##{issue.issue_iid} back to user #{target}"
+      return true
+    end
+
+    log_error "GitLab accepted the handback of issue ##{issue.issue_iid} but it is not assigned to user #{target}"
+    false
+  end
+
+  # What a round announces after it has already moved the row (Autodev #125):
+  # the transition is the verdict, and a GitLab write that follows it cannot
+  # undo it, so a failure costs that write and nothing else. Returns the block's
+  # value, or nil when the write was lost.
+  #
+  # Deliberately not folded into `notify_issue`: that is also how
+  # `QuestionHandler#post_answer` delivers an answer *before* transitioning, and
+  # swallowing a cut there would mark a ticket answered with no answer posted.
+  # The family is spelled out rather than splatted so the #62 scanner can read
+  # the clause (Autodev #119).
+  def after_conclusion(what)
+    yield
+  rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
+         ::OpenSSL::SSL::SSLError, ::EOFError => e
+    log_error "Lost the #{what} write after the row moved on: #{e.class}: #{e.message}"
+    nil
   end
 
   # Whoever autodev took the ticket from, and the author otherwise (Autodev #98).
@@ -48,9 +89,10 @@ module IssueNotifier
   #
   # The author stays the answer everywhere else, which is every row autodev was
   # assigned to in the ordinary way — the column is NULL there and nothing about
-  # those paths changes.
+  # those paths changes. The rule itself lives on `Issue#handback_target`,
+  # which also refuses the bot itself as a target (an Autospec ticket's author).
   def handback_target(issue)
-    issue.displaced_assignee_id || issue.issue_author_id
+    issue.handback_target(except: GitlabHelpers.current_user_id(@client))
   end
 
   def autodev_tag
@@ -59,6 +101,15 @@ module IssueNotifier
 
   def notify_issue(iid, message)
     @client.create_issue_note(@project_path, iid, message)
+  # Deliberately NOT widened to the transport family, unlike the two writes
+  # above (Autodev #126, adversarial review). Two callers post their content
+  # *before* they transition — `post_answer` (the answer, then
+  # `question_answered!`) and `post_clarification` (the questions, then
+  # `spec_unclear!`) — and a TCP failure escaping here is what sends them to
+  # `IssueProcessor#process`'s rescue, `error` and a retry. Swallowed, the
+  # answer was lost and the row delivered anyway, or parked waiting on
+  # questions nobody posted. The terminal sequences do not need it: each writes
+  # the handback and `finished_at` before its note.
   rescue Gitlab::Error::ResponseError => e
     log_error "Failed to post comment on ##{iid}: #{e.message}"
   end

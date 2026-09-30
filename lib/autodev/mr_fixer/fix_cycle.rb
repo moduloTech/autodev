@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'json'
+require 'time'
 require_relative 'stagnation_checker'
 require_relative 'fix_prompts'
 require_relative 'fix_verifier'
@@ -11,6 +13,10 @@ class MrFixer
     include StagnationChecker
     include FixPrompts
     include FixVerifier
+
+    # What the post-push resolutions of a round came to: the threads GitLab
+    # closed, and how many it did not take (Autodev #125, amendment 1).
+    Resolutions = Data.define(:resolved, :deferred)
 
     private
 
@@ -38,6 +44,11 @@ class MrFixer
     # `default_branch(work_dir)` — so the correction was made on a tree rebased on
     # one branch while the finding was illustrated with a diff against another.
     # Resolved once, after the clone and before the rebase, they cannot.
+    #
+    # The threads are resolved only once their corrections are on GitLab
+    # (Autodev #125, amendment 1). They used to be resolved inside the loop,
+    # before the push, so a round that failed to push left threads closed over
+    # corrections GitLab never received — and nothing reopens a thread.
     def run_fix_cycle(issue, discussions, work_dir)
       @fix_issue = issue
       branch = issue.branch_name
@@ -46,12 +57,12 @@ class MrFixer
       rebase_branch_on_target(work_dir, branch, base: base)
       env = prepare_fix_environment(work_dir, issue.issue_iid, issue.mr_iid, base)
 
-      resolved = Array(fix_each_discussion(discussions, work_dir, branch, issue.mr_iid, env))
+      addressed = Array(fix_each_discussion(discussions, work_dir, branch, issue.mr_iid, env))
 
-      return finalize_no_commits(issue, discussions) unless new_commits?(work_dir, branch)
+      return finalize_no_commits(issue, discussions, addressed) unless new_commits?(work_dir, branch)
 
       push_fixes(work_dir, branch)
-      finalize_success(issue, discussions, resolved)
+      finalize_success(issue, discussions, resolve_verified(issue, addressed))
     end
 
     # The GitLab read first, the local work after: the read is the only step here
@@ -76,10 +87,12 @@ class MrFixer
         agent: detect_agent(work_dir, 'mr-fixer') }
     end
 
-    # Answers with the discussions this round actually resolved, which since
-    # Autodev #79 is a subset of the ones it attempted rather than all of them.
+    # Answers with the discussions whose correction passed, which since Autodev
+    # #79 is a subset of the ones it attempted rather than all of them. Nothing
+    # is resolved here any more: see `run_fix_cycle`.
     def fix_each_discussion(discussions, work_dir, branch, mr_iid, env)
       @mr_fix_session_id = nil
+      @verdict_times = {}
       attempted = attempted_this_round(discussions)
       note_deferred(discussions.size - attempted.size)
       attempted.each_with_index.filter_map do |discussion, idx|
@@ -98,9 +111,11 @@ class MrFixer
 
     # The resolution is the claim that the review point is dealt with, and since
     # Autodev #79 it is only ever made behind a verdict something other than the
-    # fixing session produced. Returns the discussion when the thread was
-    # resolved, nil when it was left open for the next round.
-    def fix_single_discussion(discussion, work_dir, branch, mr_iid, env)
+    # fixing session produced. Returns the discussion when the verdict is yes,
+    # nil when the thread is left open for the next round. The resolution itself
+    # waits for the push (Autodev #125, amendment 1), so the time of the verdict
+    # is kept for the thread whose resolution GitLab might not take.
+    def fix_single_discussion(discussion, work_dir, branch, _mr_iid, env)
       thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: env[:target_branch])
       base_sha = head_sha(work_dir) if verify_fixes?
       run_fix_prompt(thread_context, work_dir, branch, env)
@@ -108,8 +123,130 @@ class MrFixer
       check = verify_fixes? ? verify_fix(discussion, thread_context, work_dir, base_sha) : FixCheck.passed
       return record_unverified(discussion, check) unless check.addressed
 
-      resolve_discussion(mr_iid, discussion[:id])
+      @verdict_times[discussion[:id]] = Time.now.utc.iso8601
       discussion
+    end
+
+    # After the push, or in place of it when the round produced no commit. A
+    # thread GitLab did not close is remembered rather than left to the next
+    # round's fix: that round would find its correction already on the branch,
+    # measure an empty diff, leave it open as `:unchanged`, and end in a
+    # stagnation give-up over one lost write. `settle_pending_resolutions`
+    # makes it at the start of the next round instead.
+    def resolve_verified(issue, addressed)
+      resolved, lost = addressed.partition { |discussion| resolve_discussion(issue.mr_iid, discussion[:id]) }
+      lost.each { |discussion| note_lost_resolution(issue, discussion) }
+      remember_pending_resolutions(issue, lost.to_h { |discussion| [discussion[:id], verdict_time(discussion)] })
+      Resolutions.new(resolved: resolved, deferred: lost.size)
+    end
+
+    def note_lost_resolution(issue, discussion)
+      log "Discussion #{discussion[:id]}: correction verified and pushed, resolution not taken by GitLab — " \
+          'deferred to the next round'
+      log_activity(issue, :discussion_resolution_deferred, title: discussion[:title])
+    end
+
+    def verdict_time(discussion) = (@verdict_times || {}).fetch(discussion[:id]) { Time.now.utc.iso8601 }
+
+    def remember_pending_resolutions(issue, lost)
+      return if lost.empty?
+
+      write_pending_resolutions(issue, pending_resolutions_of(issue).merge(lost))
+    end
+
+    # The threads an earlier round verified and pushed but could not resolve
+    # (Autodev #125, amendment 1), handled by `MrFixer#process_discussions`
+    # before anything is fixed. Their correction is already on the branch, so
+    # fixing them again would measure an empty diff and leave them open as
+    # `:unchanged` until the stagnation guard gave the request up. Answers the
+    # threads this round still has to fix.
+    #
+    # A remembered thread is resolved directly, unless a note on it is newer than
+    # the verdict: then somebody replied, the verdict no longer answers the
+    # thread, and it is fixed like any other. A thread GitLab no longer lists was
+    # resolved or deleted meanwhile, and is forgotten. One that fails to resolve
+    # again stays remembered and stays out of the fix list — its correction is on
+    # the branch, so the next round retries the resolution alone.
+    def settle_pending_resolutions(issue, discussions)
+      pending = pending_resolutions_of(issue)
+      return discussions if pending.empty?
+
+      settled = settled_resolutions(pending, discussions)
+      still_pending = settled.reject { |id, _| resolve_discussion(issue.mr_iid, id) }
+      write_pending_resolutions(issue, still_pending) unless still_pending == pending
+      remaining = discussions.reject { |discussion| settled.key?(discussion[:id]) }
+      lost_again(issue, discussions, still_pending, count: remaining.empty?) if still_pending.any?
+      remaining
+    end
+
+    # Said per thread, like the first loss: otherwise the round reads "no
+    # discussion to fix" over a thread still open on GitLab. Counted only when
+    # nothing is left to fix: otherwise the fix cycle that follows closes the
+    # round with its own count, and this one would make it two.
+    def lost_again(issue, discussions, still_pending, count:)
+      discussions.select { |discussion| still_pending.key?(discussion[:id]) }
+                 .each { |discussion| note_lost_resolution(issue, discussion) }
+      count_lost_again(issue) if count
+    end
+
+    # A resolution GitLab keeps refusing (a 403 rather than a cut) would
+    # otherwise loop for ever: the round fixes nothing, `transition_no_discussions`
+    # counts nothing, and the next green pipeline sends the row straight back.
+    # Counting the round is what puts that loop under `fix_round_ceiling`
+    # (Autodev #99), which gives the request up under its own reason; a cut
+    # that heals costs one count per poll it lasted.
+    def count_lost_again(issue)
+      issue.update(discussion_fix_round: issue.discussion_fix_round + 1)
+    end
+
+    # The remembered threads GitLab still lists and nobody wrote on since.
+    def settled_resolutions(pending, discussions)
+      open = discussions.to_h { |discussion| [discussion[:id], discussion] }
+      pending.select { |id, verdict_at| open.key?(id) && !replied_since?(open[id], verdict_at) }
+    end
+
+    # A time that cannot be read counts as a reply: resolving a thread a human
+    # may have answered is the claim that cannot be taken back, fixing it once
+    # more is not.
+    #
+    # A system note is not a reply. GitLab adds one to the thread at the very
+    # push that follows the verdict ("changed this line in version N of the
+    # diff" — on production MR !11313, one second after autodev's push) whenever
+    # the correction touched the commented line, so counting it re-fixed exactly
+    # the threads whose correction had landed (adversarial review of amendment 1).
+    def replied_since?(discussion, verdict_at)
+      verdict = Time.iso8601(verdict_at.to_s)
+      replied = discussion[:notes].reject { |note| system_note?(note) }
+                                  .any? { |note| (at = note_time(note)).nil? || at > verdict }
+      log "Discussion #{discussion[:id]}: replied to since its verdict — fixing it again" if replied
+      replied
+    rescue ArgumentError
+      true
+    end
+
+    def system_note?(note) = note.respond_to?(:system) && note.system
+
+    def note_time(note)
+      value = note.respond_to?(:created_at) ? note.created_at : nil
+      return value if value.is_a?(Time)
+
+      Time.iso8601(value.to_s)
+    rescue ArgumentError
+      nil
+    end
+
+    # A column only this module writes; anything but a JSON object reads as
+    # empty, which costs at worst one thread fixed a second time.
+    def pending_resolutions_of(issue)
+      raw = issue.pending_resolutions.to_s
+      data = raw.empty? ? {} : JSON.parse(raw)
+      data.is_a?(Hash) ? data : {}
+    rescue JSON::ParserError
+      {}
+    end
+
+    def write_pending_resolutions(issue, pending)
+      issue.update(pending_resolutions: pending.empty? ? nil : JSON.generate(pending))
     end
 
     # One consequence, three sentences: which of them a reader gets decides
@@ -163,8 +300,13 @@ class MrFixer
     # Autodev #71's rule is untouched: this IS a completed attempt — the threads
     # were read, the corrections were attempted, danger-claude answered — it simply
     # produced nothing, which is the fact the signature records.
-    def finalize_no_commits(issue, discussions)
+    #
+    # Nothing to push means nothing to wait for, so the verified threads are
+    # resolved here directly. With the verification on there are none — an empty
+    # diff fails it — so this is the `fix_verification_max: 0` round.
+    def finalize_no_commits(issue, discussions, addressed = [])
       log 'No new commits after fixing, skipping push'
+      resolve_verified(issue, addressed)
       issue.update(fix_round: issue.fix_round + 1, pipeline_retrigger_count: 0,
                    discussion_fix_round: issue.discussion_fix_round + 1)
       return if discussion_stagnated?(issue, discussions)
@@ -180,7 +322,7 @@ class MrFixer
     # not over the ones it resolved: "the same discussions are still open" is the
     # question it answers, and a round that resolved none of them is exactly the
     # case it exists to end.
-    def finalize_success(issue, discussions, resolved)
+    def finalize_success(issue, discussions, resolutions)
       ScreenshotUploader.process(client: @client, project_path: @project_path,
                                  iid: issue.issue_iid, logger: @logger)
       round = issue.fix_round + 1
@@ -189,12 +331,12 @@ class MrFixer
                    dc_stdout: @dc_stdout, dc_stderr: @dc_stderr)
       return if discussion_stagnated?(issue, discussions)
 
-      complete_discussion_fix(issue, resolved.size, round)
+      complete_discussion_fix(issue, resolutions.resolved.size, round, deferred: resolutions.deferred)
     end
 
-    def complete_discussion_fix(issue, count, round)
+    def complete_discussion_fix(issue, count, round, deferred: 0)
       issue.discussions_fixed!
-      report_round(issue, count, round)
+      report_round(issue, count, round, deferred: deferred)
       log_activity(issue, :pipeline_watch)
       log "MR !#{issue.mr_iid}: resolved #{count} discussion(s) (round #{round})"
     end
@@ -213,10 +355,26 @@ class MrFixer
     # rounds before a `stagnation_discussions` give-up legible instead of
     # sudden — but it gets its own key, so neither a reader nor a counter can
     # take it for a delivery.
-    def report_round(issue, count, round)
-      return log_activity(issue, :discussions_none_resolved, round: round) unless count.positive?
+    #
+    # `discussions_fixed!` has already fired and the push has landed, so the
+    # notice announces a verdict and cannot undo it (Autodev #125): a cut on it
+    # used to reach `execute_fix_cycle`'s `rescue StandardError` and put a pushed
+    # correction in `error`, under a comment declaring it failed.
+    #
+    # A round whose only verified threads lost their resolution validated its
+    # corrections, so "no correction validated" would be false (Autodev #125,
+    # amendment 1). It says nothing at round level: each thread's
+    # `discussion_resolution_deferred` entry already says what happened.
+    def report_round(issue, count, round, deferred: 0)
+      unless count.positive?
+        return if deferred.positive?
 
-      notify_localized(issue.issue_iid, :mr_fix_success, count: count, mr_url: issue.mr_url, round: round)
+        return log_activity(issue, :discussions_none_resolved, round: round)
+      end
+
+      after_conclusion(:mr_fix_success) do
+        notify_localized(issue.issue_iid, :mr_fix_success, count: count, mr_url: issue.mr_url, round: round)
+      end
       log_activity(issue, :discussions_fixed, count: count, round: round)
     end
   end

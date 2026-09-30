@@ -65,9 +65,15 @@ module FixVerificationHarness
     Array.new(count) { |i| { id: "thread-#{i}", title: "comment #{i}", notes: [] } }
   end
 
+  # The loop answers what passed, and the resolutions come after the push
+  # (Autodev #125, amendment 1), so a round here is both halves: what reaches
+  # `resolve_discussion` is still decided by the verdict alone.
   def run_round(fix, list)
-    fix.send(:fix_each_discussion, list, '/tmp/work', 'autodev/1', 42, { target_branch: 'main' })
+    addressed = fix.send(:fix_each_discussion, list, '/tmp/work', 'autodev/1', 42, { target_branch: 'main' })
+    fix.send(:resolve_verified, RoundIssue.new(42), addressed).resolved
   end
+
+  RoundIssue = Struct.new(:mr_iid)
 
   def addressed = JSON.generate(verdict: 'addressed', reason: 'the guard clause was added')
   def not_addressed = JSON.generate(verdict: 'not_addressed', reason: 'the diff renames a variable')

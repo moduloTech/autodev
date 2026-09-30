@@ -148,6 +148,9 @@ module KeySites # rubocop:disable Metrics/ModuleLength
     Call.new('close_row!', 1, :activity),
     Call.new('notify_localized', 1, :notification),
     Call.new('notify_stop', 1, :notification),
+    # `PostCompletion#store_pc_error` is the one sink of every post-completion
+    # failure and hands its key on to `notify_localized` (Autodev #94).
+    Call.new('store_pc_error', 2, :notification),
     # `abandon_issue`'s reason is simultaneously the `attention_reason` column
     # value, the notification key and the activity key (IssueAbandonment).
     Call.new('abandon_issue', 1, :attention_reason),
@@ -208,6 +211,10 @@ module KeySites # rubocop:disable Metrics/ModuleLength
     # `LabelHandover::EXPECTED_ACTION`, checked as its own family.
     'app/services/autodev/external_state.rb close_row!' => 'the handover reason (`activity_handover_<reason>`)',
     'app/services/autodev/external_state.rb notify_stop' => 'the handover reason (`handover_<reason>`)',
+    # The post-completion failure sink (Autodev #94), scanned at its call sites.
+    'lib/autodev/pipeline_monitor/post_completion.rb notify_localized' => "`store_pc_error`'s key",
+    'lib/autodev/pipeline_monitor/post_completion.rb store_pc_error' => 'the definition of `store_pc_error`, ' \
+                                                                        'whose call sites are scanned',
     # The `Locales.t` sites that take their key from a variable (Autodev #73). Each
     # is a wrapper whose own call sites are scanned above, or a lookup in a table
     # of literals the literal scan reads.

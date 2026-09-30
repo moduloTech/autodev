@@ -33,7 +33,7 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
   FakeNote = Struct.new(:id, :body)
 
   class StubClient
-    attr_reader :calls, :notes
+    attr_reader :calls, :notes, :edits
 
     def initialize(state: 'opened', assignee_ids: [AUTODEV_ID], labels: [DOING], events: [])
       @state = state
@@ -42,6 +42,7 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
       @events = events
       @calls = 0
       @notes = []
+      @edits = []
     end
 
     def user = FakeUser.new(AUTODEV_ID)
@@ -52,6 +53,14 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
     end
 
     def issue_label_events(_project, _iid) = Gitlab::PaginatedResponse.new(@events)
+
+    # Recording, not a no-op (Autodev #126): a handover now hands the ticket to
+    # whoever moved the label, and a silent stub would let that edit go wrong
+    # unseen.
+    def edit_issue(_project, _iid, **attrs)
+      @edits << attrs
+      nil
+    end
 
     def create_issue_note(_project, _iid, body)
       @notes << body
@@ -140,9 +149,11 @@ class DormantAuditRoutingTest < Minitest::Test # rubocop:disable Metrics/ClassLe
   end
 
   def test_a_row_moved_to_another_workflow_label_is_closed
-    issue = run_audit(orphan, client: handover_client)
+    client = handover_client
+    issue = run_audit(orphan, client: client)
 
     assert_equal 'closed', issue.status
+    assert_equal [{ assignee_ids: [HUMAN_ID] }], client.edits
   end
 
   def test_a_row_moved_to_another_workflow_label_is_not_rearmed

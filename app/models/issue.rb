@@ -23,7 +23,8 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # AR-written Issue, breaking any `date(created_at)`/`datetime(created_at)`
   # SQL the way it broke the activity_events sparkline.
   %i[started_at finished_at next_retry_at clarification_requested_at pipeline_poll_since
-     infra_recheck_at clarification_read_at created_at].each do |col|
+     infra_recheck_at clarification_read_at post_completion_dispatched_at labels_written_at
+     label_events_seen_until created_at].each do |col|
     attribute col, :datetime
   end
 
@@ -81,10 +82,12 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     state :answering_question, :needs_clarification
     state :done, :error, :closed
 
-    # `stamp_pipeline_watch!` is first on purpose: it only assigns, and
-    # `persist_status_change!` right after is the save that writes it.
-    after_all_transitions :stamp_pipeline_watch!, :persist_status_change!,
-                          :emit_activity_event!, :emit_audit_log!
+    # The three assigning hooks come first on purpose: they only assign, and
+    # `persist_status_change!` right after is the save that writes them.
+    # `clear_delivery_on_reentry!` must also run before `emit_audit_log!`, which
+    # clears the `_audit_origin` it reads to recognise a manual re-entry.
+    after_all_transitions :stamp_pipeline_watch!, :stamp_label_events_floor!, :clear_delivery_on_reentry!,
+                          :persist_status_change!, :emit_activity_event!, :emit_audit_log!
 
     # === Happy path ===
 
@@ -160,9 +163,14 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
     # === Error handling ===
 
+    # `checking_pipeline` is a source since Autodev #128: `PipelineMonitor` does
+    # part of a correction — the clone, the rebase, the job logs, the evaluation —
+    # before `pipeline_failed_code!`, so a failure there is raised while the row is
+    # still here. Without it the refusal was silent (`whiny_transitions: false`),
+    # the row stayed on the watch, and the failure comment went out on every poll.
     event :mark_failed do
       transitions from: %i[cloning checking_spec implementing committing
-                           pushing creating_mr reviewing
+                           pushing creating_mr reviewing checking_pipeline
                            fixing_discussions fixing_pipeline
                            running_post_completion answering_question],
                   to: :error
@@ -191,6 +199,21 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
                            answering_question needs_clarification done error],
                   to: :closed
     end
+  end
+
+  # Who gets the ticket when autodev lets go of it: whoever autodev took it from,
+  # and the author otherwise (Autodev #98). One definition since Autodev #126,
+  # because the dashboard's Clore and a label handover hand tickets back too, and
+  # they do it outside `IssueNotifier`.
+  #
+  # `except:` is the bot's own id. A ticket Autospec created has the bot for
+  # author and nobody displaced, and "handing" it to its author is an edit that
+  # changes nothing while GitLab's payload reads it back as landed — the
+  # dashboard then says the ticket was given back when it never left the bot.
+  # Such a ticket has nobody to go to, which is what nil answers.
+  def handback_target(except: nil)
+    target = displaced_assignee_id || issue_author_id
+    target unless except && target == except
   end
 
   # -- Guard methods (read the instance flags set by the workflow) --
@@ -246,6 +269,70 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # remaining bypass.
   def stamp_pipeline_watch!
     self.checking_pipeline_since = aasm.to_state == :checking_pipeline ? Time.current : nil
+  end
+
+  # A close accounts for every label event before it (Autodev #101): whoever
+  # closed the row — a handover, an unassignment, the dashboard — the evidence
+  # up to here has been acted on. Without the stamp, a dashboard reset of a
+  # handed-over row would replay the very event that closed it on its first
+  # label write, and close it again. Only ever moved forward: every other
+  # transition leaves the floor where the last scan put it.
+  def stamp_label_events_floor!
+    self.label_events_seen_until = Time.current if aasm.to_state == :closed
+  end
+
+  # A re-entry starts a new delivery, whoever fires it (the alpha-56 lot's
+  # integration review). The label resume, `resume_recovered_infra`,
+  # `ReviewArrearsSweep` and the dashboard's transition menu all fire these two
+  # events. The first three went through `ResumeHandler`, whose own `update`
+  # cleared the previous delivery's `post_completion` reservation; the
+  # dashboard fires the event alone, so the reservation stood and the next
+  # delivery's hook never ran (Autodev #114/#94).
+  #
+  # `reenter` rebuilds the branch, so the `pending_resolutions` it carried go
+  # with it (Autodev #125, amendment 1); `reenter_to_check_pipeline` keeps the MR
+  # and its branch, and keeps them.
+  #
+  # A manual re-entry also moves the label-events floor, clears the attention
+  # flag and gives the budgets back — see `clear_manual_reentry!`. An automatic
+  # one is not a statement about the ticket and leaves all three to its caller.
+  REENTRY_EVENTS = %i[reenter reenter_to_check_pipeline].freeze
+
+  def clear_delivery_on_reentry!
+    event = aasm.current_event.to_s.delete_suffix('!').to_sym
+    return unless REENTRY_EVENTS.include?(event)
+
+    cleared = event == :reenter ? POST_COMPLETION_CLEARED.merge(pending_resolutions: nil) : POST_COMPLETION_CLEARED
+    assign_attributes(cleared)
+    # Written whatever this object read: a nil assigned over the nil it loaded
+    # is no change to dirty tracking, and a reservation `dispatch_done_unassigned`
+    # took since the load would outlive the re-entry (adversarial review of the
+    # alpha-56 round).
+    cleared.each_key { |column| attribute_will_change!(column.to_s) }
+    clear_manual_reentry! if @_audit_origin == :manual
+  end
+
+  # What a manual re-entry gives back (owner, 30/09/2026): the union of the
+  # Reset's budgets and the label resume's round counters. Re-entered with its
+  # old counters, a row gave itself up on its first stumble — `dormant_exhausted`
+  # at 3/3 without an audit, `fix_rounds_exhausted` at the ceiling. Not
+  # `review_count`: it decides whether the next review happens, which is why the
+  # label resume caps it instead of zeroing it (Autodev #85).
+  MANUAL_REENTRY_BUDGETS = { retry_count: 0, review_failure_count: 0, fix_round: 0, discussion_fix_round: 0,
+                             stagnation_signatures: nil, pipeline_retrigger_count: 0, infra_recheck_count: 0,
+                             infra_recheck_at: nil, dormant_recheck_count: 0, dormant_recheck_at: nil }.freeze
+
+  # The operator's re-entry is their answer three times over: nobody else has
+  # taken the ticket (the floor, as for the Reset — Autodev #101), it is no
+  # longer given up, and it starts with its budgets back (owner, 30/09/2026).
+  # Without the flag cleared, a row autodev had given up and an operator
+  # re-entered stayed flagged after its next delivery, so
+  # `dispatch_done_unassigned` (`needs_attention: false`) never ran its hook and
+  # it stayed in the delivered-review tab. The automatic callers go through
+  # `ResumeHandler`, whose own `update` decides the flag and the budgets.
+  def clear_manual_reentry!
+    self.label_events_seen_until = Time.current
+    assign_attributes(needs_attention: false, attention_reason: nil, attention_detail: nil, **MANUAL_REENTRY_BUDGETS)
   end
 
   # Sequel had `save_changes` which only emits an UPDATE for dirty columns;
@@ -396,18 +483,44 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `IssuesController#reset` dropped both the stamp and the split. Hence one
   # method rather than a fourth chance to get it wrong.
   #
-  # `reset_budget:` zeroes `retry_count` and `review_failure_count` — both are
-  # budgets, and both mean "clean slate" for an operator-driven reset.
+  # `reset_budget:` zeroes `retry_count`, `review_failure_count`,
+  # `dormant_recheck_count` and `dormant_recheck_at` — all budgets, and all
+  # mean "clean slate" for an operator-driven reset.
   # `review_failure_count` joined this list under Autodev #107: before it, the
   # dashboard's Reset button left the counter untouched, so a request
   # abandoned at `REVIEW_FAILURE_THRESHOLD`/`REVIEW_FAILURE_THRESHOLD` still
   # carried that after a reset and could give itself up again on the very next
   # stumble — with no way for the operator who clicked to know that.
+  # The dormant pair joined it under Autodev #125, for the same reason: a row
+  # reset at `dormant_recheck_count` 3/3 (A#139, A#144, A#148) was flagged
+  # `dormant_exhausted` at its next dormant episode without a single audit.
+  # Only under `reset_budget:`, because two automatic paths call this method
+  # without the flag: `revive_stalled!` — DormantAudit's own revive — and
+  # `recover_errored!` — the boot-time recovery. A counter reset on each of
+  # them would lift the cap that keeps a row falling dormant in a loop from
+  # consuming GitLab reads (#47, #103).
   # `clear_attention:` also clears the needs_attention trio, for the same
   # reason.
+  #
+  # Every reset also clears the `post_completion` reservation and its verdict
+  # (`POST_COMPLETION_CLEARED`): the row goes back into work, and a new delivery
+  # is a new deploy with a new outcome (Autodev #114/#94).
+  #
+  # The operator reset also stamps `label_events_seen_until` (Autodev #101,
+  # adversarial review): the human asking for the reset *is* the answer to
+  # "has anybody taken this ticket", so the label events before it are
+  # accounted for. Without the stamp, a reviewer who reposed `label_done`
+  # weeks earlier on a `done` row — when autodev no longer held the ticket —
+  # was found by `LabelHandover::ErasedScan` right after the reset's own
+  # `apply_label_doing` removed that label, and the row was closed with a note
+  # blaming them. The two automatic callers pass no `reset_budget:` and keep
+  # the floor where it was: a recovery is not a statement about the ticket.
   def self.reset_for_retry!(scope, reset_budget: false, clear_attention: false)
-    fields = { error_message: nil, started_at: nil }
-    fields.merge!(retry_count: 0, review_failure_count: 0) if reset_budget
+    fields = { error_message: nil, started_at: nil, **POST_COMPLETION_CLEARED }
+    if reset_budget
+      fields.merge!(retry_count: 0, review_failure_count: 0, dormant_recheck_count: 0, dormant_recheck_at: nil,
+                    label_events_seen_until: Time.current)
+    end
     fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention
 
     scope.where.not(mr_iid: nil)
@@ -433,6 +546,14 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `fixing_discussions` are new here: HealthReport monitors them, but boot
   # recovery had no rule for either, so a row frozen in one survived a restart.
   REVIVE_TO_PENDING = (RECOVERABLE_ACTIVE_STATES + %w[answering_question]).freeze
+  # What every writer that takes a row back into work clears (Autodev #114/#94):
+  # `dispatch_done_unassigned` reserves a delivery's `post_completion` hook once,
+  # so the reservation must not outlive the delivery it was taken for — nor must
+  # that delivery's error, which would otherwise describe the next one. Written
+  # by `reset_for_retry!` and by the two re-entry events themselves
+  # (`clear_delivery_on_reentry!`), whichever path fires them.
+  POST_COMPLETION_CLEARED = { post_completion_dispatched_at: nil, post_completion_error: nil }.freeze
+
   REVIVE_TO_PIPELINE = %w[reviewing fixing_pipeline fixing_discussions].freeze
   REVIVE_TO_DONE = %w[running_post_completion].freeze
   STALLED_STATES = (REVIVE_TO_PENDING + REVIVE_TO_PIPELINE + REVIVE_TO_DONE).freeze

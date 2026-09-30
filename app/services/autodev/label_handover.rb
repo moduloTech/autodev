@@ -40,7 +40,13 @@ module Autodev
   # the bug already costs; a wrong stop closes a live ticket and posts a comment
   # blaming somebody who did nothing.
   class LabelHandover
-    Verdict = Struct.new(:reason, :label)
+    include ErasedScan
+
+    # `actor_id` is the GitLab user whose label event decided the verdict — nil
+    # on a mere suspicion, set on every verdict `verdict` returns, the erased
+    # ones of `ErasedScan` included. `ExternalState#stop_on_handover` hands the
+    # ticket to them (Autodev #126): they are the one who took the work on.
+    Verdict = Struct.new(:reason, :label, :actor_id)
 
     SCOPE_SEPARATOR = '::'
 
@@ -65,14 +71,23 @@ module Autodev
     # outage on the *second* read (who did it) must not erase that evidence into
     # "nothing happened" — see `events` for the full account and for which
     # boundary declines the row per caller.
-    def verdict(gl_issue, issue_iid)
+    #
+    # `row:` (the `Issue`) opens the second door (Autodev #101): when autodev has
+    # rewritten the labels since the events were last read, the current labels
+    # may no longer carry the evidence — `apply_label_doing` removes a
+    # `label_done` a human just posed — so the events are scanned for a handover
+    # that write erased. See `erased_handover`. Without `row:` only the labels
+    # are read, as before; `ExternalState#stop_on_handover`, the one production
+    # caller, always passes it.
+    def verdict(gl_issue, issue_iid, row: nil)
       suspicion = suspect(Array(::GitlabHelpers.field(gl_issue, :labels)))
-      return unless suspicion
+      event = suspicion && decisive_event(issue_iid, suspicion)
+      # The decisive event's author, not the first human in the history: when
+      # two people touched the ticket, the one whose edit produced the label we
+      # read is the one who took the work on (Autodev #126).
+      return Verdict.new(suspicion.reason, suspicion.label, actor_of(event)) if event && by_someone_else?(event)
 
-      event = decisive_event(issue_iid, suspicion)
-      return unless event && by_someone_else?(event)
-
-      suspicion
+      erased_handover(issue_iid, row)
     end
 
     # The same question as `verdict`, bounded in time (Autodev #88): did somebody
@@ -277,9 +292,11 @@ module Autodev
     end
 
     def by_someone_else?(event)
-      actor = ::GitlabHelpers.field(::GitlabHelpers.field(event, :user), :id)
+      actor = actor_of(event)
       !actor.nil? && actor != ::GitlabHelpers.current_user_id(@client)
     end
+
+    def actor_of(event) = ::GitlabHelpers.field(::GitlabHelpers.field(event, :user), :id)
 
     # GitLab lists resource label events oldest first, so the last entry naming
     # the label is the edit that produced the state we just read — of the
@@ -351,8 +368,20 @@ module Autodev
     # counted as `get` either way (`own_pages`). The walk sits inside `answer`,
     # so a page that fails to arrive raises like the first one would — a verdict
     # built from the pages that did arrive is the same defect again.
+    #
+    # Memoised per instance and per ticket (Autodev #101): stage 2 and the
+    # erased-handover scan can both want the events in one verdict, and they
+    # must read the same fetch. `@read_started_at` is taken before the call —
+    # the floor the scan advances to. A read that raises memoises nothing.
     def events(issue_iid)
-      ::GitlabHelpers.answer(:issue_label_events) { @client.issue_label_events(@path, issue_iid).auto_paginate }
+      (@events ||= {}).fetch(issue_iid) do
+        started = Time.current
+        @events[issue_iid] = ::GitlabHelpers.answer(:issue_label_events) do
+          @client.issue_label_events(@path, issue_iid).auto_paginate
+        end
+        (@read_started_at ||= {})[issue_iid] = started
+        @events[issue_iid]
+      end
     end
   end
 end

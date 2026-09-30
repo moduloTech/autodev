@@ -116,6 +116,7 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
     return redirect_to safe_return_to || "/issues/#{issue.id}" unless issue.may_close?
 
     close_issue!(issue)
+    hand_back_on_close(issue)
     redirect_to safe_return_to || "/issues/#{issue.id}"
   end
 
@@ -176,6 +177,31 @@ class IssuesController < ApplicationController # rubocop:disable Metrics/ClassLe
     Issue.where(id: issue.id).update_all(finished_at: Time.current,
                                          needs_attention: false, attention_reason: nil,
                                          attention_detail: nil)
+  end
+
+  # Autodev #126: a row closed while the bot holds its ticket used to leave it
+  # on the bot's list, which nobody reads. Run after the close and never in
+  # its place — the off-switch holds whatever GitLab answers, so the outcome
+  # is only audited and told.
+  def hand_back_on_close(issue)
+    result = Autodev::CloseHandback.perform(issue, config: app_config,
+                                                   logger: Autodev::JobLogger.new(Rails.logger))
+    Audit.record!(
+      resource: issue, action: 'issue.close_handback', actor: current_user,
+      payload: { project_path: issue.project_path, iid: issue.issue_iid,
+                 outcome: result.outcome.to_s, target_id: result.target_id }
+    )
+    flash_close_handback(result)
+  end
+
+  # `not_held` says nothing: the ticket was already with a human, so there is
+  # nothing the operator has to know.
+  def flash_close_handback(result)
+    case result.outcome
+    when :handed_back then flash[:notice] = t_web(:web_issue_close_handed_back, target: result.target_name)
+    when :failed then flash[:alert] = t_web(:web_issue_close_handback_failed, error: result.error)
+    when :no_target then flash[:alert] = t_web(:web_issue_close_handback_no_target)
+    end
   end
 
   # A ticket can be closed by an admin or by a collaborator (contributor or

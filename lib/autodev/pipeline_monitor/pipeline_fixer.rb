@@ -110,9 +110,14 @@ class PipelineMonitor
       notify_fix_pushed(issue, job_entries, round) if pushed
     end
 
+    # After `pipeline_fix_done!`: the fix is pushed and the row is back on the
+    # watch, so a cut on the notice costs the notice and nothing else (Autodev
+    # #125) — it used to put the row in `error` under a comment saying it failed.
     def notify_fix_pushed(issue, job_entries, round)
-      notify_localized(issue.issue_iid, :pipeline_fix_success,
-                       mr_url: issue.mr_url, count: job_entries.size, round: round)
+      after_conclusion(:pipeline_fix_success) do
+        notify_localized(issue.issue_iid, :pipeline_fix_success,
+                         mr_url: issue.mr_url, count: job_entries.size, round: round)
+      end
       log_activity(issue, :pipeline_fix_pushed)
       log_activity(issue, :pipeline_watch)
       log "Issue ##{issue.issue_iid}: pipeline fix pushed — #{job_entries.size} job(s) (round #{round})"

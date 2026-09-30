@@ -45,7 +45,7 @@ class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/Clas
   FakeNote = Struct.new(:id, :body)
 
   class StubClient
-    attr_reader :calls, :event_calls, :notes
+    attr_reader :calls, :event_calls, :notes, :edits
 
     def initialize(state: 'opened', assignee_ids: [AUTODEV_ID], labels: [DOING], events: [])
       @state = state
@@ -55,6 +55,7 @@ class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/Clas
       @calls = 0
       @event_calls = 0
       @notes = []
+      @edits = []
     end
 
     def user = FakeUser.new(AUTODEV_ID)
@@ -67,6 +68,14 @@ class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/Clas
     def issue_label_events(_project, _iid)
       @event_calls += 1
       Gitlab::PaginatedResponse.new(@events)
+    end
+
+    # Recording, not a no-op (Autodev #126): a handover now hands the ticket to
+    # whoever moved the label, and a silent stub would let that edit go wrong
+    # unseen.
+    def edit_issue(_project, _iid, **attrs)
+      @edits << attrs
+      nil
     end
 
     def create_issue_note(_project, _iid, body)
@@ -179,9 +188,11 @@ class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/Clas
   end
 
   def test_a_ticket_moved_to_another_workflow_label_is_closed
-    issue = sweep(active, handover_client(HUMAN_ID))
+    client = handover_client(HUMAN_ID)
+    issue = sweep(active, client)
 
     assert_equal 'closed', issue.status
+    assert_equal [{ assignee_ids: [HUMAN_ID] }], client.edits
   end
 
   def test_the_handover_is_announced_on_the_ticket
@@ -194,9 +205,11 @@ class ClosedOnGitlabDispatchTest < Minitest::Test # rubocop:disable Metrics/Clas
   # Autodev applies and removes these labels itself; only somebody else's edit
   # counts.
   def test_the_same_move_made_by_autodev_leaves_the_row_alone
-    issue = sweep(active, handover_client(AUTODEV_ID))
+    client = handover_client(AUTODEV_ID)
+    issue = sweep(active, client)
 
     assert_equal 'checking_pipeline', issue.status
+    assert_empty client.edits
   end
 
   # The objection the naive rule fails: these sit on every ticket, permanently.

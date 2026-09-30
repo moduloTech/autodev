@@ -51,8 +51,11 @@ module GitlabHelpers
   # symbol key. Canonical replacement for the ~half-dozen
   # `x.respond_to?(:f) ? x.f : x['f']` copies that had drifted apart (some tried
   # symbol keys, some only string). Falsey values are preserved (no `||`).
+  # A Struct without that member answers nil like a Hash without that key,
+  # instead of `Struct#[]`'s NameError.
   def field(obj, name)
     return obj.public_send(name) if obj.respond_to?(name)
+    return if obj.is_a?(Struct)
     return unless obj.respond_to?(:[])
     return obj[name.to_s] if !obj.respond_to?(:key?) || obj.key?(name.to_s)
 
@@ -113,6 +116,17 @@ module GitlabHelpers
 
   def current_user_id(client)
     @current_user_id ||= client.user.id
+  end
+
+  # Does this issue payload name `user_id` among its assignees? One answer for
+  # "does the bot hold it" and for reading back an assignment write (Autodev
+  # #126): GitLab Community holds one assignee and can accept an edit it does
+  # not honour (see `Autodev::TicketReclaim`), so a handback is claimed only
+  # when the payload GitLab returns says it landed. `nil` (no payload) is no.
+  def assigned_to?(gl_issue, user_id)
+    return false if gl_issue.nil? || user_id.nil?
+
+    Array(field(gl_issue, :assignees)).any? { |assignee| field(assignee, :id) == user_id }
   end
 
   def download_gitlab_images(text, gitlab_url:, project_path:, token:, dest_dir:)
@@ -386,15 +400,24 @@ module GitlabHelpers
     # clause is about, and there is no way to ask "do you support this" other
     # than calling it. The substitute removes a list of sibling ticket titles
     # from a prompt; it answers no question and decides nothing.
+    #
+    # A gap is an answer GitLab gave, so only an HTTP failure is swallowed. A
+    # request that never completed is not a gap (Autodev #125): it used to escape
+    # this clause as a bare `Net::OpenTimeout`, land in the fix round's `rescue
+    # StandardError` and be announced as a failed correction — every one of the
+    # seven `issue_links` cuts recorded in production. Converted, it ends the
+    # round at its boundary and the next cycle replays it.
     def append_links(lines, client, project_path, issue_iid)
-      links = client.issue_links(project_path, issue_iid)
+      links = GitlabHelpers.answer(:issue_links) { client.issue_links(project_path, issue_iid) }
       return unless links.any?
 
       lines << '## Related issues'
       lines << ''
       links.each { |link| lines << "- ##{link.iid}: #{link.title} (#{link.state})" }
       lines << ''
-    rescue Gitlab::Error::ResponseError, NoMethodError
+    rescue ApiUnavailableError => e
+      raise unless e.cause.is_a?(::Gitlab::Error::ResponseError)
+    rescue NoMethodError
       # Non-fatal: some GitLab versions don't support this
     end
   end

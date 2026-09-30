@@ -170,7 +170,16 @@ module LabelManager
     # The workflow labels autodev OWNS and removed — never the scope residue,
     # which `remember_entry_label` must not mistake for an entry label.
     current & remove.compact
-  rescue Gitlab::Error::ResponseError => e
+  # The whole transport family, not `Gitlab::Error::ResponseError` alone
+  # (Autodev #126): a `Net::OpenTimeout` on the `issue` read above escaped
+  # `finalize_green_done` right after its transition, so the handback, the note
+  # and `finished_at` never ran and A#134 stayed `done` on the bot's list. A TCP
+  # timeout is the outage a 502 is, and the contract was already "log it and
+  # let the caller carry on". Spelled out for `ExternalState#notify_stop`'s
+  # reason (#115): the scanner of `test/api_failure_is_not_a_verdict_test.rb`
+  # matches literal class names. A programming error still travels.
+  rescue Gitlab::Error::ResponseError, SystemCallError, Timeout::Error, SocketError,
+         OpenSSL::SSL::SSLError, EOFError => e
     # `[]`, not the value of `log_error` — which is `Logger#error`'s `true`. The
     # method's contract is "the workflow labels it removed", and a failed write
     # removed none; `apply_label_doing` hands this straight to
@@ -187,9 +196,40 @@ module LabelManager
   def rewrite_labels(iid, current, wanted, dropped, add)
     return nil if wanted.sort == current.sort
 
-    @client.edit_issue(@project_path, iid, labels: wanted.join(','))
+    send_labels(iid, wanted)
+    stamp_labels_written(iid)
     log "Labels updated on ##{iid}: dropped #{current & dropped.compact}, added #{add}"
     wanted
+  end
+
+  # This write is the one thing that can erase the evidence
+  # `LabelHandover#suspect` reads off the current labels (Autodev #101):
+  # `other_workflow_labels` has `apply_label_doing` remove a `label_done` a human
+  # just posed. The stamp is what makes the next verdict read the label events,
+  # which a later write cannot erase.
+  #
+  # After the write, not before: a scan starting between a before-stamp and the
+  # write would count the write as already read. The only `edit_issue(…,
+  # labels:)` in the codebase, so every autodev label write is stamped here.
+  # A write whose answer never came may still have landed — and if it removed
+  # a human's `label_done`, the stamp is the only thing left that sends the
+  # next verdict to the label events (Autodev #101), since `manage_labels`'
+  # rescue swallows the failure. So the stamp goes on for every cut after the
+  # request left; a stamp over a write that did not land only costs one scan.
+  # A connection that never opened, or an HTTP refusal, sent nothing — the
+  # same split as `FailureHandler#retrigger_if_needed`.
+  def send_labels(iid, wanted)
+    @client.edit_issue(@project_path, iid, labels: wanted.join(','))
+  rescue Gitlab::Error::ResponseError, Net::OpenTimeout, Errno::ECONNREFUSED, Errno::EHOSTUNREACH,
+         Errno::ENETUNREACH, SocketError
+    raise
+  rescue SystemCallError, Timeout::Error, OpenSSL::SSL::SSLError, EOFError
+    stamp_labels_written(iid)
+    raise
+  end
+
+  def stamp_labels_written(iid)
+    ::Issue.where(project_path: @project_path, issue_iid: iid).update_all(labels_written_at: Time.current)
   end
 
   def target_labels(current, remove, add)

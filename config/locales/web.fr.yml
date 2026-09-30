@@ -38,6 +38,7 @@ fr:
   web_admin_health_check_issues_error: Issues en erreur
   web_admin_health_check_mr_review: Revue automatique
   web_admin_health_check_review_skill: Skills de revue
+  web_admin_health_check_held_tickets: Tickets gardés par le bot
   web_admin_health_check_mr_review_token: Jeton mr-review
   web_admin_health_check_stuck_issues: Issues bloquées
   web_admin_health_check_database: Base de données
@@ -161,6 +162,9 @@ fr:
   web_issue_reset: Réinitialiser
   web_issue_confirm_reset: Relancer cette demande depuis le début ?
   web_issue_reset_refused: "Réinitialisation refusée : %{error}"
+  web_issue_close_handed_back: "Ticket rendu sur GitLab à %{target}."
+  web_issue_close_handback_failed: "Demande close, mais le ticket n'a pas pu être rendu sur GitLab : %{error}. Vérifiez sur GitLab à qui il est assigné."
+  web_issue_close_handback_no_target: "Demande close, mais personne à qui rendre le ticket : il reste assigné au bot sur GitLab."
   web_issue_close: Clôturer
   web_issue_confirm_close: Clôturer ce ticket ? Il passera dans l'onglet « Clôs ».
   web_issue_deploy_review: Redéployer la review

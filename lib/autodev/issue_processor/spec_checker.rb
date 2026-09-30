@@ -131,7 +131,11 @@ class IssueProcessor
     # ran anyway: `retry_count` incremented, `finished_at` and `next_retry_at`
     # stamped, and an error comment posted directly under the questions. The
     # Autodev #61 shape — a no-op transition whose consequences still fire — made
-    # reachable by adding a write after the state change.
+    # reachable by adding a write after the state change. Since Autodev #128 the
+    # consequences no longer fire either: `safe_mark_failed!` answers `false` and
+    # every handler stops there, so a write that still raises after
+    # `spec_unclear!` leaves the parked row exactly as it is — a second line of
+    # defence, not a reason to drop this rescue.
     #
     # What is lost by swallowing is a board column: the ticket stays on
     # `label_doing` and the request is invisible until the next question or the

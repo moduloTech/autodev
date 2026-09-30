@@ -49,7 +49,10 @@ class IssueAbandonmentTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
 
     def edit_issue(_path, iid, **attrs)
       @edits << [iid, attrs]
-      Issue.new(labels: [], id: 1)
+      return Issue.new(labels: [], id: 1) unless attrs.key?(:assignee_ids)
+
+      # An assignment GitLab honoured: `hand_ticket_back` reads it back.
+      Gitlab::ObjectifiedHash.new('iid' => iid, 'assignees' => attrs[:assignee_ids].map { |id| { 'id' => id } })
     end
 
     def create_issue_note(_path, _iid, body)
@@ -161,6 +164,15 @@ class IssueAbandonmentTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
       assert_includes @client.edits.map(&:last), { assignee_ids: [42] },
                       "#{reason} did not reassign to the author"
     end
+  end
+
+  # `IssueNotifier#handback_target` delegates to `Issue#handback_target` since
+  # Autodev #126; this pins that the delegation still reaches the edit.
+  def test_a_displaced_assignee_gets_the_ticket_back_rather_than_the_author
+    issue = watched(displaced_assignee_id: 55)
+    abandon(issue, :stagnation_pipeline)
+
+    assert_equal([{ assignee_ids: [55] }], @client.edits.map(&:last).select { |a| a.key?(:assignee_ids) })
   end
 
   def test_an_authorless_ticket_is_abandoned_without_a_reassignment

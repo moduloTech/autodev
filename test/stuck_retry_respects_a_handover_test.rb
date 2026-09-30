@@ -37,13 +37,14 @@ class StuckRetryRespectsAHandoverTest < Minitest::Test
   FakeNote = Struct.new(:id)
 
   class StubClient
-    attr_reader :notes
+    attr_reader :notes, :edits
 
     def initialize(ticket: nil, raises: nil, events: [])
       @ticket = ticket
       @raises = raises
       @events = events
       @notes = []
+      @edits = []
     end
 
     def issue(_path, _iid)
@@ -61,6 +62,14 @@ class StuckRetryRespectsAHandoverTest < Minitest::Test
 
     def issue_note(*) = FakeNote.new(1)
     def edit_issue_note(*) = nil
+
+    # Recording, not a no-op (Autodev #126): a handover now hands the ticket to
+    # whoever moved the label, and a silent stub would let that edit go wrong
+    # unseen.
+    def edit_issue(_path, _iid, **attrs)
+      @edits << attrs
+      nil
+    end
   end
 
   def setup
@@ -101,10 +110,11 @@ class StuckRetryRespectsAHandoverTest < Minitest::Test
 
   def test_a_ticket_handed_over_via_the_labels_is_not_relaunched
     moved = FakeEvent.new(FakeLabel.new('Done'), 'add', FakeUser.new(HUMAN_ID))
-    run_stuck_retry(ticket: ticket(labels: ['Done']), events: [moved])
+    client = run_stuck_retry(ticket: ticket(labels: ['Done']), events: [moved])
 
     assert_equal 'closed', @issue.reload.status
     refute @processed
+    assert_equal [{ assignee_ids: [HUMAN_ID] }], client.edits
   end
 
   def test_a_ticket_still_ours_is_relaunched_exactly_as_before

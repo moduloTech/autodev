@@ -108,7 +108,8 @@ class PostCompletionAfterUnassignmentTest < Minitest::Test
     issue = create_issue(status: 'done', mr_iid: 42)
     enqueued = sweep_then_hook(StubClient.new(assignee_ids: [HUMAN_ID]))
 
-    assert_equal [[PROJECT_CONFIG['path'], issue.issue_iid, :post_completion]], enqueued
+    # The fourth argument is the reservation stamp (Autodev #114).
+    assert_equal([[PROJECT_CONFIG['path'], issue.issue_iid, :post_completion]], enqueued.map { |args| args.first(3) })
   end
 
   # ...and it must not be closed on the way there: `dispatch_unassignment` only

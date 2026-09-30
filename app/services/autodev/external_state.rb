@@ -79,25 +79,66 @@ module Autodev
     #
     # See Autodev::LabelHandover for the rule and for why a healthy ticket costs
     # no extra GitLab call.
+    #
+    # The ticket is handed back here and not by the other two stops, because this
+    # is the one reached while autodev is still the assignee: `not_ours?` asks
+    # "still assigned?" first. Closing the row alone left it on the bot's list,
+    # which is nobody's (A#130, A#132 — Autodev #126). Before the notice, so the
+    # notice can say so, and only when it happened.
     def stop_on_handover(issue, gl_issue)
       return unless issue.may_close?
 
-      verdict = label_handover.verdict(gl_issue, issue.issue_iid)
+      verdict = label_handover.verdict(gl_issue, issue.issue_iid, row: issue)
       return unless verdict
 
       key = :"handover_#{verdict.reason}"
       @logger.info("Issue ##{issue.issue_iid}: #{verdict.reason} (#{verdict.label}), " \
                    'stopping and closing', project: @path)
-      notify_stop(issue, key, label: verdict.label)
+      handed_back = hand_over_to(issue, verdict.actor_id || handback_target(issue))
+      notify_stop(issue, key, suffix: (:handover_reassigned if handed_back), label: verdict.label)
       close_row!(issue, key, label: verdict.label)
       verdict
     end
 
     private
 
+    # The bot is never a target: an Autospec ticket has it for author, and an
+    # edit to itself would read back as a handover that landed.
+    def handback_target(issue)
+      issue.handback_target(except: ::GitlabHelpers.current_user_id(@client))
+    end
+
     def label_handover
       LabelHandover.new(client: @client, path: @path,
                         project_config: @project_config, logger: @logger)
+    end
+
+    # Whether the ticket changed hands. The person who moved the label comes
+    # first: they took the work on, and `handback_target` (the displaced
+    # assignee, else the author) is only who autodev took it from. Nobody known
+    # → no edit at all, never `assignee_ids: [nil]`.
+    #
+    # A write, so non-fatal like `notify_stop` below and spelled out for the
+    # same scanner: the row closes either way, because the stop is the human's
+    # decision and a GitLab outage must not keep autodev on their ticket.
+    #
+    # Read back off the payload GitLab returns, because the notice claims it.
+    def hand_over_to(issue, target)
+      return false unless target
+
+      response = @client.edit_issue(@path, issue.issue_iid, assignee_ids: [target])
+      log_handover(issue, target, ::GitlabHelpers.assigned_to?(response, target))
+    rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
+           ::OpenSSL::SSL::SSLError, ::EOFError => e
+      @logger.error("Failed to hand ##{issue.issue_iid} over to user #{target}: #{e.message}",
+                    project: @path)
+      false
+    end
+
+    def log_handover(issue, target, landed)
+      @logger.info("Issue ##{issue.issue_iid}: handover to user #{target} #{landed ? 'landed' : 'not confirmed'}",
+                   project: @path)
+      landed
     end
 
     # The one terminal write. The three outcomes above differ only by the
@@ -121,10 +162,12 @@ module Autodev
     #
     # Sibling of `IssueNotifier#notify_localized`, which this layer cannot reuse:
     # the includers are poll-cycle services with `@path`, not DangerClaudeRunner
-    # hosts with `@project_path` and the whole mixin stack.
-    def notify_stop(issue, key, **vars)
-      message = ::Locales.t(key, locale: (issue.locale || 'fr').to_sym,
-                                 tag: ::ActivityLogger.tag, label_todo: first_labels_todo, **vars)
+    # hosts with `@project_path` and the whole mixin stack. `suffix:` is that
+    # method's too: a var-free second template after a blank line.
+    def notify_stop(issue, key, suffix: nil, **vars)
+      locale = (issue.locale || 'fr').to_sym
+      message = ::Locales.t(key, locale: locale, tag: ::ActivityLogger.tag, label_todo: first_labels_todo, **vars)
+      message = "#{message}\n\n#{::Locales.t(suffix, locale: locale)}" if suffix
       @client.create_issue_note(@path, issue.issue_iid, message)
     # A write (Autodev #62 scopes writes out of the read rule): a stop notice
     # that could not be posted reports what happened, it invents nothing, so

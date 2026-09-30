@@ -72,7 +72,9 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     recheck_infra: %w[done].freeze
   }.freeze
 
-  def perform(project_path, issue_iid, action)
+  # `reservation` is carried by `:post_completion` alone: the stamp the
+  # dispatcher reserved the delivery under, as epoch seconds (Autodev #114).
+  def perform(project_path, issue_iid, action, reservation = nil)
     action = action.to_sym
     raise ArgumentError, "unknown action #{action.inspect}" unless ACTIONS.include?(action)
     return log_usage_skip(project_path, issue_iid, action) if usage_blocked?(action)
@@ -85,7 +87,7 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     return unless issue
     return log_stale_skip(project_path, issue, action) unless dispatchable?(issue, action)
 
-    public_send("perform_#{action}", issue, config, project_config)
+    public_send("perform_#{action}", issue, config, project_config, *[reservation].compact)
   end
 
   private
@@ -170,14 +172,47 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
                 .resume_recovered_infra(issue, build_client(config))
   end
 
-  def perform_post_completion(issue, config, project_config)
-    monitor = ::PipelineMonitor.new(**worker_kwargs(config, project_config))
+  # The return to `done` is unconditional, and that is a decision, not an
+  # accident (Autodev #94): a deploy that fails does not undo a delivery, so its
+  # failure is a signal (`PostCompletion#store_pc_error`), never a verdict. The
+  # `ensure` makes the decision hold on a raise too — before it, a failed clone
+  # left the row in `running_post_completion` until the next restart revived it.
+  #
+  # A job runs only on a row that still carries **the** reservation it was
+  # enqueued under (Autodev #114, plan and adversarial reviews). `DISPATCHED_FROM`
+  # reads the status alone, and a reentry lifts the reservation
+  # (`Issue::POST_COMPLETION_CLEARED`): a job still queued when the row went back
+  # to work and was delivered again would otherwise deploy that delivery, and so
+  # would the job the next cycle reserves it for. Presence alone is not enough —
+  # whichever of the two ran second found a stamp, just not its own — and the
+  # order is not held for us: `limits_concurrency` releases a key FIFO only while
+  # its semaphore lives, one hour, and `post_completion_timeout` goes up to six.
+  def perform_post_completion(issue, config, project_config, reservation = nil)
+    return log_unreserved_skip(project_config, issue) unless reserved_for?(issue, reservation)
+
     issue.start_post_completion!
+    begin
+      run_hook(issue, config, project_config)
+    ensure
+      issue.post_completion_done!
+    end
+  end
+
+  def run_hook(issue, config, project_config)
     ctx = ::ActivityLogger::Ctx.new(build_client(config), project_config['path'],
                                     ::Autodev::JobLogger.new(logger))
     ::ActivityLogger.post(ctx, issue, :post_completion)
-    monitor.run_post_completion(issue, project_config['post_completion'])
-    issue.post_completion_done!
+    ::PipelineMonitor.new(**worker_kwargs(config, project_config))
+                     .run_post_completion(issue, project_config['post_completion'])
+  end
+
+  def reserved_for?(issue, reservation)
+    !reservation.nil? && issue.post_completion_dispatched_at&.to_i == reservation
+  end
+
+  def log_unreserved_skip(project_config, issue)
+    logger.info("[issue_process] skipping post_completion for #{project_config['path']}##{issue.issue_iid}: " \
+                'the reservation it was enqueued under was lifted or replaced')
   end
 
   # Autodev #111. Entering `error` writes the retry decision (`mark_failed`

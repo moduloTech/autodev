@@ -9,7 +9,8 @@ class IssueProcessor
       wait = error.wait_seconds
       retry_at = wait.to_i.seconds.from_now
       log_error "Issue ##{issue.issue_iid}: rate limit hit, parking for #{wait}s"
-      safe_mark_failed!(issue, next_retry_at: retry_at)
+      return unless safe_mark_failed!(issue, next_retry_at: retry_at)
+
       Issue.where(id: issue.id).update_all(
         error_message: error.message, dc_stdout: @dc_stdout, dc_stderr: @dc_stderr,
         finished_at: Time.current
@@ -25,7 +26,8 @@ class IssueProcessor
     # life in `error` cannot survive into this one — see safe_mark_failed!.
     def handle_auth_failure(issue, error)
       log_error "Issue ##{issue.issue_iid}: Claude authentication failed, manual intervention required"
-      safe_mark_failed!(issue, next_retry_at: nil)
+      return unless safe_mark_failed!(issue, next_retry_at: nil)
+
       Issue.where(id: issue.id).update_all(
         error_message: "#{error.class}: #{error.message}",
         dc_stdout: @dc_stdout, dc_stderr: @dc_stderr, finished_at: Time.current
@@ -38,15 +40,20 @@ class IssueProcessor
       # Same seam, same reason: everything below this line writes (Autodev #97).
       return stop_on_stale_transition(error) if error.is_a?(StaleTransitionError)
 
-      bt = error.backtrace&.first(10)&.join("\n  ")
+      bt = ::BacktraceExcerpt.format(error)
       fields = build_error_fields(issue, error, bt)
       # The decision is already made above — passed through rather than
       # recomputed, so there is exactly one place that decides it (Autodev #103).
-      safe_mark_failed!(issue, next_retry_at: fields[:next_retry_at])
+      return unless safe_mark_failed!(issue, next_retry_at: fields[:next_retry_at])
+
+      persist_process_error(issue, error, fields, bt)
+    end
+
+    def persist_process_error(issue, error, fields, backtrace)
       log_retry_info(issue, fields, error)
       Issue.where(id: issue.id).update_all(**fields)
       notify_error_with_activity(issue, error)
-      log_error "  #{bt}" if bt
+      log_error "  #{backtrace}" if backtrace
     end
 
     def notify_error_with_activity(issue, error)

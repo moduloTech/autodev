@@ -56,6 +56,11 @@ class IssuesControllerResetReclaimTest < ActionDispatch::IntegrationTest
       Struct.new(:id).new(1)
     end
 
+    # The reset writes labels, so the next handover check scans the label
+    # events (Autodev #101). Nobody but autodev touched this ticket: nothing
+    # in them is somebody else's.
+    def issue_label_events(_project, _iid) = Gitlab::PaginatedResponse.new([])
+
     def assignee_ids = @assignees.map(&:id)
   end
 
