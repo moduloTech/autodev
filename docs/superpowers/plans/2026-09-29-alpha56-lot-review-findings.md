@@ -67,9 +67,13 @@ in `done` — when autodev no longer held the ticket — would be read by
 The automatic callers do not stamp: a recovery is not a statement about the
 ticket (same rule as `reset_for_retry!`).
 
-Out of scope, on purpose: the manual transition does not reset the budgets
-(`retry_count`, …) the label resume resets. That is master's behaviour, not
-this lot's, and changing it is a product decision.
+~~Out of scope, on purpose: the manual transition does not reset the budgets.~~
+**Owner's decision, 30/09/2026:** a manual re-entry gives every budget back —
+the union of the Reset's (`retry_count`, `review_failure_count`, the dormant
+pair) and the label resume's round counters (`fix_round`,
+`discussion_fix_round`, `stagnation_signatures`, `pipeline_retrigger_count`,
+the infra-recheck pair) — `Issue::MANUAL_REENTRY_BUDGETS`. Except
+`review_count`, which decides whether the next review happens (Autodev #85).
 
 The explicit `POST_COMPLETION_CLEARED` and `pending_resolutions: nil` in
 `ResumeHandler` stay: they are in the same `update` as the other fields that

@@ -286,9 +286,9 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # with it (Autodev #125, amendment 1); `reenter_to_check_pipeline` keeps the MR
   # and its branch, and keeps them.
   #
-  # A manual re-entry also moves the label-events floor and clears the
-  # attention flag — see `clear_manual_reentry!`. An automatic one is not a
-  # statement about the ticket and leaves both to its caller.
+  # A manual re-entry also moves the label-events floor, clears the attention
+  # flag and gives the budgets back — see `clear_manual_reentry!`. An automatic
+  # one is not a statement about the ticket and leaves all three to its caller.
   REENTRY_EVENTS = %i[reenter reenter_to_check_pipeline].freeze
 
   def clear_delivery_on_reentry!
@@ -305,16 +305,27 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     clear_manual_reentry! if @_audit_origin == :manual
   end
 
-  # The operator's re-entry is their answer twice over: nobody else has taken
-  # the ticket (the floor, as for the Reset — Autodev #101), and it is no longer
-  # given up (owner, 30/09/2026). Without the second, a row autodev had given
-  # up and an operator re-entered stayed flagged after its next delivery, so
+  # What a manual re-entry gives back (owner, 30/09/2026): the union of the
+  # Reset's budgets and the label resume's round counters. Re-entered with its
+  # old counters, a row gave itself up on its first stumble — `dormant_exhausted`
+  # at 3/3 without an audit, `fix_rounds_exhausted` at the ceiling. Not
+  # `review_count`: it decides whether the next review happens, which is why the
+  # label resume caps it instead of zeroing it (Autodev #85).
+  MANUAL_REENTRY_BUDGETS = { retry_count: 0, review_failure_count: 0, fix_round: 0, discussion_fix_round: 0,
+                             stagnation_signatures: nil, pipeline_retrigger_count: 0, infra_recheck_count: 0,
+                             infra_recheck_at: nil, dormant_recheck_count: 0, dormant_recheck_at: nil }.freeze
+
+  # The operator's re-entry is their answer three times over: nobody else has
+  # taken the ticket (the floor, as for the Reset — Autodev #101), it is no
+  # longer given up, and it starts with its budgets back (owner, 30/09/2026).
+  # Without the flag cleared, a row autodev had given up and an operator
+  # re-entered stayed flagged after its next delivery, so
   # `dispatch_done_unassigned` (`needs_attention: false`) never ran its hook and
   # it stayed in the delivered-review tab. The automatic callers go through
-  # `ResumeHandler`, whose own `update` decides the flag.
+  # `ResumeHandler`, whose own `update` decides the flag and the budgets.
   def clear_manual_reentry!
     self.label_events_seen_until = Time.current
-    assign_attributes(needs_attention: false, attention_reason: nil, attention_detail: nil)
+    assign_attributes(needs_attention: false, attention_reason: nil, attention_detail: nil, **MANUAL_REENTRY_BUDGETS)
   end
 
   # Sequel had `save_changes` which only emits an UPDATE for dirty columns;

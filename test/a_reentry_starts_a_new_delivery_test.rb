@@ -20,7 +20,7 @@ require_relative 'database_test_helper'
 # A *manual* re-entry also stamps `label_events_seen_until` (Autodev #101): the
 # human asking for it is the answer to "has anybody taken this ticket", like the
 # operator Reset. An automatic re-entry is not a statement about the ticket.
-class AReentryStartsANewDeliveryTest < Minitest::Test
+class AReentryStartsANewDeliveryTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
   include ActiveSupport::Testing::TimeHelpers
 
@@ -78,19 +78,42 @@ class AReentryStartsANewDeliveryTest < Minitest::Test
     assert_equal RESOLUTIONS, fire(delivered_row, :reenter_to_check_pipeline).pending_resolutions
   end
 
-  # Out of scope on purpose (the plan): the manual transition gives back no
-  # budget. The label resume and the Reset do; this is master's behaviour and
-  # changing it is a product decision.
-  BUDGETS = { retry_count: 3, review_failure_count: 2, dormant_recheck_count: 3, infra_recheck_count: 4 }.freeze
+  # A manual re-entry gives every budget back (owner, 30/09/2026): the union
+  # of what the Reset and the label resume give back. A row re-entered with its
+  # old counters gave itself up on its first stumble — `dormant_exhausted` at
+  # 3/3 without an audit, `fix_rounds_exhausted` at the ceiling.
+  SPENT = { retry_count: 3, review_failure_count: 2, fix_round: 7, discussion_fix_round: 9,
+            stagnation_signatures: '{"sig":4}', pipeline_retrigger_count: 1, infra_recheck_count: 4,
+            infra_recheck_at: 1.hour.from_now, dormant_recheck_count: 3, dormant_recheck_at: 1.hour.ago }.freeze
+  GIVEN_BACK = { retry_count: 0, review_failure_count: 0, fix_round: 0, discussion_fix_round: 0,
+                 stagnation_signatures: nil, pipeline_retrigger_count: 0, infra_recheck_count: 0,
+                 infra_recheck_at: nil, dormant_recheck_count: 0, dormant_recheck_at: nil }.freeze
+
+  def budgets(row) = GIVEN_BACK.keys.to_h { |k| [k, row[k]] }
 
   %i[reenter reenter_to_check_pipeline].each do |event|
-    define_method(:"test_a_manual_#{event}_gives_back_no_budget") do
+    define_method(:"test_a_manual_#{event}_gives_every_budget_back") do
       row = delivered_row
-      row.update_columns(**BUDGETS)
+      row.update_columns(**SPENT)
 
-      reentered = fire(row, event, origin: :manual)
+      assert_equal GIVEN_BACK, budgets(fire(row, event, origin: :manual))
+    end
 
-      assert_equal(BUDGETS.values, BUDGETS.keys.map { |k| reentered[k] })
+    # The exception: `review_count` decides whether the next review happens,
+    # and the label resume caps it rather than zeroing it for that reason
+    # (Autodev #85 — a request never reviewed was delivered unreviewed).
+    define_method(:"test_a_manual_#{event}_leaves_review_count_alone") do
+      row = delivered_row
+      row.update_columns(review_count: 2)
+
+      assert_equal 2, fire(row, event, origin: :manual).review_count
+    end
+
+    define_method(:"test_an_automatic_#{event}_leaves_the_budgets_to_its_caller") do
+      row = delivered_row
+      row.update_columns(**SPENT)
+
+      assert_equal 3, fire(row, event).dormant_recheck_count
     end
   end
 
