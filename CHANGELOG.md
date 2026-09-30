@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.56] - 2026-09-30
+
 ### Fixed
 
 - **A weekly Claude limit is a quota again, not a failed correction (Autodev #127).** `RateLimitDetector::PATTERN` listed the qualifiers it knew — `you've hit your (session |usage )?limit` — and Claude Code's weekly one, `You've hit your weekly limit · resets Oct 1, 3am (UTC)` (or `· resets 3am (UTC)` within a day of the reset), was not among them. On 2026-09-24 (A#68) and 2026-09-26 (A#137, #142, #144, #145) five requests therefore took the generic failure path instead of the quota park: `error` with no retry, and on PowerPanne 14856, 16030, 14007, 16269 and 16423 a public `:x: echec correction MR` / `echec de la correction du pipeline` for what was a quota. DormantAudit revived them into the same limit, and A#142, #144 and #145 ended `dormant_exhausted`. The usage probe inherits the pattern: every probe still on record (1014, the oldest kept from 2026-09-27 04:46) read `broken`, `danger_claude` down on `/healthz` while `claude_usage` said the quota was available. The qualifier is now matched as any one to three words, apostrophes allowed — `session`, `weekly`, `fast`, `monthly spend`, and the Claude Code 2.1.283 binary's `org's monthly spend` — so the next one of that shape needs no release; four words or more do not match. What a recognised limit does is unchanged: `error` + `next_retry_at` at the reset, no comment, `retry_count` untouched.
