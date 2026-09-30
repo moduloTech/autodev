@@ -286,11 +286,9 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # with it (Autodev #125, amendment 1); `reenter_to_check_pipeline` keeps the MR
   # and its branch, and keeps them.
   #
-  # A manual re-entry is also the operator's answer to "has anybody taken this
-  # ticket", like the Reset (Autodev #101): the floor moves to now, so a label
-  # move a reviewer made while the row sat in `done` is not replayed as a
-  # handover on autodev's first label write. An automatic one is not a
-  # statement about the ticket and leaves the floor alone.
+  # A manual re-entry also moves the label-events floor and clears the
+  # attention flag — see `clear_manual_reentry!`. An automatic one is not a
+  # statement about the ticket and leaves both to its caller.
   REENTRY_EVENTS = %i[reenter reenter_to_check_pipeline].freeze
 
   def clear_delivery_on_reentry!
@@ -304,7 +302,19 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # took since the load would outlive the re-entry (adversarial review of the
     # alpha-56 round).
     cleared.each_key { |column| attribute_will_change!(column.to_s) }
-    self.label_events_seen_until = Time.current if @_audit_origin == :manual
+    clear_manual_reentry! if @_audit_origin == :manual
+  end
+
+  # The operator's re-entry is their answer twice over: nobody else has taken
+  # the ticket (the floor, as for the Reset — Autodev #101), and it is no longer
+  # given up (owner, 30/09/2026). Without the second, a row autodev had given
+  # up and an operator re-entered stayed flagged after its next delivery, so
+  # `dispatch_done_unassigned` (`needs_attention: false`) never ran its hook and
+  # it stayed in the delivered-review tab. The automatic callers go through
+  # `ResumeHandler`, whose own `update` decides the flag.
+  def clear_manual_reentry!
+    self.label_events_seen_until = Time.current
+    assign_attributes(needs_attention: false, attention_reason: nil, attention_detail: nil)
   end
 
   # Sequel had `save_changes` which only emits an UPDATE for dirty columns;

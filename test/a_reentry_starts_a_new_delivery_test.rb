@@ -94,6 +94,30 @@ class AReentryStartsANewDeliveryTest < Minitest::Test
     end
   end
 
+  # A manual re-entry says "this is no longer given up" (owner, 30/09/2026),
+  # like the Reset and the label resume: the flag goes, or the next delivery is
+  # never selected by `dispatch_done_unassigned` (`needs_attention: false`) and
+  # the row stays in the delivered-review tab.
+  ATTENTION = { needs_attention: true, attention_reason: 'stagnation_pipeline', attention_detail: 'deploy' }.freeze
+
+  %i[reenter reenter_to_check_pipeline].each do |event|
+    define_method(:"test_a_manual_#{event}_clears_the_attention_flag") do
+      row = delivered_row
+      row.update_columns(**ATTENTION)
+      reentered = fire(row, event, origin: :manual)
+
+      assert_equal [false, nil, nil],
+                   [reentered.needs_attention, reentered.attention_reason, reentered.attention_detail]
+    end
+
+    define_method(:"test_an_automatic_#{event}_leaves_the_attention_flag_to_its_caller") do
+      row = delivered_row
+      row.update_columns(**ATTENTION)
+
+      assert fire(row, event).needs_attention
+    end
+  end
+
   # `ReviewArrearsSweep` fires the event with its origin as an argument.
   def test_an_event_fired_with_an_origin_still_clears_and_records_it
     row = delivered_row

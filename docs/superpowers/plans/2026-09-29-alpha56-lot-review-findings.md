@@ -90,9 +90,10 @@ selectable by `dispatch_done_unassigned` again. That holds for a delivered row
 only: the pass also selects `needs_attention: false`, and the dashboard's
 re-entry does not clear the flag (only the label resume, the Reset and the
 close do). A row autodev gave up on, re-entered from the dashboard and then
-delivered, stays flagged and is not selected. Whether a manual re-entry should
-clear `needs_attention` is the same product question as the budgets above and
-is left to the owner.
+delivered, stays flagged and is not selected. **Owner's decision, 30/09/2026:**
+a manual re-entry clears `needs_attention` (and its reason and detail), like
+the Reset and the label resume — `Issue#clear_manual_reentry!`. The automatic
+callers keep deciding the flag in `ResumeHandler`'s own `update`.
 
 ## F3 — `hand_ticket_back` claims only a handback GitLab honoured (#125 × #126)
 
