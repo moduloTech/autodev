@@ -31,10 +31,13 @@ class PipelineMonitor
     # The Kubernetes executor interleaves scheduling events into the job's output.
     RUNNER_NOISE = 'WARNING: Event retrieved from the cluster'
     TAIL_SIZE = 5
+    # `Mysql2::Error::ConnectionError`, `NameError`, `ActiveRecord::NoDatabaseError`.
+    EXCEPTION_CLASS = /\b(?:[A-Z][A-Za-z0-9]*::)*[A-Z][A-Za-z0-9]*(?:Error|Exception)\b/
 
     module_function
 
-    # `nil` (no signature), `[:examples, Set<"path:line">]` or `[:tail, Array<String>]`.
+    # `nil` (no signature), `[:examples, Set<"path:line">]` or
+    # `[:tail, [Array<String> last lines, Array<String> exception classes]]`.
     def of(trace)
       text = trace.to_s
       return nil if text.include?(TRUNCATION_MARKER)
@@ -44,13 +47,13 @@ class PipelineMonitor
       return [:examples, examples.to_set] unless examples.empty?
 
       tail = tail_of(script)
-      tail.empty? ? nil : [:tail, tail]
+      tail.empty? ? nil : [:tail, [tail, exception_classes(script)]]
     end
 
     # Whether the target's failure accounts for the merge request's. Failed
     # examples: the merge request broke nothing the target had not already broken
     # (a subset — one more failing example is the merge request's own). Otherwise
-    # the last lines must be the same.
+    # the last lines and the exception classes the script names must be the same.
     def explains?(target_signature, mr_signature)
       return false if target_signature.nil? || mr_signature.nil?
       return false unless target_signature.first == mr_signature.first
@@ -69,6 +72,19 @@ class PipelineMonitor
       lines = text.split("\n").map { |line| line.sub(RUNNER_PREFIX, '').gsub(ANSI_ESCAPE, '').delete("\r") }
       script_end = lines.rindex { |line| line.include?('section_end:') && line.include?(':step_script') }
       script_end ? lines[0...script_end] : lines
+    end
+
+    # The last lines do not always name the cause: powerpanne's parallel runner
+    # ends every failure that is not a failed example on the same five lines
+    # ("Tests Failed", "N errors, N examples, N failures", "Took N seconds"…), so a
+    # `NameError` the merge request introduced read as the target's `Mysql2`
+    # outage (review of this ticket, on two real traces). The classes of the
+    # exceptions the script names tell them apart. The set is taken whole —
+    # including what the suite logs on the way, which is the same for the same run
+    # — so a difference anywhere makes the job the merge request's: the cheap
+    # direction.
+    def exception_classes(lines)
+      lines.flat_map { |line| line.scan(EXCEPTION_CLASS) }.uniq.sort
     end
 
     def tail_of(lines)

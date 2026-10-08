@@ -8,7 +8,7 @@ require_relative 'test_helper'
 # `bundle install` while three merge requests failed `test:main` on real spec
 # failures. 36 of the 42 name matches measured in production were a different
 # failure. These tests pin the rule the spec derives from those traces.
-class FailureSignatureTest < Minitest::Test
+module FailureSignatureTraces
   Sig = PipelineMonitor::FailureSignature
 
   # A GitLab runner trace: timestamp + stream prefix, ANSI colours, CR before the
@@ -25,6 +25,10 @@ class FailureSignatureTest < Minitest::Test
     trace(['Failed examples:', ''] + examples.map { |e| "\e[31mrspec #{e}\e[0m \e[36m# does a thing\e[0m" } +
           ['Took 46 seconds'])
   end
+end
+
+class FailureSignatureTest < Minitest::Test
+  include FailureSignatureTraces
 
   def test_failed_examples_are_the_signature
     assert_equal [:examples, Set['./spec/a_spec.rb:12', './spec/b_spec.rb:7']],
@@ -51,6 +55,47 @@ class FailureSignatureTest < Minitest::Test
 
     refute Sig.explains?(target, mr)
   end
+
+  def test_a_truncated_trace_has_no_signature
+    truncated = "#{rspec_trace('./spec/a_spec.rb:1')}\n\e[33;1mJob's log exceeded limit of 4194304 bytes.\e[0;m"
+
+    assert_nil Sig.of(truncated)
+  end
+
+  def test_an_empty_trace_has_no_signature
+    assert_nil Sig.of('')
+    assert_nil Sig.of(trace([]))
+  end
+
+  def test_no_signature_is_never_comparable
+    sig = Sig.of(rspec_trace('./spec/a_spec.rb:1'))
+
+    refute Sig.explains?(nil, sig)
+    refute Sig.explains?(sig, nil)
+    refute Sig.explains?(nil, nil)
+  end
+
+  def test_an_examples_signature_and_a_tail_signature_are_never_comparable
+    examples = Sig.of(rspec_trace('./spec/a_spec.rb:1'))
+    tail = Sig.of(trace(%w[a b c d e]))
+
+    refute Sig.explains?(examples, tail)
+    refute Sig.explains?(tail, examples)
+  end
+
+  # A trace with no `step_script` marker (an older runner, a job killed before
+  # its script ended) is read whole rather than refused.
+  def test_a_trace_without_section_markers_is_read_whole
+    raw = "Running tests\nfatal: could not read from remote repository"
+
+    assert_equal [:tail, [['Running tests', 'fatal: could not read from remote repository'], []]], Sig.of(raw)
+  end
+end
+
+# Without failed examples: the tail of the job's own script, and the exceptions
+# it names.
+class FailureSignatureTailTest < Minitest::Test
+  include FailureSignatureTraces
 
   def test_the_tail_compares_the_last_lines_with_numbers_and_hashes_normalised
     target = Sig.of(trace(['$ bundle install', 'Git error: command failed in /cache/model_mapper-0a1b2c3d4e',
@@ -91,8 +136,21 @@ class FailureSignatureTest < Minitest::Test
     target = "section_start:1782923484:step_script\r\nfatal: boom\nsection_end:1782923490:step_script\r"
     mr = "section_start:1999999999:prepare_script\r\nfatal: boom\nsection_end:2000000001:step_script\r"
 
-    assert_equal [:tail, ['fatal: boom']], Sig.of(mr)
+    assert_equal [:tail, [['fatal: boom'], []]], Sig.of(mr)
     assert Sig.explains?(Sig.of(target), Sig.of(mr))
+  end
+
+  # powerpanne's parallel runner ends every non-example failure on the same
+  # lines; the exception it names is what tells a merge request's `NameError`
+  # from the target's database outage.
+  def test_the_same_tail_with_another_exception_is_not_explained
+    tail = ['Coverage report generated', 'Line Coverage: 32.34%', 'Tests Failed',
+            '2 errors, 0 examples, 0 failures', 'Took 12 seconds']
+    target = Sig.of(trace(['Mysql2::Error::ConnectionError: Unknown MySQL server host'] + tail))
+    mr = Sig.of(trace(['NameError: uninitialized constant Mission::PriceCalculatorV3'] + tail))
+
+    refute Sig.explains?(target, mr)
+    assert Sig.explains?(target, Sig.of(trace(['Mysql2::Error::ConnectionError: host is down'] + tail)))
   end
 
   # The whole window counts, not only its last line.
@@ -117,40 +175,5 @@ class FailureSignatureTest < Minitest::Test
     mr = Sig.of(trace(%w[a b c d e], after: ['Cleaning up', 'ERROR: exit code 137']))
 
     assert Sig.explains?(target, mr)
-  end
-
-  def test_a_truncated_trace_has_no_signature
-    truncated = "#{rspec_trace('./spec/a_spec.rb:1')}\n\e[33;1mJob's log exceeded limit of 4194304 bytes.\e[0;m"
-
-    assert_nil Sig.of(truncated)
-  end
-
-  def test_an_empty_trace_has_no_signature
-    assert_nil Sig.of('')
-    assert_nil Sig.of(trace([]))
-  end
-
-  def test_no_signature_is_never_comparable
-    sig = Sig.of(rspec_trace('./spec/a_spec.rb:1'))
-
-    refute Sig.explains?(nil, sig)
-    refute Sig.explains?(sig, nil)
-    refute Sig.explains?(nil, nil)
-  end
-
-  def test_an_examples_signature_and_a_tail_signature_are_never_comparable
-    examples = Sig.of(rspec_trace('./spec/a_spec.rb:1'))
-    tail = Sig.of(trace(%w[a b c d e]))
-
-    refute Sig.explains?(examples, tail)
-    refute Sig.explains?(tail, examples)
-  end
-
-  # A trace with no `step_script` marker (an older runner, a job killed before
-  # its script ended) is read whole rather than refused.
-  def test_a_trace_without_section_markers_is_read_whole
-    raw = "Running tests\nfatal: could not read from remote repository"
-
-    assert_equal [:tail, ['Running tests', 'fatal: could not read from remote repository']], Sig.of(raw)
   end
 end

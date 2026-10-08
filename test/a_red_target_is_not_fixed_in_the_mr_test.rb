@@ -168,11 +168,11 @@ module RedTargetFixtures
   # The fix itself is stubbed at the clone: what reaches it is recorded, which is
   # the "was PipelineFixer launched on this job" question. Claude's gate is
   # counted, so a poll that asked for it is visible.
-  def monitor(client)
+  def monitor(client, project_config: PROJECT_CONFIG)
     calls = { fixed: [], claude_gate: 0 }
     mon = PipelineMonitor.allocate
     mon.send(:init_runner, client: client, config: { 'gitlab_url' => 'https://gitlab.example' },
-                           project_config: PROJECT_CONFIG, logger: NullLogger.new, token: 'tok')
+                           project_config: project_config, logger: NullLogger.new, token: 'tok')
     mon.define_singleton_method(:claude_available?) { (calls[:claude_gate] += 1).positive? }
     mon.define_singleton_method(:clone_and_fix) do |_issue, failed_jobs, _triage|
       calls[:fixed] << failed_jobs.map { |j| GitlabHelpers.field(j, :name) }
@@ -610,6 +610,14 @@ module PreexistingEdgeHelpers
     result
   end
 
+  # A new target pipeline red on `test` and on `rubocop`, each for the reason
+  # it fails for in the merge request.
+  def target_explains_both(client)
+    new_target_pipeline(client, 9006, SPEC_FAILURE)
+    client.target_jobs[9006] << RedTargetFixtures.job(9007, 'rubocop')
+    client.traces[9007] = OTHER_SPEC_FAILURE
+  end
+
   def assert_untouched_abort(client)
     mon, calls = monitor(client)
     issue = watched_issue
@@ -863,6 +871,33 @@ class PreexistingSabotageGapsTest < Minitest::Test
     mon.check(watched_issue)
 
     assert_empty calls[:fixed]
+  end
+
+  # The merge request's own target, never the configuration's (Autodev #91):
+  # powerpanne moved `staging` → `master` with 83 merge requests still on
+  # `staging`. The fake raises on any ref but the merge request's.
+  def test_the_target_compared_is_the_merge_requests_not_the_configurations
+    client = preexisting_client
+    mon, calls = monitor(client, project_config: PROJECT_CONFIG.merge('target_branch' => 'staging'))
+
+    mon.check(watched_issue)
+
+    assert_equal [[], 1], [calls[:fixed], client.mr_notes.size]
+  end
+
+  # One comment per pipeline *and* job set: the target coming to explain one more
+  # job of the same pipeline is said too.
+  def test_a_new_job_set_on_the_same_pipeline_comments_again
+    client = FakeClient.new
+    two_red_jobs(client)
+    mon, = monitor(client)
+    issue = watched_issue
+    mon.check(issue)
+    target_explains_both(client)
+
+    mon.check(issue.reload)
+
+    assert_equal 2, client.mr_notes.size
   end
 
   [Net::ReadTimeout.new, EOFError.new, FakeClient.response_error(502)].each do |error|
