@@ -45,4 +45,17 @@ class ProjectsControllerReviewHandoffTest < ActionDispatch::IntegrationTest
 
     KEYS.each { |key| assert_equal COMMANDS[key], @project.public_send(key) }
   end
+
+  test 'an edited command is persisted' do
+    patch '/projects/group__proj', params: { review_size_command: "bin/ci/mr_size\n--json" }
+
+    assert_equal %w[bin/ci/mr_size --json], @project.reload.review_size_command
+  end
+
+  test 'emptying the size while coverage stays is refused and nothing is saved' do
+    patch '/projects/group__proj', params: { review_size_command: '', review_coverage_command: 'bin/ci/mr_coverage' }
+
+    assert_response :unprocessable_content
+    assert_equal COMMANDS['review_size_command'], @project.reload.review_size_command
+  end
 end

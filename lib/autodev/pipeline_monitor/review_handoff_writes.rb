@@ -9,32 +9,54 @@ class PipelineMonitor
 
     private
 
+    # Three writes, each read back before the next: the measured labels with
+    # the reviewer and the assignee, then the reviewer labels, then Ready.
+    #
+    # The reviewer labels come only once the designation has landed
+    # (adversarial review). Written together, a reviewer GitLab dropped left
+    # `MR::Reviewer::*` labels behind, and the next delivery read them as "a
+    # reviewer is already designated", kept them and posted Ready on a merge
+    # request nobody had been asked to review.
     def write_handoff(issue, merge_request, measurement)
+      current = current_labels(merge_request)
       designated = measurement.draw.is_a?(Array) ? measurement.draw : nil
-      plan = label_plan(current_labels(merge_request), measurement, designated)
-      write_and_verify(issue, plan, designated)
-      raise measurement.draw if measurement.draw.is_a?(Stop)
-
-      post_ready(issue, current_labels(merge_request))
+      write_and_verify(issue, label_plan(current, measured_targets(measurement)), designated)
+      refuse_without_reviewer(measurement) if measurement.draw.is_a?(Stop)
+      write_reviewer_labels(issue, current, designated) if designated
+      post_ready(issue, current)
       key, vars = ready_entry(measurement, designated)
       log_activity(issue, key, **vars)
+    end
+
+    def write_reviewer_labels(issue, current, designated)
+      write_and_verify(issue, label_plan(current, REVIEWER_PREFIX => designated.map(&:label).uniq), nil)
+    end
+
+    # The draw's own outcome, plus what was written all the same, so the entry
+    # never claims a coverage label that was not posted.
+    def refuse_without_reviewer(measurement)
+      stop = measurement.draw
+      raise Stop.new(stop.key, **stop.vars, labels: written_labels(measurement).join(', '))
     end
 
     # Remove-then-add per managed prefix, `MrMaterialize::LabelPlan`'s shape:
     # GitLab CE has no scoped-label exclusivity. A dimension not measured is
     # left alone.
-    def label_plan(current, measurement, designated)
-      label_targets(measurement, designated).each_with_object({ add: [], remove: [] }) do |(prefix, wanted), plan|
+    def label_plan(current, targets)
+      targets.each_with_object({ add: [], remove: [] }) do |(prefix, wanted), plan|
         plan[:remove].concat(current.select { |label| label.start_with?(prefix) } - wanted)
         plan[:add].concat(wanted - current)
       end
     end
 
-    def label_targets(measurement, designated)
+    def measured_targets(measurement)
       targets = { SIZE_PREFIX => [size_label(measurement)] }
       targets[COVERAGE_PREFIX] = [coverage_label(measurement)] if measurement.zone
-      targets[REVIEWER_PREFIX] = designated.map(&:label).uniq if designated
       targets
+    end
+
+    def written_labels(measurement)
+      measured_targets(measurement).values.flatten
     end
 
     # One reviewer and one assignee — GitLab CE holds one of each and drops a

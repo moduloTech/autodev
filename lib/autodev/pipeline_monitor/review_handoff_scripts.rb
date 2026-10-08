@@ -27,6 +27,11 @@ class PipelineMonitor
     # otherwise — `reviewer_draw` takes a bare flag.
     RED_FLAG = '%{red_flag}' # rubocop:disable Style/FormatStringToken
     RED_ARGUMENT = '--red'
+    # Per script, not `dc_timeout` (default 1800 s): three runs of it would
+    # outlive the one-hour `limits_concurrency` semaphore the job holds
+    # (adversarial review). Measured: ~3.5 s a run once the project's Ruby is
+    # installed; the bound leaves room for a first `mise x` install.
+    SCRIPT_TIMEOUT = 600
 
     # What one script answered. `exit_code` is nil for a process ended by a
     # signal; `json` is nil when no stdout line parsed as a JSON object.
@@ -68,7 +73,7 @@ class PipelineMonitor
         file.write(handoff_env)
         file.flush
         args = ['-v', "#{file.path}:#{ENV_MOUNT}:ro", '-s', handoff_shell(argv)]
-        out, err, _ok, status = run_with_timeout('danger-claude', args, chdir: work_dir,
+        out, err, _ok, status = run_with_timeout('danger-claude', args, chdir: work_dir, timeout: SCRIPT_TIMEOUT,
                                                                         label: "-s #{argv.join(' ')}")
         ScriptResult.new(status&.exitstatus, last_json_object(out), err.to_s)
       end
@@ -105,12 +110,16 @@ class PipelineMonitor
       nil
     end
 
-    # The last stderr line, scrubbed and short: what the script said about why
-    # it failed, fit for an activity note on the ticket.
+    # What the activity note on the ticket may say about a failed script: its
+    # exit code, never its output. The note is public on the ticket, and a
+    # script's stderr is the project's to word — `reviewer_draw`'s exit-2 line
+    # quotes the People API's error, which on an unreadable payload can carry
+    # the very absences the skill forbids publishing (confidentiality review).
+    # The tail of stderr goes to autodev's log, scrubbed, for the operator.
     def script_reason(result)
-      line = result.stderr.lines.map(&:strip).reject(&:empty?).last
-      text = line || "exit #{result.exit_code.inspect}"
-      Redactor.scrub(text)[0, 300]
+      tail = result.stderr.lines.map(&:strip).reject(&:empty?).last(3).join(' | ')
+      log_error "review handoff script exited #{result.exit_code.inspect}: #{Redactor.scrub(tail)[0, 500]}"
+      "exit #{result.exit_code.inspect}"
     end
   end
 end

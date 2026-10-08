@@ -38,7 +38,7 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
   # second reviewer silently dropped; labels added and removed by name.
   class FakeGitlab
     attr_reader :edits, :mr
-    attr_accessor :drop_reviewers, :drop_labels
+    attr_accessor :drop_reviewers, :drop_labels, :drop_assignees, :keep_labels
 
     def initialize(labels: [], reviewers: [], diff_refs: { 'base_sha' => BASE, 'head_sha' => HEAD })
       @mr = { 'iid' => 7, 'labels' => labels, 'reviewers' => reviewers, 'assignees' => [],
@@ -46,6 +46,7 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
               'author' => { 'username' => 'autodev_bot' }, 'diff_refs' => diff_refs }
       @edits = []
       @drop_labels = []
+      @keep_labels = []
     end
 
     def merge_request(_path, _iid) = deep_copy(@mr)
@@ -69,7 +70,7 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     private
 
     def apply_labels(attrs)
-      remove = attrs[:remove_labels].to_s.split(',')
+      remove = attrs[:remove_labels].to_s.split(',') - @keep_labels
       add = attrs[:add_labels].to_s.split(',') - @drop_labels
       @mr['labels'] = (@mr['labels'] - remove + add).uniq
     end
@@ -78,6 +79,7 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
       @mr['reviewers'] = Array(attrs[:reviewer_ids]).first(1).map { |id| { 'id' => id } } if attrs.key?(:reviewer_ids)
       @mr['reviewers'] = [] if drop_reviewers
       @mr['assignees'] = [{ 'id' => attrs[:assignee_id] }] if attrs.key?(:assignee_id)
+      @mr['assignees'] = [] if drop_assignees
     end
 
     def deep_copy(obj) = Marshal.load(Marshal.dump(obj))
@@ -130,6 +132,17 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     { env: File.read(mount), mode: File.stat(mount).mode & 0o777 }
   end
 
+  def fetch_commands(present:)
+    m = monitor
+    fetched = []
+    m.define_singleton_method(:run_cmd_status) do |cmd, **|
+      ['', '', present.any? { |sha| cmd.last == "#{sha}^{commit}" }]
+    end
+    m.define_singleton_method(:run_cmd) { |cmd, **| fetched << cmd if cmd[1] == 'fetch' }
+    m.send(:hand_off_for_review, @issue)
+    fetched
+  end
+
   def hand_off(config = PROJECT_CONFIG)
     monitor(config).send(:hand_off_for_review, @issue)
   end
@@ -170,6 +183,7 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
   test 'the reviewer label is the first word of the GitLab name, never the username' do
     hand_off
 
+    assert_equal %w[MR::Reviewer::Alexandre MR::Reviewer::Antoine], labels.grep(/Reviewer/).sort
     refute(labels.any? { |l| l.include?('alexan_a') || l.include?('bernar_a') })
   end
 
@@ -378,7 +392,16 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     refute_includes labels, 'MR::ReadyForReview'
     assert_includes labels, 'MR::Size::M'
     assert_equal [:review_handoff_no_reviewer_absences], entry_keys
-    assert_equal 'reviewer_draw: stderr line', @entries.first.last[:reason]
+    assert_equal 'exit 2', @entries.first.last[:reason]
+  end
+
+  test "a script's stderr never reaches the ticket, only its exit code; the log keeps the stderr" do
+    @answers['reviewer_draw'] = [2, '']
+    m = monitor
+    m.send(:hand_off_for_review, @issue)
+
+    refute(@entries.flatten.map(&:to_s).any? { |v| v.include?('stderr line') })
+    assert(m.instance_variable_get(:@logger).messages.any? { |msg| msg.include?('reviewer_draw: stderr line') })
   end
 
   test 'a postponed draw, a failed draw and an unreadable draw write no reviewer and no ready' do
@@ -402,7 +425,8 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
 
     assert_empty @client.mr['reviewers']
     assert_empty labels.grep(/Reviewer/)
-    assert_equal [[:review_handoff_no_reviewer_unresolved, { username: 'bourea_d' }]], @entries
+    assert_equal [[:review_handoff_no_reviewer_unresolved,
+                   { username: 'bourea_d', labels: 'MR::Size::M, MR::TestCoverage::Standard' }]], @entries
   end
 
   test 'a size that cannot be measured writes nothing at all and runs nothing else' do
@@ -433,6 +457,42 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     assert_includes @entries.first.last[:what], 'reviewer alexan_a'
   end
 
+  test 'a dropped reviewer leaves no reviewer label, so the next delivery draws again instead of keeping nobody' do # rubocop:disable Minitest/MultipleAssertions
+    @client.drop_reviewers = true
+    hand_off
+
+    assert_empty labels.grep(/Reviewer/)
+
+    @client.drop_reviewers = false
+    @entries.clear
+    hand_off
+
+    assert_equal [:review_handoff_ready], entry_keys
+    assert_equal [{ 'id' => 194 }], @client.mr['reviewers']
+    assert_equal(2, @calls.count { |c| c[:shell].include?('reviewer_draw') })
+  end
+
+  test 'a note without reviewer names only the labels actually written' do
+    @answers['mr_coverage'] = [1, '']
+    @answers['reviewer_draw'] = [2, '']
+    hand_off
+
+    assert_equal 'MR::Size::M', @entries.first.last[:labels]
+  end
+
+  test 'each script is bounded well under the one-hour concurrency semaphore' do
+    seen = []
+    test = self
+    m = monitor
+    m.define_singleton_method(:run_with_timeout) do |cmd, args, **opts|
+      seen << opts[:timeout]
+      test.container(cmd, args)
+    end
+    m.send(:hand_off_for_review, @issue)
+
+    assert_equal [600, 600, 600], seen
+  end
+
   test 'a label GitLab did not keep is reported and ready is not posted' do
     @client.drop_labels = %w[MR::Size::M]
     hand_off
@@ -447,6 +507,67 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     hand_off
 
     assert_equal [:review_handoff_not_landed], entry_keys
+  end
+
+  test 'an assignee GitLab did not keep is reported and ready is not posted' do
+    @client.drop_assignees = true
+    hand_off
+
+    refute_includes labels, 'MR::ReadyForReview'
+    assert_equal [[:review_handoff_not_landed, { what: 'assignee bernar_a' }]], @entries
+  end
+
+  test 'a stale label GitLab refused to remove is reported and ready is not posted' do
+    @client = FakeGitlab.new(labels: %w[MR::Size::XS])
+    @client.keep_labels = %w[MR::Size::XS]
+    hand_off
+
+    refute_includes labels, 'MR::ReadyForReview'
+    assert_equal [[:review_handoff_not_landed, { what: '-MR::Size::XS' }]], @entries
+  end
+
+  test 'a draw answering three names designates the first two only' do
+    @answers['reviewer_draw'] = [0, { 'drawn' => %w[alexan_a bernar_a billau_l], 'postponed' => false }]
+    hand_off
+
+    assert_equal [{ 'id' => 194 }], @client.mr['reviewers']
+    assert_equal [{ 'id' => 337 }], @client.mr['assignees']
+    refute_includes labels, 'MR::Reviewer::Lucas'
+  end
+
+  test 'an empty size command at runtime is no declaration' do
+    hand_off(PROJECT_CONFIG.merge('review_size_command' => []))
+
+    assert_empty @calls
+    assert_empty @entries
+  end
+
+  test 'a merge request whose head_sha is missing is not measured' do
+    @client = FakeGitlab.new(diff_refs: { 'base_sha' => BASE, 'head_sha' => nil })
+    hand_off
+
+    assert_empty @calls
+    assert_equal [:review_handoff_not_measured], entry_keys
+  end
+
+  test 'both diff ends present: no fetch, so a full clone is not made shallow' do
+    fetched = fetch_commands(present: [BASE, HEAD])
+
+    assert_empty fetched
+  end
+
+  test 'one diff end missing: only that one is fetched' do
+    fetched = fetch_commands(present: [HEAD])
+
+    assert_equal [%W[git fetch --depth 1 origin #{BASE}]], fetched
+  end
+
+  test 'a GitLab on a custom port reaches the scripts with its port' do
+    m = monitor
+    m.instance_variable_set(:@gitlab_url, 'https://gitlab.example.com:8443')
+    m.send(:hand_off_for_review, @issue)
+
+    assert_includes @calls.first[:env], 'GITLAB_HOST=gitlab.example.com:8443'
   end
 
   # -- Never raises -------------------------------------------------------------
@@ -516,8 +637,22 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     m.define_singleton_method(:hand_off_for_review) { |_issue| order << :hand_off_for_review }
     m.send(:finalize_green_done, @issue, [])
 
-    assert_equal :hand_off_for_review, order.last
+    assert_equal %i[apply_label_done hand_ticket_back notify_localized hand_off_for_review], order
     assert_predicate @issue.reload.finished_at, :present?
+  end
+
+  test 'finished_at is already stamped when the handoff starts' do
+    m = monitor
+    %i[apply_label_done hand_ticket_back notify_localized].each do |name|
+      m.define_singleton_method(name) do |*, **|
+        nil
+      end
+    end
+    stamped = nil
+    m.define_singleton_method(:hand_off_for_review) { |issue| stamped = Issue.find(issue.id).finished_at }
+    m.send(:finalize_green_done, @issue, [])
+
+    assert_predicate stamped, :present?
   end
 
   test 'no other delivery path hands off' do
