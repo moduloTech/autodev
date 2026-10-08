@@ -36,11 +36,12 @@ different from source` during `bundle install`, identical on `master` pipeline
 221668). 16735 was given up under `stagnation_pipeline` on 16/09/2026 at 17:34
 while `master` was red on that very failure.
 
-The name match alone is not a usable rule: 36 of the 42 were a different failure.
-On 16/09, `master` pipeline 221668 failed `test:main` in `bundle install` (a git
-clone error, 95 log lines); three merge requests failing `test:main` on real
-spec failures at the same moment would have been read as pre-existing and left
-unfixed. That is item 4 of the ticket, and it is load-bearing.
+The name match alone is not a usable rule. Of the 42, only the 6 above carry a
+failure the target accounts for; in 7 the failure is demonstrably another one —
+on 01/07, powerpanne 15349's `test` failed three spec examples while `staging`'s
+`test` had stopped after 46 seconds naming none — and the other 29 cannot be
+compared at all, their traces being truncated. Read by name, all 36 would have
+been left unfixed. That is item 4 of the ticket, and it is load-bearing.
 
 Two facts about the traces shaped the signature:
 
@@ -58,11 +59,13 @@ Two facts about the traces shaped the signature:
 A failed blocking job of the merge request's pipeline is **pre-existing** when:
 
 1. the latest **finished** pipeline of the merge request's own target branch
-   (`TargetBranch.named_target(mr)` — question 2, the merge request's target, not
-   the configuration's) has a job of the same name whose status is `failed` and
+   (the `target_branch` the merge request records — `TargetBranch`'s question 2, not
+   the configuration's; read off the field rather than through
+   `TargetBranch.named_target`, which raises on a merge request naming none — that
+   case is left to the fix path's rebase, which reports it) has a job of the same name whose status is `failed` and
    which is not `allow_failure`; "finished" is any status outside
    `RUNNING_STATUSES` — `manual` included, because that is how `master` ends on
-   powerpanne (128 of the 304 target pipelines the measurement read); and
+   powerpanne (33 of the 80 distinct target pipelines the measurement read); and
 2. the two failures have a **comparable signature** (`FailureSignature`):
    - both traces are read whole; a truncated trace, an empty one, or a trace
      GitLab refused to serve has no signature, and no signature is never
@@ -102,15 +105,21 @@ to be called. The infra wait calls no fixer and is untouched.
   counted, no Claude call is made (so no quota gate either). The row stays in
   `checking_pipeline` and **holds** the merge request pipeline
   (`issues.target_red_hold_pipeline_id`). Each later poll recomputes the split on
-  that pipeline; as soon as one held job is no longer explained by the target's
-  latest finished pipeline, the merge request pipeline is **retried**
+  that pipeline — without downloading the traces again while the target's latest
+  finished pipeline and the red job ids are unchanged (`issues.target_red_hold_key`);
+  as soon as one held job is no longer explained by the target's latest finished
+  pipeline (another failure, a green job, or evidence that can no longer be
+  compared), the merge request pipeline is **retried**
   (`retry_pipeline`, `activity_pipeline_target_recovered`) and the hold is
   released. If the retried run fails again, the target no longer explains it,
   so it is fixed as today — the fix path rebases on the target first, which is
   what picks up the target's own repair.
-- **The bound.** The hold is bounded by the existing `pipeline_watch_max_days`
-  age bound on `checking_pipeline_since` (nothing transitions during a hold, so
-  the clock runs from the moment the row entered the watch). A poll that holds
+- **The bound.** The hold adds no clock of its own: it is bounded by the existing
+  `pipeline_watch_max_days` age bound on `checking_pipeline_since`, the age of the
+  whole watch (nothing transitions during a hold, so the clock runs from the
+  moment the row entered the watch). A watch already past the bound therefore
+  gives up on its first hold, and the public text says the watch passed the
+  bound — not that autodev waited that long for the target. A poll that holds
   is a poll that read a pipeline status, so it does not raise
   `poll_inconclusive!`. When the bound is reached **on a poll that held**, the
   request is given up under a dedicated reason, `target_pipeline_red`, whose
@@ -138,13 +147,20 @@ the same pre-existing job posts it once more, for that round.
 ## Contract
 
 - Migration `20261008130001_add_target_red_columns_to_issues`:
-  `issues.target_red_hold_pipeline_id` (integer), `issues.preexisting_noted_key`
-  (string).
+  `issues.target_red_hold_pipeline_id` (integer), `issues.target_red_hold_key`
+  (string, `"<target pipeline id>:<red job ids>"`), `issues.preexisting_noted_key`
+  (string, `"<merge request pipeline id>:<job names>"`).
 - `PipelineMonitor::FailureSignature` (`lib/autodev/pipeline_monitor/failure_signature.rb`):
   `.of(trace) → nil | [:examples, Set] | [:tail, Array]`,
   `.explains?(target_signature, mr_signature) → Boolean`.
 - `PipelineMonitor::PreexistingFailures` (`lib/autodev/pipeline_monitor/preexisting_failures.rb`),
-  mixed into `PipelineMonitor`; entry point `set_aside_preexisting(issue, pipeline, failed_jobs) → own_jobs`.
+  mixed into `PipelineMonitor`; `fix_own_failures(issue, pipeline, failed_jobs, triage)`
+  replaces the direct `check_stagnation_and_fix` call in `triage_and_fix`, around
+  `set_aside_preexisting(issue, pipeline, failed_jobs) → own_jobs`.
+- `PipelineMonitor::TargetRedNotice` (`lib/autodev/pipeline_monitor/target_red_notice.rb`):
+  the activity line, the merge request comment and the give-up.
+- `PipelineMonitor::ApiHelpers#latest_finished_target_pipeline`,
+  `#comparable_trace`, `TARGET_PIPELINES_SCANNED = 20`.
 - Attention reason `target_pipeline_red` with its three sinks:
   `target_pipeline_red` (notification), `activity_target_pipeline_red`,
   `web_errors_explain_attention_target_pipeline_red`.
