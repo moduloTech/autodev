@@ -151,6 +151,38 @@ module Config # rubocop:disable Metrics/ModuleLength
                                 review_coverage_command reviewer_draw_command app].freeze
   VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
 
+  # Deprecated since Autodev #122, removed later (owner's decision of
+  # 08/10/2026: the pinned `claude-opus-4-7` is an old model and `effort` has
+  # changed meaning). Until then they are read exactly as before —
+  # `DangerClaudeRunner#dc_global_args`, project > global > per-call default —
+  # and setting either is signalled: a boot warning (`bin/autodev`) and a
+  # notice under the field on the project form.
+  #
+  # What removal changes: no call passes `-m` / `-e` from configuration any
+  # more. A call with no agent and no per-call model — the spec check, the
+  # question investigation — runs on Claude Code's default model. A call made
+  # with an agent runs on the model the agent declares: the built-in
+  # implementer, test-writer and mr-fixer agents (`IssueProcessor::Agents`,
+  # `MrFixer::AgentInjector`) declare `model: sonnet`, so implementation and MR
+  # fixing move from the global Opus 4.7 to Sonnet. The two calls that pass
+  # `model: 'haiku'` by design — the complexity evaluation (`Implementer`) and
+  # the pipeline-failure evaluation (`PipelineMonitor::Evaluator`), cheap JSON
+  # tasks — get haiku back: a global `model` overrides that per-call default
+  # today. Effort becomes Claude Code's default everywhere.
+  DEPRECATED_MODEL_SETTINGS = %w[model effort].freeze
+
+  # Every deprecated model setting in force, globals first, then each project
+  # in the order given. A blank value (an empty form field) is not a setting.
+  def self.deprecated_model_settings(config, project_configs)
+    scopes = [['global', config]] + Array(project_configs).map { |c| [c['path'], c] }
+    scopes.flat_map do |scope, cfg|
+      DEPRECATED_MODEL_SETTINGS.filter_map do |field|
+        value = cfg[field]
+        { scope: scope, field: field, value: value } unless value.to_s.strip.empty?
+      end
+    end
+  end
+
   # Single source of truth for the effective retry budget (Autodev #34).
   #
   # `max_retries` counts RETRIES, not total attempts: a budget of N allows a

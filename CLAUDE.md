@@ -70,6 +70,10 @@ Settings are resolved in 4 layers (highest priority wins):
 3. **Environment variables** — `GITLAB_API_TOKEN`, `GITLAB_URL`, plus `AUTODEV_HOME` (default `~/.autodev`), `AUTODEV_DB`, `AUTODEV_QUEUE_DB`, `AUTODEV_MAX_WORKERS`, `AUTODEV_POLL_INTERVAL`
 4. **CLI flags** — `-c`, `-d`, `-t`, `-n`, `-i`
 
+### Deprecated: `model` and `effort`
+
+Global and per-project `model` / `effort` are deprecated since Autodev #122 and will be removed (`Config::DEPRECATED_MODEL_SETTINGS`). They are still read by `DangerClaudeRunner#dc_global_args` — project > global > per-call default, a blank value read as unset — and setting either is signalled: a boot warning (`bin/autodev`'s `warn_deprecated_model_settings`) and a notice under both fields on the project form. They are deliberately **not** in `Config::IGNORED_GLOBAL_FIELDS`, which drops the value. Removal passes no `-m` / `-e` from configuration: a call with no agent (the spec check) runs on Claude Code's default model, a call with an agent on the agent's own model — the built-in implementer, test-writer and mr-fixer agents declare `model: sonnet` —, and the complexity and pipeline evaluations, which pass `model: 'haiku'` by design, get haiku back (a global `model` overrides them today). The full list is in `Config::DEPRECATED_MODEL_SETTINGS`' comment.
+
 ### Numeric settings: type and range (`NumericSettings`)
 
 Every numeric setting — global or per-project — declares its **type** and its **acceptable range** in one line of `NumericSettings::SPECS` (`lib/autodev/numeric_settings.rb`). Adding a numeric setting means adding that line; there is no second place to update.
@@ -212,6 +216,8 @@ Handles the sequential flow from `pending` through `checking_pipeline`:
 `start_processing!` → clone → `clone_complete!` → check spec → `spec_clear!` → implement → `impl_complete!` → commit → `commit_complete!` → push → `push_complete!` → create MR → `mr_created!` → `checking_pipeline`
 
 For question/investigation tickets (no code changes needed): `question_detected!` → investigate codebase → post answer → `question_answered!` → `done`.
+
+**The spec check blocks a decision whose implications are not described** (Autodev #122). `Prompts::SPEC_CHECK` lists three cases, each enough for `unclear`: the description contradicts a later answer in the comments; a decision is taken without saying what it implies (screen or place, access, output, replace or add); an answer to a previous clarification changes the nature of the request and those implications are not described. Criteria 1 and 3 ask by name whether the answer replaces the original request or adds to it — without those words Opus 4.7 asked it in 1 draw out of 5. Pragmatism is kept for truly minor details and for what the code can settle — deleting a criterion is a product decision, and `test/spec_check_prompt_test.rb` pins each by its words. The evidence is a 38-call corpus evaluation recorded in `docs/superpowers/specs/2026-10-08-the-spec-check-blocks-an-undescribed-decision-design.md`, including what it could not reproduce. The check passes no `model:` (Claude Code's default, unless the deprecated `model` setting overrides it). Its verdict is the **first** JSON object with a known `type` in the answer, nested ones included, found by `IssueProcessor::JsonObjects.scan` rather than a brace-free regex: a question quoting `{date}` used to make the answer unreadable, and an unreadable answer still **proceeds** to implementation — that fallback direction is unchanged and pinned. First, not last, so an example written after the answer cannot reverse it.
 
 ### MrFixer
 

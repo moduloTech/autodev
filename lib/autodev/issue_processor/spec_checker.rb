@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'prompts'
+require_relative 'json_objects'
 require_relative 'question_handler'
 
 class IssueProcessor
@@ -10,27 +11,36 @@ class IssueProcessor
 
     SPEC_HALT = :halt
     SPEC_CONTINUE = :continue
+    SPEC_TYPES = %w[implementation question unclear].freeze
 
     private
 
+    # No `model:` (Autodev #122): the check runs on Claude Code's default model.
+    # It used to ask for haiku, the per-call default `dc_global_args` falls back
+    # to, and the decision it takes — implement now, or ask the requester first —
+    # is not a cheap JSON task like the complexity and pipeline evaluations,
+    # which keep haiku. A `model` / `effort` setting still overrides it until
+    # those deprecated settings are removed.
     def check_specification(work_dir, context, iid, issue)
       log "Checking specification clarity for ##{iid}..."
       log_activity(issue, :spec_checking)
       out = with_context_file(work_dir, issue.branch_name, context) do |ctx|
-        danger_claude_prompt(work_dir, format(Prompts::SPEC_CHECK, ctx), model: 'haiku')
+        danger_claude_prompt(work_dir, format(Prompts::SPEC_CHECK, ctx))
       end
       parse_spec_result(out, iid, issue, work_dir, context)
-    rescue JSON::ParserError
-      log 'Could not parse spec check JSON, proceeding'
-      issue.spec_clear!
-      false
     end
 
+    # The verdict is the **first** well-formed object carrying a known `type`,
+    # nested ones included — what the pre-#122 regex read whenever it could read
+    # anything, so an example written after the answer does not reverse it. A
+    # restated schema is not JSON and is skipped. `JsonObjects` explains why
+    # this is no longer a regex (Autodev #122).
     def parse_spec_result(out, iid, issue, work_dir, context)
-      json_match = out.match(/\{[^{}]*"type"\s*:\s*"(implementation|question|unclear)"[^{}]*\}/m)
-      return dispatch_spec_type(JSON.parse(json_match[0]), iid, issue, work_dir, context) if json_match
+      objects = JsonObjects.scan(out)
+      verdict = objects.find { |o| SPEC_TYPES.include?(o['type']) }
+      return dispatch_spec_type(verdict, iid, issue, work_dir, context) if verdict
 
-      legacy_spec_outcome(out, iid, issue) == SPEC_HALT
+      legacy_spec_outcome(objects.find { |o| o.key?('clear') }, iid, issue) == SPEC_HALT
     end
 
     def dispatch_spec_type(result, iid, issue, work_dir, context)
@@ -62,7 +72,7 @@ class IssueProcessor
     end
 
     def resolve_unclear_spec(issues_list, iid, issue)
-      issues_list = Array(issues_list).compact
+      issues_list = question_texts(issues_list)
       if issues_list.empty?
         log 'Spec unclear but no issues listed, proceeding'
         issue.spec_clear!
@@ -73,15 +83,26 @@ class IssueProcessor
       SPEC_HALT
     end
 
-    def legacy_spec_outcome(out, iid, issue)
-      json_match = out.match(/\{[^{}]*"clear"\s*:\s*(true|false)[^{}]*\}/m)
-      unless json_match
+    # The questions as the requester will read them (Autodev #122). The prompt
+    # asks for strings; a model that answers with objects (`{"question": …,
+    # "cite": …}`) or with an object of questions gets its values posted, not
+    # Ruby's inspect of a Hash. The brace-free regex used to reject such an
+    # answer outright — and an unreadable answer proceeds to implementation.
+    def question_texts(issues)
+      issues = issues.values if issues.is_a?(Hash)
+      Array(issues).filter_map do |question|
+        text = question.is_a?(Hash) ? question.values.join(' — ') : question.to_s
+        text unless text.strip.empty?
+      end
+    end
+
+    def legacy_spec_outcome(result, iid, issue)
+      unless result
         log 'Could not parse spec check response, proceeding'
         issue.spec_clear!
         return SPEC_CONTINUE
       end
 
-      result = JSON.parse(json_match[0])
       return resolve_unclear_spec(result['issues'], iid, issue) unless result['clear']
 
       mark_spec_clear(issue)

@@ -47,7 +47,7 @@ C'est tout. Autodev change le label en **{{label_doing|en cours}}** dès qu'il c
 ## Ce qui se passe ensuite
 
 1. **Préparation.** Autodev récupère le projet et lit la demande.
-2. **Question ?** Si quelque chose lui manque pour bien faire, il pose une question directement dans le ticket et attend votre réponse.
+2. **Question ?** Si quelque chose lui manque pour bien faire, il pose une question directement dans le ticket et attend votre réponse. Il s'arrête en particulier quand la description dit une chose et qu'une réponse plus récente en commentaire en dit une autre, ou quand une décision a été prise sans que ce qu'elle implique soit décrit — quel écran, qui y a accès, ce qui sort (fichier téléchargé, email), et si cela remplace l'existant ou s'y ajoute. Une réponse qui change la nature de la demande (un envoi automatique qui devient un écran, par exemple) doit être complétée de ces précisions avant qu'il commence. Les détails mineurs (libellés, ordre des colonnes, mise en forme) ne l'arrêtent pas.
 3. **Écriture du code.** Sinon, il code, sauvegarde, et envoie son travail.
 4. **Ouverture de la *Merge Request*.** La MR est créée automatiquement avec le numéro de votre ticket.
 5. **Tests.** La pipeline d'intégration tourne. Si elle échoue, Autodev corrige et recommence.

@@ -203,8 +203,8 @@ Tout réglage numérique déclare son **type** et sa **plage** dans `NumericSett
 | Exécution | `sparse_checkout` | Chemins du sparse checkout (liste, pour monorepos). |
 | Exécution | `post_completion` | Commande(s) lancée(s) après livraison (sur désassignation). |
 | Exécution | `post_completion_timeout` | Délai max de la commande `post_completion` (s). |
-| Avancé | `model` | Modèle `danger-claude` (option `-m`). |
-| Avancé | `effort` | Effort de raisonnement `danger-claude` (option `-e`). |
+| Avancé | `model` | **Déprécié** (Autodev #122), supprimé dans une version ultérieure. Modèle `danger-claude` (option `-m`), global ou par projet (le projet l'emporte). Encore lu ; s'il est posé, `bin/autodev` le signale au démarrage et le formulaire du projet l'indique sous le champ. Il prime aussi sur le `model: 'haiku'` que passent l'évaluation de complexité et l'évaluation d'échec de pipeline : sa suppression leur rend haiku. Les appels faits avec un agent prennent alors le modèle de l'agent — `sonnet` pour les agents intégrés implementer, test-writer et mr-fixer —, et les autres, contrôle de spec compris, le modèle par défaut de Claude Code. |
+| Avancé | `effort` | **Déprécié** (Autodev #122), même calendrier que `model`. Effort de raisonnement `danger-claude` (option `-e`). Encore lu, signalé de la même façon. |
 | Avancé | `parallel_agents` | Découpe les issues complexes sur plusieurs agents (worktrees git). |
 | Avancé | `split_implementation` | Implémente code puis tests en deux passes distinctes. |
 | Avancé | `implementer_agent` / `test_writer_agent` / `mr_fixer_agent` | Agents custom (nom ou chemin dans `.claude/agents`). |
