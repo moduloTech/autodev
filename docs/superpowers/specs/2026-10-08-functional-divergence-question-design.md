@@ -117,11 +117,26 @@ saying the MR will resume with the answer.
   to fix, and its prompt carries the human notes posted on the ticket after it was asked
   (`functional_answer_section`). It is never asked again.
 
+- The first resumed round reads the merge request before anything else: the wait lasts days,
+  and an MR merged, closed or mid-merge meanwhile sends the row back to `checking_pipeline`
+  (`mr_ended_while_waiting`), whose MR-state branch decides. Added after the adversarial
+  review reproduced a fix cycle running on a merged MR.
+
 ### Clearing
 
 `functional_questions` and `clarification_resume_to` are cleared by `reenter` (the branch is
 rebuilt, like `pending_resolutions`); `clarification_resume_to` also by
-`reenter_to_check_pipeline`.
+`reenter_to_check_pipeline`. An operator Reset of a row still in `needs_clarification` on a
+functional question drops the last question's thread ids and the destination
+(`Issue.forget_unanswered_questions!`), so the question is asked again rather than the thread
+corrected with no decision. `functional_question` is not offered by the dashboard's transition
+menu.
+
+### Not done, by decision
+
+- The dashboard's manual `clarification_received` on a functional row resumes it on the merge
+  request like an answer would: it is the operator stating that the answer exists (on the MR
+  thread, whose notes the fixer reads, or elsewhere).
 
 ## Assumptions
 
