@@ -21,6 +21,14 @@ class ReviewContract
   SEVERITIES = %w[error warning info nitpick].freeze
   # What both project skills call blocking-class.
   BLOCKING = %w[error warning].freeze
+  # What a finding is about (Autodev #121): `code` is a defect in how the code
+  # does what was asked, `functional` a delivered behaviour that differs from
+  # what the ticket asked for — a decision only the requester can take, which
+  # `MrFixer` turns into a question on the ticket instead of a correction.
+  # Absent reads as `code`, so a skill written before the field keeps working.
+  FUNCTIONAL = 'functional'
+  CODE = 'code'
+  CATEGORIES = [FUNCTIONAL, CODE].freeze
 
   attr_reader :verdict, :summary, :inline, :summary_only
 
@@ -45,19 +53,34 @@ class ReviewContract
     @inline, @summary_only = findings.partition { |f| inline?(f) }
   end
 
+  def self.functional?(finding) = finding['category'] == FUNCTIONAL
+
+  # Does the finding carry a line GitLab can pin a thread to?
+  def self.anchorable?(finding)
+    !finding['file'].to_s.strip.empty? && finding['line'].to_s.match?(/\A\d+\z/)
+  end
+
   private
 
-  # The one rule: anchorable AND blocking-class.
+  # The one rule: blocking-class AND (anchorable OR functional). A functional
+  # finding with no line is still a decision somebody has to take, so it becomes
+  # a thread — unpositioned, `ReviewPublisher` decides — rather than prose in the
+  # summary comment, which `MrFixer` never reads and which holds no delivery
+  # (Autodev #121).
   def inline?(finding)
     BLOCKING.include?(finding['severity']) &&
-      !finding['file'].to_s.strip.empty? &&
-      finding['line'].to_s.match?(/\A\d+\z/)
+      (self.class.anchorable?(finding) || self.class.functional?(finding))
   end
 
   def validate_severities!(findings)
     findings.each do |f|
       raise InvalidError, 'each finding must be an object' unless f.is_a?(Hash)
       raise InvalidError, "unknown severity #{f['severity'].inspect}" unless SEVERITIES.include?(f['severity'])
+      raise InvalidError, "unknown category #{f['category'].inspect}" unless category_known?(f)
     end
   end
+
+  # Strict like `severity`: a misspelt category would silently turn a product
+  # question into a code fix.
+  def category_known?(finding) = finding['category'].nil? || CATEGORIES.include?(finding['category'])
 end

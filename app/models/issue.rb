@@ -152,13 +152,28 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
 
     event(:discussions_fixed)        { transitions from: :fixing_discussions, to: :checking_pipeline }
     event(:pipeline_fix_done)        { transitions from: :fixing_pipeline, to: :checking_pipeline }
-    event(:clarification_received)   { transitions from: :needs_clarification, to: :pending }
+    # A functional divergence found in review (Autodev #121): the question goes
+    # to the requester on the ticket, and the row waits exactly like a spec
+    # clarification — same state, same watch, same resume. What differs is the
+    # destination of the answer, decided once here so every caller of the event
+    # (the live poll, `ClarificationSweep`) lands on the same one: the same merge
+    # request, never `pending`, which is a full re-implementation (owner, Q5).
+    event(:functional_question)      { transitions from: :fixing_discussions, to: :needs_clarification }
+    # The answer arrived after the merge request stopped being open — merged,
+    # closed, or mid-merge during a wait of days. The fix round does not run on
+    # it: the row goes back to the watch, whose MR-state branch decides
+    # (Autodev #121, adversarial review).
+    event(:mr_ended_while_waiting)   { transitions from: :fixing_discussions, to: :checking_pipeline }
+    event :clarification_received do
+      transitions from: :needs_clarification, to: :fixing_discussions, guard: :resume_on_merge_request?
+      transitions from: :needs_clarification, to: :pending
+    end
     # `closed` is a reentry source since Autodev #52: a stop decided by a human
     # (unassignment or a workflow-label handover) now ends in `closed` rather
     # than `done`, and the documented way back — repose the todo label, reassign
     # autodev — has to keep working. `PollRouter#reenterable?` guards which
     # `closed` rows qualify; the state machine only says the move is legal.
-    event(:reenter)                  { transitions from: %i[done closed], to: :pending }
+    event(:reenter) { transitions from: %i[done closed], to: :pending }
     event(:reenter_to_check_pipeline) { transitions from: %i[done closed], to: :checking_pipeline }
 
     # === Error handling ===
@@ -242,6 +257,16 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     @_review_count_over_zero == true
   end
 
+  # Where `clarification_received` sends the row (Autodev #121). A column, not an
+  # instance flag: the question and its answer are days apart, in different
+  # processes. The merge request is required too — resuming on one the row does
+  # not carry would be a `fixing_discussions` with nothing to fix.
+  RESUME_TO_FIXING = 'fixing_discussions'
+
+  def resume_on_merge_request?
+    clarification_resume_to == RESUME_TO_FIXING && mr_iid.present?
+  end
+
   # -- AASM callbacks --
 
   # The clock the absolute pipeline-watch bound reads (Autodev #53). One
@@ -302,7 +327,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     event = aasm.current_event.to_s.delete_suffix('!').to_sym
     return unless REENTRY_EVENTS.include?(event)
 
-    cleared = event == :reenter ? POST_COMPLETION_CLEARED.merge(pending_resolutions: nil) : POST_COMPLETION_CLEARED
+    cleared = event == :reenter ? REENTER_CLEARED : REENTRY_CLEARED
     assign_attributes(cleared)
     # Written whatever this object read: a nil assigned over the nil it loaded
     # is no change to dirty tracking, and a reservation `dispatch_done_unassigned`
@@ -516,6 +541,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # blaming them. The two automatic callers pass no `reset_budget:` and keep
   # the floor where it was: a recovery is not a statement about the ticket.
   def self.reset_for_retry!(scope, reset_budget: false, clear_attention: false)
+    forget_unanswered_questions!(scope)
     fields = { error_message: nil, started_at: nil, **POST_COMPLETION_CLEARED }
     if reset_budget
       fields.merge!(retry_count: 0, review_failure_count: 0, dormant_recheck_count: 0, dormant_recheck_at: nil,
@@ -526,6 +552,32 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     scope.where.not(mr_iid: nil)
          .update_all(**fields, status: 'checking_pipeline', next_retry_at: nil, checking_pipeline_since: nil) +
       scope.where(mr_iid: nil).update_all(**fields, status: 'pending', next_retry_at: Time.current)
+  end
+
+  # A Reset of a row still waiting on a functional question (Autodev #121, review
+  # of the branch). The row goes back to watching its merge request, and the
+  # threads it asked about would then read as asked — i.e. answered — and be
+  # corrected in the code with no decision at all, which is the very behaviour
+  # the question exists to stop. So the unanswered question is forgotten and
+  # the next fix round asks it again. Only the last question: the threads of an
+  # earlier one were answered, and the row came back to work since. Rows of any
+  # other status keep both columns — a resumed row whose first round has not
+  # run yet has its answer on the ticket.
+  def self.forget_unanswered_questions!(scope)
+    scope.where(status: 'needs_clarification').where.not(clarification_resume_to: nil).find_each do |issue|
+      asked = parse_functional_questions(issue.functional_questions)
+      last = asked.values.max
+      kept = asked.reject { |_id, at| at == last }
+      issue.update_columns(clarification_resume_to: nil, functional_questions: kept.empty? ? nil : JSON.generate(kept))
+    end
+  end
+
+  # `functional_questions` as a Hash, `{}` for NULL or anything unreadable.
+  def self.parse_functional_questions(raw)
+    data = raw.to_s.empty? ? {} : JSON.parse(raw.to_s)
+    data.is_a?(Hash) ? data : {}
+  rescue JSON::ParserError
+    {}
   end
 
   # How each stalled state gets back onto a path the poller walks. The rules are
@@ -553,6 +605,11 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # by `reset_for_retry!` and by the two re-entry events themselves
   # (`clear_delivery_on_reentry!`), whichever path fires them.
   POST_COMPLETION_CLEARED = { post_completion_dispatched_at: nil, post_completion_error: nil }.freeze
+  # A re-entry also ends any wait on a functional question (Autodev #121): the
+  # destination it recorded belongs to the wait. `reenter` rebuilds the branch,
+  # so the questions asked about the old one go with it, like `pending_resolutions`.
+  REENTRY_CLEARED = POST_COMPLETION_CLEARED.merge(clarification_resume_to: nil).freeze
+  REENTER_CLEARED = REENTRY_CLEARED.merge(pending_resolutions: nil, functional_questions: nil).freeze
 
   REVIVE_TO_PIPELINE = %w[reviewing fixing_pipeline fixing_discussions].freeze
   REVIVE_TO_DONE = %w[running_post_completion].freeze
