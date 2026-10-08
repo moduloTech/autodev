@@ -170,12 +170,19 @@ module DangerClaudeRunner
     args.concat(ChromeDevtoolsInjector.dc_args) if Config.project_has_exposed_ports?(@project_config)
     @port_mappings = PortAllocator.allocate(@project_config)
     args.concat(PortAllocator.dc_port_args(@port_mappings))
-    model = @project_config['model'] || @config['model'] || model_default
-    effort = @project_config['effort'] || @config['effort']
+    model = model_setting('model') || model_default
+    effort = model_setting('effort')
     args.push('-m', model) if model
     args.push('-e', effort) if effort
     args
   end
+
+  # `model` / `effort`, project over global, a blank value read as unset
+  # (Autodev #122). Both are deprecated (`Config::DEPRECATED_MODEL_SETTINGS`),
+  # and the boot warning skips a blank one; read with a bare `||`, a
+  # `model: ""` left in config.yml reached danger-claude as `-m ''` and hid the
+  # per-call haiku default, with nothing signalling it.
+  def model_setting(key) = [@project_config[key], @config[key]].find { |value| !value.to_s.strip.empty? }
 
   # `next_retry_at:` is mandatory — no default — so a caller cannot land a row
   # in `error` without deciding what happens next (Autodev #103). A caller

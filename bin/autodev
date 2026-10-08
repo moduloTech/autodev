@@ -285,7 +285,7 @@ def bootstrap(config, logger, pastel)
   offer_template_config(config_path, logger, pastel)
   validate_config(config, config_path, logger)
   setup_database(config, logger)
-  warn_rejected_numeric_settings(config, logger, pastel)
+  warn_settings(config, logger, pastel)
   setup_chrome_devtools(config, logger)
   warn_dev_recurring_disabled(logger, pastel)
   warn_stub_azure_credentials(config, logger, pastel)
@@ -303,6 +303,12 @@ def warn_dev_recurring_disabled(logger, pastel)
   logger.warn('Trigger a poll cycle manually:')
   logger.warn("  #{pastel.cyan("bin/rails runner 'AutodevPollJob.perform_now'")}")
   logger.warn("  #{pastel.cyan("bin/rails runner 'SyncGitlabMembershipsJob.perform_now'")}")
+end
+
+# The two advisory audits of the settings in force: neither refuses the boot.
+def warn_settings(config, logger, pastel)
+  warn_rejected_numeric_settings(config, logger, pastel)
+  warn_deprecated_model_settings(config, logger, pastel)
 end
 
 # A numeric per-project setting outside its declared range (Autodev #58) is not
@@ -341,6 +347,36 @@ def warn_numeric_violations(violations, config, logger, pastel)
   logger.warn(pastel.bold(Locales.t(:cli_numeric_settings_rejected_header,
                                     locale: locale, count: violations.size)))
   violations.each { |violation| logger.warn("  #{NumericSettings.describe(violation, locale: locale)}") }
+end
+
+# `model` and `effort` are deprecated (Autodev #122, `Config::DEPRECATED_MODEL_SETTINGS`):
+# still read, signalled here once per boot so the operator removes them before
+# they stop being read. Global settings come from config.yml, per-project ones
+# from the `projects` table — hence the same rescue as the numeric audit above:
+# a database this cannot read costs the warning, never the boot.
+def warn_deprecated_model_settings(config, logger, pastel)
+  found = Config.deprecated_model_settings(config, Project.runtime_configs(config['projects']))
+  warn_model_setting_deprecations(found, config, logger, pastel)
+rescue StandardError => e
+  logger.warn("Could not check for deprecated model settings: #{e.message}")
+end
+
+def warn_model_setting_deprecations(found, config, logger, pastel)
+  return if found.empty?
+
+  locale = cli_locale(config)
+  logger.warn(pastel.bold(Locales.t(:cli_model_settings_deprecated_header, locale: locale, count: found.size)))
+  found.each { |setting| logger.warn("  #{model_setting_deprecation_line(setting, locale)}") }
+end
+
+def model_setting_deprecation_line(setting, locale)
+  field, value = setting.values_at(:field, :value)
+  if setting[:scope] == 'global'
+    Locales.t(:cli_model_settings_deprecated_global, locale: locale, field: field, value: value)
+  else
+    Locales.t(:cli_model_settings_deprecated_project, locale: locale, project: setting[:scope], field: field,
+                                                      value: value)
+  end
 end
 
 # Locale for CLI diagnostics: the operator configured one for the dashboard, and

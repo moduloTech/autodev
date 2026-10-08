@@ -150,6 +150,33 @@ module Config # rubocop:disable Metrics/ModuleLength
                                 test_writer_agent mr_fixer_agent review_skill app].freeze
   VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
 
+  # Deprecated since Autodev #122, removed later (owner's decision of
+  # 08/10/2026: the pinned `claude-opus-4-7` is an old model and `effort` has
+  # changed meaning). Until then they are read exactly as before —
+  # `DangerClaudeRunner#dc_global_args`, project > global > per-call default —
+  # and setting either is signalled: a boot warning (`bin/autodev`) and a
+  # notice under the field on the project form.
+  #
+  # What removal changes: every danger-claude call runs on Claude Code's own
+  # default model and effort, except the two that pass `model: 'haiku'` by
+  # design — the complexity evaluation (`Implementer`) and the pipeline-failure
+  # evaluation (`PipelineMonitor::Evaluator`), cheap JSON tasks. Today a global
+  # `model` overrides that per-call default too, so removal is what gives them
+  # haiku back.
+  DEPRECATED_MODEL_SETTINGS = %w[model effort].freeze
+
+  # Every deprecated model setting in force, globals first, then each project
+  # in the order given. A blank value (an empty form field) is not a setting.
+  def self.deprecated_model_settings(config, project_configs)
+    scopes = [['global', config]] + Array(project_configs).map { |c| [c['path'], c] }
+    scopes.flat_map do |scope, cfg|
+      DEPRECATED_MODEL_SETTINGS.filter_map do |field|
+        value = cfg[field]
+        { scope: scope, field: field, value: value } unless value.to_s.strip.empty?
+      end
+    end
+  end
+
   # Single source of truth for the effective retry budget (Autodev #34).
   #
   # `max_retries` counts RETRIES, not total attempts: a budget of N allows a
