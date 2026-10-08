@@ -331,7 +331,8 @@ fr:
   web_project_edit_desc_mr_review_timeout: Délai maximum d'une review de MR, quel que soit le chemin (binaire mr-review ou skill de review du projet), en secondes. Au-delà, la review est interrompue et comptée comme un échec.
   web_project_edit_desc_model: "Modèle danger-claude (option -m). Défaut : modèle par défaut de danger-claude."
   web_project_edit_desc_effort: "Effort de raisonnement danger-claude (option -e). Défaut : effort par défaut de danger-claude."
-  web_project_edit_deprecated_setting: "Déprécié : ce réglage sera supprimé. Laissé vide, il reprend le réglage global, lui aussi déprécié ; sans aucun des deux, chaque appel prend le modèle de son agent ou, à défaut, celui de Claude Code."
+  web_project_edit_deprecated_model: "Déprécié : ce réglage sera supprimé. Laissé vide, il reprend le réglage global, lui aussi déprécié. Sans aucun des deux, l'évaluation de complexité et celle d'un échec de pipeline tournent sur haiku, un appel fait avec un agent prend le modèle de son agent, et les autres le modèle par défaut de Claude Code. Renseigné ici ou en global, il remplace tous ces modèles, haiku compris."
+  web_project_edit_deprecated_effort: "Déprécié : ce réglage sera supprimé. Laissé vide, il reprend le réglage global, lui aussi déprécié ; sans aucun des deux, chaque appel prend l'effort par défaut de Claude Code."
   web_project_edit_desc_parallel_agents: Découpe les issues complexes sur plusieurs agents en parallèle (worktrees git).
   web_project_edit_desc_split_implementation: Implémente le code puis les tests en deux passes danger-claude distinctes.
   web_project_edit_desc_implementer_agent: "Agent utilisé pour l'implémentation (nom ou chemin dans .claude/agents). Défaut : agent intégré."

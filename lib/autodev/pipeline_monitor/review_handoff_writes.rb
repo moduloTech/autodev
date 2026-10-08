@@ -21,7 +21,7 @@ class PipelineMonitor
       current = current_labels(merge_request)
       designated = measurement.draw.is_a?(Array) ? measurement.draw : nil
       write_and_verify(issue, label_plan(current, measured_targets(measurement)), designated)
-      refuse_without_reviewer(measurement) if measurement.draw.is_a?(Stop)
+      refuse_without_reviewer(issue, measurement, current) if measurement.draw.is_a?(Stop)
       write_reviewer_labels(issue, current, designated) if designated
       post_ready(issue, current)
       key, vars = ready_entry(measurement, designated)
@@ -32,12 +32,30 @@ class PipelineMonitor
       write_and_verify(issue, label_plan(current, REVIEWER_PREFIX => designated.map(&:label).uniq), nil)
     end
 
-    # The draw's own outcome, plus what was written all the same, so the entry
-    # never claims a coverage label that was not posted.
-    def refuse_without_reviewer(measurement)
+    # The draw's own outcome, plus what this handoff added all the same, so the
+    # entry never claims a coverage label that was not posted, nor one that was
+    # already there. Ready is never posted without a reviewer, but one already
+    # on the merge request is left as it is, and the entry says which.
+    def refuse_without_reviewer(issue, measurement, current)
       stop = measurement.draw
-      raise Stop.new(stop.key, **stop.vars, labels: written_labels(measurement).join(', '))
+      raise Stop.new(stop.key, **stop.vars, labels: added_labels(issue, written_labels(measurement) - current),
+                                            ready: ready_status(issue, current))
     end
+
+    def added_labels(issue, added)
+      return added.join(', ') if added.any?
+
+      Locales.t(:activity_review_handoff_part_no_label, locale: handoff_locale(issue))
+    end
+
+    def ready_status(issue, current)
+      locale = handoff_locale(issue)
+      return Locales.t(:activity_review_handoff_part_ready_left, locale: locale) if current.include?(READY_LABEL)
+
+      Locales.t(:activity_review_handoff_part_ready_not_posted, locale: locale)
+    end
+
+    def handoff_locale(issue) = (issue.locale || 'fr').to_sym
 
     # Remove-then-add per managed prefix, `MrMaterialize::LabelPlan`'s shape:
     # GitLab CE has no scoped-label exclusivity. A dimension not measured is
@@ -68,7 +86,26 @@ class PipelineMonitor
       return if attrs.empty?
 
       edit_handoff_mr(issue, attrs)
-      verify_landed(issue, plan, designated)
+      read_back(:review_handoff_not_confirmed, what: claims(plan, designated).join(', ')) do
+        verify_landed(issue, plan, designated)
+      end
+    end
+
+    # A read-back GitLab did not answer is not a write that failed: the write
+    # was sent and may well have landed — measured, Ready applied by GitLab,
+    # then `Net::ReadTimeout` on the check. The entry such an outage gets is
+    # recorded for the duration of the check, and `hand_off_for_review`'s
+    # boundary — the one place the handoff swallows a GitLab error — says "not
+    # confirmed" with it instead of "not posted".
+    def read_back(key, **vars)
+      @handoff_read_back = [key, vars]
+      yield
+      @handoff_read_back = nil
+    end
+
+    def claims(plan, designated)
+      people = designated ? ["reviewer #{designated.first.username}", "assignee #{designated.last.username}"] : []
+      plan[:add] + plan[:remove].map { |label| "-#{label}" } + people
     end
 
     def label_attrs(plan)
@@ -109,7 +146,7 @@ class PipelineMonitor
       return if labels_before.include?(READY_LABEL)
 
       edit_handoff_mr(issue, add_labels: READY_LABEL)
-      verify_landed(issue, { add: [READY_LABEL], remove: [] }, nil)
+      read_back(:review_handoff_ready_not_confirmed) { verify_landed(issue, { add: [READY_LABEL], remove: [] }, nil) }
     end
 
     def ready_entry(measurement, designated)

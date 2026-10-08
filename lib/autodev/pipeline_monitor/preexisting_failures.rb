@@ -50,7 +50,7 @@ class PipelineMonitor
 
       target_pipeline = latest_finished_target_pipeline(polled_target_branch)
       own, verdict = split_preexisting(issue, pipeline, failed_jobs, target_pipeline)
-      return retry_held_pipeline(issue, pipeline) if holding?(issue, pipeline) && own.any?
+      return retry_held_pipeline(issue, pipeline, target_pipeline, own) if holding?(issue, pipeline) && own.any?
       return failed_jobs unless verdict
 
       note_preexisting(issue, pipeline, verdict)
@@ -140,17 +140,38 @@ class PipelineMonitor
     # and the next poll fixes it as before — on a branch the fix path rebases on
     # the target first. A retry GitLab did not take keeps the hold, so the next
     # poll asks again.
-    def retry_held_pipeline(issue, pipeline)
+    def retry_held_pipeline(issue, pipeline, target_pipeline, own)
       id = pipeline_id(pipeline)
+      target_unchanged = held_against?(issue, target_pipeline)
       @client.retry_pipeline(@project_path, id)
       release_hold(issue)
-      log_activity(issue, :pipeline_target_recovered, target_branch: polled_target_branch)
-      log "Issue ##{issue.issue_iid}: #{polled_target_branch} no longer explains pipeline ##{id}, retried"
+      log_retry(issue, id, target_unchanged ? target_pipeline : nil, own)
       []
     rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
            ::OpenSSL::SSL::SSLError, ::EOFError => e
       log_error "Failed to retry held pipeline ##{id}: #{e.class}: #{e.message}"
       []
+    end
+
+    # The hold key names the target pipeline the hold was decided on. The same
+    # one still the latest means the target did not move, so what stopped
+    # matching is the merge request's side: a retried or newly red job.
+    def held_against?(issue, target_pipeline)
+      target_pipeline.present? && issue.target_red_hold_key.to_s.start_with?("#{pipeline_id(target_pipeline)}:")
+    end
+
+    # What was observed, not a guess at why (integration review of the alpha-57
+    # lot): a target that moved or can no longer be compared, or an unchanged
+    # target whose failure the merge request's red jobs no longer match.
+    def log_retry(issue, id, unchanged_target, own)
+      log "Issue ##{issue.issue_iid}: #{polled_target_branch} no longer explains pipeline ##{id}, retried"
+      unless unchanged_target
+        return log_activity(issue, :pipeline_target_recovered, target_branch: polled_target_branch)
+      end
+
+      log_activity(issue, :pipeline_held_job_diverged,
+                   target_branch: polled_target_branch, target_pipeline: pipeline_id(unchanged_target),
+                   jobs: own.map { |job| GitlabHelpers.field(job, :name) }.join(', '))
     end
   end
 end

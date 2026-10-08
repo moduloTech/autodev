@@ -150,6 +150,23 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
   def labels = @client.mr['labels']
   def entry_keys = @entries.map(&:first)
 
+  def rendered(locale = :fr)
+    key, vars = @entries.first
+    I18n.t(:"activity_#{key}", locale: locale, **vars, raise: true)
+  end
+
+  # GitLab applies the write, then the read-back made right after it times
+  # out — `Net::ReadTimeout` on the check, not on the write.
+  def read_back_times_out_after(added_label)
+    client = @client
+    real = client.method(:merge_request)
+    client.define_singleton_method(:merge_request) do |path, iid|
+      raise Net::ReadTimeout if client.edits.last.to_h[:add_labels].to_s.split(',').include?(added_label)
+
+      real.call(path, iid)
+    end
+  end
+
   # -- The nominal handoff ----------------------------------------------------
 
   test 'a delivery writes size, coverage, the reviewer labels, the reviewer and the assignee, then ready' do # rubocop:disable Minitest/MultipleAssertions
@@ -426,7 +443,8 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     assert_empty @client.mr['reviewers']
     assert_empty labels.grep(/Reviewer/)
     assert_equal [[:review_handoff_no_reviewer_unresolved,
-                   { username: 'bourea_d', labels: 'MR::Size::M, MR::TestCoverage::Standard' }]], @entries
+                   { username: 'bourea_d', labels: 'MR::Size::M, MR::TestCoverage::Standard',
+                     ready: 'MR::ReadyForReview non pose' }]], @entries
   end
 
   test 'a size that cannot be measured writes nothing at all and runs nothing else' do
@@ -472,6 +490,30 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     assert_equal(2, @calls.count { |c| c[:shell].include?('reviewer_draw') })
   end
 
+  # Integration review of the alpha-57 lot: on a merge request already carrying
+  # Ready the entry ended "MR::ReadyForReview not." while the label stayed, and
+  # listed as written labels that were already there.
+  test 'no reviewer on a merge request already ready: only added labels are listed, ready is said left as is' do # rubocop:disable Minitest/MultipleAssertions
+    @client = FakeGitlab.new(labels: %w[MR::ReadyForReview MR::Size::M])
+    @answers['reviewer_draw'] = [0, { 'drawn' => [], 'postponed' => true }]
+    hand_off
+
+    assert_includes labels, 'MR::ReadyForReview'
+    assert_equal [:review_handoff_no_reviewer_postponed], entry_keys
+    assert_equal 'MR::TestCoverage::Standard', @entries.first.last[:labels]
+    assert_match(/MR::ReadyForReview deja present, laisse tel quel/, rendered(:fr))
+    refute_match(/pas MR::ReadyForReview/, rendered(:fr))
+  end
+
+  test 'no reviewer and nothing added: the entry says no label was added' do
+    @client = FakeGitlab.new(labels: %w[MR::Size::M MR::TestCoverage::Standard])
+    @answers['reviewer_draw'] = [1, '']
+    hand_off
+
+    assert_equal [:review_handoff_no_reviewer_draw_failed], entry_keys
+    assert_match(/Labels ajoutes : aucun ; MR::ReadyForReview non pose\./, rendered(:fr))
+  end
+
   test 'a note without reviewer names only the labels actually written' do
     @answers['mr_coverage'] = [1, '']
     @answers['reviewer_draw'] = [2, '']
@@ -507,6 +549,31 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     hand_off
 
     assert_equal [:review_handoff_not_landed], entry_keys
+  end
+
+  # Integration review of the alpha-57 lot: the entry said "MR::ReadyForReview
+  # not posted" on a merge request that carried it.
+  test 'a read-back of ready that GitLab does not answer says not confirmed, never not posted' do # rubocop:disable Minitest/MultipleAssertions
+    read_back_times_out_after('MR::ReadyForReview')
+    hand_off
+
+    assert_includes labels, 'MR::ReadyForReview'
+    assert_equal [:review_handoff_ready_not_confirmed], entry_keys
+    assert_match(/non confirme/, rendered(:fr))
+    assert_match(/not confirmed/, rendered(:en))
+    refute_match(/non pose/, rendered(:fr))
+    refute_match(/not posted/, rendered(:en))
+  end
+
+  test 'a read-back of an earlier write that GitLab does not answer says not confirmed, and ready was not sent' do # rubocop:disable Minitest/MultipleAssertions
+    read_back_times_out_after('MR::Size::M')
+    hand_off
+
+    refute_includes labels, 'MR::ReadyForReview'
+    assert_equal [:review_handoff_not_confirmed], entry_keys
+    assert_includes @entries.first.last[:what], 'MR::Size::M'
+    assert_match(/not confirmed/, rendered(:en))
+    assert_match(/MR::ReadyForReview not posted/, rendered(:en))
   end
 
   test 'an assignee GitLab did not keep is reported and ready is not posted' do

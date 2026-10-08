@@ -25,7 +25,8 @@ class PipelineMonitor
     OUTCOMES = %i[review_handoff_ready review_handoff_ready_reviewer_kept review_handoff_ready_no_draw
                   review_handoff_no_reviewer_absences review_handoff_no_reviewer_postponed
                   review_handoff_no_reviewer_draw_failed review_handoff_no_reviewer_unresolved
-                  review_handoff_not_measured review_handoff_not_landed review_handoff_failed].freeze
+                  review_handoff_not_measured review_handoff_not_landed review_handoff_not_confirmed
+                  review_handoff_ready_not_confirmed review_handoff_failed].freeze
 
     # Ends the handoff with one activity entry.
     class Stop < StandardError

@@ -25,6 +25,15 @@ class ProjectFormFlagsDeprecatedModelSettingsTest < ActionDispatch::IntegrationT
     field(body, key)&.at_css('.deprecated-setting')&.text
   end
 
+  # The notice under `key`, as the fr then the en form renders it.
+  def notices(key)
+    %w[fr en].map do |locale|
+      cookies[:locale] = locale
+      get '/projects/group__proj/edit'
+      notice(response.body, key).to_s
+    end
+  end
+
   def test_the_model_field_carries_the_notice
     get '/projects/group__proj/edit'
 
@@ -35,6 +44,24 @@ class ProjectFormFlagsDeprecatedModelSettingsTest < ActionDispatch::IntegrationT
     get '/projects/group__proj/edit'
 
     assert_includes notice(response.body, 'effort').to_s, 'Déprécié'
+  end
+
+  # Integration review of the alpha-57 lot: "with neither, each call takes its
+  # agent's model, or else Claude Code's default" was false for the complexity
+  # and pipeline evaluations, which pass `model: 'haiku'` and keep it.
+  def test_the_model_notice_names_the_haiku_exception_in_both_locales
+    fr, en = notices('model')
+
+    assert_equal [true, true], [fr.include?('haiku'), en.include?('haiku')], "fr: #{fr}\nen: #{en}"
+  end
+
+  # The same notice sat under `effort` while speaking only of the model.
+  def test_the_effort_notice_speaks_of_effort_not_of_the_model
+    fr, en = notices('effort')
+
+    assert_equal [true, true, false, false],
+                 [fr.include?('effort'), en.include?('effort'), fr.include?('modèle'), en.include?('model')],
+                 "fr: #{fr}\nen: #{en}"
   end
 
   def test_no_other_field_carries_it

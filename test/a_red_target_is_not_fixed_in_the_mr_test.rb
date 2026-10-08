@@ -514,6 +514,33 @@ class HeldPipelineTest < Minitest::Test
            "no activity line for the retry: #{client.notes}"
   end
 
+  # Integration review of the alpha-57 lot: the target untouched (same
+  # pipeline, same red job, same trace), a human retries the merge request's
+  # `test` alone and it now fails on another example. The retry is right; the
+  # line used to say the target "no longer shows the same failure", which is
+  # false — it is the merge request's job that moved.
+  def test_a_retry_after_only_the_merge_requests_job_changed_says_so
+    client = FakeClient.new
+    hold_then_retry_the_merge_requests_job(client)
+
+    assert_equal [[MR_PIPELINE], true, false],
+                 [client.retries, naming?(client.notes, 'La branche master est inchangee', TARGET_PIPELINE, 'test'),
+                  naming?(client.notes, 'ne montre plus le meme echec')],
+                 "expected the retry, said of the merge request's job, not of the target: #{client.notes}"
+  end
+
+  # Held on `test`, then the merge request's `test` alone retried: a new job
+  # id, now failing on another example, the target untouched.
+  def hold_then_retry_the_merge_requests_job(client)
+    preexisting_test_job(client)
+    mon, = monitor(client)
+    issue = watched_issue
+    mon.check(issue)
+    client.mr_jobs = [RedTargetFixtures.job(3, 'test')]
+    client.traces[3] = OTHER_SPEC_FAILURE
+    mon.check(issue.reload)
+  end
+
   # Released by the retry, the next failure on that pipeline is no longer the
   # target's: it is fixed as today.
   def test_after_the_retry_a_failure_the_target_does_not_explain_is_fixed
