@@ -641,6 +641,13 @@ ALLOWED_SWALLOWS = {
     # this method wants. No GitLab call, no verdict.
     'kill_process' => 'local process signalling, not a read'
   },
+  'lib/autodev/pipeline_monitor/review_handoff.rb' => {
+    # Runs after `finalize_green_done`'s terminal transition, as its last
+    # statement (Autodev #90). It returns nothing anybody reads: every failure,
+    # an outage included, becomes one `review_handoff_failed` activity entry,
+    # and no verdict on the row or the ticket is taken from it.
+    'hand_off_for_review' => 'post-delivery courtesy on the merge request, returns nothing'
+  },
   'lib/autodev/mr_fixer/discussion_formatter.rb' => {
     # `git diff` in a work directory, for the prompt. No GitLab call, and the
     # substitute (`nil` = no diff hunk to quote) removes context from a prompt

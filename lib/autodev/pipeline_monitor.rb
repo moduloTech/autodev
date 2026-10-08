@@ -7,6 +7,7 @@ require_relative 'pipeline_monitor/blocked_pipeline'
 require_relative 'pipeline_monitor/evaluator'
 require_relative 'pipeline_monitor/poll_tracker'
 require_relative 'pipeline_monitor/post_completion'
+require_relative 'pipeline_monitor/review_handoff'
 require_relative 'pipeline_monitor/fix_prompts'
 require_relative 'pipeline_monitor/failure_handler'
 require_relative 'pipeline_monitor/infra_recheck'
@@ -26,6 +27,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include Evaluator
   include PollTracker
   include PostCompletion
+  include ReviewHandoff
   include FailureHandler
   include InfraRecheck
   include PipelineFixer
@@ -282,6 +284,8 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     notify_localized(iid, :done_nominal, label_todo: @project_config['labels_todo']&.first)
     log_activity(issue, discussions.empty? ? :pipeline_green_done : :done, count: discussions.size)
     log "Issue ##{iid}: pipeline green, #{discussions.size} discussion(s) → done"
+    # Last, so nothing it does can skip what precedes it (Autodev #90).
+    hand_off_for_review(issue)
   end
 
   def set_pipeline_green_guards(issue, review_count_zero: false, review_count_over_zero: false,

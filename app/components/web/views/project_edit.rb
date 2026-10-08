@@ -21,7 +21,8 @@ module Web
          %i[target_branch labels_todo label_doing label_done label_attention review_skill extra_prompt]],
         [:web_project_edit_section_execution,
          %i[dc_timeout max_retries retry_backoff stagnation_threshold clone_depth
-            sparse_checkout post_completion post_completion_timeout mr_review_timeout]],
+            sparse_checkout post_completion post_completion_timeout mr_review_timeout
+            review_size_command review_coverage_command reviewer_draw_command]],
         [:web_project_edit_section_advanced,
          %i[model effort parallel_agents split_implementation implementer_agent
             test_writer_agent mr_fixer_agent]]

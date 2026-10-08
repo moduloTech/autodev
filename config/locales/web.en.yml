@@ -322,6 +322,9 @@ en:
   web_project_edit_desc_sparse_checkout: "Paths to fetch via sparse checkout (handy for monorepos). One entry per line. Default: full clone."
   web_project_edit_desc_post_completion: "Command run after a green pipeline (Docker CMD format). One entry per line. Default: no hook."
   web_project_edit_desc_post_completion_timeout: Maximum time for the post_completion command, in seconds.
+  web_project_edit_desc_review_size_command: "The project's script measuring a delivered merge request's size, run in the danger-claude container (one entry per line, placeholders %{mr_iid}, %{base_sha}, %{head_sha}…). Its JSON output carries \"class\". Default: nothing is written on the merge request."
+  web_project_edit_desc_review_coverage_command: "The project's script measuring the coverage zone (JSON output \"zone\"). Requires review_size_command. Default: no coverage label."
+  web_project_edit_desc_reviewer_draw_command: "The project's script drawing the reviewers (JSON output \"drawn\", \"postponed\"; exit 2 = no draw possible). Adds the %{size} and %{red_flag} placeholders. Requires review_size_command. Default: no reviewer designated."
   web_project_edit_desc_mr_review_timeout: Maximum time for a single MR review, whichever path runs it (the mr-review binary or the project's review skill), in seconds. Past it the review is killed and counted as a failure.
   web_project_edit_desc_model: "danger-claude model (-m option). Default: danger-claude's default model."
   web_project_edit_desc_effort: "danger-claude reasoning effort (-e option). Default: danger-claude's default effort."
