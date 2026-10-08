@@ -192,6 +192,7 @@ fr:
   web_event_clone_complete: Préparation terminée
   web_event_spec_clear: Demande comprise
   web_event_spec_unclear: Demande floue, demander une précision
+  web_event_functional_question: Divergence fonctionnelle, question au demandeur
   web_event_question_detected: Question à poser
   web_event_question_answered: Réponse envoyée, terminer
   web_event_impl_complete: Écriture du code terminée

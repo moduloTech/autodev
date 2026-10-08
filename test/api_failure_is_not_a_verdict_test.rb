@@ -446,6 +446,9 @@ class MrFixerApiFailureTest < Minitest::Test
     def discussions_fixed! = @attrs[:status] = 'checking_pipeline'
     def status = @attrs[:status]
     def pending_resolutions = @attrs[:pending_resolutions]
+    # Autodev #121: the round reads both before it decides to fix.
+    def functional_questions = @attrs[:functional_questions]
+    def clarification_resume_to = @attrs[:clarification_resume_to]
   end
 
   class StubClient
@@ -852,7 +855,25 @@ ALLOWED_SWALLOWS = {
     # (`merge_request`) and `post_summary` (`create_merge_request_note`), all
     # three wrapped in `answer` with no rescue of their own.
     'post_finding' => 'a 400/422 on one position is GitLab declining to anchor it; ' \
-                      'the finding is demoted to the summary comment and every other failure raises'
+                      'the finding is demoted to the summary comment and every other failure raises',
+    # Autodev #121: the unpositioned fallback of a functional finding. Same
+    # clause, same class, same reasoning as `post_finding`: only GitLab's own
+    # 400/422 demotes it to the summary, every outage aborts the publication.
+    'post_unpositioned' => 'a 400/422 on the unpositioned thread is GitLab refusing it; ' \
+                           'the finding is demoted to the summary comment and every other failure raises'
+  },
+  # Autodev #121. Two label writes, both after the decision they follow is
+  # already on record, and neither returns a value anybody reads.
+  'lib/autodev/mr_fixer/functional_question.rb' => {
+    # After the question is posted and the row parked: the #75 rationale of
+    # `SpecChecker#repose_entry_label`, which this mirrors. The question stands;
+    # what is lost is a board column.
+    'repose_entry_label_for_question' => 'a label write after the question is posted and the row parked; ' \
+                                         'returns nothing, the wait is already on record',
+    # The first resumed round: the doing label is board honesty, not a verdict,
+    # and the round goes on to read the threads through `answer` either way.
+    'resume_after_functional_answer' => 'a label write on resume; returns nothing and the round that ' \
+                                        'follows reads GitLab through answer'
   },
   'lib/autodev/pipeline_monitor/skill_reviewer.rb' => {
     # This used to be one `clone_and_inject`, declared here as "no GitLab read

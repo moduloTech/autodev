@@ -5,6 +5,8 @@ en:
   error_generic: ":x: %{tag}: failed — %{error}"
   spec_unclear_header: ":thinking: %{tag}: the specification needs clarification before implementation."
   spec_unclear_footer: Please answer these questions in the comments. Implementation will resume automatically.
+  functional_question_header: ":thinking: %{tag}: %{mention}merge request !%{mr_iid} was delivered, but its review found %{count} gap(s) with what was asked for. These are product decisions: autodev will not settle them on its own in the code."
+  functional_question_footer: Please state in a comment on this ticket the expected behaviour for each point. Merge request !%{mr_iid} will resume automatically with your answer, without starting over.
   question_answered_header: ":mag: %{tag}: answer to the question"
   question_answered_footer: _This answer was generated automatically by analyzing the codebase. Feel free to ask for more details._
   mr_fix_success: ":wrench: %{tag}: %{count} review comment(s) fixed on %{mr_url} (round %{round})"
@@ -58,6 +60,7 @@ en:
 
     :arrow_right: **Want to dig deeper or move on to an implementation?** Leave a comment to guide me, put the _%{label_todo}_ label back, reassign me, and I'm on it.
   review_summary: "<!-- autodev:review -->\n:mag: **autodev** — automated review (verdict: %{verdict})\n\n%{summary}"
+  review_functional_finding_label: "**Product decision** — this point will not be fixed in the code: %{tag} will ask the requester on the ticket."
   arrears_takeover: |-
     :arrows_counterclockwise: %{tag}: I'm taking this ticket back.
 

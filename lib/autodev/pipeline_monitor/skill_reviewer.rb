@@ -229,6 +229,9 @@ class PipelineMonitor
       "/tmp/autodev_review_#{@project_path.tr('/', '_')}_#{mr_iid}.json"
     end
 
+    # `category` is the structured signal of Autodev #121 (owner, Q4): the
+    # review used to write « Divergence fonctionnelle (à valider par le PO) » in
+    # a thread's title, and nothing in autodev read it.
     def review_prompt(issue, skill, path)
       <<~PROMPT
         Charge le skill `#{skill}`. Revois la merge request !#{issue.mr_iid} contre sa
@@ -240,10 +243,16 @@ class PipelineMonitor
         ticket. Dépose tes constats consolidés dans #{path}, au format :
 
         {"verdict":"approve|changes_requested","summary":"…",
-         "findings":[{"file":"chemin","line":12,"severity":"error|warning|info|nitpick","body":"…"}]}
+         "findings":[{"file":"chemin","line":12,"severity":"error|warning|info|nitpick",
+                      "category":"code|functional","body":"…"}]}
 
         Un constat sans `file`/`line` est accepté : il sera rendu dans le commentaire
         de synthèse au lieu d'une discussion inline.
+
+        `category` vaut `functional` quand le comportement livré diffère de ce que le ticket
+        ou ses précisions demandaient et que seul le demandeur peut trancher (autodev lui
+        posera la question sur le ticket au lieu de corriger le code), `code` pour un défaut
+        dans la façon dont le code fait ce qui était demandé. Absent, il vaut `code`.
       PROMPT
     end
 

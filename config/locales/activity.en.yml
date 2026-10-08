@@ -6,6 +6,7 @@ en:
   activity_spec_checking: ":mag: Checking specification..."
   activity_spec_clear: ":white_check_mark: Specification clear"
   activity_spec_unclear: ":thinking: Specification needs clarification (%{count} question(s))"
+  activity_functional_question_asked: ":thinking: Functional divergence found in review: question asked to the requester (%{count} point(s))"
   activity_question_detected: ":grey_question: Question detected, investigating..."
   activity_question_answered: ":speech_balloon: Answer posted"
   activity_implementing: ":gear: Implementation in progress..."
