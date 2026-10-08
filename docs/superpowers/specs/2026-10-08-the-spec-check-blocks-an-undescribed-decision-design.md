@@ -76,9 +76,18 @@ complexity evaluation (`Implementer#evaluate_complexity`) and the pipeline
 evaluation (`PipelineMonitor::Evaluator#evaluate_code_related`) keep passing
 `model: 'haiku'`, by design: cheap JSON tasks. Today the global `model`
 overrides that per-call default too, so they also run on Opus 4.7 in
-production; removing the setting is what gives them haiku back. Every other
-call — the spec check included — then runs on Claude Code's default model and
-effort. Both halves are pinned (`TheCheapEvaluationsKeepHaikuTest`).
+production; removing the setting is what gives them haiku back. Both halves
+are pinned (`TheCheapEvaluationsKeepHaikuTest`).
+
+**And for the other calls** (corrected by the truthfulness review): a call
+made without an agent — the spec check, the question investigation — then runs
+on Claude Code's default model. A call made with an agent runs on the model the
+agent declares, and the built-in implementer, test-writer and mr-fixer agents
+declare `model: sonnet` (`IssueProcessor::Agents`, `MrFixer::AgentInjector`;
+Claude Code applies an agent's model when no `--model` is passed). So removal
+moves implementation and MR fixing from today's global Opus 4.7 to Sonnet. Effort
+becomes Claude Code's default everywhere. That is the owner's call to make
+before removal, not this ticket's.
 
 ### 4. A blank `model` / `effort` is unset
 
@@ -97,20 +106,28 @@ template (`{date}`) — and an unreadable answer *proceeds* to implementation, s
 the request would be implemented without the questions just produced. The new
 prompt asks the model to quote, which makes that likelier.
 `IssueProcessor::JsonObjects.scan` returns every balanced `{…}` that parses as
-a JSON object (braces inside JSON strings are not counted); the verdict is the
-**last** object with a known `type` — the answer the model ended on, after any
-example or restated schema. The legacy `{"clear": …}` shape goes through the
-same scan. The fallback direction is unchanged: nothing readable → proceed.
+a JSON object, nested ones included (braces inside JSON strings are not
+counted); the verdict is the **first** object with a known `type`, as the
+regex read it whenever it could read anything — so an example written after
+the answer does not reverse it, and a restated schema, not being JSON, is
+skipped. The adversarial review measured both alternatives: skipping the inside
+of a parsed object lost a wrapped verdict (`{"result": {…}}`), and taking the
+last object let a trailing example turn `unclear` into `implementation`; both
+are pinned. Questions returned as objects are posted as their values. The
+legacy `{"clear": …}` shape goes through the same scan. The fallback direction is unchanged: nothing readable → proceed.
 
 ## Proof: corpus evaluation, old prompt vs new prompt
 
 ### Corpus
 
 POWERPANNE#14746 in its 28/08 state, and eight PowerPanne tickets autodev
-delivered without being given up (`status = 'done'`, `needs_attention = 0`,
-merge request not closed — production DB, 08/10/2026). Five went straight
-through the check; two (14635, 14985) came back from a clarification, which is
-exactly the population criterion 3 could over-block.
+whose request ended delivered (`status = 'done'`, `needs_attention = 0`,
+merge request not closed — production DB, 08/10/2026). Three of them (16151,
+16364, 16424) had been given up once on review failures on 11/08 and
+re-entered; that happened after the check and does not bear on it. Two (14635,
+14985) came back from a clarification, which is exactly the population
+criterion 3 could over-block; 16151 ran the check three times (the table uses
+its second); the other five ran it once.
 
 | Ticket | Title | Check ran at (UTC) |
 |---|---|---|
@@ -143,10 +160,11 @@ exactly the population criterion 3 could over-block.
   claude-opus-4-7 --effort xhigh` for the production arguments. Read-only tools,
   no user settings or MCP servers; the clone's own `CLAUDE.md` loaded, as in
   the container.
-- **Verdict**: read with the pre-#122 regex, which parsed all 31 answers.
-- 31 calls, US$ 12.08, 7–127 s each. The owner accepted about 18; the 10
-  repeated draws below were added because a single draw could not explain the
-  first result.
+- **Verdict**: read with the pre-#122 regex, which parsed all 38 answers.
+- 38 calls in all, US$ 14.33, 7–127 s each: the 18 old/new calls the owner
+  accepted, 3 on the default model, 10 repeated draws added because a single
+  draw could not explain the first result, and 7 on the revised prompt (v2,
+  below). "New prompt" in the results table is the first version.
 
 ### Results
 
@@ -163,16 +181,43 @@ exactly the population criterion 3 could over-block.
 | 16580 | unclear (3 points) | implementation | — |
 
 Counts on the eight delivered tickets, first draw: old prompt **6/8**
-implementation, new prompt **7/8**. Over every draw on them, the new prompt
-answered `unclear` 1 time in 10, the old one 2 in 8.
+implementation, new prompt **7/8**. Over every Opus 4.7 draw on them, the new
+prompt answered `unclear` 1 time in 10 (1 in 12 counting the two default-model
+draws), the old one 2 in 8.
 
 **14746, the three holes.** Every new-prompt answer (6/6, both models) asks
 where the screen lives and who may access it, and asks the output question
-(download or e-mail). Replace-vs-add is asked explicitly in 5 of the 6 —
-draw #2 folds it into "e-mail, download, or both?". The old prompt lists the
-same holes but drowns them in five to seven points, several of them minor
-(column formats, multi-valued fields, an unreachable attachment) — exactly what
-criterion 2 and the scoped pragmatism separate.
+(download or e-mail). Replace-vs-add — whether the screen replaces the monthly
+automatic send or comes on top of it, the hole the 28/08 implementation got
+wrong — is asked explicitly in only 1 of the 5 Opus 4.7 draws (#2) and in the
+default-model draw: the others turn it into an output question ("download,
+e-mail after choosing the period, or both?"). The old prompt asked it in 5 of 5,
+but drowned it among five to seven points, several of them minor (column
+formats, multi-valued fields, an unreachable attachment). The truthfulness
+review caught the first version of this paragraph claiming 5 of 6.
+
+### Revised prompt (v2) — the version shipped
+
+Criteria 1 and 3 now ask for it by name: criterion 1 ends "Demande si la
+réponse remplace ce que décrit la description ou s'y ajoute", criterion 3
+requires that the redefined request say "si elle remplace la demande d'origine
+ou s'y ajoute". 7 more calls, Opus 4.7 xhigh:
+
+| Ticket | v2 prompt |
+|---|---|
+| 14746 | **unclear 5/5** (3–5 points) |
+| 14635 | implementation |
+| 14985 | implementation |
+
+On 14746 every v2 answer asks place, access and output; whether the screen
+replaces the monthly send is asked explicitly in 4 of 5 (draws 1, 2, 4, 5), and
+draw 3 asks which of the three — download screen, e-mail screen, or "l'envoi
+automatique mensuel initial" — is finally wanted. The two delivered tickets
+that came back from a clarification, the population the sharpened criterion 3
+could over-block, stay `implementation`. The six other delivered tickets were
+not re-run on v2: the revision only adds words to criteria 1 and 3, which apply
+to a contradiction or a redefinition, and none of the six had a clarification
+answer.
 
 ### What this does and does not prove
 
@@ -194,7 +239,8 @@ criterion 2 and the scoped pragmatism separate.
 ## Assumptions
 
 - "Delivered successfully" = `done`, not flagged, merge request not closed (1
-  of the 8 is merged; the rest await feature review).
+  of the 8 is merged; six sit on `Development::Awaiting CR`, 16580 on
+  `Development::Awaiting Feature Review`).
 - The description at a cutoff is the last description version at or before it.
 - One `master` tree stands for the trees the checks saw.
 - The host `claude` CLI stands for danger-claude's container.
@@ -211,7 +257,7 @@ criterion 2 and the scoped pragmatism separate.
 
 ## Appendix — every `unclear` answer
 
-The client's e-mail address is masked.
+The client's e-mail address is masked. "new" is the first version of the prompt, "v2" the version shipped.
 
 #### #14746 — old prompt, prod: `unclear`
 
@@ -297,6 +343,41 @@ The client's e-mail address is masked.
 - Emplacement de l'interface : sur quel écran faut-il placer le formulaire de choix de période ? Par exemple dans la gestion commerciale à côté des exports existants, dans la page des missions de la société (/companies/r-a-d/missions), ou sur une nouvelle page dédiée ?
 - Accès : qui peut utiliser cet export ? Emily BETHAM a signalé le 2026-02-18 qu'une interface cachée à tous sauf RAD posait problème, et rien n'a été tranché depuis. L'export est-il réservé à la société 471 - RAD (feature flag ou feature de la FeatureTree activée pour elle seule), ou ouvert à toutes les sociétés ? Et quels utilisateurs ou droits y ont accès ?
 - Date de référence de la période : Bryan ALVES a confirmé le 2025-09-24 « Date de création de la facture », mais c'était avant le passage à une période libre. Le filtre de période porte-t-il toujours sur la date de création de la facture, et non sur la date de facturation, la date d'envoi ou la date d'intervention ?
+
+#### #14746 — v2 prompt, prod: `unclear`
+
+- La description demande un envoi mensuel automatique d'un rapport Excel, mais le commentaire du 2026-06-29 de Bryan ALVES ajoute « Une interface utilisateur permettant de choisir une période jusqu'à 1 mois » et une adresse email de destination (<client address>). S'agit-il d'une UI de selection de periode qui remplace l'envoi mensuel automatique, ou les deux coexistent (envoi auto mensuel + UI ponctuelle) ? Si une UI, le fichier est-il telecharge par l'utilisateur ou envoye par email a <client address> apres selection ?
+- L'UI de selection de periode mentionnee dans le commentaire du 2026-06-29 n'est pas localisee : dans quel ecran de l'application se trouve-t-elle (page societe RAD, menu gestion commerciale, autre) ? Qui y a acces (quel profil / quelle societe) : uniquement RAD, un profil specifique, un feature flag ?
+- Pour l'envoi par email, le destinataire <client address> est-il fixe en dur pour la societe 471 - RAD, ou configurable par societe (parametre dans l'admin) ? Et si envoi automatique mensuel, a quelle date du mois est-il declenche et sur quelle periode (mois calendaire precedent) ?
+
+#### #14746 — v2 prompt, prod#2: `unclear`
+
+- Le commentaire du 2026-06-29 ajoute « une interface utilisateur permettant de choisir une période jusqu'à 1 mois », alors que la description initiale demande un « envoi mensuel automatique ». Cette interface remplace-t-elle l'envoi automatique mensuel, ou s'y ajoute-t-elle (les deux coexistent) ?
+- Le commentaire mentionne à la fois une interface utilisateur de sélection de période et une adresse email de destination (<client address>). Quelle est la sortie après sélection de la période dans l'UI : le fichier Excel est-il téléchargé directement par l'utilisateur, ou envoyé par email à <client address> (ou les deux) ?
+- Où dans l'application cette interface d'export doit-elle être placée (quel écran, quel menu) ?
+- Qui a accès à cette interface : tous les utilisateurs de la société RAD (471), un profil particulier, un feature flag ciblé ? Emily avait soulevé en 2026-02-18 que « cacher à tout le monde sauf eux » n'était pas souhaitable — comment tranche-t-on cette question d'accès ?
+
+#### #14746 — v2 prompt, prod#3: `unclear`
+
+- La description décrit un envoi mensuel automatique par email, et le commentaire du 2026-06-29 mentionne à la fois une adresse email de destination (<client address>) et une interface utilisateur permettant de choisir une période jusqu'à 1 mois : qu'est-ce qui est finalement demandé — un écran d'export avec téléchargement direct, un écran d'export qui déclenche l'envoi par email à <client address>, ou l'envoi automatique mensuel initial ? L'adresse email remplace-t-elle ou complète-t-elle l'interface ?
+- Où doit se trouver cette interface utilisateur d'export dans l'application (quel écran, quel menu) et qui y a accès (uniquement la société 471 - RAD ? un profil particulier ? une permission dédiée dans le FeatureTree ?)
+- Cette fonctionnalité remplace-t-elle l'export existant de la gestion commerciale (qui, d'après les commentaires de Bryan, ne convient pas au client) ou s'y ajoute-t-elle comme nouvel écran dédié ?
+- Pour la question posée par Emily le 2025-09-24 (« se base-t-on sur la date de création de la facture ou sur la date de facturation ? »), la réponse de Bryan « Date de création de la facture oui » est ambiguë : confirme-t-elle que c'est bien la date de création, ou valide-t-elle une des deux options sans trancher ?
+
+#### #14746 — v2 prompt, prod#4: `unclear`
+
+- La nature de la demande a change entre la description et le commentaire du 2026-06-29 : la description parle d'un envoi mensuel automatique par email, alors que le point 3 du 2026-06-29 impose « une interface utilisateur permettant de choisir une periode jusqu'a 1 mois ». L'UI remplace-t-elle l'envoi automatique mensuel, ou s'y ajoute-t-elle ?
+- Le meme commentaire du 2026-06-29 liste a la fois une adresse email de destination (<client address>, point 2) et une UI de selection de periode (point 3), sans dire comment les deux s'articulent : le fichier genere depuis l'UI est-il telecharge par l'utilisateur, envoye a <client address>, ou les deux ?
+- L'emplacement de la nouvelle UI dans l'application n'est pas precise : sur quel ecran (menu Exports, page societe RAD, gestion commerciale, autre) doit-elle apparaitre ?
+- L'acces a la fonctionnalite n'est pas defini : est-elle reservee aux utilisateurs de la societe 471 - RAD, ouverte a toutes les societes, ou soumise a un droit FeatureTree particulier ?
+- Il n'est pas dit si cette nouvelle fonctionnalite remplace un export existant (par exemple celui de la gestion commerciale evoque dans les commentaires) ou s'y ajoute.
+
+#### #14746 — v2 prompt, prod#5: `unclear`
+
+- La description demande un envoi mensuel automatique du rapport Excel, mais le commentaire de Bryan ALVES du 2026-06-29 decide d'une interface utilisateur permettant de choisir une periode jusqu'a 1 mois. L'interface remplace-t-elle l'envoi mensuel automatique, ou s'y ajoute-t-elle ?
+- Le commentaire du 2026-06-29 donne a la fois une adresse email de destination (<client address>) et une interface utilisateur. Quelle est la sortie attendue : un telechargement depuis l'interface, un envoi email a <client address> apres selection de la periode dans l'interface, ou les deux ? Si c'est un envoi email, qui est le destinataire final (le compte connecte ou toujours <client address>) ?
+- L'emplacement de l'interface utilisateur de selection de la periode n'est pas precise. Doit-elle etre dans l'espace de la societe RAD (par exemple sous /companies/r-a-d/...), dans la gestion commerciale, dans un ecran d'export dedie ? Et sous quel menu/onglet ?
+- Qui a acces a cette interface d'export ? Est-ce reserve aux utilisateurs de la societe RAD, a tous les utilisateurs avec un droit de FeatureTree particulier, au support, ou a d'autres profils ?
 
 #### #16341 — new prompt, prod: `unclear`
 
