@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **The activity note links the issue's page on the dashboard (Autodev #124).** The one note autodev keeps up to date on each GitLab issue said what was happening but not where to read the rest, so the full journal, the state and the error had to be found on the dashboard by hand. A new global key, `dashboard_url` (`~/.autodev/config.yml`, unset by default), is the dashboard's base URL as GitLab readers reach it; when it is set, the note's header line ends with a localized link to `/issues/<id>` — the autodev row, not the GitLab iid — and the label says an Autodev sign-in is required, since a GitLab user without an account lands on the sign-in page. Unset, the note is posted exactly as before, never an error; set to anything but an http(s) URL with a host (a blank included), the supervisor refuses to boot rather than putting a broken link on every ticket. Base and path are joined without `//`, so `https://autodev.netbird.modulotech.fr/` gives `…/issues/160`. The link lives in the header because it is the one line every writer keeps — the size cap keeps the first two lines, and no `replace_pattern` matches a header — and the header is rebuilt on every update: the 135 notes production already carries (08/10/2026) receive the link at their next update, a changed or removed `dashboard_url` is followed, and the header's version tag now names the version that last wrote the note. A first line that is not autodev's header is left as written.
+
 ## [1.0.0-alpha.56] - 2026-09-30
 
 ### Fixed
