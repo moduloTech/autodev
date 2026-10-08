@@ -336,6 +336,10 @@ class PipelineFixRebasesOnTheMrsTargetTest < Minitest::Test
                                      PipelineFixRebasesOnTheMrsTargetTest::FakePipeline.new(9, 'failed'))
     end
 
+    # The target's pipelines (Autodev #130): none finished, so no job is
+    # pre-existing and the fix path runs as this test expects.
+    def pipelines(_path, **_opts) = []
+
     def pipeline_jobs(_path, _pid, **_opts) = CODE_JOBS
 
     def issue(_path, iid)

@@ -106,6 +106,10 @@ module NetworkCutFixtures
     end
 
     def issue_notes(_path, _iid, **_opts) = FakePaginated.new([])
+    # The target's pipelines (Autodev #130): none finished, so no job is
+    # pre-existing and the fix path runs as this test expects.
+    def pipelines(_path, **_opts) = []
+
     def pipeline_jobs(_path, _pid, **_opts) = CODE_JOBS
     def user = FakeUser.new(1, 'autodev')
 

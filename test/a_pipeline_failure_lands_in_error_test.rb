@@ -28,6 +28,10 @@ module PipelineFailureHarness
 
   class StubClient
     def merge_request(_path, _iid) = FakeMr.new('opened', FakePipeline.new(9, 'failed'), 'master')
+    # The target's pipelines (Autodev #130): none finished, so no job is
+    # pre-existing and the fix path runs as this test expects.
+    def pipelines(_path, **_opts) = []
+
     def pipeline_jobs(_path, _pid, **_opts) = CODE_JOBS
   end
 

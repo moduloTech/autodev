@@ -753,7 +753,25 @@ ALLOWED_SWALLOWS = {
     # since Autodev #125 it goes through `answer`, and the clause re-raises every
     # `ApiUnavailableError` whose cause is not an HTTP response, so the round is
     # replayed next cycle.
-    'fetch_job_trace' => 'self-describing prose for an HTTP refusal; a cut raises'
+    'fetch_job_trace' => 'self-describing prose for an HTTP refusal; a cut raises',
+    # Autodev #130. The substitute is `nil` — no signature — and no signature is
+    # never comparable (`FailureSignature.explains?`), so the job stays the merge
+    # request's and is fixed as before: the substitute leans towards today's
+    # behaviour, not towards "pre-existing". Only for GitLab *answering* that the
+    # trace is unavailable; a request that never completed re-raises, so the poll
+    # aborts with the row untouched. Not `fetch_job_trace`'s placeholder text, which
+    # two unreadable traces would share and compare equal on.
+    'comparable_trace' => 'nil means no signature, which is never pre-existing; a cut raises'
+  },
+  'lib/autodev/pipeline_monitor/preexisting_failures.rb' => {
+    # A write. A retry GitLab did not take keeps the hold, and the next poll
+    # retries again; nothing is concluded from the failure.
+    'retry_held_pipeline' => 'write, not a read: the hold stays and the next poll retries'
+  },
+  'lib/autodev/pipeline_monitor/target_red_notice.rb' => {
+    # A write, and an announcement. `false` means the key is not recorded, so the
+    # next poll posts the comment again; nothing is concluded from the failure.
+    'post_preexisting_note' => 'write, not a read: false means the comment is posted again next poll'
   },
   'lib/autodev/review_skill_source.rb' => {
     # Three clauses, and they are the reason this file had to enter the perimeter:

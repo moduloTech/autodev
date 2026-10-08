@@ -137,7 +137,13 @@ class PipelineMonitor
     # No `detail:` — it renders through `web_errors_attention_detail` ("Job(s) en
     # cause : %{detail}"), so it may only carry a technical token, and there is no
     # failing job to name here.
+    #
+    # Except on a poll that held a pipeline the target branch keeps red (Autodev
+    # #130): that watch did reach a verdict, every poll of it — "not this merge
+    # request's failure" — and says so under its own reason.
     def give_up_on_watch(issue, days)
+      return give_up_on_red_target(issue, days) if @target_red_hold
+
       log "Issue ##{issue.issue_iid}: pipeline watch older than #{days} days → done"
       abandon_issue(issue, :pipeline_watch_expired, days: days)
     end
