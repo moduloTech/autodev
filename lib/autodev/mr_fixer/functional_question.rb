@@ -36,13 +36,8 @@ class MrFixer
     # threads already have, for `functional_answer_section`.
     def functional_question_asked?(issue, discussions)
       unasked = unasked_functional(issue, discussions)
-      if unasked.any?
-        ask_functional_question(issue, unasked)
-        return true
-      end
-
-      load_functional_answers(issue, discussions)
-      false
+      unasked.any? ? ask_functional_question(issue, unasked) : load_functional_answers(issue, discussions)
+      unasked.any?
     end
 
     def unasked_functional(issue, discussions)
@@ -95,19 +90,45 @@ class MrFixer
                 'the question stands, the ticket stays on the doing label'
     end
 
-    # The first round after the answer: the ticket goes back to the doing label,
-    # and the destination is spent. A todo label on an active row is not a
-    # handover (`LabelHandover#doing_dropped?`), so the window between the resume
-    # and this round closes nothing.
-    def resume_after_functional_answer(issue)
-      return unless issue.clarification_resume_to
+    # The first round after the answer. The wait lasted days, and the merge
+    # request may have been merged or closed meanwhile — `fixing_discussions`
+    # used to be entered only minutes after `PipelineMonitor` read its state. So
+    # the state is read first, and anything but `opened` sends the row back to
+    # the watch, whose MR-state branch decides (a merge is a delivery, a close a
+    # give-up, `locked` a wait); the destination is kept for the round that will
+    # follow if the merge request comes back. Otherwise the ticket goes back to
+    # the doing label and the destination is spent. A todo label on an active
+    # row is not a handover (`LabelHandover#doing_dropped?`), so the window
+    # between the resume and this round closes nothing.
+    #
+    # Answers true when the round must stop here.
+    def mr_ended_after_answer?(issue)
+      return false unless issue.clarification_resume_to
 
-      begin
-        apply_label_doing(issue.issue_iid)
-      rescue StandardError => e
-        log_error "Issue ##{issue.issue_iid}: could not repose the doing label (#{e.class}: #{e.message})"
+      unless merge_request_open?(issue)
+        hand_back_to_the_watch(issue)
+        return true
       end
+
+      repose_doing_label_after_answer(issue.issue_iid)
       issue.update(clarification_resume_to: nil)
+      false
+    end
+
+    def merge_request_open?(issue)
+      mr = GitlabHelpers.answer(:merge_request) { @client.merge_request(@project_path, issue.mr_iid) }
+      GitlabHelpers.field(mr, :state).to_s == 'opened'
+    end
+
+    def hand_back_to_the_watch(issue)
+      log "MR !#{issue.mr_iid} is no longer open after the requester answered — back to the pipeline watch"
+      issue.mr_ended_while_waiting!
+    end
+
+    def repose_doing_label_after_answer(iid)
+      apply_label_doing(iid)
+    rescue StandardError => e
+      log_error "Issue ##{iid}: could not repose the doing label (#{e.class}: #{e.message})"
     end
 
     # The human notes posted on the ticket after each answered thread was asked,
@@ -136,9 +157,10 @@ class MrFixer
       notes = Array((@functional_answers || {})[discussion[:id]])
       return '' if notes.empty?
 
-      quoted = notes.map { |note| "#{note.author&.name || 'Demandeur'} :\n\n#{note.body}" }.join("\n\n---\n\n")
-      "\n\n#### Décision du demandeur\n\nCe point relevait d'une décision produit. autodev a posé la question " \
-        "au demandeur sur le ticket, qui a répondu :\n\n#{quoted}\n\nApplique cette décision.\n"
+      quoted = notes.map { |note| "#{note.author&.name || 'Inconnu'} :\n\n#{note.body}" }.join("\n\n---\n\n")
+      "\n\n#### Réponses à la question produit\n\nCe point relevait d'une décision produit. autodev a posé " \
+        'la question au demandeur sur le ticket ; voici les commentaires publiés sur le ticket depuis :' \
+        "\n\n#{quoted}\n\nApplique la décision qu'ils expriment.\n"
     end
 
     def functional_question_body(issue, threads, gl_issue)
@@ -157,16 +179,9 @@ class MrFixer
     # The finding as the review wrote it, without what autodev added to it.
     def functional_gap(thread)
       body = Array(thread[:notes]).first&.body.to_s
-      body.sub(/\A#{Regexp.escape(ReviewPublisher::FUNCTIONAL_MARKER)}\n[^\n]*\n\n/, '')
-          .gsub(ReviewPublisher::FUNCTIONAL_MARKER, '').strip
+      body.sub(/\A#{Regexp.escape(ReviewPublisher::FUNCTIONAL_MARKER)}\n[^\n]*\n\n/, '').strip
     end
 
-    def functional_questions_of(issue)
-      raw = issue.functional_questions.to_s
-      data = raw.empty? ? {} : JSON.parse(raw)
-      data.is_a?(Hash) ? data : {}
-    rescue JSON::ParserError
-      {}
-    end
+    def functional_questions_of(issue) = Issue.parse_functional_questions(issue.functional_questions)
   end
 end

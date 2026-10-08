@@ -34,12 +34,15 @@ module FunctionalDivergenceFixtures
 
   class Client
     attr_reader :posted
-    attr_accessor :fail_post
+    attr_accessor :fail_post, :mr_state
 
-    def initialize(notes: [])
+    def initialize(notes: [], mr_state: 'opened')
       @notes = notes
+      @mr_state = mr_state
       @posted = []
     end
+
+    def merge_request(_path, _iid) = Struct.new(:state).new(mr_state)
 
     def issue(_path, iid) = GlIssue.new(iid, 'Export Excel RAD', nil, Author.new('Bryan Alves', AUTHOR))
 
@@ -101,7 +104,17 @@ class AFunctionalDivergenceAsksTheRequesterTest < Minitest::Test # rubocop:disab
     sink = @sink
     %i[log log_error].each { |noop| fix.define_singleton_method(noop) { |*| nil } }
     fix.define_singleton_method(:log_activity) { |_i, key, **vars| sink[:activity] << [key, vars] }
-    fix.define_singleton_method(:execute_fix_cycle) { |_i, discussions| sink[:cycles] << discussions }
+    stub_cycle_and_labels(fix)
+  end
+
+  def stub_cycle_and_labels(fix)
+    sink = @sink
+    # Writes the counter the real cycle writes, so a round that reached it
+    # cannot pass for one that did not.
+    fix.define_singleton_method(:execute_fix_cycle) do |i, discussions|
+      sink[:cycles] << discussions
+      i.update(discussion_fix_round: i.discussion_fix_round + 1)
+    end
     fix.define_singleton_method(:apply_label_todo) { |iid| sink[:labels] << [:todo, iid] }
     fix.define_singleton_method(:apply_label_doing) { |iid, **| sink[:labels] << [:doing, iid] }
   end
@@ -130,7 +143,7 @@ class AFunctionalDivergenceAsksTheRequesterTest < Minitest::Test # rubocop:disab
 
     assert_includes body, 'livraison automatique mensuelle vs. UI de sélection', 'states the gap'
     refute_includes body, ReviewPublisher::FUNCTIONAL_MARKER
-    refute_includes body, 'ne sera pas corrige dans le code', 'the review label is not the question'
+    refute_includes body, 'ne tranchera pas ce point seul', 'the review label is not the question'
   end
 
   def test_the_row_waits_in_needs_clarification_and_no_correction_runs
@@ -308,7 +321,7 @@ class AFunctionalDivergenceAsksTheRequesterTest < Minitest::Test # rubocop:disab
   def test_the_question_is_in_the_requests_locale
     body = asked(Client.new, fixing_issue(locale: 'en')).first.last
 
-    assert_includes body, 'was delivered'
+    assert_includes body, 'implements this ticket'
     refute_includes body, '%{', 'every placeholder is filled'
   end
 
@@ -371,8 +384,86 @@ class AFunctionalDivergenceAsksTheRequesterTest < Minitest::Test # rubocop:disab
     assert_nil row.clarification_resume_to
   end
 
+  def asked_ids(issue) = Issue.parse_functional_questions(Issue.find(issue.id).functional_questions).keys.sort
+
+  def reset_then_fix(issue)
+    Issue.reset_for_retry!(Issue.where(id: issue.id), reset_budget: true, clear_attention: true)
+    back_to_fixing(issue)
+  end
+
   def back_to_fixing(issue)
     Issue.where(id: issue.id).update_all(status: 'fixing_discussions', clarification_resume_to: nil)
+  end
+
+  # GitLab answered that the note cannot be created as formed (400/422): an
+  # `InvalidRequestError`, which still parks nothing.
+  def test_a_refused_question_parks_nothing
+    client = Client.new
+    client.fail_post = Gitlab::Error::BadRequest.new(
+      Struct.new(:parsed_response, :code, :request).new('bad', 400, Struct.new(:base_uri, :path).new('h', '/x'))
+    )
+    issue = fixing_issue
+
+    assert_raises(InvalidRequestError) { run_round(client, issue, [functional_thread]) }
+    assert_equal 'fixing_discussions', issue.reload.status
+  end
+
+  # A second review round adds a new functional thread: the first stays asked.
+  def test_a_second_question_keeps_the_first_on_record
+    issue = fixing_issue
+    run_round(Client.new, issue, [functional_thread('f-1')])
+    back_to_fixing(issue)
+
+    run_round(Client.new, Issue.find(issue.id), [functional_thread('f-1'), functional_thread('f-2')])
+
+    assert_equal %w[f-1 f-2], asked_ids(issue)
+  end
+
+  # The wait lasted days: a merge request merged, closed or mid-merge meanwhile
+  # is not fixed, the watch decides (adversarial review).
+  %w[merged closed locked].each do |state|
+    define_method("test_an_answer_after_the_merge_request_is_#{state}_goes_back_to_the_watch") do
+      issue = fixing_issue(clarification_resume_to: Issue::RESUME_TO_FIXING,
+                           functional_questions: JSON.generate('f-1' => '2026-08-29T10:00:00Z'))
+
+      run_round(Client.new(mr_state: state), issue, [functional_thread])
+
+      assert_equal ['checking_pipeline', []], [issue.reload.status, @sink[:cycles]]
+    end
+  end
+
+  def test_an_ended_merge_request_gets_no_doing_label
+    issue = fixing_issue(clarification_resume_to: Issue::RESUME_TO_FIXING)
+
+    run_round(Client.new(mr_state: 'merged'), issue, [functional_thread])
+
+    assert_empty @sink[:labels]
+  end
+
+  # An operator Reset of a row still waiting: the unanswered question is
+  # forgotten and asked again, never fixed with no decision (review of the
+  # branch). The question answered earlier stays answered.
+  def test_a_reset_while_waiting_asks_again_instead_of_fixing
+    client = Client.new
+    issue = fixing_issue(functional_questions: JSON.generate('f-0' => '2026-08-01T10:00:00Z'))
+    run_round(client, issue, [functional_thread('f-1')])
+    reset_then_fix(issue)
+
+    run_round(client, Issue.find(issue.id), [functional_thread('f-1')])
+
+    assert_equal 2, client.posted.size, 'asked again'
+    assert_equal %w[f-0 f-1], asked_ids(issue)
+  end
+
+  # A resumed row whose first round has not run yet has its answer: a Reset
+  # then keeps what was asked.
+  def test_a_reset_after_the_answer_keeps_the_question
+    issue = fixing_issue(clarification_resume_to: Issue::RESUME_TO_FIXING,
+                         functional_questions: JSON.generate('f-1' => '2026-08-29T10:00:00Z'))
+
+    Issue.reset_for_retry!(Issue.where(id: issue.id), reset_budget: true)
+
+    assert_equal ['f-1'], JSON.parse(Issue.find(issue.id).functional_questions).keys
   end
 
   # The skill is told what the field means — the field is the whole signal.

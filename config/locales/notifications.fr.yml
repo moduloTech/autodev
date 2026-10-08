@@ -5,7 +5,7 @@ fr:
   error_generic: ":x: %{tag} : echec — %{error}"
   spec_unclear_header: ":thinking: %{tag} : la specification necessite des precisions avant implementation."
   spec_unclear_footer: Merci de repondre a ces questions dans les commentaires. L'implementation reprendra automatiquement.
-  functional_question_header: ":thinking: %{tag} : %{mention}la merge request !%{mr_iid} a ete livree, mais sa revue a releve %{count} ecart(s) avec ce qui etait demande. Ce sont des decisions produit : autodev ne les tranchera pas seul dans le code."
+  functional_question_header: ":thinking: %{tag} : %{mention}la merge request !%{mr_iid} implemente ce ticket, mais sa revue a releve %{count} ecart(s) avec ce qui etait demande. Ce sont des decisions produit : autodev ne les tranchera pas seul dans le code."
   functional_question_footer: Merci d'indiquer en commentaire de ce ticket le comportement attendu pour chaque point. La merge request !%{mr_iid} reprendra automatiquement avec votre reponse, sans repartir de zero.
   question_answered_header: ":mag: %{tag} : reponse a la question"
   question_answered_footer: _Cette reponse a ete generee automatiquement par analyse du codebase. N'hesitez pas a demander des precisions._
@@ -60,7 +60,7 @@ fr:
 
     :arrow_right: **Vous souhaitez creuser davantage ou passer a une implementation ?** Laissez un commentaire pour me guider, remettez le label _%{label_todo}_, reassignez-moi, et c'est parti.
   review_summary: "<!-- autodev:review -->\n:mag: **autodev** — revue automatique (verdict : %{verdict})\n\n%{summary}"
-  review_functional_finding_label: "**Decision produit** — ce point ne sera pas corrige dans le code : %{tag} posera la question au demandeur sur le ticket."
+  review_functional_finding_label: "**Decision produit** — %{tag} ne tranchera pas ce point seul : il posera la question au demandeur sur le ticket, puis corrigera selon sa reponse."
   arrears_takeover: |-
     :arrows_counterclockwise: %{tag} : je reprends ce ticket.
 

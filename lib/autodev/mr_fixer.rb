@@ -120,8 +120,9 @@ class MrFixer
     DiscussionSnapshot.capture(context: :pre_mr_fix, client: @client,
                                project_path: @project_path, mr_iid: issue.mr_iid,
                                logger: @logger, issue: issue)
+    return if mr_ended_after_answer?(issue)
+
     discussions = settle_pending_resolutions(issue, discussions)
-    resume_after_functional_answer(issue)
     return transition_no_discussions(issue) if discussions.empty?
 
     # Asked before anything is fixed, and never counted (Autodev #121).

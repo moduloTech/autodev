@@ -870,10 +870,10 @@ ALLOWED_SWALLOWS = {
     # what is lost is a board column.
     'repose_entry_label_for_question' => 'a label write after the question is posted and the row parked; ' \
                                          'returns nothing, the wait is already on record',
-    # The first resumed round: the doing label is board honesty, not a verdict,
-    # and the round goes on to read the threads through `answer` either way.
-    'resume_after_functional_answer' => 'a label write on resume; returns nothing and the round that ' \
-                                        'follows reads GitLab through answer'
+    # The first resumed round, once the merge request was read open through
+    # `answer`: the doing label is board honesty, not a verdict.
+    'repose_doing_label_after_answer' => 'a label write on resume, after the MR state was read through ' \
+                                         'answer; returns nothing'
   },
   'lib/autodev/pipeline_monitor/skill_reviewer.rb' => {
     # This used to be one `clone_and_inject`, declared here as "no GitLab read
