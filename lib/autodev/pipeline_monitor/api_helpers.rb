@@ -3,6 +3,10 @@
 class PipelineMonitor
   # GitLab API interaction helpers for pipeline monitoring.
   module ApiHelpers
+    # How far back the latest finished target pipeline is looked for, newest
+    # first (Autodev #130).
+    TARGET_PIPELINES_SCANNED = 20
+
     private
 
     # The pipeline's full job list. There is no return value for "GitLab did not
@@ -62,6 +66,36 @@ class PipelineMonitor
 
       log_error "Failed to fetch job trace: #{e.cause.message}"
       "(trace unavailable: #{e.cause.message})"
+    end
+
+    # "Finished" is any status outside `RUNNING_STATUSES`: `manual` included,
+    # because that is how `master` ends on powerpanne (128 of the 304 target
+    # pipelines the measurement read). A canceled one has canceled jobs, so it
+    # explains nothing — which is the conservative answer.
+    #
+    # A read GitLab could not answer aborts the poll (Autodev #62): an unreadable
+    # target is not a green one, and reading it as one would fix a failure that
+    # may be the target's.
+    def latest_finished_target_pipeline(target)
+      pipelines = GitlabHelpers.answer(:target_pipelines) do
+        @client.pipelines(@project_path, ref: target, per_page: TARGET_PIPELINES_SCANNED)
+      end
+      pipelines.find { |candidate| !RUNNING_STATUSES.include?(GitlabHelpers.field(candidate, :status).to_s) }
+    end
+
+    # The trace, or nil when GitLab *answered* that it cannot serve it (expired,
+    # forbidden): no trace, no signature, and the job stays the merge request's.
+    # A request that never completed raises like every other read here — the same
+    # split `fetch_job_trace` makes, without its placeholder text, which two
+    # unreadable traces would share and compare equal on.
+    def comparable_trace(job)
+      jid = GitlabHelpers.field(job, :id)
+      GitlabHelpers.answer(:job_trace) { @client.job_trace(@project_path, jid) }.to_s
+    rescue ApiUnavailableError => e
+      raise unless e.cause.is_a?(::Gitlab::Error::ResponseError)
+
+      log_error "Trace of job #{jid} unavailable, not comparing it with the target: #{e.cause.message}"
+      nil
     end
 
     def pipeline_id(pipeline)

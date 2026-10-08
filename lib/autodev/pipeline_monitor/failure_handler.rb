@@ -62,7 +62,9 @@ class PipelineMonitor
       return if retrigger_if_needed(issue, pipeline, triage)
       return if infra_skip?(issue, triage, failed_jobs)
 
-      check_stagnation_and_fix(issue, failed_jobs, triage)
+      # The jobs already red on the target, for the same reason, are not this
+      # merge request's to fix nor to count (Autodev #130).
+      fix_own_failures(issue, pipeline, failed_jobs, triage)
     end
 
     def handle_no_failed_jobs(_issue, pipeline)
