@@ -1,6 +1,6 @@
 ---
 fr:
-  activity_dashboard_link: "[Fiche du ticket dans Autodev](%{url}) (connexion Autodev requise)"
+  activity_dashboard_link: "[Fiche du ticket dans Autodev](%{url}) (acces Autodev requis)"
   activity_header: ":robot: %{tag} — Journal d'activite"
   activity_started: ":rocket: Traitement demarre"
   activity_cloning: ":file_folder: Clonage du depot (%{detail})"

@@ -132,12 +132,12 @@ class ActivityLoggerDashboardLinkTest < Minitest::Test
     assert_equal expected_header(en, locale: :en), header_of(en)
   end
 
-  def test_the_label_is_a_markdown_link_that_says_a_sign_in_is_required
+  def test_the_label_is_a_markdown_link_that_says_access_is_required
     fr = Locales.t(:activity_dashboard_link, locale: :fr, url: 'u')
     en = Locales.t(:activity_dashboard_link, locale: :en, url: 'u')
 
-    assert_match(/\A\[[^\]]+\]\(u\) .*connexion Autodev requise/, fr)
-    assert_match(/\A\[[^\]]+\]\(u\) .*sign-in required/, en)
+    assert_match(/\A\[[^\]]+\]\(u\) .*acces Autodev requis/, fr)
+    assert_match(/\A\[[^\]]+\]\(u\) .*Autodev access required/, en)
   end
 
   def test_every_locales_header_starts_with_the_prefix_the_rewrite_guards_on
@@ -184,15 +184,18 @@ class ActivityLoggerDashboardLinkUpdateTest < Minitest::Test
     assert_equal expected_header(issue, locale: :en), header_of(issue)
   end
 
-  def test_a_replaced_line_keeps_the_link
+  # A row watching its pipeline writes nothing but `pipeline_checking` with a
+  # `replace_pattern`, so that path alone must bring the link to an old note.
+  def test_a_replaced_line_brings_the_link_to_an_old_note_and_keeps_it
     with_dashboard(BASE)
-    issue = create_issue
-    pattern = /— :mag:.*(?:pipeline|statut du pipeline)/
+    pattern = PipelineMonitor::PollTracker::POLL_LINE_PATTERN
+    poll = '- `09-22 17:00` — :mag: Interrogation du statut du pipeline depuis 1 min...'
+    issue = issue_with_note("#{legacy_body}\n#{poll}")
 
-    3.times { ActivityLogger.post(@ctx, issue, :pipeline_checking, since: '1 min', replace_pattern: pattern) }
+    2.times { ActivityLogger.post(@ctx, issue, :pipeline_checking, since: '2 min', replace_pattern: pattern) }
 
     assert_equal expected_header(issue), header_of(issue)
-    assert_equal 3, lines_of(issue).size
+    assert_equal 4, lines_of(issue).size
   end
 
   def test_the_size_cap_keeps_the_link

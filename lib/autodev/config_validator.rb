@@ -145,9 +145,12 @@ module ConfigValidator
   private_class_method :validate_web_bind!
 
   # Optional (Autodev #124): unset means the activity note carries no link.
-  # Set, it is refused unless it is an http(s) URL with a host — a blank would
-  # read as "unset" while looking configured, and anything else would put a
-  # broken link on the note of every ticket autodev touches.
+  # Set, it is refused unless it is an http(s) URL with a host and nothing
+  # else that cannot sit in front of `/issues/<id>` — a blank would read as
+  # "unset" while looking configured, a query or a fragment would swallow the
+  # path, a parenthesis closes the Markdown link early, and credentials
+  # (`https://user:pass@host`) would be published on the note of every
+  # ticket autodev touches.
   def self.validate_dashboard_url!(config)
     value = config['dashboard_url']
     return if value.nil? || http_url?(value)
@@ -158,10 +161,10 @@ module ConfigValidator
   private_class_method :validate_dashboard_url!
 
   def self.http_url?(value)
-    return false unless value.is_a?(String)
+    return false unless value.is_a?(String) && !value.match?(/[()]/)
 
     uri = URI.parse(value.strip)
-    uri.is_a?(URI::HTTP) && !uri.host.to_s.empty?
+    uri.is_a?(URI::HTTP) && !uri.host.to_s.empty? && [uri.userinfo, uri.query, uri.fragment].all?(&:nil?)
   rescue URI::InvalidURIError
     false
   end

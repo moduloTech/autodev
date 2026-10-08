@@ -89,7 +89,8 @@ class ConfigDashboardUrlTest < Minitest::Test
 
   def test_invalid_values_are_refused_naming_the_key
     ['', '   ', 'autodev.local', 'ftp://a.example/', 'https://', 'https:///issues', 42, ['https://a.example'],
-     'https://a example/'].each do |value|
+     'https://a example/', 'https://admin:s3cret@a.example/', 'https://a.example/?token=abc',
+     'https://a.example/#top', 'https://a.example/?', 'https://a.example/x)y', 'https://a.example/(x'].each do |value|
       error = assert_raises(ConfigError, value.inspect) do
         ConfigValidator.validate_globals!(BASE.merge('dashboard_url' => value))
       end
