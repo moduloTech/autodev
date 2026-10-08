@@ -178,8 +178,14 @@ request, or a human — the draw is not run and nothing reviewer-shaped is
 written. A re-delivery after a fix round must not hand the review to somebody
 else, and a human's choice is not autodev's to undo.
 
-**Every write is read back.** One `merge_request` read after the label and
-assignment writes: every added label present, every removed one absent, the
+**Three writes, in this order, each read back before the next**: the measured
+labels with the reviewer and the assignee; then the `MR::Reviewer::*` labels;
+then `MR::ReadyForReview`. The reviewer labels wait for the designation to land
+(adversarial review, reproduced): written together, a reviewer GitLab dropped
+left the labels behind, and the next delivery read them as "a reviewer is
+already designated", kept nobody and posted Ready.
+
+**Every write is read back.** One `merge_request` read after each write: every added label present, every removed one absent, the
 reviewer list exactly `[reviewer]`, the assignee the one written. Anything else
 is "did not land", named in the activity note, and stops before
 `MR::ReadyForReview`.
@@ -199,13 +205,20 @@ activity entry shows `—` for it. Ready is read back too.
 | Everything declared succeeded, reviewer drawn now | size, coverage, reviewer labels, reviewer, assignee, Ready | `review_handoff_ready` |
 | Same, reviewer already present (kept) | size, coverage, Ready | `review_handoff_ready_reviewer_kept` |
 | Same, project declares no draw | size, coverage, Ready | `review_handoff_ready_no_draw` |
-| Draw exit 2 (People absence check failed) | size, coverage | `review_handoff_no_reviewer_absences` |
+| Draw exit 2 (People absence check failed) | size, coverage (the entry names exactly what was written) | `review_handoff_no_reviewer_absences` |
 | Draw `postponed` (pool too small) | size, coverage | `review_handoff_no_reviewer_postponed` |
 | Draw failed otherwise / unreadable output | size, coverage | `review_handoff_no_reviewer_draw_failed` |
 | Drawn user or its label unknown | size, coverage | `review_handoff_no_reviewer_unresolved` |
 | Size not measured (script failed, no diff_refs) | nothing | `review_handoff_not_measured` |
 | A write did not read back | what landed | `review_handoff_not_landed` |
 | Anything else (clone, GitLab outage, container) | what landed | `review_handoff_failed` |
+
+An entry quotes a failed script's **exit code, never its output**: the
+activity note is public on the ticket, and `reviewer_draw`'s exit-2 line
+quotes the People API's error, which on an unreadable payload can carry the
+absences the skill forbids publishing (confidentiality review: reproduced with
+the json gem Ruby 3.2.3 ships, 2.6.3). The stderr tail goes to autodev's log,
+scrubbed.
 
 On exit 2 the owner's rule is literal: no reviewer, never a guessed one, and
 the note says the absence check could not be made. The skill forbids working
@@ -230,8 +243,9 @@ plus one fetch, three container runs (~3.5 s each measured, once the project's
 Ruby is in danger-claude's mise volume), and at most five GitLab requests
 (one merge request read, one label list, one user read per drawn developer, two
 writes and two read-backs). Once per delivery, inside the `check_pipeline` job
-that delivered. Each container run is bounded by the project's `dc_timeout`
-(`ProcessRunner#run_with_timeout`).
+that delivered. Each container run is bounded by `SCRIPT_TIMEOUT` (600 s), not `dc_timeout`
+(default 1800 s): three runs of the latter would outlive the one-hour
+`limits_concurrency` semaphore the job holds (adversarial review).
 
 ## Assumptions written down
 
