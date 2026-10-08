@@ -96,7 +96,7 @@ module RedTargetFixtures
       raise api_error if @pipelines_down
       raise "unexpected ref #{opts[:ref]}" unless opts[:ref] == @target_branch
 
-      @target_pipelines
+      @target_pipelines.first(opts.fetch(:per_page, 20))
     end
 
     # Any pipeline that is not one of the target's is the merge request's.
@@ -495,7 +495,8 @@ class HeldPipelineTest < Minitest::Test
 
     mon.check(issue.reload)
 
-    assert_equal [[MR_PIPELINE], [], nil], [client.retries, calls[:fixed], issue.reload.target_red_hold_pipeline_id],
+    assert_equal [[MR_PIPELINE], [], nil, nil],
+                 [client.retries, calls[:fixed], issue.reload.target_red_hold_pipeline_id, issue.target_red_hold_key],
                  'expected one retry, no fix on that poll, and the hold released'
   end
 
@@ -509,7 +510,8 @@ class HeldPipelineTest < Minitest::Test
 
     mon.check(issue.reload)
 
-    assert naming?(client.notes, 'master', 'relanc'), "no activity line for the retry: #{client.notes}"
+    assert naming?(client.notes, 'master ne montre plus le meme echec'),
+           "no activity line for the retry: #{client.notes}"
   end
 
   # Released by the retry, the next failure on that pipeline is no longer the
@@ -542,6 +544,18 @@ class HeldPipelineTest < Minitest::Test
     # names it by its number.
     assert naming?(client.notes, 'test', 'master', TARGET_URL),
            "the give-up does not name the job, the target and its pipeline: #{client.notes.inspect}"
+  end
+
+  # The watch card's "Job(s) en cause" reads the detail.
+  def test_the_give_up_records_the_jobs_as_its_detail
+    client = FakeClient.new
+    preexisting_test_job(client)
+    mon, = monitor(client)
+    issue = watched_issue(since: 15.days.ago)
+
+    mon.check(issue)
+
+    assert_equal 'test', issue.reload.attention_detail
   end
 
   # The hold column outlives the poll that wrote it. A watch that expires on a
@@ -579,11 +593,16 @@ module PreexistingEdgeHelpers
     [mon, calls, issue.reload]
   end
 
-  # Two held jobs, `test` and `lint`; then a target pipeline where `lint` is green.
-  def hold_two_then_recover_one(client)
+  # A second red job, `lint`, red on the target for the same reason.
+  def add_held_lint_job(client)
     client.mr_jobs << RedTargetFixtures.job(2, 'lint')
     client.target_jobs[TARGET_PIPELINE] << RedTargetFixtures.job(102, 'lint')
     client.traces.merge!(2 => GIT_FAILURE, 102 => GIT_FAILURE)
+  end
+
+  # Two held jobs, `test` and `lint`; then a target pipeline where `lint` is green.
+  def hold_two_then_recover_one(client)
+    add_held_lint_job(client)
     result = held(client)
     client.target_pipelines = [FakeClient::GlPipeline.new(id: 9005, status: 'failed', web_url: 'u5')]
     client.target_jobs[9005] = [RedTargetFixtures.job(101, 'test'),
@@ -773,6 +792,86 @@ class PreexistingAnnouncementEdgesTest < Minitest::Test
       3.times { mon.check(issue.reload) }
 
       assert_equal(1, client.notes.sum { |note| note.scan(line).size })
+    end
+  end
+end
+
+# The second round of gaps, found by mutating the code under the tests above.
+class PreexistingSabotageGapsTest < Minitest::Test
+  include DatabaseTestHelper
+  include PreexistingEdgeHelpers
+
+  def setup = setup_database
+
+  # The comment is written in the request's language.
+  def test_the_merge_request_comment_is_in_the_requests_language
+    client = preexisting_client
+    mon, = monitor(client)
+
+    mon.check(watched_issue(locale: 'en'))
+
+    assert naming?(client.mr_notes, 'already fails on `master`'), "not in English: #{client.mr_notes}"
+  end
+
+  # A stale hold from another pipeline is released by a round that fixes.
+  def test_a_round_that_fixes_releases_a_stale_hold
+    client = FakeClient.new
+    two_red_jobs(client)
+    mon, = monitor(client)
+    issue = watched_issue(target_red_hold_pipeline_id: 5000, target_red_hold_key: 'stale')
+
+    mon.check(issue)
+
+    assert_equal [nil, nil], [issue.reload.target_red_hold_pipeline_id, issue.target_red_hold_key]
+  end
+
+  # Matched by name: the target's `lint`, failing on the very examples `test`
+  # fails on here, is not `test` — whose own failure on the target is another one.
+  def test_the_target_job_is_found_by_name
+    client = preexisting_client
+    client.target_jobs[TARGET_PIPELINE].unshift(RedTargetFixtures.job(100, 'lint'))
+    client.traces[100] = SPEC_FAILURE
+    client.traces[101] = GIT_FAILURE
+    mon, calls = monitor(client)
+
+    mon.check(watched_issue)
+
+    assert_equal [['test']], calls[:fixed]
+  end
+
+  # The same red jobs served in another order are the same hold.
+  def test_the_hold_key_does_not_depend_on_the_job_order
+    client = preexisting_client
+    add_held_lint_job(client)
+    mon, _, issue = held(client)
+    reads = client.trace_reads
+    client.mr_jobs.reverse!
+
+    mon.check(issue)
+
+    assert_equal reads, client.trace_reads
+  end
+
+  # The newest finished pipeline may sit behind running ones: the scan goes
+  # TARGET_PIPELINES_SCANNED deep.
+  def test_the_scan_reaches_past_running_pipelines
+    client = preexisting_client
+    running = (1..5).map { |i| FakeClient::GlPipeline.new(id: 9100 + i, status: 'running', web_url: 'r') }
+    client.target_pipelines = running + client.target_pipelines
+    mon, calls = monitor(client)
+
+    mon.check(watched_issue)
+
+    assert_empty calls[:fixed]
+  end
+
+  [Net::ReadTimeout.new, EOFError.new, FakeClient.response_error(502)].each do |error|
+    define_method(:"test_a_comment_lost_to_#{error.class.name.gsub('::', '_')}_does_not_fail_the_poll") do
+      client = preexisting_client
+      client.failures[:mr_note] = error
+      _, _, issue = held(client)
+
+      assert_equal ['checking_pipeline', nil], [issue.status, issue.preexisting_noted_key]
     end
   end
 end

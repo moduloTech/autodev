@@ -77,6 +77,24 @@ class FailureSignatureTest < Minitest::Test
     assert Sig.explains?(Sig.of(trace(%w[alpha beta] + tail)), Sig.of(trace(%w[gamma] + tail)))
   end
 
+  # Durations and counts move between any two runs of the same failure.
+  def test_numbers_are_normalised_in_the_tail
+    target = Sig.of(trace(['$ bundle exec rake', 'Net::ReadTimeout after 75002 ms', 'exit code 1']))
+    mr = Sig.of(trace(['$ bundle exec rake', 'Net::ReadTimeout after 81230 ms', 'exit code 1']))
+
+    assert Sig.explains?(target, mr)
+  end
+
+  # A short script keeps the runner's own section markers inside the window; their
+  # ids differ on every run and say nothing about the failure.
+  def test_section_markers_are_not_part_of_the_tail
+    target = "section_start:1782923484:step_script\r\nfatal: boom\nsection_end:1782923490:step_script\r"
+    mr = "section_start:1999999999:prepare_script\r\nfatal: boom\nsection_end:2000000001:step_script\r"
+
+    assert_equal [:tail, ['fatal: boom']], Sig.of(mr)
+    assert Sig.explains?(Sig.of(target), Sig.of(mr))
+  end
+
   # The whole window counts, not only its last line.
   def test_a_different_line_inside_the_window_is_not_explained
     refute Sig.explains?(Sig.of(trace(%w[a b X d e])), Sig.of(trace(%w[a b Y d e])))

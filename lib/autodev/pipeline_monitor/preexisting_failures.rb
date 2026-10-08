@@ -132,7 +132,9 @@ class PipelineMonitor
       issue.update(target_red_hold_pipeline_id: nil, target_red_hold_key: nil) if issue.target_red_hold_pipeline_id
     end
 
-    # The target no longer explains every red job of the held pipeline: retry it
+    # The target no longer explains every red job of the held pipeline — it shows
+    # another failure, a green job, or evidence that can no longer be compared (a
+    # truncated trace, no finished pipeline): retry it
     # (the owner's decision) rather than fix it. The run was made against the
     # target as it was; if it fails again, the target does not explain it any more
     # and the next poll fixes it as before — on a branch the fix path rebases on

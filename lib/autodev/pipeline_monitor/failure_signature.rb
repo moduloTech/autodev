@@ -5,10 +5,12 @@ class PipelineMonitor
   #
   # The job's name does not. Measured on the 318 pipeline-fix rounds production
   # recorded up to 08/10/2026: 42 failed a job that was also red, by name, on the
-  # target branch at that moment, and 36 of those 42 were a different failure — on
-  # 16/09 `master` failed `test:main` in `bundle install` (a git clone error, 95
-  # lines) while three merge requests failed `test:main` on real spec failures.
-  # Read by name, those three would have been left unfixed.
+  # target branch at that moment, and only 6 of those 42 carry a failure the
+  # target accounts for. In 7 the failure is demonstrably another one — on
+  # 01/07, powerpanne 15349's `test` failed three spec examples while `staging`'s
+  # `test` had stopped after 46 seconds naming no failed example — and the other 29 cannot
+  # be compared at all, their traces being truncated. Read by name, all 36 would
+  # have been left unfixed.
   #
   # Two facts about the traces decided the rule. powerpanne's test jobs regularly
   # exceed GitLab's 4 MiB trace limit, and the tail of a truncated trace is the

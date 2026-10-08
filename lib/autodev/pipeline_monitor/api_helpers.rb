@@ -69,7 +69,7 @@ class PipelineMonitor
     end
 
     # "Finished" is any status outside `RUNNING_STATUSES`: `manual` included,
-    # because that is how `master` ends on powerpanne (128 of the 304 target
+    # because that is how `master` ends on powerpanne (33 of the 80 distinct target
     # pipelines the measurement read). A canceled one has canceled jobs, so it
     # explains nothing — which is the conservative answer.
     #
