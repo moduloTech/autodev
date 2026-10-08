@@ -5,6 +5,7 @@ module ProjectValidator
   def self.validate!(project_config, path)
     validate_numerics!(project_config, path)
     validate_post_completion!(project_config, path)
+    validate_review_handoff!(project_config, path)
     validate_clone_options!(project_config, path)
     validate_labels!(project_config, path)
     validate_optional_string_fields!(project_config, path)
@@ -48,6 +49,28 @@ module ProjectValidator
     raise ConfigError, "#{path}: 'post_completion' must be a non-empty array of strings."
   end
   private_class_method :validate_post_completion_cmd!
+
+  REVIEW_HANDOFF_KEYS = %w[review_size_command review_coverage_command reviewer_draw_command].freeze
+
+  # Autodev #90. Each declared script is a command array; coverage and the draw
+  # mean nothing without the size, which routes the draw and gates every write.
+  def self.validate_review_handoff!(project_config, path)
+    REVIEW_HANDOFF_KEYS.each do |key|
+      next if !project_config.key?(key) || command_array?(project_config[key])
+
+      raise ConfigError, "#{path}: '#{key}' must be a non-empty array of strings."
+    end
+    return if project_config.key?('review_size_command')
+
+    orphan = REVIEW_HANDOFF_KEYS.drop(1).find { |key| project_config.key?(key) }
+    raise ConfigError, "#{path}: '#{orphan}' is set but 'review_size_command' is missing." if orphan
+  end
+  private_class_method :validate_review_handoff!
+
+  def self.command_array?(cmd)
+    cmd.is_a?(Array) && cmd.any? && cmd.all?(String)
+  end
+  private_class_method :command_array?
 
   # `post_completion_timeout` and `clone_depth` are numeric, so their bounds are
   # applied by `validate_numerics!` from their NumericSettings declaration. What

@@ -224,6 +224,13 @@ module KeySites # rubocop:disable Metrics/ModuleLength
     'app/helpers/web/i18n_helpers.rb Locales.t' => "`t_web`'s delegation — the `web_` literals",
     'lib/autodev/numeric_settings.rb Locales.t' => '`MESSAGE_KEYS`, two literal `cli_` symbols',
     'app/services/autodev/ticket_reclaim.rb Locales.t' => "`reclaim!`'s `message_key:` argument",
+    # The review handoff's outcome travels through `Stop` / `ready_entry`
+    # (Autodev #90); its family is `ReviewHandoffVocabulary::OUTCOMES`.
+    'lib/autodev/pipeline_monitor/review_handoff.rb log_activity' =>
+      '`PipelineMonitor::ReviewHandoffVocabulary::OUTCOMES` (`activity_<key>`), derived from the code and rendered ' \
+      'in both locales by `test/an_autodev_mr_reaches_its_reviewer_test.rb`',
+    'lib/autodev/pipeline_monitor/review_handoff_writes.rb log_activity' =>
+      '`PipelineMonitor::ReviewHandoffVocabulary::OUTCOMES`, as above',
     # The flag the watch writes is the key of its activity line (Autodev #86).
     'app/services/autodev/clarification_watch.rb ActivityLogger.warn_event' =>
       '`ClarificationWatch::REASONS` (`activity_<reason>`), iterated by ' \
