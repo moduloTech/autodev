@@ -141,10 +141,11 @@ module ActivityLogger # rubocop:disable Metrics/ModuleLength
   # receives it, and a changed or removed `dashboard_url` is followed. Its
   # version tag then names the version that last wrote the note.
   def self.refresh_header(body, issue)
-    first, rest = body.split("\n", 2)
-    return body unless first&.start_with?(HEADER_PREFIX)
+    parts = body.split("\n", 2)
+    return body unless parts.first&.start_with?(HEADER_PREFIX)
 
-    rest.nil? ? header_line(issue) : "#{header_line(issue)}\n#{rest}"
+    parts[0] = header_line(issue)
+    parts.join("\n")
   end
 
   # GitLab refuses notes over 1,000,000 chars. We aim well below so a slightly longer

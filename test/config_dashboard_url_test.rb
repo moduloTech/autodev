@@ -84,6 +84,7 @@ class ConfigDashboardUrlTest < Minitest::Test
   def test_http_and_https_pass_validation
     ConfigValidator.validate_globals!(BASE.merge('dashboard_url' => OWNER_VALUE))
     ConfigValidator.validate_globals!(BASE.merge('dashboard_url' => 'http://127.0.0.1:4567'))
+    ConfigValidator.validate_globals!(BASE.merge('dashboard_url' => " https://a.example/ \n"))
   end
 
   def test_invalid_values_are_refused_naming_the_key

@@ -166,6 +166,15 @@ class ActivityLoggerDashboardLinkUpdateTest < Minitest::Test
     assert_equal 4, lines.size
   end
 
+  def test_a_note_that_holds_only_its_header_is_rebuilt
+    with_dashboard(BASE)
+    issue = issue_with_note(LEGACY_HEADERS[:fr])
+
+    ActivityLogger.post(@ctx, issue, :started)
+
+    assert_equal expected_header(issue), header_of(issue)
+  end
+
   def test_an_english_note_is_rebuilt_in_english
     with_dashboard(BASE)
     issue = issue_with_note(legacy_body(:en), locale: 'en')
