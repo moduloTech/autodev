@@ -81,7 +81,13 @@ A failed blocking job of the merge request's pipeline is **pre-existing** when:
      failure and is fixed as today;
    - **tail** signature otherwise: the last 5 non-blank lines, ignoring the
      runner's `WARNING: Event retrieved from the cluster` lines, with digits
-     replaced by `N` and hex runs of 7+ by `H`. Explained when equal.
+     replaced by `N` and hex runs of 7+ by `H`, **plus** the set of exception
+     classes the section names (`Mysql2::Error::ConnectionError`, `NameError`…).
+     Explained when both are equal. The class set was added on review: the
+     parallel runner ends every failure that is not a failed example on the same
+     five lines ("Tests Failed", "N errors, N examples, N failures", "Took N
+     seconds"), so the tail alone let a `NameError` the merge request introduced
+     read as the target's database outage. Re-measured with it: still 6 of 42.
 
 The rule errs towards "own": every unknown (no target, no finished pipeline in
 the last 20, no matching job, an unreadable or truncated trace, different
