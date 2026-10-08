@@ -11,6 +11,11 @@ module ActivityLogger # rubocop:disable Metrics/ModuleLength
     @tag ||= "**autodev** (v#{Autodev::VERSION})".freeze
   end
 
+  # How every locale's `activity_header` begins, and the guard `upsert` reads
+  # before it rebuilds line 0: a first line that does not start with it is not
+  # autodev's header, so it is left as written (Autodev #124).
+  HEADER_PREFIX = ':robot: **autodev**'
+
   # Lightweight context for standalone callers that lack DangerClaudeRunner.
   Ctx = Struct.new(:client, :project_path, :logger)
 
@@ -116,10 +121,31 @@ module ActivityLogger # rubocop:disable Metrics/ModuleLength
   end
 
   def self.create(ctx, issue, first_entry)
+    note = ctx.client.create_issue_note(ctx.project_path, issue.issue_iid, "#{header_line(issue)}\n\n#{first_entry}")
+    issue.update(activity_note_id: note.id)
+  end
+
+  # The note's first line: the localized header and, when `dashboard_url` is
+  # configured, a link to the issue's page on the dashboard (Autodev #124).
+  # The link lives here because line 0 is the one line every writer keeps —
+  # `enforce_size_cap` keeps the first two, and no `replace_pattern` matches
+  # a header — so no update can drop it.
+  def self.header_line(issue)
     locale = (issue.locale || 'fr').to_sym
     header = Locales.t(:activity_header, locale: locale, tag: tag)
-    note = ctx.client.create_issue_note(ctx.project_path, issue.issue_iid, "#{header}\n\n#{first_entry}")
-    issue.update(activity_note_id: note.id)
+    url = Config.dashboard_issue_url(defined?(::Web) ? ::Web.config : nil, issue.id)
+    url ? "#{header} · #{Locales.t(:activity_dashboard_link, locale: locale, url: url)}" : header
+  end
+
+  # Rebuild line 0 on every update, so a note written before the link existed
+  # receives it, and a changed or removed `dashboard_url` is followed. Its
+  # version tag then names the version that last wrote the note.
+  def self.refresh_header(body, issue)
+    parts = body.split("\n", 2)
+    return body unless parts.first&.start_with?(HEADER_PREFIX)
+
+    parts[0] = header_line(issue)
+    parts.join("\n")
   end
 
   # GitLab refuses notes over 1,000,000 chars. We aim well below so a slightly longer
@@ -128,7 +154,8 @@ module ActivityLogger # rubocop:disable Metrics/ModuleLength
 
   def self.upsert(ctx, issue, note_id, entry, pattern)
     note = ctx.client.issue_note(ctx.project_path, issue.issue_iid, note_id)
-    body = pattern ? replace_or_append(note.body, entry, pattern) : "#{note.body}\n#{entry}"
+    current = refresh_header(note.body, issue)
+    body = pattern ? replace_or_append(current, entry, pattern) : "#{current}\n#{entry}"
     body = enforce_size_cap(body, issue) if body.length > MAX_NOTE_BYTES
     ctx.client.edit_issue_note(ctx.project_path, issue.issue_iid, note_id, body)
   rescue Gitlab::Error::NotFound
@@ -192,7 +219,7 @@ module ActivityLogger # rubocop:disable Metrics/ModuleLength
   private_class_method :build_entry, :create, :upsert, :replace_or_append, :persist_event!,
                        :enforce_size_cap, :take_tail_within, :truncation_marker,
                        :strip_existing_marker, :budget_for, :last_collapsible_event,
-                       :like_escape, :supersede!, :payload_for
+                       :like_escape, :supersede!, :payload_for, :header_line, :refresh_header
 
   # Instance method for processors (uses @client, @project_path from DangerClaudeRunner).
   private

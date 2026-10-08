@@ -1,5 +1,6 @@
 ---
 en:
+  activity_dashboard_link: "[Autodev page for this ticket](%{url}) (Autodev access required)"
   activity_header: ":robot: %{tag} — Activity log"
   activity_started: ":rocket: Processing started"
   activity_cloning: ":file_folder: Cloning repository (%{detail})"
