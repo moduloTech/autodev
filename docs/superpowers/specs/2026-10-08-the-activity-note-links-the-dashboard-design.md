@@ -23,7 +23,9 @@ wants the full journal, the state or the error has to find the row by hand.
 1. **Config key `dashboard_url`**, global, `Config::DEFAULTS['dashboard_url'] = nil`
    (owner). Unset → the note is posted without a link and nothing fails. When
    set, `ConfigValidator` refuses at boot anything that is not an `http`/`https`
-   URL with a host — including a present-and-blank value, the repository's rule
+   URL with a host and no credentials, query or fragment (credentials would be
+   published on every note; a query or fragment swallows `/issues/<id>`, a parenthesis closes the Markdown link) —
+   including a present-and-blank string (a bare `dashboard_url:` key loads as nil, i.e. unset), the repository's rule
    for optional strings (`mr_review_token`, `OPTIONAL_STRING_FIELDS`): a blank
    would read as "unset" while looking configured, and a malformed one would put
    a broken link on every note of every ticket.
@@ -36,7 +38,7 @@ wants the full journal, the state or the error has to find the row by hand.
    base with a path prefix (a reverse proxy mounting autodev under `/autodev/`)
    keeps it.
 3. **The link lives in the header line (line 0)**, appended after the existing
-   header text: `":robot: **autodev** (v…) — Journal d'activite · [Fiche du ticket dans Autodev](url) (connexion Autodev requise)"`.
+   header text: `":robot: **autodev** (v…) — Journal d'activite · [Fiche du ticket dans Autodev](url) (acces Autodev requis)"`.
    Line 0 is the one line every writer already preserves — `enforce_size_cap`
    keeps the first two lines, `replace_or_append` matches entries only (the
    header begins with `:robot:`, no entry pattern matches it). A separate line
@@ -51,11 +53,13 @@ wants the full journal, the state or the error has to find the row by hand.
    `activity_header` start with — a test derives that from the two tables), so
    a note whose first line is not autodev's header is never overwritten. The
    upsert makes no extra GitLab call: it already reads and edits the note.
-5. **The label says a sign-in is required** (localized fr + en,
-   `activity_dashboard_link`): the page sits behind `authenticate_user!` and a
-   GitLab user without an Autodev account lands on `/sign_in`. Saying so costs
-   four words and saves a reader the surprise (owner: accepted, label at our
-   discretion).
+5. **The label says Autodev access is required** (localized fr + en,
+   `activity_dashboard_link`, ASCII like every string posted on GitLab): the
+   page sits behind `authenticate_user!`, so a GitLab user without an Autodev
+   account lands on `/sign_in`, and a signed-in user who is not a member of
+   the project gets a 404 (`issues_dataset` scopes to `visible_project_paths`).
+   "Access" covers both; "sign-in" alone would be untrue for the second (owner:
+   accepted, label at our discretion; wording changed after the domain review).
 
 ## Assumptions
 
