@@ -72,7 +72,7 @@ class ModelSettingsDeprecationTest < Minitest::Test # rubocop:disable Metrics/Cl
     output = @logger.messages.join("\n")
 
     assert_includes output, 'group/proj'
-    assert_includes output, 'effort'
+    assert_includes output, "'effort' = high"
   end
 
   def test_one_line_per_setting_plus_a_header

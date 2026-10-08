@@ -157,12 +157,17 @@ module Config # rubocop:disable Metrics/ModuleLength
   # and setting either is signalled: a boot warning (`bin/autodev`) and a
   # notice under the field on the project form.
   #
-  # What removal changes: every danger-claude call runs on Claude Code's own
-  # default model and effort, except the two that pass `model: 'haiku'` by
-  # design — the complexity evaluation (`Implementer`) and the pipeline-failure
-  # evaluation (`PipelineMonitor::Evaluator`), cheap JSON tasks. Today a global
-  # `model` overrides that per-call default too, so removal is what gives them
-  # haiku back.
+  # What removal changes: no call passes `-m` / `-e` from configuration any
+  # more. A call with no agent and no per-call model — the spec check, the
+  # question investigation — runs on Claude Code's default model. A call made
+  # with an agent runs on the model the agent declares: the built-in
+  # implementer, test-writer and mr-fixer agents (`IssueProcessor::Agents`,
+  # `MrFixer::AgentInjector`) declare `model: sonnet`, so implementation and MR
+  # fixing move from the global Opus 4.7 to Sonnet. The two calls that pass
+  # `model: 'haiku'` by design — the complexity evaluation (`Implementer`) and
+  # the pipeline-failure evaluation (`PipelineMonitor::Evaluator`), cheap JSON
+  # tasks — get haiku back: a global `model` overrides that per-call default
+  # today. Effort becomes Claude Code's default everywhere.
   DEPRECATED_MODEL_SETTINGS = %w[model effort].freeze
 
   # Every deprecated model setting in force, globals first, then each project

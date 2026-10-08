@@ -3,7 +3,7 @@ fr:
   cli_numeric_setting_out_of_range: "%{project} : '%{field}' = %{value} est hors bornes (entier attendu entre %{min} et %{max})."
   cli_numeric_setting_not_a_number: "%{project} : '%{field}' = %{value} n'est pas un entier (attendu entre %{min} et %{max})."
   cli_mr_review_missing: "mr-review n'est pas installé : l'étape de revue sera ignorée pour les projets qui ne déclarent pas de `review_skill`."
-  cli_model_settings_deprecated_header: "%{count} réglage(s) `model` / `effort` dépréciés : ils sont encore lus, mais seront supprimés — retirez-les pour que danger-claude utilise son modèle et son effort par défaut."
+  cli_model_settings_deprecated_header: "%{count} réglage(s) `model` / `effort` dépréciés : ils sont encore lus, mais seront supprimés — retirez-les pour que chaque appel reprenne le modèle et l'effort qu'il a sans eux."
   cli_model_settings_deprecated_global: "config.yml : '%{field}' = %{value} (déprécié)."
   cli_model_settings_deprecated_project: "%{project} : '%{field}' = %{value} (déprécié, à vider dans le formulaire du projet)."
   cli_boot_guard_orphan_found: "Processus orphelin détecté au démarrage : %{name} (pid=%{pid}), enfant d'un superviseur précédent dont le groupe de processus %{pgid} n'a plus de chef, gardant %{db_path} ouvert."

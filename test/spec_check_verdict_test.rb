@@ -32,10 +32,15 @@ class SpecCheckVerdictTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
   # Records the comments posted; every other GitLab call answers something
   # inert, so the paths after the verdict run without reaching the network.
   class Client
-    attr_reader :notes
+    attr_reader :notes, :label_writes
 
-    def initialize = @notes = []
-    def issue(_path, _iid) = Struct.new(:labels, :state, :author, :assignees).new(['To do'], 'opened', nil, [])
+    # The ticket carries the working label, as it does while the check runs.
+    def initialize
+      @notes = []
+      @label_writes = []
+    end
+
+    def issue(_path, _iid) = Struct.new(:labels, :state, :author, :assignees).new(['Doing'], 'opened', nil, [])
     def issue_notes(*, **) = Paginated.new([])
 
     def create_issue_note(_path, _iid, body)
@@ -44,7 +49,7 @@ class SpecCheckVerdictTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
     end
 
     def edit_issue_note(*) = nil
-    def edit_issue(*, **) = nil
+    def edit_issue(_path, _iid, **opts) = @label_writes << opts[:labels]
     def user = Struct.new(:id).new(1)
   end
 
@@ -177,10 +182,11 @@ class SpecCheckVerdictTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
     assert_equal 'needs_clarification', @issue.reload.status
   end
 
-  # Two well-formed objects: the last one is the answer the model ended on.
-  def test_the_last_verdict_is_the_answer
-    halted = check('Exemple : {"type": "implementation", "issues": []}. ' \
-                   'Ma reponse : {"type": "unclear", "issues": ["Quel ecran ?"]}')
+  # Two well-formed verdicts: the first is read, as before #122. An example
+  # written after the answer must not reverse it.
+  def test_the_first_verdict_is_the_answer
+    halted = check('{"type": "unclear", "issues": ["Quel ecran ?"]} ' \
+                   'Une spec claire donnerait {"type": "implementation", "issues": []}')
 
     assert halted
     assert_equal 'needs_clarification', @issue.reload.status
@@ -193,5 +199,85 @@ class SpecCheckVerdictTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
 
     assert halted
     assert_equal 'needs_clarification', @issue.reload.status
+  end
+
+  # A parked request goes back to the entry label, where `dispatch_new_issues`
+  # re-reads it (Autodev #75); a cleared one does not.
+  def test_unclear_reposes_the_entry_label
+    check('{"type": "unclear", "issues": ["Quel ecran ?"]}')
+
+    assert(@client.label_writes.any? { |labels| labels.to_s.include?('To do') })
+  end
+
+  def test_implementation_leaves_the_labels_alone
+    check('{"type": "implementation", "issues": []}')
+
+    refute(@client.label_writes.any? { |labels| labels.to_s.include?('To do') })
+  end
+
+  # An unbalanced brace inside a JSON string: only reading strings as strings
+  # finds the end of the object.
+  def test_an_unbalanced_brace_inside_a_question_still_parks_the_request
+    halted = check('{"type": "unclear", "issues": ["Le caractere } ferme le gabarit {date"]}')
+
+    assert halted
+    assert(@client.notes.any? { |n| n.include?('Le caractere } ferme le gabarit {date') })
+  end
+
+  # An escaped quote does not end the string: the `}` after it is still text.
+  def test_an_escaped_quote_does_not_end_the_question
+    halted = check('{"type": "unclear", "issues": ["Le libelle \\"Total}\\" est-il garde ?"]}')
+
+    assert halted
+    assert(@client.notes.any? { |n| n.include?('Le libelle "Total}" est-il garde ?') })
+  end
+
+  # A brace that opens no object is stepped over one character at a time, so a
+  # verdict nested inside it is still found.
+  def test_a_verdict_inside_a_broken_object_is_found
+    halted = check('{"x": | {"type": "unclear", "issues": ["Quel ecran ?"]}}')
+
+    assert halted
+    assert_equal 'needs_clarification', @issue.reload.status
+  end
+
+  def test_a_null_question_is_dropped_not_numbered
+    check('{"type": "unclear", "issues": ["Quel ecran ?", null]}')
+    question = @client.notes.find { |n| n.include?('Quel ecran ?') }
+
+    refute_match(/^2\. /, question)
+  end
+
+  def test_the_first_legacy_answer_is_the_answer
+    halted = check('{"clear": false, "issues": ["Quel ecran ?"]} {"clear": true, "issues": []}')
+
+    assert halted
+    assert_equal 'needs_clarification', @issue.reload.status
+  end
+
+  # A verdict wrapped in another object is still the verdict (the pre-#122
+  # regex found it; skipping the inside of every parsed object did not).
+  def test_a_verdict_wrapped_in_an_object_is_found
+    halted = check('{"result": {"type": "unclear", "issues": ["Ou va l ecran ?"]}}')
+
+    assert halted
+    assert_equal 'needs_clarification', @issue.reload.status
+  end
+
+  # Questions the model returned as objects are posted as text, not as Ruby's
+  # inspect of a Hash.
+  def test_questions_returned_as_objects_are_posted_as_text
+    check('{"type": "unclear", "issues": [{"question": "Quel ecran ?", "cite": "description"}]}')
+    question = @client.notes.find { |n| n.include?('Quel ecran ?') }
+
+    assert_includes question, '1. Quel ecran ? — description'
+    refute_includes question, '=>'
+  end
+
+  def test_issues_returned_as_an_object_are_posted_as_its_values
+    check('{"type": "unclear", "issues": {"1": "Quel ecran ?", "2": "Quelle sortie ?"}}')
+    question = @client.notes.find { |n| n.include?('Quel ecran ?') }
+
+    assert_includes question, "1. Quel ecran ?\n2. Quelle sortie ?"
   end
 end

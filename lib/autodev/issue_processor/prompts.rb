@@ -32,7 +32,8 @@ class IssueProcessor
       Chacun de ces cas suffit, meme si le reste du ticket est precis :
 
       1. **La description contredit une reponse donnee plus tard dans les commentaires.** La description dit une
-         chose, un commentaire posterieur en dit une autre, et rien ne tranche laquelle fait foi.
+         chose, un commentaire posterieur en dit une autre, et rien ne tranche laquelle fait foi. Demande si la
+         reponse remplace ce que decrit la description ou s'y ajoute.
       2. **Une decision est prise, mais ce qu'elle implique n'est pas decrit.** Pour toute decision prise dans la
          description ou dans un commentaire, verifie que le ticket dit : quel ecran ou quel emplacement dans
          l'application ; qui y a acces ; quelle sortie (fichier telecharge, email et son destinataire, affichage) ;
@@ -40,7 +41,8 @@ class IssueProcessor
          c'est un probleme a lister.
       3. **Une reponse a une clarification precedente change la nature de la demande** (par exemple un envoi
          automatique devient un ecran de selection, un export devient une fonctionnalite). Ne conclus alors
-         `"implementation"` que si ce qu'implique la nouvelle demande est decrit, au sens du point 2.
+         `"implementation"` que si ce qu'implique la nouvelle demande est decrit, au sens du point 2, et s'il est
+         dit si elle remplace la demande d'origine ou s'y ajoute.
 
       Pour chaque probleme, ecris dans `issues` une question precise que le demandeur peut trancher, en citant ce
       qui se contredit ou ce qui manque.

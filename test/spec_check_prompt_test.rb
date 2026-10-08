@@ -11,8 +11,26 @@ require 'autodev/issue_processor'
 class SpecCheckPromptTest < Minitest::Test
   PROMPT = IssueProcessor::Prompts::SPEC_CHECK
 
+  # The criteria lead to "unclear", each on its own — the fragments below would
+  # survive a prompt that told the model the opposite.
+  def test_the_criteria_sit_under_a_blocking_heading_and_each_suffices
+    blocking = PROMPT[/## Ce qui bloque : reponds "unclear"\n(.*?)## Ce qui ne bloque pas/m, 1]
+
+    refute_nil blocking
+    assert_includes blocking, 'Chacun de ces cas suffit, meme si le reste du ticket est precis'
+    %w[1. 2. 3.].each { |n| assert_includes blocking, "#{n} **" }
+  end
+
   def test_a_description_contradicted_by_a_later_answer_blocks
     assert_match(/La description contredit une reponse donnee plus tard dans les commentaires/, PROMPT)
+  end
+
+  # The hole the 28/08 implementation got wrong: whether the answer replaces the
+  # original request or comes on top of it. Without these words Opus 4.7 asked
+  # it explicitly in 1 draw out of 5 (design doc).
+  def test_replace_or_add_is_asked_of_a_contradicting_or_redefining_answer
+    assert_includes PROMPT, "Demande si la\n   reponse remplace ce que decrit la description ou s'y ajoute."
+    assert_match(/dit si elle remplace la demande d'origine ou s'y ajoute/, PROMPT)
   end
 
   def test_an_undescribed_decision_blocks_and_names_what_must_be_described
@@ -31,7 +49,7 @@ class SpecCheckPromptTest < Minitest::Test
 
   def test_the_answer_shape_parse_spec_result_reads_is_unchanged
     assert_includes PROMPT, '"type": "implementation" | "question" | "unclear"'
-    assert_includes PROMPT, '"issues"'
+    assert_includes PROMPT, 'Liste les problemes dans `issues`.'
   end
 
   # `format(SPEC_CHECK, path)` is how the check fills it: exactly one

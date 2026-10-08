@@ -14,10 +14,10 @@ class IssueProcessor
   # asks the model to quote what contradicts or is missing, which makes that
   # case likelier. This walks the text instead: a candidate is a balanced
   # `{…}`, counted outside JSON strings (escapes respected), and it is kept only
-  # when `JSON.parse` turns it into a Hash. A brace that opens no object — a
-  # restated schema `{"type": "implementation" | …}` is not JSON — is stepped
-  # over, and the scan resumes one character later so an object inside it is
-  # still found.
+  # when `JSON.parse` accepts it. The scan always resumes one character after
+  # the brace it started on, so an object nested inside another — parsed or not
+  # (a restated schema `{"type": "implementation" | …}` is not JSON) — is found
+  # too, in the order its opening brace appears.
   module JsonObjects
     module_function
 
@@ -29,7 +29,7 @@ class IssueProcessor
         stop = closing_brace(text, start)
         object = stop && parse(text[start..stop])
         objects << object if object
-        pos = object ? stop + 1 : start + 1
+        pos = start + 1
       end
       objects
     end
@@ -51,9 +51,9 @@ class IssueProcessor
       nil
     end
 
+    # A candidate starts with `{`, so it parses to a Hash or not at all.
     def parse(candidate)
-      value = JSON.parse(candidate)
-      value.is_a?(Hash) ? value : nil
+      JSON.parse(candidate)
     rescue JSON::ParserError
       nil
     end

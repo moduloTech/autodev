@@ -30,16 +30,17 @@ class IssueProcessor
       parse_spec_result(out, iid, issue, work_dir, context)
     end
 
-    # The verdict is the **last** well-formed object carrying a known `type`
-    # (Autodev #122): the answer the model ended on, after any example or
-    # restated schema it wrote first. `JsonObjects` explains why this is no
-    # longer a regex.
+    # The verdict is the **first** well-formed object carrying a known `type`,
+    # nested ones included — what the pre-#122 regex read whenever it could read
+    # anything, so an example written after the answer does not reverse it. A
+    # restated schema is not JSON and is skipped. `JsonObjects` explains why
+    # this is no longer a regex (Autodev #122).
     def parse_spec_result(out, iid, issue, work_dir, context)
       objects = JsonObjects.scan(out)
-      verdict = objects.rfind { |o| SPEC_TYPES.include?(o['type']) }
+      verdict = objects.find { |o| SPEC_TYPES.include?(o['type']) }
       return dispatch_spec_type(verdict, iid, issue, work_dir, context) if verdict
 
-      legacy_spec_outcome(objects.rfind { |o| o.key?('clear') }, iid, issue) == SPEC_HALT
+      legacy_spec_outcome(objects.find { |o| o.key?('clear') }, iid, issue) == SPEC_HALT
     end
 
     def dispatch_spec_type(result, iid, issue, work_dir, context)
@@ -71,7 +72,7 @@ class IssueProcessor
     end
 
     def resolve_unclear_spec(issues_list, iid, issue)
-      issues_list = Array(issues_list).compact
+      issues_list = question_texts(issues_list)
       if issues_list.empty?
         log 'Spec unclear but no issues listed, proceeding'
         issue.spec_clear!
@@ -80,6 +81,19 @@ class IssueProcessor
 
       post_clarification(issues_list, iid, issue)
       SPEC_HALT
+    end
+
+    # The questions as the requester will read them (Autodev #122). The prompt
+    # asks for strings; a model that answers with objects (`{"question": …,
+    # "cite": …}`) or with an object of questions gets its values posted, not
+    # Ruby's inspect of a Hash. The brace-free regex used to reject such an
+    # answer outright — and an unreadable answer proceeds to implementation.
+    def question_texts(issues)
+      issues = issues.values if issues.is_a?(Hash)
+      Array(issues).filter_map do |question|
+        text = question.is_a?(Hash) ? question.values.join(' — ') : question.to_s
+        text unless text.strip.empty?
+      end
     end
 
     def legacy_spec_outcome(result, iid, issue)
