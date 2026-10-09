@@ -257,6 +257,9 @@ that delivered. Each container run is bounded by `SCRIPT_TIMEOUT` (600 s), not `
   measured here (same danger-claude version is the owner's to confirm).
 - First drawn = reviewer, second = assignee: an order nothing in the skill or
   the scripts fixes; the human handoffs read do not show a stable order either.
+  Kept by the owner on 09/10/2026: the assignee may well end up the one who
+  merges and deploys, but the draw is uniformly random, so which of the two
+  drawn developers gets which role carries no meaning.
 - `%{mr_author}` (the bot's username) is passed as `--author`: the bot is in no
   roster, so excluding it changes nothing, and the ticket's author is not the
   code's author.
