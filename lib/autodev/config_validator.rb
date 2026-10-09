@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'uri'
+
 # Validation helpers for Config. Extracted to keep Config module focused on loading.
 module ConfigValidator
   LABEL_FIELDS = %w[labels_todo label_doing label_done].freeze
@@ -26,6 +28,7 @@ module ConfigValidator
     validate_numeric_settings!(config)
     validate_log_level!(config)
     validate_web!(config)
+    validate_dashboard_url!(config)
   end
 
   def self.validate_project!(project_config, path)
@@ -140,4 +143,30 @@ module ConfigValidator
     raise ConfigError, "'web.bind' must be a non-empty string, got: #{bind.inspect}"
   end
   private_class_method :validate_web_bind!
+
+  # Optional (Autodev #124): unset means the activity note carries no link.
+  # Set, it is refused unless it is an http(s) URL with a host and nothing
+  # else that cannot sit in front of `/issues/<id>` — a blank would read as
+  # "unset" while looking configured, a query or a fragment would swallow the
+  # path, a parenthesis closes the Markdown link early, and credentials
+  # (`https://user:pass@host`) would be published on the note of every
+  # ticket autodev touches.
+  def self.validate_dashboard_url!(config)
+    value = config['dashboard_url']
+    return if value.nil? || http_url?(value)
+
+    raise ConfigError, "'dashboard_url', if set, must be an http(s) URL such as " \
+                       "https://autodev.example.com/, got: #{value.inspect}"
+  end
+  private_class_method :validate_dashboard_url!
+
+  def self.http_url?(value)
+    return false unless value.is_a?(String) && !value.match?(/[()]/)
+
+    uri = URI.parse(value.strip)
+    uri.is_a?(URI::HTTP) && !uri.host.to_s.empty? && [uri.userinfo, uri.query, uri.fragment].all?(&:nil?)
+  rescue URI::InvalidURIError
+    false
+  end
+  private_class_method :http_url?
 end

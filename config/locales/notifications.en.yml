@@ -5,6 +5,8 @@ en:
   error_generic: ":x: %{tag}: failed — %{error}"
   spec_unclear_header: ":thinking: %{tag}: the specification needs clarification before implementation."
   spec_unclear_footer: Please answer these questions in the comments. Implementation will resume automatically.
+  functional_question_header: ":thinking: %{tag}: %{mention}merge request !%{mr_iid} implements this ticket, but its review found %{count} gap(s) with what was asked for. These are product decisions: autodev will not settle them on its own in the code."
+  functional_question_footer: Please state in a comment on this ticket the expected behaviour for each point. Merge request !%{mr_iid} will resume automatically with your answer, without starting over.
   question_answered_header: ":mag: %{tag}: answer to the question"
   question_answered_footer: _This answer was generated automatically by analyzing the codebase. Feel free to ask for more details._
   mr_fix_success: ":wrench: %{tag}: %{count} review comment(s) fixed on %{mr_url} (round %{round})"
@@ -17,6 +19,8 @@ en:
   stagnation_discussions: ":warning: %{tag}: stagnation detected — the same discussions remain unresolved on %{mr_url}. Manual intervention required."
   fix_rounds_exhausted: ":octagonal_sign: %{tag}: %{rounds} fix rounds on %{mr_url} without concluding, ceiling of %{ceiling} reached. Stopping here: stagnation detection should have ended this long before, so there are two things to look at — the MR, and me. Manual intervention required."
   pipeline_watch_expired: ":warning: %{tag}: I have been watching the pipeline on %{mr_url} for more than %{days} days without ever reaching a verdict — I am no longer watching it. The MR stays open; please take it from here."
+  pipeline_preexisting_mr_note: ":construction: %{tag}: %{jobs} already fails on `%{target_branch}`, for the same reason as here (pipeline %{target_url}). This merge request did not break it: I am not fixing it here."
+  target_pipeline_red: ":warning: %{tag}: for more than %{days} days, the only failure left on the pipeline of %{mr_url} has been %{jobs}, still failing on `%{target_branch}` in its latest finished pipeline (%{target_url}), for the same reason — this merge request did not break it. I am no longer following this request. Once `%{target_branch}` is repaired, put the starting label back and reassign me."
   mr_closed_unmerged: ":warning: %{tag}: %{mr_url} was closed without being merged — nothing was delivered, so I am no longer following this request. If the work should be picked up again, put the starting label back and reassign me."
   review_skill_missing: ":warning: %{tag}: the project declares the review skill `%{skill}`, but `%{path}` is missing from the repository on branch `%{ref}` (the branch %{mr_url} is going into, and therefore the one that decides its review). I will not fall back to the mr-review binary, which would run a different process from the one declared, so I am no longer following this request. Fix `review_skill` or the target branch in the project configuration, or add the skill on `%{ref}`, then put the starting label back and reassign me."
   target_branch_missing: ":warning: %{tag}: the target branch of %{mr_url} is `%{branch}`, and the repository no longer carries it (found missing %{count} times for this branch). With no base there is nothing to rebase onto and nothing to measure against, so I am no longer following this request. Retarget the merge request onto a branch that exists, or restore `%{branch}`, then put the starting label back and reassign me."
@@ -58,6 +62,7 @@ en:
 
     :arrow_right: **Want to dig deeper or move on to an implementation?** Leave a comment to guide me, put the _%{label_todo}_ label back, reassign me, and I'm on it.
   review_summary: "<!-- autodev:review -->\n:mag: **autodev** — automated review (verdict: %{verdict})\n\n%{summary}"
+  review_functional_finding_label: "**Product decision** — %{tag} will not settle this point on its own: it will ask the requester on the ticket, then fix it according to the answer."
   arrears_takeover: |-
     :arrows_counterclockwise: %{tag}: I'm taking this ticket back.
 

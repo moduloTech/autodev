@@ -116,7 +116,7 @@ class MrFixer
     # waits for the push (Autodev #125, amendment 1), so the time of the verdict
     # is kept for the thread whose resolution GitLab might not take.
     def fix_single_discussion(discussion, work_dir, branch, _mr_iid, env)
-      thread_context = format_discussion(discussion, work_dir: work_dir, target_branch: env[:target_branch])
+      thread_context = thread_context_for(discussion, work_dir, env)
       base_sha = head_sha(work_dir) if verify_fixes?
       run_fix_prompt(thread_context, work_dir, branch, env)
       danger_claude_commit(work_dir, resume: @mr_fix_session_id)
@@ -125,6 +125,13 @@ class MrFixer
 
       @verdict_times[discussion[:id]] = Time.now.utc.iso8601
       discussion
+    end
+
+    # The decision the requester took, when this thread was a question
+    # (Autodev #121): the fixer and the verifier both read it.
+    def thread_context_for(discussion, work_dir, env)
+      format_discussion(discussion, work_dir: work_dir, target_branch: env[:target_branch]) +
+        functional_answer_section(discussion)
     end
 
     # After the push, or in place of it when the round produced no commit. A

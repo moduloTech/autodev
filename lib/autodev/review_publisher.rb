@@ -5,6 +5,13 @@
 # been answering 401 since April.
 class ReviewPublisher
   MARKER = '<!-- autodev:review -->'
+  # Heads every thread posted for a functional finding (Autodev #121). The
+  # review and the fix run in different jobs, so the category has to survive in
+  # GitLab: `MrFixer::FunctionalQuestion` reads it back off the thread's first
+  # note and asks the requester instead of correcting the code.
+  FUNCTIONAL_MARKER = '<!-- autodev:functional -->'
+  # The signature `HumanActivity#human_note_after?` reads as "autodev wrote this".
+  AUTODEV_TAG = '**autodev**'
 
   def initialize(client:, project_path:, logger:, locale:)
     @client = client
@@ -63,14 +70,29 @@ class ReviewPublisher
   # {:line_code=>[…]}`, which is what a merge request in conflict answers to every
   # position it is handed, because its diff has no resolvable line codes. Same
   # fact, same answer: demote the finding. See `post_finding`.
+  #
+  # A functional finding has one more step before the summary (Autodev #121): a
+  # thread with no position. It is a decision for the requester, and the thread
+  # is what `MrFixer` reads and what holds the delivery — prose in the summary
+  # would be read by nobody. GitLab's unpositioned MR discussions are resolvable
+  # (the SonarQube threads of powerpanne MR !11409 are, measured 08/10/2026).
   def post_inline(mr_iid, refs, findings)
     posted = []
     demoted = []
     findings.each do |finding|
-      note = post_finding(mr_iid, refs, finding)
-      anchored?(note) ? posted << finding : demoted << finding
+      thread?(mr_iid, refs, finding) ? posted << finding : demoted << finding
     end
     [posted, demoted]
+  end
+
+  # For a functional finding, a positioned post GitLab accepted but did not
+  # anchor is already a thread carrying the marker, so it is kept as it is:
+  # posting the fallback on top would open the same question twice.
+  def thread?(mr_iid, refs, finding)
+    return anchored?(post_finding(mr_iid, refs, finding)) unless ReviewContract.functional?(finding)
+
+    note = ReviewContract.anchorable?(finding) ? post_finding(mr_iid, refs, finding) : nil
+    started?(note) || started?(post_unpositioned(mr_iid, finding))
   end
 
   # `nil` = not anchored, which `post_inline` reads as "demote it", exactly as it
@@ -96,13 +118,32 @@ class ReviewPublisher
   def post_finding(mr_iid, refs, finding)
     GitlabHelpers.answer(:mr_discussion) do
       @client.create_merge_request_discussion(@project_path, mr_iid,
-                                              body: finding['body'].to_s,
+                                              body: thread_body(finding),
                                               position: position_for(finding, refs))
     end
   rescue InvalidRequestError => e
     @logger.info("MR !#{mr_iid}: GitLab refused the position for #{finding['file']}:#{finding['line']} " \
-                 "(#{e.message}); the finding moves to the summary comment")
+                 "(#{e.message}); the finding falls back (a functional one to a thread, else the summary)")
     nil
+  end
+
+  # Same narrow rescue as `post_finding`, for the same reason: only GitLab's own
+  # refusal demotes, an outage aborts the publication.
+  def post_unpositioned(mr_iid, finding)
+    GitlabHelpers.answer(:mr_discussion) do
+      @client.create_merge_request_discussion(@project_path, mr_iid, body: thread_body(finding))
+    end
+  rescue InvalidRequestError => e
+    @logger.info("MR !#{mr_iid}: GitLab refused an unpositioned thread (#{e.message}); " \
+                 'the finding moves to the summary comment')
+    nil
+  end
+
+  def thread_body(finding)
+    return finding['body'].to_s unless ReviewContract.functional?(finding)
+
+    "#{FUNCTIONAL_MARKER}\n#{Locales.t(:review_functional_finding_label, locale: @locale,
+                                                                         tag: AUTODEV_TAG)}\n\n#{finding['body']}"
   end
 
   def position_for(finding, refs)
@@ -112,9 +153,15 @@ class ReviewPublisher
   end
 
   def anchored?(note)
-    first = Array(note.respond_to?(:notes) ? note.notes : nil).first
+    first = first_note(note)
     !first.nil? && !first.position.nil?
   end
+
+  # An unpositioned thread has no position to check: GitLab returning its note
+  # is the whole evidence that it exists.
+  def started?(note) = !first_note(note).nil?
+
+  def first_note(note) = Array(note.respond_to?(:notes) ? note.notes : nil).first
 
   # The summary comment is posted last, so its presence means the review went all
   # the way — and this check is what keeps a retry from doubling **the comment**,

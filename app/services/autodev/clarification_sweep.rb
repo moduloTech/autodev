@@ -117,9 +117,12 @@ module Autodev
     # `dispatch_new_issues` would not rediscover it. `:process` is the same action
     # the live path enqueues, and `IssueProcessJob`'s staleness guard accepts it
     # from `pending`.
+    #
+    # A row resumed on its merge request (Autodev #121) is in `fixing_discussions`,
+    # which `dispatch_discussions` selects on every cycle: it needs no job.
     def apply!(issue, resumer)
       resumer.resume!(issue)
-      ::IssueProcessJob.perform_later(issue.project_path, issue.issue_iid, :process)
+      ::IssueProcessJob.perform_later(issue.project_path, issue.issue_iid, :process) if issue.pending?
       say("#{label(issue)} — answered, re-queued")
     end
 

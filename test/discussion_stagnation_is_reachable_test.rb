@@ -68,6 +68,12 @@ class DiscussionStagnationIsReachableTest < Minitest::Test # rubocop:disable Met
 
     def initialize = @assignments = []
 
+    # `IssueNotifier#handback_target` asks who the bot is, and
+    # `GitlabHelpers.current_user_id` memoises the answer for the process: this
+    # file passed in the suite only when an earlier file had answered it, and
+    # failed alone (measured at 62e8927).
+    def user = Struct.new(:id).new(1)
+
     def edit_issue(_path, iid, **opts)
       @assignments << [iid, opts[:assignee_ids]] if opts.key?(:assignee_ids)
       nil

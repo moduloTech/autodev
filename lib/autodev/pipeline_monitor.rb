@@ -7,7 +7,9 @@ require_relative 'pipeline_monitor/blocked_pipeline'
 require_relative 'pipeline_monitor/evaluator'
 require_relative 'pipeline_monitor/poll_tracker'
 require_relative 'pipeline_monitor/post_completion'
+require_relative 'pipeline_monitor/review_handoff'
 require_relative 'pipeline_monitor/fix_prompts'
+require_relative 'pipeline_monitor/preexisting_failures'
 require_relative 'pipeline_monitor/failure_handler'
 require_relative 'pipeline_monitor/infra_recheck'
 require_relative 'pipeline_monitor/pipeline_fixer'
@@ -26,6 +28,8 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include Evaluator
   include PollTracker
   include PostCompletion
+  include ReviewHandoff
+  include PreexistingFailures
   include FailureHandler
   include InfraRecheck
   include PipelineFixer
@@ -86,6 +90,8 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   def begin_poll(issue)
     @dc_issue = issue
     clear_poll_verdict
+    @polled_mr = nil
+    @target_red_hold = nil
     log "Checking pipeline for MR !#{issue.mr_iid} (issue ##{issue.issue_iid})..."
     log_pipeline_poll(issue)
     remember_watch_clock(issue)
@@ -93,6 +99,9 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
 
   def poll_open_mr(issue)
     mr = @client.merge_request(@project_path, issue.mr_iid)
+    # Kept for the poll: the pre-existing failure check compares against the
+    # target this merge request records (Autodev #130).
+    @polled_mr = mr
     return handle_mr_closed(issue, mr) if mr_state_concluded?(mr.state)
 
     continue_watch(issue, mr)
@@ -282,6 +291,8 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
     notify_localized(iid, :done_nominal, label_todo: @project_config['labels_todo']&.first)
     log_activity(issue, discussions.empty? ? :pipeline_green_done : :done, count: discussions.size)
     log "Issue ##{iid}: pipeline green, #{discussions.size} discussion(s) → done"
+    # Last, so nothing it does can skip what precedes it (Autodev #90).
+    hand_off_for_review(issue)
   end
 
   def set_pipeline_green_guards(issue, review_count_zero: false, review_count_over_zero: false,

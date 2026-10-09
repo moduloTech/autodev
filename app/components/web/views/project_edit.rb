@@ -21,7 +21,8 @@ module Web
          %i[target_branch labels_todo label_doing label_done label_attention review_skill extra_prompt]],
         [:web_project_edit_section_execution,
          %i[dc_timeout max_retries retry_backoff stagnation_threshold clone_depth
-            sparse_checkout post_completion post_completion_timeout mr_review_timeout]],
+            sparse_checkout post_completion post_completion_timeout mr_review_timeout
+            review_size_command review_coverage_command reviewer_draw_command]],
         [:web_project_edit_section_advanced,
          %i[model effort parallel_agents split_implementation implementer_agent
             test_writer_agent mr_fixer_agent]]
@@ -305,6 +306,23 @@ module Web
           span(style: field_label_style) { code { key.to_s } }
           yield
           span(class: 'muted', style: 'font-size: 11px;') { field_hint(key) }
+          render_deprecation_notice(key) if ::Config::DEPRECATED_MODEL_SETTINGS.include?(key.to_s)
+        end
+      end
+
+      # `model` / `effort` still work and will be removed (Autodev #122): the
+      # form that sets them says so under each field, in the warning colours, so
+      # it reads as a notice rather than as one more line of the hint. One notice
+      # per field: what an empty `model` falls back to is not what an empty
+      # `effort` does, and the model's has an exception (the two haiku
+      # evaluations, `Config::DEPRECATED_MODEL_SETTINGS`).
+      def render_deprecation_notice(key)
+        span(class: 'deprecated-setting',
+             style: 'font-size: 11px; color: var(--warn-fg); background: var(--warn-bg); ' \
+                    'border-radius: var(--r-md); padding: 4px 8px;') do
+          next t_web(:web_project_edit_deprecated_effort) if key.to_s == 'effort'
+
+          t_web(:web_project_edit_deprecated_model)
         end
       end
 

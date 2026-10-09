@@ -15,7 +15,8 @@ class PipelineMonitor
   # This bound is deliberately blind to the pipeline's *status*. It reads one
   # thing — how long the row has sat in `checking_pipeline` without a
   # transition (`issues.checking_pipeline_since`) — and gives the ticket up past
-  # `pipeline_watch_max_days`.
+  # `pipeline_watch_max_days`. A poll that held a pipeline the target keeps red
+  # reads the hold's own clock instead (`watch_bound_clock`, Autodev #130).
   #
   # It is not blind to whether the poll read anything at all (Autodev #56). An
   # infrastructure failure must never be the reason a ticket is given up:
@@ -50,11 +51,22 @@ class PipelineMonitor
       days = pipeline_watch_max_days
       return unless days.positive?
 
-      since = issue.checking_pipeline_since
+      since = watch_bound_clock(issue)
       return if since.nil? || since > days.days.ago
       return log_bound_withheld(issue, days) if @poll_inconclusive
 
       give_up_on_watch(issue, days)
+    end
+
+    # A poll that held a pipeline the target keeps red is bounded by the hold's
+    # own clock, not the watch's (Autodev #130, owner's decision of 09/10/2026):
+    # a hold beginning on a row watched for months must still wait the whole
+    # bound for the target to recover — PP#16735 was given up on 16/09/2026 on
+    # the very poll it found `master` red. The poll that ends a hold by retrying
+    # the pipeline does not hold, and reads `checking_pipeline_since` — which
+    # that retry has just re-stamped (`release_hold(restart_watch: true)`).
+    def watch_bound_clock(issue)
+      @target_red_hold ? issue.target_red_hold_since : issue.checking_pipeline_since
     end
 
     # The poll cycle's "this cycle could not conclude" flag (Autodev #56).
@@ -137,7 +149,13 @@ class PipelineMonitor
     # No `detail:` — it renders through `web_errors_attention_detail` ("Job(s) en
     # cause : %{detail}"), so it may only carry a technical token, and there is no
     # failing job to name here.
+    #
+    # Except on a poll that held a pipeline the target branch keeps red (Autodev
+    # #130): that watch did reach a verdict, every poll of it — "not this merge
+    # request's failure" — and says so under its own reason.
     def give_up_on_watch(issue, days)
+      return give_up_on_red_target(issue, days) if @target_red_hold
+
       log "Issue ##{issue.issue_iid}: pipeline watch older than #{days} days → done"
       abandon_issue(issue, :pipeline_watch_expired, days: days)
     end

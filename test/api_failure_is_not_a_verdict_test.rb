@@ -446,6 +446,9 @@ class MrFixerApiFailureTest < Minitest::Test
     def discussions_fixed! = @attrs[:status] = 'checking_pipeline'
     def status = @attrs[:status]
     def pending_resolutions = @attrs[:pending_resolutions]
+    # Autodev #121: the round reads both before it decides to fix.
+    def functional_questions = @attrs[:functional_questions]
+    def clarification_resume_to = @attrs[:clarification_resume_to]
   end
 
   class StubClient
@@ -641,6 +644,13 @@ ALLOWED_SWALLOWS = {
     # this method wants. No GitLab call, no verdict.
     'kill_process' => 'local process signalling, not a read'
   },
+  'lib/autodev/pipeline_monitor/review_handoff.rb' => {
+    # Runs after `finalize_green_done`'s terminal transition, as its last
+    # statement (Autodev #90). It returns nothing anybody reads: every failure,
+    # an outage included, becomes one `review_handoff_failed` activity entry,
+    # and no verdict on the row or the ticket is taken from it.
+    'hand_off_for_review' => 'post-delivery courtesy on the merge request, returns nothing'
+  },
   'lib/autodev/mr_fixer/discussion_formatter.rb' => {
     # `git diff` in a work directory, for the prompt. No GitLab call, and the
     # substitute (`nil` = no diff hunk to quote) removes context from a prompt
@@ -743,7 +753,25 @@ ALLOWED_SWALLOWS = {
     # since Autodev #125 it goes through `answer`, and the clause re-raises every
     # `ApiUnavailableError` whose cause is not an HTTP response, so the round is
     # replayed next cycle.
-    'fetch_job_trace' => 'self-describing prose for an HTTP refusal; a cut raises'
+    'fetch_job_trace' => 'self-describing prose for an HTTP refusal; a cut raises',
+    # Autodev #130. The substitute is `nil` — no signature — and no signature is
+    # never comparable (`FailureSignature.explains?`), so the job stays the merge
+    # request's and is fixed as before: the substitute leans towards today's
+    # behaviour, not towards "pre-existing". Only for GitLab *answering* that the
+    # trace is unavailable; a request that never completed re-raises, so the poll
+    # aborts with the row untouched. Not `fetch_job_trace`'s placeholder text, which
+    # two unreadable traces would share and compare equal on.
+    'comparable_trace' => 'nil means no signature, which is never pre-existing; a cut raises'
+  },
+  'lib/autodev/pipeline_monitor/preexisting_failures.rb' => {
+    # A write. A retry GitLab did not take keeps the hold, and the next poll
+    # retries again; nothing is concluded from the failure.
+    'retry_held_pipeline' => 'write, not a read: the hold stays and the next poll retries'
+  },
+  'lib/autodev/pipeline_monitor/target_red_notice.rb' => {
+    # A write, and an announcement. `false` means the key is not recorded, so the
+    # next poll posts the comment again; nothing is concluded from the failure.
+    'post_preexisting_note' => 'write, not a read: false means the comment is posted again next poll'
   },
   'lib/autodev/review_skill_source.rb' => {
     # Three clauses, and they are the reason this file had to enter the perimeter:
@@ -852,7 +880,25 @@ ALLOWED_SWALLOWS = {
     # (`merge_request`) and `post_summary` (`create_merge_request_note`), all
     # three wrapped in `answer` with no rescue of their own.
     'post_finding' => 'a 400/422 on one position is GitLab declining to anchor it; ' \
-                      'the finding is demoted to the summary comment and every other failure raises'
+                      'the finding is demoted to the summary comment and every other failure raises',
+    # Autodev #121: the unpositioned fallback of a functional finding. Same
+    # clause, same class, same reasoning as `post_finding`: only GitLab's own
+    # 400/422 demotes it to the summary, every outage aborts the publication.
+    'post_unpositioned' => 'a 400/422 on the unpositioned thread is GitLab refusing it; ' \
+                           'the finding is demoted to the summary comment and every other failure raises'
+  },
+  # Autodev #121. Two label writes, both after the decision they follow is
+  # already on record, and neither returns a value anybody reads.
+  'lib/autodev/mr_fixer/functional_question.rb' => {
+    # After the question is posted and the row parked: the #75 rationale of
+    # `SpecChecker#repose_entry_label`, which this mirrors. The question stands;
+    # what is lost is a board column.
+    'repose_entry_label_for_question' => 'a label write after the question is posted and the row parked; ' \
+                                         'returns nothing, the wait is already on record',
+    # The first resumed round, once the merge request was read open through
+    # `answer`: the doing label is board honesty, not a verdict.
+    'repose_doing_label_after_answer' => 'a label write on resume, after the MR state was read through ' \
+                                         'answer; returns nothing'
   },
   'lib/autodev/pipeline_monitor/skill_reviewer.rb' => {
     # This used to be one `clone_and_inject`, declared here as "no GitLab read

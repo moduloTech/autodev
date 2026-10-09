@@ -27,6 +27,10 @@ module Config # rubocop:disable Metrics/ModuleLength
     # Health/monitoring (see docs/observability.md). Unauthenticated /healthz
     # endpoints for external probes (Datadog, BetterStack). Optional token gate.
     # monitoring: { token: null, poll_stale_factor: 3 }  # poll stale after factor × poll_interval
+    # dashboard_url: https://autodev.netbird.modulotech.fr/
+    #   Optional. The dashboard's public base URL: the activity note on each
+    #   GitLab issue then links the issue's page (/issues/<id>). Unset, the note
+    #   carries no link. Must be an http(s) URL when set (Autodev #124).
 
     # Microsoft 365 SSO credentials (Entra ID / Azure AD). Required as of
     # v1.0.0-alpha.7 — without these the gated dashboard can't complete
@@ -87,7 +91,11 @@ module Config # rubocop:disable Metrics/ModuleLength
     # open, matching the 127.0.0.1/NetBird trust model) optionally gates the
     # unauthenticated /healthz endpoints. `poll_stale_factor` × poll_interval
     # is when a missing poller heartbeat flips the health check to "down".
-    'monitoring' => { 'token' => nil, 'poll_stale_factor' => 3 }
+    'monitoring' => { 'token' => nil, 'poll_stale_factor' => 3 },
+    # The dashboard's base URL as GitLab readers reach it (Autodev #124). nil
+    # means "no link in the activity note", never an error: autodev only
+    # knows `web.bind`, which is not an address anybody outside can open.
+    'dashboard_url' => nil
   }.freeze
 
   # Baked default for the per-project `post_completion_timeout`, in seconds.
@@ -147,8 +155,41 @@ module Config # rubocop:disable Metrics/ModuleLength
                                 dc_timeout max_retries retry_backoff stagnation_threshold clone_depth
                                 sparse_checkout post_completion post_completion_timeout mr_review_timeout
                                 model effort parallel_agents split_implementation implementer_agent
-                                test_writer_agent mr_fixer_agent review_skill app].freeze
+                                test_writer_agent mr_fixer_agent review_skill review_size_command
+                                review_coverage_command reviewer_draw_command app].freeze
   VALID_LOG_LEVELS = %w[DEBUG INFO WARN ERROR].freeze
+
+  # Deprecated since Autodev #122, removed later (owner's decision of
+  # 08/10/2026: the pinned `claude-opus-4-7` is an old model and `effort` has
+  # changed meaning). Until then they are read exactly as before —
+  # `DangerClaudeRunner#dc_global_args`, project > global > per-call default —
+  # and setting either is signalled: a boot warning (`bin/autodev`) and a
+  # notice under the field on the project form.
+  #
+  # What removal changes: no call passes `-m` / `-e` from configuration any
+  # more. A call with no agent and no per-call model — the spec check, the
+  # question investigation — runs on Claude Code's default model. A call made
+  # with an agent runs on the model the agent declares: the built-in
+  # implementer, test-writer and mr-fixer agents (`IssueProcessor::Agents`,
+  # `MrFixer::AgentInjector`) declare `model: sonnet`, so implementation and MR
+  # fixing move from the global Opus 4.7 to Sonnet. The two calls that pass
+  # `model: 'haiku'` by design — the complexity evaluation (`Implementer`) and
+  # the pipeline-failure evaluation (`PipelineMonitor::Evaluator`), cheap JSON
+  # tasks — get haiku back: a global `model` overrides that per-call default
+  # today. Effort becomes Claude Code's default everywhere.
+  DEPRECATED_MODEL_SETTINGS = %w[model effort].freeze
+
+  # Every deprecated model setting in force, globals first, then each project
+  # in the order given. A blank value (an empty form field) is not a setting.
+  def self.deprecated_model_settings(config, project_configs)
+    scopes = [['global', config]] + Array(project_configs).map { |c| [c['path'], c] }
+    scopes.flat_map do |scope, cfg|
+      DEPRECATED_MODEL_SETTINGS.filter_map do |field|
+        value = cfg[field]
+        { scope: scope, field: field, value: value } unless value.to_s.strip.empty?
+      end
+    end
+  end
 
   # Single source of truth for the effective retry budget (Autodev #34).
   #
@@ -227,6 +268,18 @@ module Config # rubocop:disable Metrics/ModuleLength
     coerce_numeric_settings!(config)
     warn_ignored!(yaml)
     config
+  end
+
+  # The dashboard page of the `issues` row `issue_id` — the primary key, which
+  # is what `/issues/:id` routes on, not the GitLab iid — or nil when no
+  # `dashboard_url` is configured (Autodev #124). Trailing slashes are dropped
+  # from the base so `https://host/` and `https://host` both give
+  # `https://host/issues/<id>`; a path prefix (`https://host/autodev/`) is kept.
+  def self.dashboard_issue_url(config, issue_id)
+    base = config.is_a?(Hash) ? config['dashboard_url'] : nil
+    return nil unless base.is_a?(String) && !base.strip.empty? && issue_id
+
+    "#{base.strip.sub(%r{/+\z}, '')}/issues/#{issue_id}"
   end
 
   # Returns true when the project uses the label workflow (all 5 label fields configured).

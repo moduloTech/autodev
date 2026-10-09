@@ -6,7 +6,9 @@
 # rake (autospec §H) populates this from `~/.autodev/config.yml`'s `projects:`
 # block, after which the legacy YAML branch in `lib/autodev/poller.rb` is
 # deleted.
-class Project < ApplicationRecord
+class Project < ApplicationRecord # rubocop:disable Metrics/ClassLength -- the per-project config surface
+  include ReviewHandoffDeclaration
+
   VALID_LOCALES = %w[fr en].freeze
 
   has_many :app_commands, class_name: 'ProjectAppCommand', dependent: :destroy
@@ -86,7 +88,7 @@ class Project < ApplicationRecord
                           post_completion_timeout mr_review_timeout model effort parallel_agents
                           split_implementation implementer_agent test_writer_agent
                           mr_fixer_agent review_skill].freeze
-  LIST_CONFIG_KEYS = %i[labels_todo sparse_checkout post_completion].freeze
+  LIST_CONFIG_KEYS = (%i[labels_todo sparse_checkout post_completion] + REVIEW_HANDOFF_KEYS).freeze
   LABEL_FIELDS = %i[labels_todo label_doing label_done].freeze
 
   # Editable per-project config fields grouped by input type. Single source
@@ -170,7 +172,7 @@ class Project < ApplicationRecord
   end
 
   def validate_string_arrays
-    { labels_todo: labels_todo, sparse_checkout: sparse_checkout, post_completion: post_completion }.each do |f, v|
+    LIST_CONFIG_KEYS.to_h { |f| [f, public_send(f)] }.each do |f, v|
       next if v.nil?
       next if v.is_a?(Array) && v.any? && v.all?(String)
 

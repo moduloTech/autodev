@@ -207,9 +207,14 @@ module Autodev
       @logger.info("Enqueued issue ##{gl_issue.iid}: #{gl_issue.title}", project: @path)
     end
 
+    # A row whose answer resumed it on its merge request (Autodev #121) is not
+    # `pending` afterwards, and enqueuing `:process` for it would only be skipped
+    # by `IssueProcessJob`'s staleness guard: `dispatch_discussions` picks it up
+    # later in this same cycle.
     def skip_existing?(existing, gl_issue)
       if existing.status == 'needs_clarification'
         return true unless clarification_received?(existing, gl_issue)
+        return true unless existing.pending?
       elsif existing.status != 'pending'
         return true
       end

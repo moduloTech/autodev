@@ -383,8 +383,15 @@ module Web
     # closing has its own membership-gated action (IssuesController#close) and
     # a dedicated button, so it must not appear in the generic transition
     # dropdown (nor be accepted by IssuesController#transition).
+    #
+    # `:functional_question` neither (Autodev #121): it means "the question was
+    # posted on the ticket", and fired by hand it parks the row with no question
+    # and no destination, so the next cycle reads it as answered and sends it to
+    # `pending` — a full re-implementation over a delivered merge request.
+    AUTOMATIC_ONLY_EVENTS = %i[close functional_question].freeze
+
     def permitted_events_for(issue)
-      issue.aasm.events(permitted: true).map(&:name) - [:close]
+      issue.aasm.events(permitted: true).map(&:name) - AUTOMATIC_ONLY_EVENTS
     end
 
     def screenshot_dir_for(issue)
