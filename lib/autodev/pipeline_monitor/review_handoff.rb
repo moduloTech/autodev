@@ -36,23 +36,23 @@ class PipelineMonitor
       commands = handoff_commands
       return unless commands
 
-      @handoff_read_back = nil
+      @handoff_read_back = @handoff_labels_before = nil
       run_handoff(issue, commands)
     rescue Stop => e
       log_activity(issue, e.key, **e.vars)
     rescue StandardError => e
       log_error "Issue ##{issue.issue_iid}: review handoff failed: #{e.class}: #{e.message}"
-      key, vars = failure_entry(e)
+      key, vars = failure_entry(issue, e)
       log_activity(issue, key, **vars, reason: Redactor.scrub("#{e.class}: #{e.message}")[0, 300])
     end
 
     # GitLab not answering the read-back of a write it was sent is "not
     # confirmed" (`ReviewHandoffWrites#read_back`); anything else interrupted
     # the handoff.
-    def failure_entry(error)
+    def failure_entry(issue, error)
       return @handoff_read_back if @handoff_read_back && error.is_a?(ApiUnavailableError)
 
-      [:review_handoff_failed, {}]
+      [:review_handoff_failed, { ready: handoff_ready_status(issue) }]
     end
 
     def handoff_commands
@@ -65,6 +65,7 @@ class PipelineMonitor
 
     def run_handoff(issue, commands)
       mr = read_handoff_mr(issue)
+      @handoff_labels_before = current_labels(mr)
       refs = diff_ends(mr)
       work_dir = "/tmp/autodev_review_handoff_#{@project_path.tr('/', '_')}_#{issue.issue_iid}"
       clone_for_handoff(work_dir, issue, refs)

@@ -42,21 +42,6 @@ class PipelineMonitor
                                             ready: ready_status(issue, current))
     end
 
-    def added_labels(issue, added)
-      return added.join(', ') if added.any?
-
-      Locales.t(:activity_review_handoff_part_no_label, locale: handoff_locale(issue))
-    end
-
-    def ready_status(issue, current)
-      locale = handoff_locale(issue)
-      return Locales.t(:activity_review_handoff_part_ready_left, locale: locale) if current.include?(READY_LABEL)
-
-      Locales.t(:activity_review_handoff_part_ready_not_posted, locale: locale)
-    end
-
-    def handoff_locale(issue) = (issue.locale || 'fr').to_sym
-
     # Remove-then-add per managed prefix, `MrMaterialize::LabelPlan`'s shape:
     # GitLab CE has no scoped-label exclusivity. A dimension not measured is
     # left alone.
@@ -86,7 +71,8 @@ class PipelineMonitor
       return if attrs.empty?
 
       edit_handoff_mr(issue, attrs)
-      read_back(:review_handoff_not_confirmed, what: claims(plan, designated).join(', ')) do
+      read_back(:review_handoff_not_confirmed, what: claims(issue, plan, designated).join(', '),
+                                               ready: handoff_ready_status(issue)) do
         verify_landed(issue, plan, designated)
       end
     end
@@ -103,8 +89,8 @@ class PipelineMonitor
       @handoff_read_back = nil
     end
 
-    def claims(plan, designated)
-      people = designated ? ["reviewer #{designated.first.username}", "assignee #{designated.last.username}"] : []
+    def claims(issue, plan, designated)
+      people = designated ? [reviewer_claim(issue, designated.first), assignee_claim(issue, designated.last)] : []
       plan[:add] + plan[:remove].map { |label| "-#{label}" } + people
     end
 
@@ -124,15 +110,17 @@ class PipelineMonitor
       back = read_handoff_mr(issue)
       labels = current_labels(back)
       missing = (plan[:add] - labels) + (plan[:remove] & labels).map { |label| "-#{label}" }
-      missing.concat(designation_mismatches(back, designated)) if designated
-      raise Stop.new(:review_handoff_not_landed, what: missing.join(', ')) if missing.any?
+      missing.concat(designation_mismatches(issue, back, designated)) if designated
+      return if missing.empty?
+
+      raise Stop.new(:review_handoff_not_landed, what: missing.join(', '), ready: handoff_ready_status(issue))
     end
 
-    def designation_mismatches(merge_request, designated)
+    def designation_mismatches(issue, merge_request, designated)
       reviewer, assignee = designated.first, designated.last # rubocop:disable Style/ParallelAssignment
       mismatches = []
-      mismatches << "reviewer #{reviewer.username}" unless user_ids(merge_request, :reviewers) == [reviewer.id]
-      mismatches << "assignee #{assignee.username}" unless user_ids(merge_request, :assignees) == [assignee.id]
+      mismatches << reviewer_claim(issue, reviewer) unless user_ids(merge_request, :reviewers) == [reviewer.id]
+      mismatches << assignee_claim(issue, assignee) unless user_ids(merge_request, :assignees) == [assignee.id]
       mismatches
     end
 

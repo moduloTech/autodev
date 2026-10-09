@@ -124,11 +124,23 @@ to be called. The infra wait calls no fixer and is untouched.
   `issues.target_red_hold_since` is stamped by the poll that begins a hold (one
   that holds while no hold is recorded), kept while the hold goes on — a new
   merge request pipeline the target explains too is the same wait on the same
-  broken target — and cleared wherever the hold is released: the retry once the
-  target no longer explains every red job, and a round that fixes. A poll that
-  holds is bounded by `pipeline_watch_max_days` counted from that stamp (`0`
-  still disables it); the ordinary `pipeline_watch_expired` bound on
-  `checking_pipeline_since` is unchanged for every poll that does not hold. The
+  broken target — and cleared by every poll that compares against the target
+  and does not hold: the retry once the target no longer explains every red
+  job, and a round that fixes, whether or not some of its jobs were
+  pre-existing (a round with none used to keep the hold, so a later hold took
+  the stale stamp for its own start and could be given up on its first poll —
+  phase-10 review of the alpha-57 lot). A poll that holds is bounded by
+  `pipeline_watch_max_days` counted from that stamp (`0` still disables it);
+  the ordinary `pipeline_watch_expired` bound on `checking_pipeline_since` is
+  unchanged for every poll that does not hold. **A release by retry starts a
+  new watch**: the same write that clears the hold re-stamps
+  `checking_pipeline_since` to now, because the wait was the target's and the
+  retried pipeline is a new one to watch. Without it the retrying poll, which
+  does not hold, read the watch's own age — 60 days on the reproduction — and
+  gave the row up under `pipeline_watch_expired` on the poll that had just
+  concluded; now neither that poll nor the following ones expire the row on
+  time spent before or during the hold, and the retried pipeline gets the
+  whole bound. A retry GitLab refused releases nothing and restamps nothing. The
   first design had no clock of its own and counted the hold on the watch's age,
   so a row already watched for longer than the bound gave up on the very poll
   its hold began, having waited for nothing — the shape of powerpanne 16735,

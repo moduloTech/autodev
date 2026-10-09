@@ -62,7 +62,9 @@ class PipelineMonitor
     # own clock, not the watch's (Autodev #130, owner's decision of 09/10/2026):
     # a hold beginning on a row watched for months must still wait the whole
     # bound for the target to recover — PP#16735 was given up on 16/09/2026 on
-    # the very poll it found `master` red.
+    # the very poll it found `master` red. The poll that ends a hold by retrying
+    # the pipeline does not hold, and reads `checking_pipeline_since` — which
+    # that retry has just re-stamped (`release_hold(restart_watch: true)`).
     def watch_bound_clock(issue)
       @target_red_hold ? issue.target_red_hold_since : issue.checking_pipeline_since
     end

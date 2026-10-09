@@ -2,6 +2,7 @@
 
 require_relative 'test_helper'
 require_relative 'database_test_helper'
+require 'active_support/testing/time_helpers'
 
 # Autodev #130 — a job already red on the target branch is not "fixed" in the
 # merge request.
@@ -1066,5 +1067,105 @@ class TargetRedGiveUpWayOutTest < Minitest::Test
       assert_includes body, way_out
       refute_match RETRY, body, 'a pipeline retry does not bring autodev back'
     end
+  end
+end
+
+# Phase-10 review of the alpha-57 lot. A row watched for 60 days holds, then
+# the target is repaired: the retry released the hold, the poll no longer held,
+# so the bound read `checking_pipeline_since` — 60 days — and the same poll gave
+# the row up under `pipeline_watch_expired`, "never able to conclude", on the
+# poll that had just concluded. The wait was the target's; the retried
+# pipeline is a new one to watch.
+class AReleasedHoldStartsANewWatchTest < Minitest::Test
+  include DatabaseTestHelper
+  include PreexistingEdgeHelpers
+  include ActiveSupport::Testing::TimeHelpers
+
+  def setup = setup_database
+
+  def held_on_an_old_watch_then_retried(client)
+    mon, = monitor(client)
+    issue = watched_issue(since: 60.days.ago)
+    mon.check(issue)
+    recover_target(client)
+    monitor(client).first.check(issue.reload)
+    issue.reload
+  end
+
+  def poll(client, issue)
+    monitor(client).first.check(issue.reload)
+    issue.reload
+  end
+
+  def test_the_poll_that_retries_does_not_expire_the_watch_the_hold_waited_through
+    client = preexisting_client
+    issue = held_on_an_old_watch_then_retried(client)
+
+    assert_equal ['checking_pipeline', nil, [MR_PIPELINE]], [issue.status, issue.attention_reason, client.retries]
+    assert_in_delta Time.current.to_f, issue.checking_pipeline_since.to_f, 5
+  end
+
+  def test_the_retried_pipeline_is_watched_for_the_whole_bound_from_the_release
+    client = preexisting_client
+    issue = held_on_an_old_watch_then_retried(client)
+    client.head = FakeClient::GlPipeline.new(id: MR_PIPELINE, status: 'running')
+
+    travel 13.days
+
+    assert_equal 'checking_pipeline', poll(client, issue).status, 'expired inside the bound counted from the release'
+
+    travel 2.days
+
+    assert_equal %w[done pipeline_watch_expired], [poll(client, issue).status, issue.attention_reason]
+  end
+end
+
+# Phase-10 review of the alpha-57 lot. A round that fixes its own jobs left a
+# recorded hold behind — pipeline, key and `target_red_hold_since` — and a
+# later hold took that stale date for its own start, so it could be given up on
+# its very first poll. Any poll that does not hold releases a recorded hold.
+class APollThatDoesNotHoldReleasesTheHoldTest < Minitest::Test
+  include DatabaseTestHelper
+  include PreexistingEdgeHelpers
+
+  def setup = setup_database
+
+  # The target is green on `test`: the job is the merge request's own.
+  def fixing_round_over_a_stale_hold(client)
+    client.target_jobs[TARGET_PIPELINE] = [RedTargetFixtures.job(101, 'test', status: 'success')]
+    mon, calls = monitor(client)
+    issue = watched_issue(target_red_hold_pipeline_id: 5000, target_red_hold_key: 'stale',
+                          target_red_hold_since: 20.days.ago)
+    mon.check(issue)
+    [mon, calls, issue.reload]
+  end
+
+  # A new merge request pipeline red on `test`, and `master` red on it again
+  # for the same reason.
+  def red_on_both_again(client)
+    client.target_jobs[TARGET_PIPELINE] = [RedTargetFixtures.job(101, 'test')]
+    client.head = FakeClient::GlPipeline.new(id: 5002, status: 'failed')
+    client.mr_jobs = [RedTargetFixtures.job(4, 'test')]
+    client.traces[4] = SPEC_FAILURE
+  end
+
+  def test_a_round_that_fixes_its_own_jobs_clears_the_hold
+    client = preexisting_client
+    _, calls, issue = fixing_round_over_a_stale_hold(client)
+
+    assert_equal [[['test']], nil, nil, nil],
+                 [calls[:fixed], issue.target_red_hold_pipeline_id, issue.target_red_hold_key,
+                  issue.target_red_hold_since]
+  end
+
+  def test_a_later_hold_starts_its_own_clock_and_is_not_given_up_on_its_first_poll
+    client = preexisting_client
+    mon, _, issue = fixing_round_over_a_stale_hold(client)
+    red_on_both_again(client)
+
+    mon.check(issue)
+
+    assert_equal ['checking_pipeline', 5002], [issue.reload.status, issue.target_red_hold_pipeline_id]
+    assert_in_delta Time.current.to_f, issue.target_red_hold_since.to_f, 5
   end
 end

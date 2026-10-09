@@ -472,7 +472,7 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
 
     refute_includes labels, 'MR::ReadyForReview'
     assert_equal [:review_handoff_not_landed], entry_keys
-    assert_includes @entries.first.last[:what], 'reviewer alexan_a'
+    assert_includes @entries.first.last[:what], 'relecteur alexan_a'
   end
 
   test 'a dropped reviewer leaves no reviewer label, so the next delivery draws again instead of keeping nobody' do # rubocop:disable Minitest/MultipleAssertions
@@ -566,6 +566,7 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
   end
 
   test 'a read-back of an earlier write that GitLab does not answer says not confirmed, and ready was not sent' do # rubocop:disable Minitest/MultipleAssertions
+    @issue.update!(locale: 'en')
     read_back_times_out_after('MR::Size::M')
     hand_off
 
@@ -581,7 +582,8 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     hand_off
 
     refute_includes labels, 'MR::ReadyForReview'
-    assert_equal [[:review_handoff_not_landed, { what: 'assignee bernar_a' }]], @entries
+    assert_equal [[:review_handoff_not_landed, { what: 'assignee a bernar_a', ready: 'MR::ReadyForReview non pose' }]],
+                 @entries
   end
 
   test 'a stale label GitLab refused to remove is reported and ready is not posted' do
@@ -590,7 +592,8 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     hand_off
 
     refute_includes labels, 'MR::ReadyForReview'
-    assert_equal [[:review_handoff_not_landed, { what: '-MR::Size::XS' }]], @entries
+    assert_equal [[:review_handoff_not_landed, { what: '-MR::Size::XS', ready: 'MR::ReadyForReview non pose' }]],
+                 @entries
   end
 
   test 'a draw answering three names designates the first two only' do
@@ -635,6 +638,59 @@ class AnAutodevMrReachesItsReviewerTest < ActiveSupport::TestCase # rubocop:disa
     m.send(:hand_off_for_review, @issue)
 
     assert_includes @calls.first[:env], 'GITLAB_HOST=gitlab.example.com:8443'
+  end
+
+  # Phase-10 review of the alpha-57 lot: "reviewer <user>" / "assignee <user>"
+  # were English words inside a French note.
+  test 'the people a read-back names are in the issue locale' do
+    @client.drop_reviewers = true
+    @client.drop_assignees = true
+    hand_off
+
+    assert_match(/\(relecteur alexan_a, assignee a bernar_a\)/, rendered(:fr))
+    refute_match(/reviewer alexan_a/, rendered(:fr))
+
+    @issue.update!(locale: 'en')
+    @client = FakeGitlab.new
+    @client.drop_reviewers = true
+    @entries.clear
+    hand_off
+
+    assert_equal 'reviewer alexan_a', @entries.first.last[:what]
+  end
+
+  test 'a read-back that GitLab does not answer names the people in the issue locale' do
+    read_back_times_out_after('MR::Size::M')
+    hand_off
+
+    assert_match(/relecteur alexan_a, assignee a bernar_a non confirme/, rendered(:fr))
+  end
+
+  # Phase-10 review of the alpha-57 lot: these three entries ended "not posted"
+  # on a merge request that carried Ready all along — `post_ready` leaves it.
+  { 'a write that did not read back' => -> { @client.drop_labels = %w[MR::Size::M] },
+    'a read-back GitLab did not answer' => -> { read_back_times_out_after('MR::Size::M') },
+    'an interrupted handoff' => -> { @client.define_singleton_method(:edit_merge_request) { |*| raise EOFError } } }
+    .each do |what, prepare|
+    test "#{what} on a merge request already ready says ready was left as is" do
+      { fr: /MR::ReadyForReview deja present, laisse tel quel/,
+        en: /MR::ReadyForReview already present, left as is/ }.each do |locale, said|
+        @issue.update!(locale: locale.to_s)
+        @client = FakeGitlab.new(labels: %w[MR::ReadyForReview])
+        @entries.clear
+        instance_exec(&prepare)
+        hand_off
+
+        assert_match(said, rendered(locale))
+      end
+    end
+  end
+
+  test 'an interrupted handoff on a merge request without ready still says not posted' do
+    @client.define_singleton_method(:merge_request) { |*| raise Net::OpenTimeout, 'cut' }
+    hand_off
+
+    assert_match(/MR::ReadyForReview non pose/, rendered(:fr))
   end
 
   # -- Never raises -------------------------------------------------------------

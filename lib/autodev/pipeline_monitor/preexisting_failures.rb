@@ -51,13 +51,23 @@ class PipelineMonitor
       target_pipeline = latest_finished_target_pipeline(polled_target_branch)
       own, verdict = split_preexisting(issue, pipeline, failed_jobs, target_pipeline)
       return retry_held_pipeline(issue, pipeline, target_pipeline, own) if holding?(issue, pipeline) && own.any?
-      return failed_jobs unless verdict
+      return own_failures(issue, failed_jobs) unless verdict
 
       note_preexisting(issue, pipeline, verdict)
       return hold_pipeline(issue, pipeline, verdict, failed_jobs) if own.empty?
 
+      own_failures(issue, own)
+    end
+
+    # A poll that compared and does not hold releases a recorded hold — or a
+    # later hold would take the stale `target_red_hold_since` for its own start
+    # and could be given up on its first poll (phase-10 review of the alpha-57
+    # lot: a round with no pre-existing job at all kept it). A merge request
+    # naming no target compares nothing and is left to the rebase, which
+    # reports it (`MissingTargetBranchError`).
+    def own_failures(issue, jobs)
       release_hold(issue)
-      own
+      jobs
     end
 
     # A hold re-polled on the same two pipelines — the target's latest finished
@@ -134,10 +144,18 @@ class PipelineMonitor
       []
     end
 
-    def release_hold(issue)
+    # `restart_watch:` is the retry's: the wait was the target's, and the
+    # retried pipeline is a new one to watch. Left on the watch's clock, a row
+    # watched for longer than the bound before its hold was given up under
+    # `pipeline_watch_expired` on the very poll that retried it (phase-10 review
+    # of the alpha-57 lot). One write, so no poll sees the hold gone and the old
+    # clock still standing.
+    def release_hold(issue, restart_watch: false)
       return unless issue.target_red_hold_pipeline_id || issue.target_red_hold_since
 
-      issue.update(target_red_hold_pipeline_id: nil, target_red_hold_key: nil, target_red_hold_since: nil)
+      released = { target_red_hold_pipeline_id: nil, target_red_hold_key: nil, target_red_hold_since: nil }
+      released[:checking_pipeline_since] = Time.current if restart_watch
+      issue.update(released)
     end
 
     # The target no longer explains every red job of the held pipeline — it shows
@@ -152,7 +170,7 @@ class PipelineMonitor
       id = pipeline_id(pipeline)
       target_unchanged = held_against?(issue, target_pipeline)
       @client.retry_pipeline(@project_path, id)
-      release_hold(issue)
+      release_hold(issue, restart_watch: true)
       log_retry(issue, id, target_unchanged ? target_pipeline : nil, own)
       []
     rescue ::Gitlab::Error::ResponseError, ::SystemCallError, ::Timeout::Error, ::SocketError,
