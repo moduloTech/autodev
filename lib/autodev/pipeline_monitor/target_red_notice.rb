@@ -43,11 +43,19 @@ class PipelineMonitor
     # The age bound reached on a poll that held: the truth is that the target is
     # still red, not that the watch "never reached a verdict" — which is what
     # `pipeline_watch_expired` says, and what would be false here.
+    #
+    # The hold's clock ends with it; the held pipeline does not. A row put back on
+    # track by hand would otherwise inherit an expired clock and give up again on
+    # its first poll, whereas the held pipeline still tells that poll to retry it
+    # once the target is repaired rather than "fix" in the merge request a job
+    # the target broke.
     def give_up_on_red_target(issue, days)
       verdict = @target_red_hold
-      log "Issue ##{issue.issue_iid}: #{verdict.target_branch} still red after #{days} days → done"
-      abandon_issue(issue, :target_pipeline_red, detail: verdict.jobs.join(', '), days: days,
-                                                 **preexisting_vars(verdict))
+      log "Issue ##{issue.issue_iid}: #{verdict.target_branch} still red after #{days} days of hold → done"
+      return unless abandon_issue(issue, :target_pipeline_red, detail: verdict.jobs.join(', '), days: days,
+                                                               **preexisting_vars(verdict))
+
+      issue.update(target_red_hold_since: nil)
     end
   end
 end

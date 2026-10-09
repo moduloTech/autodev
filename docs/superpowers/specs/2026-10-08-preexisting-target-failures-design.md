@@ -120,18 +120,34 @@ to be called. The infra wait calls no fixer and is untouched.
   released. If the retried run fails again, the target no longer explains it,
   so it is fixed as today — the fix path rebases on the target first, which is
   what picks up the target's own repair.
-- **The bound.** The hold adds no clock of its own: it is bounded by the existing
-  `pipeline_watch_max_days` age bound on `checking_pipeline_since`, the age of the
-  whole watch (nothing transitions during a hold, so the clock runs from the
-  moment the row entered the watch). A watch already past the bound therefore
-  gives up on its first hold, and the public text says the watch passed the
-  bound — not that autodev waited that long for the target. A poll that holds
-  is a poll that read a pipeline status, so it does not raise
-  `poll_inconclusive!`. When the bound is reached **on a poll that held**, the
-  request is given up under a dedicated reason, `target_pipeline_red`, whose
-  public text names the job(s), the target branch and the target pipeline, and
-  says that the failure is not this merge request's. Any other expired watch
-  keeps `pipeline_watch_expired`.
+- **The bound: the hold has its own clock** (owner's decision of 09/10/2026).
+  `issues.target_red_hold_since` is stamped by the poll that begins a hold (one
+  that holds while no hold is recorded), kept while the hold goes on — a new
+  merge request pipeline the target explains too is the same wait on the same
+  broken target — and cleared wherever the hold is released: the retry once the
+  target no longer explains every red job, and a round that fixes. A poll that
+  holds is bounded by `pipeline_watch_max_days` counted from that stamp (`0`
+  still disables it); the ordinary `pipeline_watch_expired` bound on
+  `checking_pipeline_since` is unchanged for every poll that does not hold. The
+  first design had no clock of its own and counted the hold on the watch's age,
+  so a row already watched for longer than the bound gave up on the very poll
+  its hold began, having waited for nothing — the shape of powerpanne 16735,
+  given up on 16/09/2026 while `master` was red on the same `bundle install`
+  error. A poll that holds is a poll that read a pipeline status, so it does
+  not raise `poll_inconclusive!`. When the bound is reached **on a poll that
+  held**, the request is given up under a dedicated reason,
+  `target_pipeline_red`, whose public text says the target has explained the
+  failure for longer than the bound, names the job(s), the target branch and
+  the target pipeline, and says that the failure is not this merge request's.
+  The give-up clears `target_red_hold_since` and keeps the held pipeline, so a
+  row put back on track later starts a fresh wait if the target is still red,
+  and retries the held pipeline if it has been repaired.
+- **The way out** (owner's decision of 09/10/2026). No automatic pass re-selects
+  a row given up under `target_pipeline_red` — the only re-arm keyed on a
+  give-up reason is `dispatch_infra_recheck`'s `stagnation_pipeline` — so a
+  retried merge request pipeline would never be reviewed nor delivered. The
+  texts give the way out of every other give-up: once the target is repaired,
+  put the starting label back and reassign autodev. No automatic re-arm.
 
 The comment on the merge request is posted once per (merge request pipeline,
 pre-existing job set) — `issues.preexisting_noted_key` — so a hold that lasts
@@ -156,6 +172,8 @@ the same pre-existing job posts it once more, for that round.
   `issues.target_red_hold_pipeline_id` (integer), `issues.target_red_hold_key`
   (string, `"<target pipeline id>:<red job ids>"`), `issues.preexisting_noted_key`
   (string, `"<merge request pipeline id>:<job names>"`).
+- Migration `20261008130002_add_target_red_hold_since_to_issues`:
+  `issues.target_red_hold_since` (datetime, nullable) — the hold's own clock.
 - `PipelineMonitor::FailureSignature` (`lib/autodev/pipeline_monitor/failure_signature.rb`):
   `.of(trace) → nil | [:examples, Set] | [:tail, Array]`,
   `.explains?(target_signature, mr_signature) → Boolean`.

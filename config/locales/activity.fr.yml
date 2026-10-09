@@ -59,7 +59,7 @@ fr:
   activity_pipeline_preexisting: ":construction: Deja en echec sur %{target_branch} (pipeline #%{target_pipeline}), pour la meme raison : %{jobs} — non corrige dans cette MR"
   activity_pipeline_target_recovered: ":repeat: %{target_branch} ne montre plus le meme echec, ou ne permet plus de le comparer : pipeline de la MR relancee"
   activity_pipeline_held_job_diverged: ":repeat: La branche %{target_branch} est inchangee (pipeline #%{target_pipeline}), mais les jobs en echec de cette MR ne correspondent plus a son echec : %{jobs} ; pipeline de la MR relancee"
-  activity_target_pipeline_red: ":hourglass: Surveillance de plus de %{days} jours terminee : %{jobs} toujours en echec sur %{target_branch} (pipeline #%{target_pipeline}), pas a cause de cette MR → termine"
+  activity_target_pipeline_red: ":hourglass: %{jobs} en echec sur %{target_branch} depuis plus de %{days} jours (pipeline #%{target_pipeline}), pas a cause de cette MR → termine"
   activity_mr_closed_unmerged: ":stop_sign: MR fermee sans etre fusionnee, rien n'a ete livre → termine, intervention requise"
   activity_review_skill_missing: ":wrench: Skill de revue `%{skill}` declare mais `%{path}` absent de la branche cible `%{ref}` → termine, intervention requise"
   activity_target_branch_missing: ":wrench: Branche cible `%{branch}` absente du depot apres %{count} tentatives → termine, intervention requise"

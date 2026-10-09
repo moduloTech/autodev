@@ -118,10 +118,16 @@ class PipelineMonitor
     # stays in `checking_pipeline`, and `@target_red_hold` tells the age bound that
     # this poll saw the target still red — the column alone outlives the poll that
     # wrote it, so it cannot.
+    #
+    # `target_red_hold_since` is the hold's own clock (owner's decision of
+    # 09/10/2026): stamped by the poll that begins the hold, kept for as long as
+    # no poll releases it — a new merge request pipeline the target explains too
+    # is the same wait on the same broken target.
     def hold_pipeline(issue, pipeline, verdict, failed_jobs)
       @target_red_hold = verdict
       id = pipeline_id(pipeline)
-      hold = { target_red_hold_pipeline_id: id, target_red_hold_key: hold_key(verdict.pipeline, failed_jobs) }
+      hold = { target_red_hold_pipeline_id: id, target_red_hold_key: hold_key(verdict.pipeline, failed_jobs),
+               target_red_hold_since: issue.target_red_hold_since || Time.current }
       issue.update(hold) unless hold.all? { |column, value| issue.public_send(column) == value }
       log "Issue ##{issue.issue_iid}: every red job of pipeline ##{id} is already red on " \
           "#{verdict.target_branch}, holding until it recovers"
@@ -129,7 +135,9 @@ class PipelineMonitor
     end
 
     def release_hold(issue)
-      issue.update(target_red_hold_pipeline_id: nil, target_red_hold_key: nil) if issue.target_red_hold_pipeline_id
+      return unless issue.target_red_hold_pipeline_id || issue.target_red_hold_since
+
+      issue.update(target_red_hold_pipeline_id: nil, target_red_hold_key: nil, target_red_hold_since: nil)
     end
 
     # The target no longer explains every red job of the held pipeline — it shows

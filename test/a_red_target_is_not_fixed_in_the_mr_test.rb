@@ -189,6 +189,16 @@ module RedTargetFixtures
     issue
   end
 
+  # A hold on the merge request pipeline that began at `at`: the hold's own clock
+  # (owner's decision of 09/10/2026), not the watch's.
+  def hold_begun(at)
+    { target_red_hold_pipeline_id: MR_PIPELINE, target_red_hold_since: at }
+  end
+
+  def held_since(at, **attrs)
+    watched_issue(**hold_begun(at), **attrs)
+  end
+
   # The merge request's `test` failed on spec a_spec.rb:12, and so did `master`'s.
   def preexisting_test_job(client)
     client.mr_jobs = [RedTargetFixtures.job(1, 'test')]
@@ -562,7 +572,7 @@ class HeldPipelineTest < Minitest::Test
     client = FakeClient.new
     preexisting_test_job(client)
     mon, = monitor(client)
-    issue = watched_issue(since: 15.days.ago)
+    issue = held_since(15.days.ago)
 
     mon.check(issue)
 
@@ -578,7 +588,7 @@ class HeldPipelineTest < Minitest::Test
     client = FakeClient.new
     preexisting_test_job(client)
     mon, = monitor(client)
-    issue = watched_issue(since: 15.days.ago)
+    issue = held_since(15.days.ago)
 
     mon.check(issue)
 
@@ -934,6 +944,127 @@ class PreexistingSabotageGapsTest < Minitest::Test
       _, _, issue = held(client)
 
       assert_equal ['checking_pipeline', nil], [issue.status, issue.preexisting_noted_key]
+    end
+  end
+end
+
+# The hold's own clock (owner's decision of 09/10/2026). It used to be the
+# watch's: `checking_pipeline_since`, so a row already watched for longer than
+# `pipeline_watch_max_days` gave up on the very poll its hold began, having
+# waited for nothing — the shape of powerpanne 16735, given up on 16/09/2026.
+class TargetRedHoldClockTest < Minitest::Test
+  include DatabaseTestHelper
+  include PreexistingEdgeHelpers
+
+  def setup = setup_database
+
+  def test_a_hold_that_begins_on_an_old_watch_waits_the_full_bound
+    client = preexisting_client
+    mon, = monitor(client)
+    issue = watched_issue(since: 60.days.ago)
+
+    mon.check(issue)
+
+    assert_equal 'checking_pipeline', issue.reload.status, 'the hold gave up on the poll it began'
+    assert_in_delta Time.current, issue.target_red_hold_since, 5
+  end
+
+  def test_a_hold_that_goes_on_keeps_the_time_it_began
+    client = preexisting_client
+    began = 3.days.ago.change(usec: 0)
+    mon, = monitor(client)
+    issue = watched_issue(**hold_begun(began))
+
+    mon.check(issue)
+
+    assert_equal ['checking_pipeline', began], [issue.reload.status, issue.target_red_hold_since]
+  end
+
+  # The young watch clock does not save a hold whose own clock ran out.
+  def test_a_hold_past_the_bound_gives_up_whatever_the_watch_clock_says
+    client = preexisting_client
+    mon, = monitor(client)
+    issue = watched_issue(since: 1.day.ago, **hold_begun(15.days.ago))
+
+    mon.check(issue)
+
+    assert_equal %w[done target_pipeline_red], [issue.reload.status, issue.attention_reason]
+  end
+
+  def test_zero_days_still_disables_the_hold_bound
+    client = preexisting_client
+    mon, = monitor(client, project_config: PROJECT_CONFIG.merge('pipeline_watch_max_days' => 0))
+    issue = watched_issue(since: 90.days.ago, **hold_begun(90.days.ago))
+
+    mon.check(issue)
+
+    assert_equal 'checking_pipeline', issue.reload.status
+  end
+
+  def test_the_target_recovering_clears_the_hold_clock
+    client = preexisting_client
+    mon, _, issue = held(client)
+    recover_target(client)
+
+    mon.check(issue)
+
+    assert_nil issue.reload.target_red_hold_since
+  end
+
+  def test_a_round_that_fixes_clears_the_hold_clock
+    client = FakeClient.new
+    two_red_jobs(client)
+    mon, = monitor(client)
+    issue = watched_issue(target_red_hold_pipeline_id: 5000, target_red_hold_key: 'stale',
+                          target_red_hold_since: 2.days.ago)
+
+    mon.check(issue)
+
+    assert_nil issue.reload.target_red_hold_since
+  end
+
+  # The give-up ends the hold's clock but keeps the held pipeline: a row put
+  # back on track (starting label, reassigned) whose target is repaired by then
+  # retries that pipeline, and one whose target is still red holds again for a
+  # whole bound instead of giving up on its first poll.
+  def test_the_give_up_ends_the_hold_clock_and_keeps_the_held_pipeline
+    client = preexisting_client
+    mon, = monitor(client)
+    issue = held_since(15.days.ago)
+
+    mon.check(issue)
+
+    assert_equal ['done', nil, MR_PIPELINE],
+                 [issue.reload.status, issue.target_red_hold_since, issue.target_red_hold_pipeline_id]
+  end
+end
+
+# The way out of a `target_pipeline_red` give-up (owner's decision of
+# 09/10/2026). Retrying the merge request pipeline is not one: no automatic pass
+# re-selects a row given up under this reason, so autodev would never review nor
+# deliver the merge request. The way out is every other give-up's.
+class TargetRedGiveUpWayOutTest < Minitest::Test
+  LOCALES = File.expand_path('../config/locales', __dir__)
+
+  TEXTS = {
+    %w[notifications fr target_pipeline_red] => 'remettez le label de depart et reassignez-moi',
+    %w[notifications en target_pipeline_red] => 'put the starting label back and reassign me',
+    %w[web fr web_errors_explain_attention_target_pipeline_red] => 'remettez le label de départ et réassignez Autodev',
+    %w[web en web_errors_explain_attention_target_pipeline_red] => 'put the starting label back and reassign Autodev'
+  }.freeze
+
+  RETRY = /relance[rz]? la pipeline|retry the merge request pipeline/i
+
+  def text(table, locale, key)
+    YAML.load_file(File.join(LOCALES, "#{table}.#{locale}.yml")).fetch(locale).fetch(key)
+  end
+
+  TEXTS.each do |(table, locale, key), way_out|
+    define_method(:"test_#{table}_#{locale}_gives_the_usual_way_out") do
+      body = text(table, locale, key)
+
+      assert_includes body, way_out
+      refute_match RETRY, body, 'a pipeline retry does not bring autodev back'
     end
   end
 end
