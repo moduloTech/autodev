@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.58] - 2026-10-21
+
 ### Changed
 
 - **The usage guides cover the alpha-58 lot (Autodev #78, #129, #135, #137, #138, #139, #140).** `/help`: a request handed back because its branch conflicts with the target (a new card, what to do: update the branch by hand, repose the starting label, reassign autodev), the "no longer progresses" card clearing once the request moves again, autodev re-reading its own questions with their answers, and the poll seeing a GitLab gesture at the next cycle even when autodev is busy; the last two mentions of a review limit are gone. `/admin/help`: the two workers and the `poll` queue, the `workers` card, the derived pools, a re-implementation enqueued as a job, `DISPATCHED_FROM[:process]` at `pending`, the dormant budget returned by progress, `ContextNotes`, and two error-catalogue rows (`rebase_conflict`, the shallow-clone merge base). Text only: no screen changed, no screenshot re-shot.
