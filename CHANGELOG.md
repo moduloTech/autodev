@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A duplicate `:process` job no longer asks the requester again (Autodev #140).** On 15/10/2026 six `:process` jobs were queued for one ticket (A#164, PowerPanne #16627) while the queue ran late. The first parked the request in `needs_clarification` with its questions; each of the next five found the row in a state its staleness guard accepted — `IssueProcessJob::DISPATCHED_FROM[:process]` was `Issue::PROCESSABLE_STATES`, which includes `needs_clarification` since Autodev #75 — and posed `label_doing`, cloned, ran the spec check and posted a new set of questions: three different sets in two minutes, then a quota stop that left the ticket on `Development::Doing`, out of reach of any answer. The guard is now `pending` alone, since the poll moves an answered request to `pending` before it enqueues; `PROCESSABLE_STATES` stays the router's rule. And `IssueProcessor#process` stops before any write when `start_processing!` did not happen, instead of running the label, the activity entry and the whole pipeline after a silently refused transition.
+
 ## [1.0.0-alpha.57] - 2026-10-09
 
 ### Added

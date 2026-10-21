@@ -217,6 +217,15 @@ class IssueProcessJobTest < ActiveSupport::TestCase # rubocop:disable Metrics/Cl
            'a queued pipeline check must not run against a row already delivered'
   end
 
+  # Autodev #140: a `:process` run can end in `needs_clarification`, so a
+  # duplicate queued behind it finds the row there. The poll moves a waiting row
+  # to `pending` before it enqueues, so this state is never one a `:process` job
+  # was queued from.
+  test ':process is skipped once the run before it parked the row in needs_clarification' do
+    refute action_reached?(:process, status: 'needs_clarification'),
+           'a duplicate :process job ran against a row waiting for an answer'
+  end
+
   test 'no action reaches its body when the row no longer matches it' do
     IssueProcessJob::ACTIONS.each do |action|
       refute action_reached?(action, status: 'cloning'), "#{action} ran against a row in cloning"

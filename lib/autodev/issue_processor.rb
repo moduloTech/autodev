@@ -23,7 +23,7 @@ class IssueProcessor
   end
 
   def process(issue)
-    start_processing(issue)
+    return unless start_processing(issue)
     return if issue_closed?(issue)
 
     @work_dir = work_dir_for(issue)
@@ -42,13 +42,24 @@ class IssueProcessor
     "/tmp/autodev_#{@project_path.gsub('/', '_')}_#{issue.issue_iid}"
   end
 
-  def start_processing(issue)
+  # Answers whether the run started. `start_processing!` leaves `pending` only,
+  # and `whiny_transitions: false` makes it a silent `false` from anywhere else —
+  # after which the label, the activity entry and the whole pipeline used to run
+  # anyway (Autodev #140: five duplicate jobs on a row the first had parked in
+  # `needs_clarification`, each posting new questions). Nothing is written
+  # before the transition has happened.
+  def start_processing(issue) # rubocop:disable Naming/PredicateMethod -- it acts; the boolean says whether it did
     @dc_issue = issue
+    unless issue.start_processing!
+      log "Issue ##{issue.issue_iid} is #{issue.status}, not pending — not processing it"
+      return false
+    end
+
     log "Processing issue ##{issue.issue_iid}: #{issue.issue_title}"
-    issue.start_processing!
     Issue.where(id: issue.id).update_all(started_at: Time.current)
     apply_label_doing(issue.issue_iid)
     log_activity(issue, :started)
+    true
   end
 
   def issue_closed?(issue)

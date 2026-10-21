@@ -62,8 +62,19 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # row has just been read anyway. It is not a substitute for a per-issue lock
   # (`limits_concurrency` is that) — it answers the different question of
   # whether the work this job was queued for still needs doing.
+  #
+  # `:process` is `pending` alone, and deliberately not `Issue::PROCESSABLE_STATES`
+  # (Autodev #140). That constant answers the router's question — may a waiting
+  # row reach `process_issue`, the one place that asks whether the human
+  # answered (#75) — and this one answers "is the work still to do". Both
+  # `:process` enqueue sites move the row to `pending` before enqueuing
+  # (`PollDispatcher#process_issue` through `ClarificationResume#resume!`,
+  # `ClarificationSweep#apply!` likewise), so a job finding its row in
+  # `needs_clarification` is a duplicate queued behind the run that parked it.
+  # Sharing the constant let five such duplicates on A#164 each pose
+  # `label_doing`, clone, and post a new set of questions to the requester.
   DISPATCHED_FROM = {
-    process: ::Issue::PROCESSABLE_STATES,
+    process: %w[pending].freeze,
     check_pipeline: %w[checking_pipeline].freeze,
     fix_discussions: %w[fixing_discussions].freeze,
     post_completion: %w[done].freeze,
