@@ -223,12 +223,16 @@ class ClarificationLabelCycleTest < Minitest::Test
     client = StubClient.new(labels: ['To do'])
     proc = processor(client)
     proc.send(:start_processing, issue)
+    # Without it the row stayed in `cloning`, every transition below was
+    # silently refused, and this test only passed because `start_processing`
+    # posed the label anyway — the defect of Autodev #140.
+    issue.clone_complete!
     proc.send(:post_clarification, ['Which company?'], issue.issue_iid, issue)
 
     issue.clarification_received!
     processor(client).send(:start_processing, issue)
 
-    assert_equal ['Development::Doing'], client.labels
+    assert_equal %w[cloning Development::Doing], [issue.status, *client.labels]
   end
 end
 
@@ -248,7 +252,7 @@ class ClarificationLabelDoesNotMisrouteTest < Minitest::Test
   def test_the_reposed_label_routes_to_the_pickup_not_to_a_reimplementation
     issue = create_issue(status: 'needs_clarification', clarification_requested_at: Time.now.utc)
     router = PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,
-                            logger: StubLogger.new, token: 'x', pool: nil)
+                            logger: StubLogger.new, token: 'x')
 
     verdict = router.route(FakeGlIssue.new(issue.issue_iid, 'title', nil), StubClient.new)
 

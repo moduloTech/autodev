@@ -597,7 +597,7 @@ module Autodev
     # those events are the record `LabelHandover` reads.
     def router_for(path)
       ::PollRouter.new(config: @config, project_config: project_config(path), logger: @logger,
-                       token: @config['gitlab_token'], pool: nil)
+                       token: @config['gitlab_token'])
     end
 
     def project_config(path)

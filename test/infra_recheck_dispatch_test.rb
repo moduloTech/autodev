@@ -190,7 +190,7 @@ class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassL
   end
 
   def test_excludes_other_needs_attention_reasons
-    issue = infra_stagnation_issue(attention_reason: 'review_limit_reached')
+    issue = infra_stagnation_issue(attention_reason: 'fix_rounds_exhausted')
 
     refute_includes candidate_iids, issue.issue_iid
   end
@@ -202,7 +202,7 @@ class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassL
   # the reasons and autodev restarts tickets it has just abandoned.
   def test_only_a_pipeline_stagnation_is_ever_re_armed
     reasons = %w[stagnation_pipeline stagnation_discussions pipeline_watch_expired
-                 review_limit_reached review_failures_exhausted dormant_exhausted
+                 fix_rounds_exhausted review_failures_exhausted dormant_exhausted
                  mr_closed_unmerged]
     issues = reasons.to_h { |reason| [reason, infra_stagnation_issue(attention_reason: reason)] }
     selected = candidate_iids
@@ -456,6 +456,6 @@ class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassL
 
   def build_router
     PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,
-                   logger: @logger, token: 'x', pool: nil)
+                   logger: @logger, token: 'x')
   end
 end

@@ -75,7 +75,7 @@ class DeliveredReviewCardTest < ActiveSupport::TestCase
   end
 
   def test_all_attention_reasons_show_contact_line
-    %w[stagnation_pipeline stagnation_discussions review_limit_reached review_failures_exhausted].each do |reason|
+    %w[stagnation_pipeline stagnation_discussions fix_rounds_exhausted review_failures_exhausted].each do |reason|
       issue = create_issue(status: 'done', needs_attention: true, attention_reason: reason)
       html = render_for(issue, closable: [issue.id])
 

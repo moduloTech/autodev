@@ -132,7 +132,9 @@ class ClarificationSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
     assert_equal 'pending', issue.reload.status
     assert_nil issue.clarification_requested_at
-    assert_equal [['group/project', issue.issue_iid, :process]], @enqueued
+    assert_equal [['group/project', issue.issue_iid, :process, true]],
+                 @enqueued.map { |args| [*args, IssueProcessJob.new.send(:dispatchable?, issue, :process)] },
+                 'the job the sweep enqueued must pass its own guard (Autodev #140)'
   end
 
   # Same journal entry the poller writes, so a re-armed ticket reads identically

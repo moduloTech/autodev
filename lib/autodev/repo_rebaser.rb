@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'shallow_history'
+
 # Rebase an autodev branch onto its target branch (`origin/<target_branch>`) before
 # starting any write action (implementing, fixing discussions, fixing pipeline).
 # Without this, danger-claude operates against a stale tree: target may have
@@ -12,6 +14,8 @@
 # what the callers below hand in as `base:`), and DangerClaudeRunner
 # (danger_claude_prompt, log, log_error) to be available on the including class.
 module RepoRebaser
+  include ShallowHistory
+
   private
 
   # `base` is asked for rather than worked out here (Autodev #91): this module
@@ -22,12 +26,15 @@ module RepoRebaser
   # required keyword so that a new caller has to have asked.
   #
   # Outcome symbols: :no_op (already up to date), :rebased (rebase applied and
-  # pushed), :failed (clean rebase impossible, branch left untouched).
+  # pushed). There is no third symbol any more (Autodev #138): a rebase that
+  # cannot be completed raises `RebaseConflictError`, because `:failed` is what
+  # all three callers discarded before working on, and reviewing, a stale base.
   def rebase_branch_on_target(work_dir, branch, base:)
     fetch_target_with_history(work_dir, base)
     ensure_base_available!(work_dir, base)
     return :no_op unless target_has_new_commits?(work_dir, base)
 
+    ensure_merge_base!(work_dir, branch, base)
     log "Rebasing #{branch} on origin/#{base}..."
     _, _, ok = run_cmd_status(['git', 'rebase', "origin/#{base}"], chdir: work_dir)
     return finalize_rebase(work_dir, branch) if ok
@@ -89,10 +96,9 @@ module RepoRebaser
   # branch `refs/remotes/origin/<target>` gets created — `git fetch origin <target>`
   # alone only writes FETCH_HEAD on clones made with `--branch <other>`.
   def fetch_target_with_history(work_dir, target)
-    is_shallow, = run_cmd_status(%w[git rev-parse --is-shallow-repository], chdir: work_dir)
     refspec = "+refs/heads/#{target}:refs/remotes/origin/#{target}"
-    cmd = if is_shallow.strip == 'true'
-            ['git', 'fetch', '--deepen=500', 'origin', refspec]
+    cmd = if shallow?(work_dir)
+            ['git', 'fetch', "--deepen=#{deepen_step}", 'origin', refspec]
           else
             ['git', 'fetch', 'origin', refspec]
           end
@@ -107,10 +113,24 @@ module RepoRebaser
     ok && !out.empty?
   end
 
+  # The conflicted paths are read before danger-claude touches anything: if git
+  # later refuses to continue with nothing left unmerged, these are still the
+  # files the rebase stopped on.
   def resolve_conflicts_then_continue(work_dir, branch, target)
+    conflicted = unmerged_files(work_dir)
+    ask_to_resolve_conflicts(work_dir, branch, target)
+    continue_after_resolution(work_dir, branch, target, conflicted)
+  end
+
+  # Only the danger-claude call sits under these rescues. Whatever it raised, the
+  # rebase is aborted so the tree is clean, and the error travels on as itself to
+  # the boundary's own handler (Autodev #138). A crash used to become `:failed`,
+  # i.e. a silent stale base; and it is not a conflict verdict either, since a
+  # tool that did not run has said nothing about the conflict (Autodev #107: an
+  # outage read as a verdict hands healthy requests back).
+  def ask_to_resolve_conflicts(work_dir, branch, target)
     log 'Rebase produced conflicts, asking danger-claude to resolve...'
     danger_claude_prompt(work_dir, build_conflict_prompt(branch, target))
-    continue_after_resolution(work_dir, branch)
   rescue RateLimitError
     # Rate-limit signals the worker to pause. Abort the rebase first so the
     # tree is clean if the worker resumes later on this work_dir.
@@ -119,16 +139,23 @@ module RepoRebaser
   rescue StandardError => e
     log_error "Conflict-resolution prompt failed (#{e.class}: #{e.message}); aborting rebase"
     run_cmd_status(%w[git rebase --abort], chdir: work_dir)
-    :failed
+    raise
   end
 
-  def continue_after_resolution(work_dir, branch)
+  # Outside the rescues above on purpose: a push that fails after a resolved
+  # conflict propagates exactly like one after a clean rebase. Under them it used
+  # to read as a failed rebase.
+  def continue_after_resolution(work_dir, branch, target, conflicted)
     out, _, ok = run_cmd_status(
       %w[git rebase --continue],
       chdir: work_dir,
       env: { 'GIT_EDITOR' => 'true' } # auto-accept the existing commit message
     )
-    ok ? finalize_rebase(work_dir, branch) : abort_rebase(work_dir, out)
+    return finalize_rebase(work_dir, branch) if ok || rebase_completed?(work_dir, target)
+
+    remaining = unmerged_files(work_dir)
+    abort_rebase(work_dir, out)
+    raise RebaseConflictError.new(branch: branch, base: target, files: remaining.empty? ? conflicted : remaining)
   end
 
   def finalize_rebase(work_dir, branch)
@@ -137,12 +164,29 @@ module RepoRebaser
     :rebased
   end
 
-  # Leave the branch in its pre-rebase state. The downstream action (implement
-  # / fix) will run on stale-but-clean ground rather than block on a bad rebase.
+  # Puts the branch back in its pre-rebase state, so nothing half-rebased is left
+  # in the work directory. Nothing is pushed, and the caller does not work on what
+  # is left: it stops the line (`RebaseConflictStop`).
   def abort_rebase(work_dir, continue_output)
     log_error "Rebase --continue failed; aborting rebase. Output: #{continue_output[0, 300]}"
     run_cmd_status(%w[git rebase --abort], chdir: work_dir)
-    :failed
+  end
+
+  # danger-claude is told not to run `git rebase --continue`, and may do it
+  # anyway. Ours then answers `fatal: no rebase in progress` — a non-zero exit on
+  # a branch that is rebased and resolved. Reading that as a conflict would tell a
+  # human to resolve files that are already resolved (Autodev #138, review).
+  def rebase_completed?(work_dir, target)
+    return false if %w[rebase-merge rebase-apply].any? { |d| File.exist?(File.join(work_dir, '.git', d)) }
+
+    _, _, ok = run_cmd_status(['git', 'merge-base', '--is-ancestor', "origin/#{target}", 'HEAD'], chdir: work_dir)
+    ok
+  end
+
+  # Read before `git rebase --abort`, which erases the answer.
+  def unmerged_files(work_dir)
+    out, _, ok = run_cmd_status(%w[git diff --name-only --diff-filter=U], chdir: work_dir)
+    ok ? out.split("\n").map(&:strip).reject(&:empty?) : []
   end
 
   def build_conflict_prompt(branch, target)

@@ -24,8 +24,6 @@ class PollRouter
   # invisible for the same reason: the substitute is a plausible destination. The
   # read now raises and `PollRouter#route` skips this issue for the cycle.
   module ResumeHandler
-    DORMANT_BUDGET_RESET = { dormant_recheck_count: 0, dormant_recheck_at: nil }.freeze
-
     private
 
     def handle_reenter(gl_issue, existing)
@@ -110,10 +108,13 @@ class PollRouter
     # powerpanne. Announced as reviewed to the very people whose job is to review
     # it, which is the harm Autodev #63 removed from the six abandon paths.
     #
-    # The cap stays, and is the whole of what the line ever bought: an inherited
-    # value at `MAX_REVIEW_ROUNDS` would send the next green pipeline into
-    # `green_branch`'s `:review_limit` short-circuit and give the request up
-    # again without a single new round.
+    # The cap stays, though it no longer protects anything. Until Autodev #78 it
+    # kept an inherited value away from `green_branch`'s review-round limit, which
+    # was unreachable and is gone. No reader tells 1 from more —
+    # `announce_reentry` asks `positive?`, `ReviewArrearsSweep` selects 0,
+    # `green_branch` asks `zero?` — so all it does now is keep a value above 1,
+    # which nothing writes, from surviving a reentry. Kept rather than removed
+    # as the smaller change; the #78 spec leaves that choice to the owner.
     #
     # `review_failure_count: 0` beside it really is a reset, deliberately: a
     # request abandoned on `REVIEW_FAILURE_THRESHOLD` consecutive review failures
@@ -135,7 +136,8 @@ class PollRouter
     # a single audit (A#139, A#144, A#148 at 3/3). The two automatic callers keep
     # it: the cap is what stops a row that keeps falling dormant from consuming
     # GitLab reads (#47, #103), and a reset on every automatic recovery would
-    # reopen that loop.
+    # reopen that loop. Their row gets it back at its next progress instead
+    # (Autodev #129 — `Issue#return_dormant_budget_on_progress!`).
     def reenter_via_pipeline_check(existing, origin: nil, reset_dormant: false)
       existing.reenter_to_check_pipeline!(origin)
       existing.update(review_count: reentry_review_count(existing), review_failure_count: 0,
@@ -144,7 +146,7 @@ class PollRouter
                       error_message: nil, finished_at: nil, activity_note_id: nil,
                       needs_attention: false, attention_reason: nil, attention_detail: nil,
                       infra_recheck_count: 0, infra_recheck_at: nil, **::Issue::POST_COMPLETION_CLEARED,
-                      **(reset_dormant ? DORMANT_BUDGET_RESET : {}))
+                      **(reset_dormant ? ::Issue::DORMANT_BUDGET_RESET : {}))
       apply_label_doing(existing.issue_iid)
       announce_reentry(existing)
     end
@@ -180,7 +182,7 @@ class PollRouter
                       finished_at: nil, started_at: nil,
                       pipeline_retrigger_count: 0, activity_note_id: nil,
                       needs_attention: false, attention_reason: nil, attention_detail: nil,
-                      **::Issue::POST_COMPLETION_CLEARED, **DORMANT_BUDGET_RESET)
+                      **::Issue::POST_COMPLETION_CLEARED, **::Issue::DORMANT_BUDGET_RESET)
       log_activity(existing, :reenter)
       enqueue_issue_processing(gl_issue, existing)
     end

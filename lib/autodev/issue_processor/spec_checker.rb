@@ -174,7 +174,7 @@ class IssueProcessor
       header = Locales.t(:spec_unclear_header, locale: locale, tag: autodev_tag)
       footer = Locales.t(:spec_unclear_footer, locale: locale, tag: autodev_tag)
       numbered = issues_list.map.with_index(1) { |iss, i| "#{i}. #{iss}" }.join("\n")
-      notify_issue(iid, "#{header}\n\n#{numbered}\n\n#{footer}")
+      notify_issue(iid, "#{header}\n\n#{numbered}\n\n#{footer}\n\n#{ContextNotes::QUESTION_MARKER}")
     end
 
     def issue_locale(iid)

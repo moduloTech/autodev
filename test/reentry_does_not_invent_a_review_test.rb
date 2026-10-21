@@ -11,9 +11,9 @@ require_relative 'database_test_helper'
 # it was written for: a *delivered* request whose todo label a human reposes. That
 # one has been reviewed — `finalize_green_done` is reachable through
 # `green_post_review` alone — so the 1 it is given is the 1 it already had, and
-# what the line really buys is the cap: an inherited value at the review-round
-# limit would otherwise send the next green pipeline straight to
-# `green_done_max_reviews`.
+# what the line really bought was the cap: an inherited value at the review-round
+# limit would otherwise have sent the next green pipeline straight to
+# `green_done_max_reviews` (unreachable, deleted by Autodev #78).
 #
 # A request abandoned BEFORE any review carries `review_count = 0`, and 0 is a
 # fact: nobody looked. Writing 1 over it makes `PipelineMonitor#green_branch`
@@ -153,7 +153,7 @@ class ReentryDoesNotInventAReviewTest < Minitest::Test
 
   def router
     PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,
-                   logger: @logger, token: 'tok', pool: nil)
+                   logger: @logger, token: 'tok')
   end
 
   def monitor

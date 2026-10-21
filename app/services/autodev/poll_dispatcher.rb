@@ -51,25 +51,6 @@ module Autodev
       end
     end
 
-    # PollRouter's contract expects a `pool` arg with an `enqueue?` method. In
-    # the Solid Queue world the router still routes (returns :next vs
-    # :continue) but the actual enqueue happens through `process_issue`
-    # below, never via the pool object — so we hand it a no-op. PollRouter
-    # also occasionally enqueues a re-implementation cycle itself via the
-    # pool; for those branches we forward to the job. Block content runs
-    # inline so the router's reentry / reimplementation branches still
-    # execute their AASM transitions; this goes away at step 6 when
-    # WorkerPool is deleted and PollRouter is refactored to enqueue jobs
-    # directly.
-    NullPool = Module.new do
-      module_function
-
-      def enqueue?(issue_iid:, &block) # rubocop:disable Lint/UnusedMethodArgument
-        block&.call
-        true
-      end
-    end
-
     # `usage_ok:` is the Claude-quota verdict AutodevPollJob probed once for the
     # whole cycle (Autodev::UsageGate). It gates only the passes that end in a
     # danger-claude / mr-review call — see #claude_available? (Autodev #46).
@@ -162,7 +143,7 @@ module Autodev
       return if too_recent?(gl_issue)
 
       router = ::PollRouter.new(config: @config, project_config: @project_config,
-                                logger: @logger, token: @token, pool: NullPool)
+                                logger: @logger, token: @token)
       return if router.route(gl_issue, @client) == :next
 
       process_issue(gl_issue)
@@ -260,8 +241,9 @@ module Autodev
     # this method, and it was false for four months (Autodev #75): `route_by_state`
     # answered `:next` for anything that was not `pending`, so `process_issue` — and
     # therefore this method — was never reached for the state it exists to serve.
-    # The rule is now stated once, as `Issue::PROCESSABLE_STATES`, and read by both
-    # the router and `IssueProcessJob`.
+    # The rule is now stated once, as `Issue::PROCESSABLE_STATES`, and read by the
+    # router. The job it enqueues is guarded on `pending` alone (Autodev #140):
+    # `resume!` has moved the row there before `process_issue` enqueues.
     def clarification_received?(existing, gl_issue)
       resumer = ClarificationResume.new(client: @client, path: @path, logger: @logger)
       return false unless resumer.answered?(existing)
@@ -365,10 +347,12 @@ module Autodev
     # #60). This hook is a *delivery* hook — that is the whole argument behind #52
     # routing an interrupted row to `closed` — and an abandoned row is `done`
     # without being delivered: pipeline stagnation, discussion stagnation, an
-    # expired pipeline watch, the review-round limit, an exhausted review budget.
-    # Two of those already reassigned the ticket to its author and so already
-    # slipped past the `still_assigned?` guard into this pass; #60 made the
-    # reassignment uniform, which would have let the other three in too. No nominal
+    # expired pipeline watch, an exhausted review budget, and the later ones.
+    # Two of the give-ups #60 found already reassigned the ticket to its author —
+    # the exhausted review budget and the review-round limit, unreachable and
+    # deleted by Autodev #78 — and so already slipped past the `still_assigned?`
+    # guard into this pass; #60 made the reassignment uniform, which would have
+    # let the other three in too. No nominal
     # completion path sets the flag and every give-up path does, so the clause
     # separates the two populations exactly.
     #

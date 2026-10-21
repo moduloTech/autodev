@@ -372,17 +372,21 @@ module GitlabHelpers
     # ticket's comments are not decoration: bug #32 is the case where the whole
     # instruction ("la recette est KO, il manque X") lives in a comment posted
     # after the first delivery, and a prompt silently missing them reads as a
-    # ticket nobody commented on. Same endpoint, same rule as `human_comment_since?`.
+    # ticket nobody commented on. Same endpoint as `human_comment_since?`.
+    #
+    # Which notes, and in what order, is `ContextNotes` (Autodev #137): the human
+    # notes and autodev's own questions and answers, oldest first, so an answer
+    # follows the question it answers.
     def append_comments(lines, client, project_path, issue_iid, img_opts)
       notes = GitlabHelpers.answer(:issue_notes) do
         client.issue_notes(project_path, issue_iid, per_page: 100).auto_paginate
       end
-      user_notes = notes.reject { |n| n.system || n.body.to_s.include?('**autodev**') }
-      return unless user_notes.any?
+      kept = ContextNotes.chronological(notes.select { |note| ContextNotes.in_context?(note) })
+      return unless kept.any?
 
       lines << '## Comments'
       lines << ''
-      user_notes.each { |note| append_single_comment(lines, note, img_opts) }
+      kept.each { |note| append_single_comment(lines, note, img_opts) }
     end
 
     # Format and append a single comment note.

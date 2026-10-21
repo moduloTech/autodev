@@ -44,14 +44,16 @@ class DatabasePipelineGreenTest < Minitest::Test
     assert_equal 'fixing_discussions', issue.status
   end
 
-  # -- max review rounds reached → done, via `abandon`, not `pipeline_green` --
+  # -- a give-up from checking_pipeline → done, via `abandon`, not `pipeline_green` --
   #
   # `pipeline_green` used to carry a second transition to `done`, guarded by
   # `max_review_rounds_reached?`. That made a give-up look like a delivery in the
   # journal and in the audit log, and it was one of the two ways into `done` from
-  # `checking_pipeline` that Autodev #60 collapsed into `abandon`.
+  # `checking_pipeline` that Autodev #60 collapsed into `abandon`. The review-round
+  # limit itself was unreachable and Autodev #78 deleted it; the event stays the
+  # way every other give-up from `checking_pipeline` reaches `done`.
 
-  def test_reaching_the_review_round_limit_is_an_abandon_not_a_green_completion
+  def test_a_give_up_from_checking_pipeline_is_an_abandon_not_a_green_completion
     issue = create_issue
     advance_to(issue, 'checking_pipeline')
     issue.abandon!

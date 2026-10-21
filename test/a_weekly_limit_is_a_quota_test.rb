@@ -98,7 +98,7 @@ class AWeeklyLimitIsAQuotaTest < ActiveSupport::TestCase
   test 'an implementation that meets the weekly limit is parked until the reset, silently' do
     issue = create_issue(status: 'implementing', retry_count: 1)
     processor = worker(IssueProcessor)
-    processor.define_singleton_method(:start_processing) { |*| nil }
+    processor.define_singleton_method(:start_processing) { |*| true }
     processor.define_singleton_method(:issue_closed?) { |*| false }
     processor.define_singleton_method(:execute_pipeline) { |*| danger_claude_prompt('/tmp', 'fix the thread') }
 

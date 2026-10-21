@@ -147,7 +147,10 @@ class MrFixer
       end
       answered.to_h do |discussion|
         since = Time.parse(asked[discussion[:id]])
-        [discussion[:id], notes.select { |note| HumanActivity.human_note_after?(note, since) }]
+        # Oldest first, like the ticket context (Autodev #137): GitLab answers
+        # newest first, and the two sections of one prompt must not disagree.
+        after = notes.select { |note| HumanActivity.human_note_after?(note, since) }
+        [discussion[:id], ContextNotes.chronological(after)]
       end
     end
 
@@ -168,7 +171,7 @@ class MrFixer
       vars = { tag: autodev_tag, mr_iid: issue.mr_iid, count: threads.size, mention: requester_mention(gl_issue) }
       gaps = threads.map.with_index(1) { |thread, i| "#{i}. #{functional_gap(thread)}" }.join("\n\n")
       [Locales.t(:functional_question_header, locale: locale, **vars), gaps,
-       Locales.t(:functional_question_footer, locale: locale, **vars)].join("\n\n")
+       Locales.t(:functional_question_footer, locale: locale, **vars), ContextNotes::QUESTION_MARKER].join("\n\n")
     end
 
     def requester_mention(gl_issue)

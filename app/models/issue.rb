@@ -60,18 +60,21 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     fixing_discussions fixing_pipeline running_post_completion
   ].freeze
 
-  # The states a `:process` cycle may start from — the two waiting states, and
-  # only those. Read by `PollRouter#route_by_state`, which decides whether a
-  # discovered GitLab issue reaches `PollDispatcher#process_issue` at all, and by
-  # `IssueProcessJob::DISPATCHED_FROM`, which refuses a dispatch whose row has
-  # moved on since (Autodev #61).
+  # The states a discovered GitLab issue may reach `PollDispatcher#process_issue`
+  # from — the two waiting states, and only those. Read by
+  # `PollRouter#route_by_state`.
   #
-  # One declaration because the two disagreed, silently and for months (Autodev
-  # #75): the job already accepted `needs_clarification`, the router did not, and
-  # the narrower of the two wins by dropping the row. `process_issue` is the only
-  # code that ever asks whether the human answered, so a row the router refuses is
-  # a question that is never re-read — 12 production tickets, the oldest waiting
-  # since 15/05/2026.
+  # The router refused `needs_clarification` for months (Autodev #75), and
+  # `process_issue` is the only code that ever asks whether the human answered,
+  # so a row the router refuses is a question that is never re-read — 12
+  # production tickets, the oldest waiting since 15/05/2026.
+  #
+  # Not what `IssueProcessJob::DISPATCHED_FROM[:process]` reads any more
+  # (Autodev #140). #75 shared this constant with the job's staleness guard; but
+  # `process_issue` moves an answered row to `pending` before it enqueues, so the
+  # job is only ever queued from `pending`, and a job finding `needs_clarification`
+  # is a duplicate of the run that parked the row — which the shared constant let
+  # through five times on A#164, two of them posting new questions.
   PROCESSABLE_STATES = %w[pending needs_clarification].freeze
 
   aasm column: :status, whiny_transitions: false do # rubocop:disable Metrics/BlockLength
@@ -87,6 +90,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # `clear_delivery_on_reentry!` must also run before `emit_audit_log!`, which
     # clears the `_audit_origin` it reads to recognise a manual re-entry.
     after_all_transitions :stamp_pipeline_watch!, :stamp_label_events_floor!, :clear_delivery_on_reentry!,
+                          :return_dormant_budget_on_progress!,
                           :persist_status_change!, :emit_activity_event!, :emit_audit_log!
 
     # === Happy path ===
@@ -129,10 +133,11 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # The single point at which autodev stops working a ticket short of a nominal
     # delivery (Autodev #60, item 2). Four call sites used to write
     # `status: 'done'` themselves — pipeline stagnation, discussion stagnation, an
-    # expired pipeline watch, the review-round limit — so none of them produced a
-    # `transition` row, none appeared in the activity journal or the audit log, and
-    # none of the callbacks below ran: that is what left the stale
-    # `checking_pipeline_since` clock Autodev #53 had to patch at each site.
+    # expired pipeline watch, the review-round limit (unreachable, deleted by
+    # Autodev #78) — so none of them produced a `transition` row, none appeared in
+    # the activity journal or the audit log, and none of the callbacks below ran:
+    # that is what left the stale `checking_pipeline_since` clock Autodev #53 had
+    # to patch at each site.
     #
     # `IssueAbandonment#abandon_issue` is the only caller. The *reason* stays
     # per-site (`attention_reason`) because `dispatch_infra_recheck` selects
@@ -146,7 +151,11 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # exactly there: leaving it in `reviewing` is what made Autodev #81's request
     # invisible to every dispatch pass, and handing it back to `checking_pipeline`
     # is the unbounded loop that ticket refuses.
-    event(:abandon) { transitions from: %i[checking_pipeline fixing_discussions reviewing], to: :done }
+    #
+    # `cloning` joined with Autodev #138: a re-implementation rebases the reused
+    # branch before `clone_complete!`, and a rebase that cannot be completed stops
+    # the line from there (`RebaseConflictStop`).
+    event(:abandon) { transitions from: %i[cloning checking_pipeline fixing_discussions reviewing], to: :done }
 
     # === Fix cycles, clarification, reentry ===
 
@@ -337,6 +346,10 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     clear_manual_reentry! if @_audit_origin == :manual
   end
 
+  # The dormant audit's budget (`DormantAudit`, #47/#103), shared by its three
+  # arms. Given back by the human gestures (#125) and by progress (#129).
+  DORMANT_BUDGET_RESET = { dormant_recheck_count: 0, dormant_recheck_at: nil }.freeze
+
   # What a manual re-entry gives back (owner, 30/09/2026): the union of the
   # Reset's budgets and the label resume's round counters. Re-entered with its
   # old counters, a row gave itself up on its first stumble — `dormant_exhausted`
@@ -345,7 +358,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # label resume caps it instead of zeroing it (Autodev #85).
   MANUAL_REENTRY_BUDGETS = { retry_count: 0, review_failure_count: 0, fix_round: 0, discussion_fix_round: 0,
                              stagnation_signatures: nil, pipeline_retrigger_count: 0, infra_recheck_count: 0,
-                             infra_recheck_at: nil, dormant_recheck_count: 0, dormant_recheck_at: nil }.freeze
+                             infra_recheck_at: nil, **DORMANT_BUDGET_RESET }.freeze
 
   # The operator's re-entry is their answer three times over: nobody else has
   # taken the ticket (the floor, as for the Reset — Autodev #101), it is no
@@ -358,6 +371,57 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   def clear_manual_reentry!
     self.label_events_seen_until = Time.current
     assign_attributes(needs_attention: false, attention_reason: nil, attention_detail: nil, **MANUAL_REENTRY_BUDGETS)
+  end
+
+  # What "the row progresses" means (Autodev #129, #135): it completed a unit of
+  # work that no automatic path can repeat for ever. An MR created happens once
+  # per delivery; a completed discussion round advances `discussion_fix_round`,
+  # whose ceiling only a human re-entry lifts — and a pass that finds no thread
+  # left (`MrFixer#transition_no_discussions`) ends the step without a round:
+  # the next poll delivers. So does a delivery, which is a transition *to*
+  # `done` by one of `DELIVERY_EVENTS`; `abandon`, `review_giveup` and a closed
+  # ticket reach `done` too and are not one.
+  #
+  # Two things that look like progress are not, because counting them removes the
+  # bound the budget exists for. The revival (`retry_*`, `revive_stalled!`,
+  # `recover_errored!`, the audit's own) is the thing being counted. And
+  # `pipeline_green` into `reviewing` or `fixing_discussions` re-reads the very
+  # pipeline a revival lands on: a worker that dies in either step is revived to
+  # `checking_pipeline`, whose next poll fires `pipeline_green` straight back, and
+  # nothing else bounds that loop. `review_done` is out for the same reason —
+  # `resume_watch` fires it on a review that did nothing — and so is
+  # `pipeline_fix_done`: `fix_round` has no ceiling, and the stagnation guard
+  # restarts at 1 whenever the failed job set changes, so two job sets taking
+  # turns would get the budget back on every lap.
+  COMPLETION_EVENTS = %i[mr_created discussions_fixed].freeze
+  DELIVERY_EVENTS = %i[pipeline_green mr_closed question_answered].freeze
+
+  # The budget comes back for all three arms, and a `dormant_exhausted` flag is
+  # lifted: it describes a row that stopped, and this one has just moved. Any
+  # other reason is left alone — each has its own owner (spec of #129/#135).
+  #
+  # Both are only assigned here, never written by a statement of their own: the
+  # transition's saves carry them (`persist_status_change!`, then AASM's own
+  # state write), so a transition refused as stale (#97) writes neither. The flag is read from the database rather than
+  # from this object: the audit flags by `update_all` from the poll, and a worker
+  # holding the row may have loaded it before that — or before a human cleared
+  # or replaced the flag, which must not be undone here. The columns are marked
+  # changed whatever this object read, for the same reason as in
+  # `clear_delivery_on_reentry!`.
+  def return_dormant_budget_on_progress!
+    return unless persisted? && progress?
+
+    lifted = self.class.where(id: id).pick(:attention_reason) == 'dormant_exhausted'
+    cleared = lifted ? DORMANT_BUDGET_RESET.merge(DORMANT_FLAG_CLEARED) : DORMANT_BUDGET_RESET
+    assign_attributes(cleared)
+    cleared.each_key { |column| attribute_will_change!(column.to_s) }
+  end
+
+  DORMANT_FLAG_CLEARED = { needs_attention: false, attention_reason: nil, attention_detail: nil }.freeze
+
+  def progress?
+    event = aasm.current_event.to_s.delete_suffix('!').to_sym
+    COMPLETION_EVENTS.include?(event) || (DELIVERY_EVENTS.include?(event) && aasm.to_state == :done)
   end
 
   # Sequel had `save_changes` which only emits an UPDATE for dirty columns;
@@ -389,13 +453,15 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # middle of a method that goes on to post comments and move labels, and "write
   # nothing" has to mean the whole sequence, not just this row.
   #
-  # And what it is NOT: atomic. The read and the save are two statements, so a row
-  # moved in the microseconds between them is still overwritten. That is worth
-  # stating rather than papering over — but the window this closes is the one that
-  # actually existed, ten to sixty minutes of a danger-claude call, and the one
-  # left is not reachable by a human clicking a button. Making it atomic means
-  # optimistic locking on every write path, `update_all` included, which is a much
-  # larger change than the defect asks for.
+  # The read and the save are two statements, but not two moments: every event is
+  # fired as a bang (`issues_controller` sends `"#{event}!"` too), AASM wraps a bang
+  # event in a transaction, and Rails 8.1 opens SQLite transactions `BEGIN
+  # IMMEDIATE` (`default_transaction_mode: :immediate`, not overridden in
+  # config/database.yml). The write lock is taken before this `pick`, so another
+  # connection's write — `update_all` included — waits on `busy_timeout` until the
+  # commit instead of landing in between (concurrency review of the alpha-58 lot,
+  # SQL trace). A non-bang event, or a transaction mode changed to `deferred`,
+  # would reopen that window.
   def refuse_stale_transition!
     return unless persisted?
 
@@ -544,7 +610,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     forget_unanswered_questions!(scope)
     fields = { error_message: nil, started_at: nil, **POST_COMPLETION_CLEARED }
     if reset_budget
-      fields.merge!(retry_count: 0, review_failure_count: 0, dormant_recheck_count: 0, dormant_recheck_at: nil,
+      fields.merge!(retry_count: 0, review_failure_count: 0, **DORMANT_BUDGET_RESET,
                     label_events_seen_until: Time.current)
     end
     fields.merge!(needs_attention: false, attention_reason: nil, attention_detail: nil) if clear_attention

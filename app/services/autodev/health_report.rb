@@ -205,15 +205,31 @@ module Autodev
     end
 
     def check_workers
-      cutoff = @now - SolidQueue.process_alive_threshold
-      alive = SolidQueue::Process.where(last_heartbeat_at: cutoff..)
-      total = alive.count
-      workers = alive.where(kind: 'Worker').count
-      meta = { workers: workers, processes: total }
-      return build(:down, 'no Solid Queue process alive', meta) if total.zero?
-      return build(:down, 'no worker process alive', meta) if workers.zero?
+      alive = SolidQueue::Process.where(last_heartbeat_at: (@now - SolidQueue.process_alive_threshold)..)
+      workers = alive.where(kind: 'Worker')
+      meta = { workers: workers.count, processes: alive.count }
+      return build(:down, 'no Solid Queue process alive', meta) if meta[:processes].zero?
+      return build(:down, 'no worker process alive', meta) if meta[:workers].zero?
 
-      build(:ok, "#{workers} worker(s) alive", meta)
+      workers_by_queue(workers, meta)
+    end
+
+    def workers_by_queue(workers, meta)
+      unserved = unserved_queues(workers)
+      return build(:ok, "#{meta[:workers]} worker(s) alive", meta) if unserved.empty?
+
+      build(:down, "no worker alive for queue(s) #{unserved.join(', ')}", meta.merge(unserved_queues: unserved))
+    end
+
+    # Since Autodev #139 the poll and the IssueProcessJobs are served by two
+    # worker processes, so "one worker is alive" no longer means both are: the
+    # poll worker alone would read healthy while no ticket is processed. Each
+    # Solid Queue worker records the queues it serves in its metadata
+    # (`"default,solid_queue_recurring"`).
+    def unserved_queues(workers)
+      patterns = workers.flat_map { |worker| worker.metadata.fetch('queues', '').to_s.split(',') }
+      [::IssueProcessJob, ::AutodevPollJob].map { |job| job.queue_name.to_s }.uniq
+                                           .reject { |queue| QueuePatterns.serves?(patterns, queue) }
     end
 
     def check_queue

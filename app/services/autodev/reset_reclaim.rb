@@ -68,7 +68,7 @@ module Autodev
       project_config = ::Project.runtime_configs(@config['projects']).find { |cfg| cfg['path'] == path } ||
                        raise(::ConfigError, "no project configuration for #{path}")
       ::PollRouter.new(config: @config, project_config: project_config, logger: @logger,
-                       token: @config['gitlab_token'], pool: nil)
+                       token: @config['gitlab_token'])
     end
   end
 end

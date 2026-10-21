@@ -17,7 +17,8 @@ require 'autodev/mr_fixer'
 #     `after_all_transitions` callbacks ran, which is precisely what produced the
 #     stale `checking_pipeline_since` clock Autodev #53 had to fix by hand at each
 #     of those call sites.
-#   * the review-rounds path reassigned the ticket to its author; the other three
+#   * the review-rounds path (unreachable, deleted by Autodev #78) reassigned the
+#     ticket to its author; the other three
 #     left it assigned to autodev, which made an abandoned ticket invisible to
 #     everybody.
 #
@@ -155,7 +156,7 @@ class IssueAbandonmentTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
   # --- the reassignment policy --------------------------------------------
 
   def test_every_reason_reassigns_the_ticket_to_its_author
-    %i[stagnation_pipeline stagnation_discussions pipeline_watch_expired review_limit_reached]
+    %i[stagnation_pipeline stagnation_discussions pipeline_watch_expired mr_closed_unmerged]
       .each do |reason|
       @client = FakeClient.new
       issue = watched
@@ -203,7 +204,7 @@ class IssueAbandonmentTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
     { stagnation_pipeline: 'stagnation_pipeline',
       stagnation_discussions: 'stagnation_discussions',
       pipeline_watch_expired: 'pipeline_watch_expired',
-      review_limit_reached: 'review_limit_reached' }.each do |reason, expected|
+      mr_closed_unmerged: 'mr_closed_unmerged' }.each do |reason, expected|
       issue = watched
       abandon(issue, reason, days: 14)
 
@@ -217,7 +218,7 @@ class IssueAbandonmentTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
   # had just given up on.
   def test_only_a_pipeline_stagnation_is_a_candidate_for_the_infra_recheck
     reasons = %i[stagnation_pipeline stagnation_discussions pipeline_watch_expired
-                 review_limit_reached]
+                 mr_closed_unmerged]
     reasons.each do |reason|
       issue = watched
       abandon(issue, reason, days: 14)
@@ -256,12 +257,15 @@ class IssueAbandonmentTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
 
   def test_a_reason_with_no_detail_leaves_the_column_null
     issue = watched
-    abandon(issue, :review_limit_reached)
+    abandon(issue, :mr_closed_unmerged)
 
     assert_nil issue.reload.attention_detail
   end
 
-  # --- the four call sites all land here ----------------------------------
+  # --- the original call sites all land here ------------------------------
+  #
+  # Autodev #60 named four; the fourth, the review-round limit, was unreachable
+  # and Autodev #78 deleted it.
 
   def test_pipeline_stagnation_goes_through_the_abandon_event
     issue = watched
@@ -279,16 +283,6 @@ class IssueAbandonmentTest < Minitest::Test # rubocop:disable Metrics/ClassLengt
     worker.send(:abandon_expired_watch, issue)
 
     assert_equal %w[done pipeline_watch_expired],
-                 [issue.reload.status, issue.attention_reason]
-    assert_includes transitions_for(issue), 'abandon'
-  end
-
-  def test_the_review_round_limit_goes_through_the_abandon_event
-    issue = watched
-    issue.update_columns(review_count: 3)
-    worker.send(:green_done_max_reviews, issue)
-
-    assert_equal %w[done review_limit_reached],
                  [issue.reload.status, issue.attention_reason]
     assert_includes transitions_for(issue), 'abandon'
   end

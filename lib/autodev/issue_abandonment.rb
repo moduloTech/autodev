@@ -12,9 +12,10 @@
 #     `after_all_transitions` callbacks ran, which is exactly what produced the
 #     stale `checking_pipeline_since` clock Autodev #53 had to fix by clearing the
 #     column by hand at each of those sites.
-#   * the review-round limit reassigned the ticket to its author; the other three
-#     left it assigned to autodev. Nothing justified the difference, and leaving an
-#     abandoned ticket on autodev is what made it invisible to everybody.
+#   * the review-round limit (unreachable, deleted by Autodev #78) reassigned the
+#     ticket to its author; the other three left it assigned to autodev. Nothing
+#     justified the difference, and leaving an abandoned ticket on autodev is what
+#     made it invisible to everybody.
 #
 # So: one AASM event (`Issue#abandon`), one reassignment policy (always hand the
 # ticket back to its author — an abandon means a human has to pick the work up),
@@ -69,6 +70,8 @@ module IssueAbandonment
     true
   end
 
+  def handback_sentence(issue) = issue.mr_url ? :abandon_reassigned : :abandon_reassigned_no_mr
+
   def fire_abandon(issue, reason)
     return true if issue.abandon!
 
@@ -82,11 +85,15 @@ module IssueAbandonment
   # GitLab comment only claims a handback when the ticket actually changed hands.
   # Only the comment is wrapped: `hand_ticket_back` answers a cut itself, and the
   # activity line must still be written when the comment was lost.
+  #
+  # The handback sentence names the merge request, and since Autodev #138 a
+  # give-up can happen before there is one (a re-implementation stopped from
+  # `cloning`): that one gets a sentence that does not promise an MR.
   def announce_abandonment(issue, reason, template_vars)
     handed_back = hand_ticket_back(issue)
     after_conclusion(reason) do
       notify_localized(issue.issue_iid, reason, mr_url: issue.mr_url,
-                                                suffix: (:abandon_reassigned if handed_back),
+                                                suffix: (handback_sentence(issue) if handed_back),
                                                 **template_vars)
     end
     log_activity(issue, reason, **template_vars)

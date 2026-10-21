@@ -66,27 +66,14 @@ class AResumeRestoresTheDormantBudgetTest < Minitest::Test
     end
   end
 
-  # The reimplementation path hands the row to a worker; what the worker does is
-  # not this file's question, so the block is recorded and never run.
-  class RecordingPool
-    attr_reader :enqueued
-
-    def initialize = @enqueued = []
-
-    def enqueue?(issue_iid:)
-      @enqueued << issue_iid
-      true
-    end
-  end
-
   def setup
     setup_database
     @logger = StubLogger.new
     GitlabHelpers.instance_variable_set(:@current_user_id, AUTODEV_ID)
   end
 
-  def router(pool: nil)
-    PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG, logger: @logger, token: 'x', pool: pool)
+  def router
+    PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG, logger: @logger, token: 'x')
   end
 
   def dormant_pair(issue) = issue.reload.then { [it.dormant_recheck_count, it.dormant_recheck_at] }
@@ -143,13 +130,14 @@ class AResumeRestoresTheDormantBudgetTest < Minitest::Test
 
   def test_the_label_resume_through_a_reimplementation_resets_the_dormant_pair
     issue = finished_row(mr_iid: nil)
-    pool = RecordingPool.new
+    enqueued = []
 
-    router(pool: pool).route(FakeGlIssue.new(issue.issue_iid, 'a request'), StubClient.new)
+    # The reimplementation path enqueues a job; what it does is not this file's question.
+    IssueProcessJob.stub(:perform_later, ->(*args) { enqueued << args[1] }) do
+      router.route(FakeGlIssue.new(issue.issue_iid, 'a request'), StubClient.new)
+    end
 
-    assert_equal 'pending', issue.reload.status
-    assert_equal [issue.issue_iid], pool.enqueued
-    assert_equal [0, nil], dormant_pair(issue)
+    assert_equal ['pending', [issue.issue_iid], [0, nil]], [issue.reload.status, enqueued, dormant_pair(issue)]
   end
 
   def test_the_label_resume_through_the_pipeline_check_resets_the_dormant_pair
