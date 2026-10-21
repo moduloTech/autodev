@@ -11,6 +11,7 @@ require_relative 'issue_processor/error_handler'
 class IssueProcessor
   include DangerClaudeRunner
   include StaleTransitionBound
+  include RebaseConflictStop
   include GitOperations
   include SpecChecker
   include Implementer

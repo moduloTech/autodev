@@ -39,6 +39,10 @@ class IssueProcessor
       return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
       # Same seam, same reason: everything below this line writes (Autodev #97).
       return stop_on_stale_transition(error) if error.is_a?(StaleTransitionError)
+      # A rebase onto the target that could not be completed (Autodev #138) is not
+      # a failure to retry: the retry would meet the same conflict. The line stops
+      # and goes back to a human, before any write below.
+      return stop_on_rebase_conflict(issue, error) if error.is_a?(RebaseConflictError)
 
       bt = ::BacktraceExcerpt.format(error)
       fields = build_error_fields(issue, error, bt)

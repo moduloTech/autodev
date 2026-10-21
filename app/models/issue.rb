@@ -146,7 +146,11 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # exactly there: leaving it in `reviewing` is what made Autodev #81's request
     # invisible to every dispatch pass, and handing it back to `checking_pipeline`
     # is the unbounded loop that ticket refuses.
-    event(:abandon) { transitions from: %i[checking_pipeline fixing_discussions reviewing], to: :done }
+    #
+    # `cloning` joined with Autodev #138: a re-implementation rebases the reused
+    # branch before `clone_complete!`, and a rebase that cannot be completed stops
+    # the line from there (`RebaseConflictStop`).
+    event(:abandon) { transitions from: %i[cloning checking_pipeline fixing_discussions reviewing], to: :done }
 
     # === Fix cycles, clarification, reentry ===
 
