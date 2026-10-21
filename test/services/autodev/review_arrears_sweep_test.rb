@@ -244,7 +244,7 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   # give-up reason names a different cause and must never be re-armed from here.
   def test_only_an_exhausted_review_budget_is_ever_swept
     reasons = %w[review_failures_exhausted stagnation_pipeline stagnation_discussions
-                 pipeline_watch_expired review_limit_reached dormant_exhausted
+                 pipeline_watch_expired fix_rounds_exhausted dormant_exhausted
                  mr_closed_unmerged review_skill_missing]
     issues = reasons.to_h { |reason| [reason, arrear(attention_reason: reason)] }
     sweep(StubClient.new)

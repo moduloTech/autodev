@@ -132,7 +132,7 @@ class PostCompletionAfterUnassignmentTest < Minitest::Test
   # the deploy population by construction.
   def test_an_abandoned_row_is_not_sent_to_post_completion
     %w[stagnation_pipeline stagnation_discussions pipeline_watch_expired
-       review_limit_reached review_failures_exhausted mr_closed_unmerged].each do |reason|
+       fix_rounds_exhausted review_failures_exhausted mr_closed_unmerged].each do |reason|
       create_issue(status: 'done', mr_iid: 42, needs_attention: true, attention_reason: reason)
     end
 

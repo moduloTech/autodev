@@ -488,6 +488,21 @@ class ScannedI18nKeysTest < Minitest::Test
     assert_empty stale, "NO_GITLAB_COMMENT names reasons no code writes: #{stale.join(', ')}"
   end
 
+  # The reverse direction (Autodev #78): an explanation in the tables for a reason
+  # nothing writes any more is copy for a give-up that cannot happen, and reads
+  # like one that can. `review_limit_reached` carried its three keys for a path
+  # no row could reach. This catches the keys a deletion leaves behind; it cannot
+  # see a writer that exists but is unreachable, which was #78's own shape.
+  def test_every_attention_explanation_names_a_reason_the_code_writes
+    explained = LocaleKeyTables::LANGUAGES.flat_map do |language|
+      LocaleKeyTables.table(language).filter_map { |key| key.dup.delete_prefix!('web_errors_explain_attention_') }
+    end.uniq
+
+    stale = explained - attention_reasons.keys
+
+    assert_empty stale, "web_errors_explain_attention_<reason> keys no code writes: #{stale.join(', ')}"
+  end
+
   # Autodev #86. The watch writes its flag from a variable, so neither the call
   # scan nor the column scan can read the values: they come from
   # `ClarificationWatch::REASONS`, and each needs its activity line and its

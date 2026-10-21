@@ -12,9 +12,10 @@
 #     `after_all_transitions` callbacks ran, which is exactly what produced the
 #     stale `checking_pipeline_since` clock Autodev #53 had to fix by clearing the
 #     column by hand at each of those sites.
-#   * the review-round limit reassigned the ticket to its author; the other three
-#     left it assigned to autodev. Nothing justified the difference, and leaving an
-#     abandoned ticket on autodev is what made it invisible to everybody.
+#   * the review-round limit (unreachable, deleted by Autodev #78) reassigned the
+#     ticket to its author; the other three left it assigned to autodev. Nothing
+#     justified the difference, and leaving an abandoned ticket on autodev is what
+#     made it invisible to everybody.
 #
 # So: one AASM event (`Issue#abandon`), one reassignment policy (always hand the
 # ticket back to its author — an abandon means a human has to pick the work up),

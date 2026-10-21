@@ -1,0 +1,121 @@
+# A single review has no round limit (Autodev #78)
+
+## The finding
+
+`PipelineMonitor#green_branch` routed a green pipeline on `review_count`:
+`>= Reviewer::MAX_REVIEW_ROUNDS` (3) → `:review_limit` → `green_done_max_reviews`
+→ `abandon_issue(:review_limit_reached)`; `0` → `:first_review`; otherwise
+`:post_review`.
+
+`review_count` cannot reach 3. Its writers, read on the base `82cf6b1`:
+
+| Writer | Value written |
+|---|---|
+| `Reviewer#increment_review_count` (`reviewer.rb:482`), called once, from `finalize_review_success`, reached only from `reviewing`, which `green_first_review` enters only at `review_count == 0` | `0 → 1`, once |
+| `ResumeHandler#reenter_via_pipeline_check` (`reentry_review_count`) | `min(count, 1)` |
+| `ResumeHandler#reenter_via_reimplementation` | `0` |
+
+The dashboard reset, `Issue::MANUAL_REENTRY_BUDGETS` and
+`autodev:recheck_review_arrears` never write it above 1 (batch recon, re-read).
+The `:review_limit` branch and the `review_limit_reached` give-up were reachable
+only in tests that forced `review_count: 3` by hand.
+
+Measured, read-only, on 2026-10-21:
+
+| Database | `review_count` distribution | rows with `attention_reason = 'review_limit_reached'` | `activity_events` rows mentioning `review_limit` |
+|---|---|---|---|
+| production (`bobette-autodev`) | `0` → 65, `1` → 102, `> 1` → 0 | 0 | 0 |
+| development copy (`~/.autodev/autodev.db`, events up to 2026-08-12) | `0` → 82, `1` → 60 | 0 | 0 |
+
+The review runs once per **delivery**, and that is not a defect: the correction
+rounds that follow a review are never re-reviewed, which PowerPanne's review
+skill requires ("The adversarial pass runs once per MR — never re-run it
+on the fixed commit … the loop never converges"). It is not once per *merge
+request*: `reenter_via_reimplementation` keeps `mr_iid`, rebuilds the branch and
+resets `review_count` to 0, so the same merge request is reviewed again after
+each rebuild — measured on production (phase-7 adversarial review, re-run
+2026-10-21): MR !11489 (issue 157) carries four `post_mr_review` discussion
+snapshots, on 09-11, 09-14, 09-15 and 09-16, each of the last three after a
+`reenter` transition; three other merge requests show four as well. The count
+still never rises above 1. What bounds the correction loop
+is discussion stagnation (`stagnation_threshold` rounds of the same unresolved
+set → `stagnation_discussions`), with the `fix_rounds_exhausted` ceiling above it
+(`stagnation_threshold * 3` on `discussion_fix_round`).
+
+## Decision (owner, option 1 of the ticket)
+
+Delete the dead path rather than keep it as a defensive net:
+
+- `Reviewer::MAX_REVIEW_ROUNDS`, the `:review_limit` branch of `green_branch` and
+  `dispatch_green`, and `green_done_max_reviews`. The green routing becomes:
+  `review_count` zero → first review, anything else → post review.
+- The `review_limit_reached` attention reason: its three sinks
+  (`notifications.{fr,en}.yml` `review_limit_reached`, `activity.{fr,en}.yml`
+  `activity_review_limit_reached`, `web.{fr,en}.yml`
+  `web_errors_explain_attention_review_limit_reached`).
+- The tests that forced `review_count: 3` to reach it. Those that pinned something
+  still true — the abandon machinery, reason-specific routing, the infra recheck
+  and arrears sweep populations — are rewritten around a live reason
+  (`fix_rounds_exhausted`, `mr_closed_unmerged`) instead of being dropped.
+
+### Is a locale key still rendered for an existing row?
+
+`Web::Views::Concerns::WatchCards#explain_key` builds
+`web_errors_explain_attention_<reason>` from the row's `attention_reason`, and
+the timeline renders the activity line. A row or event still carrying
+`review_limit_reached` would render the bare key after the deletion. Production
+and the development copy carry none (table above), and nothing can write one any
+more, so deleting the keys renders nothing raw. `explain_key` has no fallback
+for a reason outside the vocabulary, and none is added here: the risk is the same
+for every reason ever deleted, it is not this ticket's to settle, and for this one
+the population it would protect is measured at zero.
+
+### What a value above 1 does now
+
+Nothing distinct: it routes to post review like 1. No writer produces one; a
+hand-written database value would take the ordinary post-review path (deliver if
+no thread is open, fix otherwise), which is what a reviewed request does.
+
+### The reentry cap stays
+
+`ResumeHandler#reentry_review_count` still caps at 1 (`[count, 1].min`). Its only
+stated reason was the `:review_limit` short-circuit, which is gone, and no reader
+tells 1 from more (`announce_reentry` asks `positive?`, `ReviewArrearsSweep`
+selects 0, `green_branch` asks `zero?`). It is kept as the smaller change, and
+its comment now says it protects nothing. *Owner may reverse* — see below.
+
+### A guard for the leftover, not for the original defect
+
+`test/i18n_derived_keys_test.rb` checks that every reason the code writes has its
+three keys. Nothing checked the reverse: a `web_errors_explain_attention_<reason>`
+in the tables for a reason nothing writes any more — which is what this deletion
+leaves behind if one key is forgotten. A test is added deriving it from the same
+vocabulary (`attention_reasons`). It does **not** detect a reason whose writer
+exists but is unreachable, which was this ticket's shape; that would need a
+reachability analysis no test here performs. Nor can it read the other two sinks:
+`activity_*` and the bare notification keys share their namespaces with symbols
+that are not reasons, so an orphan there is indistinguishable from a live key by
+rule. `test/a_review_runs_once_per_delivery_test.rb` pins the absence of
+this reason's six keys by name instead.
+
+## Out of scope
+
+- Re-running the review after each correction round (option 3): the project's
+  doctrine says the loop does not converge.
+- Any change to stagnation detection or to the `fix_rounds_exhausted` ceiling.
+
+## Owner may reverse
+
+- **Keeping the reentry cap at 1.** Options: (a) keep `[count, 1].min` (chosen);
+  (b) drop the cap and keep the inherited value. On the motivating case (no row
+  above 1 exists, none can be produced) both behave identically, and no reader
+  tells 1 from more; (a) keeps a hand-edited value above 1 from surviving a
+  reentry, (b) removes three lines and two tests whose reason has disappeared.
+- **"Once per delivery", not the ticket's "once per MR".** The ticket and the
+  owner's answer say the review runs exactly once per merge request. Production
+  contradicts it for the reimplementation reentry (above), so the docs say once
+  per delivery. Options: (a) document it as it is (chosen); (b) make a
+  reimplementation keep `review_count`, so a rebuilt branch on the same merge
+  request is not reviewed again — a behaviour change this ticket does not make,
+  and which on !11489 would have skipped three reviews of three rebuilt
+  branches.
