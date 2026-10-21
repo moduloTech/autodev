@@ -179,7 +179,7 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
     ::PollRouter.new(config: config, project_config: project_config,
                      logger: ::Autodev::JobLogger.new(logger),
-                     token: config['gitlab_token'], pool: nil)
+                     token: config['gitlab_token'])
                 .resume_recovered_infra(issue, build_client(config))
   end
 

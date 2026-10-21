@@ -9,9 +9,10 @@
 #   threaded poller's `max_workers: 3`); it is the IssueProcessJob concurrency
 #   cap.
 # * `poll` — AutodevPollJob alone, one thread. When it shared the `*` worker,
-#   the 3 threads were held by 25-minute IssueProcessJobs and every poll waited
-#   behind the older IssueProcessJobs it had itself enqueued: /healthz went
-#   `down` on `poller` three times on 15/10/2026. One thread also serialises
+#   the 3 threads were held by long IssueProcessJobs (25 minutes at 08:00 UTC)
+#   and by polls running a re-implementation inline (up to 35 minutes at 03:00
+#   UTC; a reentry now enqueues a job instead), and every poll waited behind
+#   the older jobs: /healthz went `down` on `poller` three times on 15/10/2026. One thread also serialises
 #   the polls, which could run three at a time after such a gap.
 #
 # The lists are explicit, so a job on a queue named nowhere here would wait

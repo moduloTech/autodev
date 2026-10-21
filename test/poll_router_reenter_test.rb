@@ -31,19 +31,6 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
   end
 
   # Pool stub: just record enqueue calls without running them.
-  class StubPool
-    attr_reader :enqueued
-
-    def initialize
-      @enqueued = []
-    end
-
-    def enqueue?(issue_iid:, &block)
-      @enqueued << { issue_iid: issue_iid, block: block }
-      true
-    end
-  end
-
   # `Gitlab::Error::ResponseError` builds its message from the real HTTP
   # response; this is the minimum surface it reads.
   FakeRequest = Struct.new(:base_uri, :path)
@@ -123,8 +110,8 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
     GitlabHelpers.singleton_class.alias_method :build_gitlab_client, :original_build_gitlab_client
   end
 
-  # The Gitlab gem isn't loaded in tests; the reimplementation path builds a
-  # worker client for the worker pool. Stub it so we don't pull the gem.
+  # The Gitlab gem isn't loaded in tests; stub the client builder so no route
+  # under test pulls the gem.
   def stub_gitlab_client_builder
     unless GitlabHelpers.respond_to?(:original_build_gitlab_client)
       GitlabHelpers.singleton_class.alias_method :original_build_gitlab_client, :build_gitlab_client
@@ -460,7 +447,7 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
 
   def build_router
     PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,
-                   logger: @logger, token: 'x', pool: StubPool.new)
+                   logger: @logger, token: 'x')
   end
 
   def done_issue_with_mr(mr_iid:, review_count: 2)

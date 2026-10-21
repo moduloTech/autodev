@@ -87,7 +87,7 @@ class ClarificationRoutingTest < Minitest::Test
 
   def router
     PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,
-                   logger: @logger, token: 'x', pool: nil)
+                   logger: @logger, token: 'x')
   end
 
   def test_a_row_waiting_for_clarification_is_handed_to_the_processing_step
@@ -133,7 +133,11 @@ class ClarificationRoutingTest < Minitest::Test
       'process_issue: a new row is created pending; a needs_clarification row is enqueued only ' \
       'once ClarificationResume#resume! moved it and `existing.pending?` holds (skip_existing?)',
     'app/services/autodev/clarification_sweep.rb' =>
-      'apply!: resume! first, then enqueues only `if issue.pending?`'
+      'apply!: resume! first, then enqueues only `if issue.pending?`',
+    'lib/autodev/poll_router.rb' =>
+      'enqueue_issue_processing: reached only from reenter_via_reimplementation, after `reenter!` ' \
+      'moved the row from done/closed to pending (alpha-58 integration review: it used to run the ' \
+      'processor inline, inside the poll)'
   }.freeze
 
   # A site that passes the action in a variable is invisible to the literal scan

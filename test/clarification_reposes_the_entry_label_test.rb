@@ -252,7 +252,7 @@ class ClarificationLabelDoesNotMisrouteTest < Minitest::Test
   def test_the_reposed_label_routes_to_the_pickup_not_to_a_reimplementation
     issue = create_issue(status: 'needs_clarification', clarification_requested_at: Time.now.utc)
     router = PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,
-                            logger: StubLogger.new, token: 'x', pool: nil)
+                            logger: StubLogger.new, token: 'x')
 
     verdict = router.route(FakeGlIssue.new(issue.issue_iid, 'title', nil), StubClient.new)
 

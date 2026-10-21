@@ -1086,7 +1086,7 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
   def test_a_human_reentry_records_no_origin
     issue = arrear(status: 'done', needs_attention: false, attention_reason: nil)
     router = PollRouter.new(config: CONFIG, project_config: PROJECT, logger: StubLogger.new,
-                            token: 'x', pool: nil)
+                            token: 'x')
     GitlabHelpers.stub(:current_user_id, AUTODEV_USER_ID) do
       router.send(:resume_via_pipeline_check, issue, StubClient.new)
     end
@@ -1372,7 +1372,7 @@ class ReviewArrearsSweepTest < Minitest::Test # rubocop:disable Metrics/ClassLen
 
   def exploding_sweep(client, **)
     real = PollRouter.new(config: CONFIG, project_config: PROJECT, logger: StubLogger.new,
-                          token: 'x', pool: nil)
+                          token: 'x')
     PollRouter.stub(:new, ExplodingRouter.new(real)) do
       sweep(client, apply: true, **)
     end

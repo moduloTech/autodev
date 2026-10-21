@@ -456,6 +456,6 @@ class InfraRecheckDispatchTest < Minitest::Test # rubocop:disable Metrics/ClassL
 
   def build_router
     PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,
-                   logger: @logger, token: 'x', pool: nil)
+                   logger: @logger, token: 'x')
   end
 end

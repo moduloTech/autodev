@@ -127,7 +127,7 @@ class ADuplicateProcessJobDoesNothingTest < ActiveSupport::TestCase
 
   # Defence in depth: the processor itself refuses a row its first transition
   # cannot leave, whoever called it — the job's guard is not the only way in
-  # (`PollRouter#enqueue_issue_processing` runs it inline after `reenter!`).
+  # (`perform_retry_stuck` calls it directly).
   test 'the processor writes nothing on a row start_processing! cannot leave' do
     issue = create_issue(project_path: PROJECT, status: 'needs_clarification')
     before = snapshot(issue)

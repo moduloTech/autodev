@@ -153,7 +153,7 @@ class ReentryDoesNotInventAReviewTest < Minitest::Test
 
   def router
     PollRouter.new(config: CONFIG, project_config: PROJECT_CONFIG,
-                   logger: @logger, token: 'tok', pool: nil)
+                   logger: @logger, token: 'tok')
   end
 
   def monitor

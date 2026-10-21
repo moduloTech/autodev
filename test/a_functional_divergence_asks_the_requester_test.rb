@@ -23,7 +23,7 @@ module FunctionalDivergenceFixtures
   CONFIG = { 'gitlab_token' => 'x', 'gitlab_url' => 'https://gitlab.example' }.freeze
 
   Author = Struct.new(:name, :username)
-  Note = Struct.new(:body, :author, :created_at, :system)
+  Note = Struct.new(:body, :author, :created_at, :system, :id)
   GlIssue = Struct.new(:iid, :title, :created_at, :author)
   Paginated = Struct.new(:items) do
     def auto_paginate = items
@@ -279,6 +279,22 @@ class AFunctionalDivergenceAsksTheRequesterTest < Minitest::Test # rubocop:disab
 
     assert_includes section, 'Il faut une UI de sélection de période'
     refute_includes section, 'Avant la question', 'only what was said after the question'
+  end
+
+  # GitLab answers `issue_notes` newest first. The ticket context lists the
+  # comments oldest first since Autodev #137, so this section must too, or one
+  # prompt quotes the same two answers in opposite orders and a corrected
+  # decision reads last in one place and first in the other (alpha-58
+  # integration review).
+  def test_the_fix_context_quotes_the_answers_oldest_first
+    client = Client.new(notes: [human_note('SECOND : finalement un envoi mensuel', '2026-08-30T10:00:00Z'),
+                                human_note('FIRST : une UI de sélection', '2026-08-30T09:00:00Z')])
+    issue = fixing_issue(functional_questions: JSON.generate('f-1' => '2026-08-29T10:00:00Z'))
+    fix = fixer(client)
+    DiscussionSnapshot.stub(:capture, nil) { fix.send(:process_discussions, issue, [functional_thread]) }
+    section = fix.send(:functional_answer_section, functional_thread)
+
+    assert_operator section.index('FIRST'), :<, section.index('SECOND'), section
   end
 
   def test_the_fix_context_quotes_neither_autodev_nor_gitlab

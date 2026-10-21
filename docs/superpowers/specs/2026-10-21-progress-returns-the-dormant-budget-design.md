@@ -104,12 +104,14 @@ back. The budget columns are marked changed whatever the object read (the
 `clear_delivery_on_reentry!` idiom), so a count the audit bumped since the load
 is still reset.
 
-Not atomic, like `refuse_stale_transition!`: a flag the audit writes between the
-`pick` and the `save!` stays while the count goes to 0 (domain review, reached only
-by forcing the interleaving). It needs the audit to select a row a live worker is
-saving, which the #50 invariant rules out for the active arm (its window exceeds
-the longest a live worker stays silent), and the `pending` / `error` arms hold no
-worker. The next progress lifts it.
+Atomic, like `refuse_stale_transition!`, though this spec first said otherwise.
+The child's domain review feared a flag the audit writes between the `pick` and
+the `save!`. The batch's concurrency review traced the SQL instead: every event
+is fired as a bang, AASM wraps it in a transaction, and Rails 8.1 opens SQLite
+transactions `BEGIN IMMEDIATE`. The write lock is held from before the `pick` to
+the commit, so the audit's `update_all` from another connection waits on
+`busy_timeout` rather than landing in between. A non-bang event or a `deferred`
+transaction mode would reopen the window.
 
 ### Articulation with #125
 

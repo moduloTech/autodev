@@ -451,13 +451,15 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # middle of a method that goes on to post comments and move labels, and "write
   # nothing" has to mean the whole sequence, not just this row.
   #
-  # And what it is NOT: atomic. The read and the save are two statements, so a row
-  # moved in the microseconds between them is still overwritten. That is worth
-  # stating rather than papering over — but the window this closes is the one that
-  # actually existed, ten to sixty minutes of a danger-claude call, and the one
-  # left is not reachable by a human clicking a button. Making it atomic means
-  # optimistic locking on every write path, `update_all` included, which is a much
-  # larger change than the defect asks for.
+  # The read and the save are two statements, but not two moments: every event is
+  # fired as a bang (`issues_controller` sends `"#{event}!"` too), AASM wraps a bang
+  # event in a transaction, and Rails 8.1 opens SQLite transactions `BEGIN
+  # IMMEDIATE` (`default_transaction_mode: :immediate`, not overridden in
+  # config/database.yml). The write lock is taken before this `pick`, so another
+  # connection's write — `update_all` included — waits on `busy_timeout` until the
+  # commit instead of landing in between (concurrency review of the alpha-58 lot,
+  # SQL trace). A non-bang event, or a transaction mode changed to `deferred`,
+  # would reopen that window.
   def refuse_stale_transition!
     return unless persisted?
 

@@ -16,12 +16,11 @@ class PollRouter
   # THIS value is already on the row before re-arming it a second time.
   REVIEW_ARREARS_ORIGIN = 'review_arrears_sweep'
 
-  def initialize(config:, project_config:, logger:, token:, pool:)
+  def initialize(config:, project_config:, logger:, token:)
     @config         = config
     @project_config = project_config
     @logger         = logger
     @token          = token
-    @pool           = pool
     init_project_settings(project_config)
   end
 
@@ -249,15 +248,15 @@ class PollRouter
       .todo_reapplied_after?(existing.issue_iid, existing.finished_at)
   end
 
+  # A job, never the processor itself: this runs inside the poll, and a
+  # re-implementation (clone, danger-claude, push) held the poll's thread for
+  # its whole length — 608 s, 918 s and 2134 s on 15/10/2026, which with the
+  # poll alone on its one-thread queue (Autodev #139) froze every poll behind
+  # it. The reentry has just left the row in `pending`, which is what
+  # `IssueProcessJob::DISPATCHED_FROM[:process]` accepts (Autodev #140).
   def enqueue_issue_processing(gl_issue, existing)
-    processor = IssueProcessor.new(client: build_worker_client, config: @config,
-                                   project_config: @project_config, logger: @logger, token: @token)
-    @pool.enqueue?(issue_iid: existing.issue_iid) { processor.process(existing) }
+    ::IssueProcessJob.perform_later(@project_path, existing.issue_iid, :process)
     @logger.info("Enqueued resumed issue ##{gl_issue.iid}: #{gl_issue.title}", project: @project_path)
-  end
-
-  def build_worker_client
-    GitlabHelpers.build_gitlab_client(@config['gitlab_url'], @token)
   end
 
   def log_activity(issue, key)

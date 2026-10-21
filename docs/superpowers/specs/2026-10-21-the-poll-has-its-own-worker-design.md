@@ -163,3 +163,28 @@ not done here.
 - **Only the poll moves** (owner's decision). Alternative: the short recurring
   jobs on `poll` too; `RefreshProjectBriefingsJob` must not, since its clone +
   danger-claude call would delay a poll by minutes.
+
+## Integration review (alpha-58 lot)
+
+The batch's adversarial review found the poll holding its own thread for the
+length of a re-implementation, and a diagnosis above that is wrong for one of
+the three gaps.
+
+**A re-implementation ran inside the poll.** `PollRouter#enqueue_issue_processing`
+handed `IssueProcessor#process` to `PollDispatcher::NullPool`, whose `enqueue?`
+called the block in place: a label resume that rebuilt a request cloned,
+implemented and pushed inside the `AutodevPollJob`. Production, 15/10/2026,
+`production.log.20261015-063000`: three polls of 608 s, 918 s and 2 134 s
+(05:00–05:35 local, the 02:58 → 03:20 UTC gap). On one thread this would have
+frozen every poll behind one re-implementation, longer than the gaps this ticket
+removes. Fixed on the integration branch: the router enqueues an
+`IssueProcessJob :process` on the row `reenter!` has just left in `pending`
+(`DISPATCHED_FROM[:process]`, Autodev #140); `NullPool` and the router's `pool:`
+argument are gone (`test/a_reimplementation_is_never_run_inside_the_poll_test.rb`).
+
+**The 02:58 → 03:20 UTC gap was not `:check_pipeline` runs.** In that window the
+three threads were held by two `:process` jobs (17004: 712 s, 17003: 433 s) and
+then by the three polls above; the 24–27-minute `:check_pipeline` runs quoted in
+*Problem* belong to the 08:00 UTC gap. Both causes starve a shared `"*"` worker;
+the dedicated worker answers the first, the enqueue answers the second. The
+CHANGELOG entry and the `config/queue.yml` comment say so.

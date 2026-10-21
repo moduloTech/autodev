@@ -51,25 +51,6 @@ module Autodev
       end
     end
 
-    # PollRouter's contract expects a `pool` arg with an `enqueue?` method. In
-    # the Solid Queue world the router still routes (returns :next vs
-    # :continue) but the actual enqueue happens through `process_issue`
-    # below, never via the pool object — so we hand it a no-op. PollRouter
-    # also occasionally enqueues a re-implementation cycle itself via the
-    # pool; for those branches we forward to the job. Block content runs
-    # inline so the router's reentry / reimplementation branches still
-    # execute their AASM transitions; this goes away at step 6 when
-    # WorkerPool is deleted and PollRouter is refactored to enqueue jobs
-    # directly.
-    NullPool = Module.new do
-      module_function
-
-      def enqueue?(issue_iid:, &block) # rubocop:disable Lint/UnusedMethodArgument
-        block&.call
-        true
-      end
-    end
-
     # `usage_ok:` is the Claude-quota verdict AutodevPollJob probed once for the
     # whole cycle (Autodev::UsageGate). It gates only the passes that end in a
     # danger-claude / mr-review call — see #claude_available? (Autodev #46).
@@ -162,7 +143,7 @@ module Autodev
       return if too_recent?(gl_issue)
 
       router = ::PollRouter.new(config: @config, project_config: @project_config,
-                                logger: @logger, token: @token, pool: NullPool)
+                                logger: @logger, token: @token)
       return if router.route(gl_issue, @client) == :next
 
       process_issue(gl_issue)

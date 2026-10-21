@@ -147,7 +147,10 @@ class MrFixer
       end
       answered.to_h do |discussion|
         since = Time.parse(asked[discussion[:id]])
-        [discussion[:id], notes.select { |note| HumanActivity.human_note_after?(note, since) }]
+        # Oldest first, like the ticket context (Autodev #137): GitLab answers
+        # newest first, and the two sections of one prompt must not disagree.
+        after = notes.select { |note| HumanActivity.human_note_after?(note, since) }
+        [discussion[:id], ContextNotes.chronological(after)]
       end
     end
 
