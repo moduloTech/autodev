@@ -260,8 +260,9 @@ module Autodev
     # this method, and it was false for four months (Autodev #75): `route_by_state`
     # answered `:next` for anything that was not `pending`, so `process_issue` — and
     # therefore this method — was never reached for the state it exists to serve.
-    # The rule is now stated once, as `Issue::PROCESSABLE_STATES`, and read by both
-    # the router and `IssueProcessJob`.
+    # The rule is now stated once, as `Issue::PROCESSABLE_STATES`, and read by the
+    # router. The job it enqueues is guarded on `pending` alone (Autodev #140):
+    # `resume!` has moved the row there before `process_issue` enqueues.
     def clarification_received?(existing, gl_issue)
       resumer = ClarificationResume.new(client: @client, path: @path, logger: @logger)
       return false unless resumer.answered?(existing)

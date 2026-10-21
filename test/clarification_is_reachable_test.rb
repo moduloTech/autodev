@@ -108,15 +108,68 @@ class ClarificationRoutingTest < Minitest::Test
     assert_equal :next, verdict
   end
 
-  # One declaration of "the states a `:process` cycle may start from", read by
-  # the router that lets the row through and by the job that refuses a stale
-  # dispatch (Autodev #61). Two lists would be free to disagree, and the
-  # disagreement is silent: the row is dropped by whichever is narrower.
-  def test_the_router_and_the_job_agree_on_the_processable_states
-    assert_equal Issue::PROCESSABLE_STATES, IssueProcessJob::DISPATCHED_FROM[:process]
-    assert_includes Issue::PROCESSABLE_STATES, 'needs_clarification'
-    assert_includes Issue::PROCESSABLE_STATES, 'pending'
+  # Autodev #75 shared one constant between this router and
+  # `IssueProcessJob::DISPATCHED_FROM[:process]`, because two lists were free to
+  # disagree and the narrower silently dropped the row. Autodev #140 separated
+  # them again: the router's question is "may a waiting row reach
+  # `process_issue`", the job's is "is the work still to do", and a job finding
+  # its row in `needs_clarification` is a duplicate of the run that parked it.
+  # What keeps the narrower list from dropping a row now is that every `:process`
+  # enqueue moves the row to `pending` first — declared below, and checked
+  # behaviourally in `ClarificationPickupTest` and the sweep's own test.
+  def test_the_job_accepts_a_subset_of_what_the_router_lets_through
+    assert_equal %w[pending], IssueProcessJob::DISPATCHED_FROM[:process]
+    assert_empty IssueProcessJob::DISPATCHED_FROM[:process] - Issue::PROCESSABLE_STATES
+    assert_equal %w[needs_clarification pending], Issue::PROCESSABLE_STATES.sort
   end
+
+  # Every site that enqueues `:process`, with how it makes the row `pending`
+  # before it does. A new site fails here until somebody writes that sentence —
+  # and if the sentence cannot be written, the job will skip what it enqueues.
+  # Same limit as `test/api_failure_is_not_a_verdict_test.rb`: this proves every
+  # site is declared, not that a declaration is true.
+  PROCESS_ENQUEUE_SITES = {
+    'app/services/autodev/poll_dispatcher.rb' =>
+      'process_issue: a new row is created pending; a needs_clarification row is enqueued only ' \
+      'once ClarificationResume#resume! moved it and `existing.pending?` holds (skip_existing?)',
+    'app/services/autodev/clarification_sweep.rb' =>
+      'apply!: resume! first, then enqueues only `if issue.pending?`'
+  }.freeze
+
+  # A site that passes the action in a variable is invisible to the literal scan
+  # above, so it is declared too, with every action it can send (concurrency
+  # review of Autodev #140). One that could send `:process` belongs in
+  # PROCESS_ENQUEUE_SITES as well.
+  VARIABLE_ACTION_SITES = {
+    'app/services/autodev/poll_dispatcher.rb' => 'enqueue_retry: :retry_stuck or :retry_errored, never :process'
+  }.freeze
+
+  def test_every_process_enqueue_site_is_declared
+    assert_equal PROCESS_ENQUEUE_SITES.keys.sort, enqueue_sites { |args| args.match?(/:process\b/) },
+                 'a new :process enqueue must say how it leaves the row pending'
+    assert_equal VARIABLE_ACTION_SITES.keys.sort, enqueue_sites { |args| !args.match?(/(?<!:):[a-z_]+\b/) },
+                 'an enqueue whose action is a variable must say which actions it can send'
+  end
+
+  private
+
+  # The files holding an `IssueProcessJob.perform_later(…)` whose argument list
+  # matches the block.
+  def enqueue_sites(&)
+    source_files.select { |file| enqueue_arguments(file).any?(&) }
+                .map { |file| file.delete_prefix("#{repo_root}/") }.sort
+  end
+
+  def enqueue_arguments(file)
+    File.read(file).scrub.scan(/IssueProcessJob\.perform_later\(([^)]*)\)/).flatten
+  end
+
+  def source_files
+    (Dir.glob(File.join(repo_root, '{app,lib}', '**', '*.rb')) + Dir.glob(File.join(repo_root, 'bin', '*')))
+      .select { |file| File.file?(file) }
+  end
+
+  def repo_root = File.expand_path('..', __dir__)
 end
 
 # --- 2. the whole pass, from GitLab discovery to the re-armed row ----------
@@ -164,7 +217,9 @@ class ClarificationPickupTest < Minitest::Test
 
     assert_equal 'pending', issue.reload.status
     assert_nil issue.clarification_requested_at
-    assert_equal [[PROJECT_CONFIG['path'], issue.issue_iid, :process]], enqueued
+    assert_equal [[PROJECT_CONFIG['path'], issue.issue_iid, :process, true]],
+                 enqueued.map { |args| [*args, IssueProcessJob.new.send(:dispatchable?, issue, :process)] },
+                 'the job this pass enqueued must pass its own guard (Autodev #140)'
   end
 
   # The resume is announced on the ticket's activity journal — which is also how

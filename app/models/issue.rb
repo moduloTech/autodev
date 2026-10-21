@@ -60,18 +60,21 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     fixing_discussions fixing_pipeline running_post_completion
   ].freeze
 
-  # The states a `:process` cycle may start from — the two waiting states, and
-  # only those. Read by `PollRouter#route_by_state`, which decides whether a
-  # discovered GitLab issue reaches `PollDispatcher#process_issue` at all, and by
-  # `IssueProcessJob::DISPATCHED_FROM`, which refuses a dispatch whose row has
-  # moved on since (Autodev #61).
+  # The states a discovered GitLab issue may reach `PollDispatcher#process_issue`
+  # from — the two waiting states, and only those. Read by
+  # `PollRouter#route_by_state`.
   #
-  # One declaration because the two disagreed, silently and for months (Autodev
-  # #75): the job already accepted `needs_clarification`, the router did not, and
-  # the narrower of the two wins by dropping the row. `process_issue` is the only
-  # code that ever asks whether the human answered, so a row the router refuses is
-  # a question that is never re-read — 12 production tickets, the oldest waiting
-  # since 15/05/2026.
+  # The router refused `needs_clarification` for months (Autodev #75), and
+  # `process_issue` is the only code that ever asks whether the human answered,
+  # so a row the router refuses is a question that is never re-read — 12
+  # production tickets, the oldest waiting since 15/05/2026.
+  #
+  # Not what `IssueProcessJob::DISPATCHED_FROM[:process]` reads any more
+  # (Autodev #140). #75 shared this constant with the job's staleness guard; but
+  # `process_issue` moves an answered row to `pending` before it enqueues, so the
+  # job is only ever queued from `pending`, and a job finding `needs_clarification`
+  # is a duplicate of the run that parked the row — which the shared constant let
+  # through, to post new questions five times on A#164.
   PROCESSABLE_STATES = %w[pending needs_clarification].freeze
 
   aasm column: :status, whiny_transitions: false do # rubocop:disable Metrics/BlockLength

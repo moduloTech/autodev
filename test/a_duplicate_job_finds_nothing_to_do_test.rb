@@ -22,7 +22,10 @@ class ADuplicateJobFindsNothingToDoTest < Minitest::Test
   # of every state it is dispatched from. Stated per action, with the transition
   # that does the moving, so adding an action forces the question to be answered.
   SELF_CLEARING = {
-    process: 'IssueProcessor#process leaves PROCESSABLE_STATES on start_processing!',
+    process: 'IssueProcessor#process leaves pending on start_processing!, and a run that ends ' \
+             'back in a waiting state ends in needs_clarification, which DISPATCHED_FROM[:process] ' \
+             'refuses. Until Autodev #140 this said "leaves PROCESSABLE_STATES", which was false ' \
+             'from #75 on: five duplicates on A#164 each re-ran the spec check on a parked row',
     check_pipeline: 'a conclusive poll leaves checking_pipeline; an inconclusive one re-reads harmlessly',
     fix_discussions: 'a round ends on discussions_fixed! or an abandon, leaving fixing_discussions',
     retry_errored: 'retry_pipeline! / retry_processing! leave error — except while ' \
@@ -61,10 +64,37 @@ class ADuplicateJobFindsNothingToDoTest < Minitest::Test
                  'a new action must declare whether its precondition survives its own work'
   end
 
+  # The one SELF_CLEARING sentence a test can check (Autodev #140): no state a
+  # `:process` run can reach once it has left `pending` — derived from the state
+  # machine, `needs_clarification` included — is one the job accepts a `:process`
+  # dispatch from. `pending` itself is excluded: reaching it again takes a
+  # separate gesture — an answer or a reentry, which enqueue or run their own
+  # pass, or `retry_errored`, which enqueues nothing and leaves the row to
+  # `DormantAudit`'s pending arm — never the end of this run.
+  def test_no_state_a_process_run_reaches_is_one_it_is_dispatched_from
+    reachable = states_reachable_from(:cloning) - [:pending]
+
+    assert_includes reachable, :needs_clarification
+    assert_empty reachable.map(&:to_s) & IssueProcessJob::DISPATCHED_FROM[:process]
+  end
+
   def test_the_reserved_actions_are_reserved_by_the_dispatcher
     assert Autodev::PollDispatcher.private_method_defined?(:reserve_infra_recheck?),
            'recheck_infra is declared as reserved, so the reservation must exist'
     assert Autodev::PollDispatcher.private_method_defined?(:reserve_post_completion?),
            'post_completion is declared as reserved, so the reservation must exist'
+  end
+
+  private
+
+  def states_reachable_from(start)
+    edges = Issue.aasm.events.flat_map { |event| event.transitions.map { |t| [t.from, t.to] } }
+    seen = [start]
+    loop do
+      added = edges.filter_map { |src, dest| dest if seen.include?(src) }.uniq - seen
+      return seen if added.empty?
+
+      seen.concat(added)
+    end
   end
 end
