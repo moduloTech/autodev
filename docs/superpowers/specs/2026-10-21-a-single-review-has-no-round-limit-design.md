@@ -57,7 +57,10 @@ Delete the dead path rather than keep it as a defensive net:
 the timeline renders the activity line. A row or event still carrying
 `review_limit_reached` would render the bare key after the deletion. Production
 and the development copy carry none (table above), and nothing can write one any
-more, so deleting the keys renders nothing raw.
+more, so deleting the keys renders nothing raw. `explain_key` has no fallback
+for a reason outside the vocabulary, and none is added here: the risk is the same
+for every reason ever deleted, it is not this ticket's to settle, and for this one
+the population it would protect is measured at zero.
 
 ### What a value above 1 does now
 
@@ -82,7 +85,11 @@ in the tables for a reason nothing writes any more — which is what this deleti
 leaves behind if one key is forgotten. A test is added deriving it from the same
 vocabulary (`attention_reasons`). It does **not** detect a reason whose writer
 exists but is unreachable, which was this ticket's shape; that would need a
-reachability analysis no test here performs.
+reachability analysis no test here performs. Nor can it read the other two sinks:
+`activity_*` and the bare notification keys share their namespaces with symbols
+that are not reasons, so an orphan there is indistinguishable from a live key by
+rule. `test/a_review_runs_once_per_merge_request_test.rb` pins the absence of
+this reason's six keys by name instead.
 
 ## Out of scope
 
