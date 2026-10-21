@@ -62,8 +62,19 @@ A priority alone would not do (ticket): the first thread freed at 10:24, a
   interval delays the next one instead of overlapping it. Measured on the
   development copy of production (`activity_events`, `kind = 'poller'`,
   `cycle_complete`): since July, 30 618 cycles, mean 6–7 s, 11 longer than
-  120 s (max 2 039 s). June had 4 489 cycles of ~125 s; none since
-  July. A backlog after a long cycle drains at ~7 s a poll.
+  120 s (max 2 039 s). June had 4 489 cycles of ~125 s — every cycle of
+  19-22 June was longer than production's 120 s interval. One thread alone
+  would have let the scheduler's ticks pile up by the difference for as long as
+  that lasted (the adversarial review reproduced it at 1.25× the interval with
+  real workers: one more queued poll every five ticks, against none on the
+  pre-#139 configuration). So a poll a worker claims **steps aside when a newer
+  poll already waits on its queue** (`AutodevPollJob#superseded?`): the
+  backlog drains to the last tick, which does the work. Not
+  `limits_concurrency … on_conflict: :discard`: Solid Queue's
+  `Semaphore::Proxy#wait` ignores `expires_at`, which only the dispatcher's
+  maintenance pass (every 600 s) enforces, so a semaphore leaked by a killed
+  worker would discard every poll meanwhile. `perform_now` carries no
+  `provider_job_id` and always runs; a failed read never stops a poll.
 - **One more process.** In fork mode every worker entry is its own process
   (`processes: 1`), with its own pools; `bin/jobs start` now forks dispatcher,
   scheduler and two workers. Idle cost: one `ready_executions` query per second

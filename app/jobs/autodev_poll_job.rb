@@ -14,6 +14,8 @@ class AutodevPollJob < ApplicationJob
   queue_as :poll
 
   def perform
+    return log_superseded if superseded?
+
     config = ::Config.load
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     usage_ok = probe_usage
@@ -27,6 +29,32 @@ class AutodevPollJob < ApplicationJob
   end
 
   private
+
+  # One thread serialises the polls, so a cycle longer than `poll_interval`
+  # leaves the scheduler's next ticks queued behind it — and in June 2026 every
+  # cycle of four days running was longer (~125 s at an interval of 120 s):
+  # the queue would have grown by the difference for as long as that lasted,
+  # each queued poll re-reading the same state (Autodev #139, adversarial
+  # review). A poll a worker claims therefore steps aside when a newer one is
+  # already waiting on its queue: the backlog drains to the last tick, which
+  # does the work. Not `limits_concurrency … on_conflict: :discard`: Solid
+  # Queue's semaphore ignores its `expires_at` until the dispatcher's
+  # maintenance pass, so one leaked by a killed worker would discard every
+  # poll meanwhile. `provider_job_id` is set by Solid Queue alone, so
+  # `perform_now` (`bin/rails runner`) always runs; a read that fails never
+  # stops a poll.
+  def superseded?
+    return false if provider_job_id.blank?
+
+    SolidQueue::ReadyExecution.where(queue_name: queue_name).exists?
+  rescue StandardError => e
+    logger.warn("[autodev_poll] superseded check failed: #{e.class}: #{e.message}")
+    false
+  end
+
+  def log_superseded
+    logger.info('[autodev_poll] a newer poll is already queued: skipping this one')
+  end
 
   # One probe per cycle, persisted by the gate so every worker and the dashboard
   # read the same verdict without shelling out to danger-claude themselves.

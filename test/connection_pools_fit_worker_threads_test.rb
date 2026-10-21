@@ -29,7 +29,7 @@ class ConnectionPoolsFitWorkerThreadsTest < ActiveSupport::TestCase
                                           .send(:estimated_number_of_threads)
 
         assert_operator database.dig(env, :queue, :pool), :>=, needed, "N=#{n} #{env}: queue pool"
-        assert_operator database.dig(env, :primary, :pool), :>=, n, "N=#{n} #{env}: primary pool"
+        assert_operator database.dig(env, :primary, :pool), :>=, n + 2, "N=#{n} #{env}: primary pool"
       end
     end
   end
