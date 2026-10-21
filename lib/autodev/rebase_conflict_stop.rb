@@ -26,10 +26,6 @@
 # `stop_on_stale_transition` (`StaleTransitionBound`),
 # @client and @project_path.
 module RebaseConflictStop
-  # How many paths the `/errors` card's detail line carries; the comments carry
-  # them all.
-  DETAIL_FILES = 5
-
   private
 
   # The `StaleTransitionError` clause is not decoration: this runs from inside a
@@ -41,7 +37,9 @@ module RebaseConflictStop
   def stop_on_rebase_conflict(issue, error)
     log_error "Issue ##{issue.issue_iid}: #{error.message} → handing back"
     vars = rebase_conflict_vars(issue, error)
-    return unless abandon_issue(issue, :rebase_conflict, detail: error.files.first(DETAIL_FILES).join(', '), **vars)
+    # No `detail:`: the `/errors` card renders it under "Failing job(s)", and
+    # these are files. The comments carry them.
+    return unless abandon_issue(issue, :rebase_conflict, **vars)
 
     post_rebase_conflict_mr_note(issue, vars) if issue.mr_iid
   rescue StaleTransitionError => e

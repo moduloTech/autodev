@@ -222,6 +222,15 @@ class AFailedRebaseHandsBackTest < Minitest::Test
     assert(client.issue_notes_posted.any? { |n| n.include?(CONFLICTED) })
   end
 
+  # The handback sentence promises a merge request to take over; there is none.
+  def test_without_a_merge_request_the_handback_names_no_merge_request
+    client = process(pending_issue(mr_iid: nil))
+    notice = client.issue_notes_posted.find { |n| n.include?(CONFLICTED) }
+
+    assert_includes notice, Locales.t(:abandon_reassigned_no_mr, locale: :fr)
+    refute_includes notice, Locales.t(:abandon_reassigned, locale: :fr)
+  end
+
   # --- 4. what the stop itself decides --------------------------------------
 
   # A danger-claude crash during the resolution has said nothing about the
@@ -246,23 +255,23 @@ class AFailedRebaseHandsBackTest < Minitest::Test
 
   # git can refuse with nothing left unmerged: still a stop, and the comments say
   # so rather than printing an empty list.
-  def test_no_file_listed_is_said_on_both_comments # rubocop:disable Minitest/MultipleAssertions
+  def test_no_file_listed_is_said_on_both_comments
     row = fixing_issue
     client = stop(row, [])
     said = Locales.t(:rebase_conflict_no_files, locale: :fr)
 
     assert_equal 'rebase_conflict', row.reload.attention_reason
-    assert_equal '', row.attention_detail
     assert_includes client.mr_notes.first.last, said
     assert(client.issue_notes_posted.any? { |n| n.include?(said) })
   end
 
-  # The `/errors` card carries the first five paths; the comments carry them all.
-  def test_the_detail_is_bounded_and_the_comments_are_not
+  # The comments carry every path. The `/errors` card does not: it renders
+  # `attention_detail` under "Failing job(s)", and these are files.
+  def test_the_comments_carry_every_file_and_the_card_none
     files = (1..7).map { |n| "app/f#{n}.rb" }
     client = stop(fixing_issue, files)
 
-    assert_equal files.first(5).join(', '), Issue.last.attention_detail
+    assert_nil Issue.last.attention_detail
     assert(files.all? { |f| client.mr_notes.first.last.include?(f) })
   end
 

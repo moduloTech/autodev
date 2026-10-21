@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'shallow_history'
+
 # Rebase an autodev branch onto its target branch (`origin/<target_branch>`) before
 # starting any write action (implementing, fixing discussions, fixing pipeline).
 # Without this, danger-claude operates against a stale tree: target may have
@@ -12,6 +14,8 @@
 # what the callers below hand in as `base:`), and DangerClaudeRunner
 # (danger_claude_prompt, log, log_error) to be available on the including class.
 module RepoRebaser
+  include ShallowHistory
+
   private
 
   # `base` is asked for rather than worked out here (Autodev #91): this module
@@ -30,6 +34,7 @@ module RepoRebaser
     ensure_base_available!(work_dir, base)
     return :no_op unless target_has_new_commits?(work_dir, base)
 
+    ensure_merge_base!(work_dir, branch, base)
     log "Rebasing #{branch} on origin/#{base}..."
     _, _, ok = run_cmd_status(['git', 'rebase', "origin/#{base}"], chdir: work_dir)
     return finalize_rebase(work_dir, branch) if ok
@@ -91,10 +96,9 @@ module RepoRebaser
   # branch `refs/remotes/origin/<target>` gets created — `git fetch origin <target>`
   # alone only writes FETCH_HEAD on clones made with `--branch <other>`.
   def fetch_target_with_history(work_dir, target)
-    is_shallow, = run_cmd_status(%w[git rev-parse --is-shallow-repository], chdir: work_dir)
     refspec = "+refs/heads/#{target}:refs/remotes/origin/#{target}"
-    cmd = if is_shallow.strip == 'true'
-            ['git', 'fetch', '--deepen=500', 'origin', refspec]
+    cmd = if shallow?(work_dir)
+            ['git', 'fetch', "--deepen=#{deepen_step}", 'origin', refspec]
           else
             ['git', 'fetch', 'origin', refspec]
           end
@@ -147,7 +151,7 @@ module RepoRebaser
       chdir: work_dir,
       env: { 'GIT_EDITOR' => 'true' } # auto-accept the existing commit message
     )
-    return finalize_rebase(work_dir, branch) if ok
+    return finalize_rebase(work_dir, branch) if ok || rebase_completed?(work_dir, target)
 
     remaining = unmerged_files(work_dir)
     abort_rebase(work_dir, out)
@@ -166,6 +170,17 @@ module RepoRebaser
   def abort_rebase(work_dir, continue_output)
     log_error "Rebase --continue failed; aborting rebase. Output: #{continue_output[0, 300]}"
     run_cmd_status(%w[git rebase --abort], chdir: work_dir)
+  end
+
+  # danger-claude is told not to run `git rebase --continue`, and may do it
+  # anyway. Ours then answers `fatal: no rebase in progress` — a non-zero exit on
+  # a branch that is rebased and resolved. Reading that as a conflict would tell a
+  # human to resolve files that are already resolved (Autodev #138, review).
+  def rebase_completed?(work_dir, target)
+    return false if %w[rebase-merge rebase-apply].any? { |d| File.exist?(File.join(work_dir, '.git', d)) }
+
+    _, _, ok = run_cmd_status(['git', 'merge-base', '--is-ancestor', "origin/#{target}", 'HEAD'], chdir: work_dir)
+    ok
   end
 
   # Read before `git rebase --abort`, which erases the answer.

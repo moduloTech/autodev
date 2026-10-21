@@ -28,6 +28,32 @@ nothing was done and the automatic review asserted it did not exist.
 Measured by the batch on production logs: the line appears 2 times in
 `production.log.20261015-063000` and 28 times in `production.log.20261016-063946`.
 
+## A second defect under the first: the shallow clone invents conflicts
+
+Found by the adversarial review and reproduced: every clone is `--depth 1` (neither
+production project sets `clone_depth`), and `fetch_target_with_history` deepened the
+**target** only. The branch arrives as one commit with no parent, so there is no
+merge base; `git rebase` replays the branch tip as a root commit, and every file the
+target changed since the fork comes back as an add/add conflict. On a `file://` clone
+(that transport honours `--depth`, as https does; a plain path does not, which is why
+the suite never saw it) a branch that only added `feat.rb` conflicted on
+`shared.rb`, which only the target had touched. Deepening both refs in one more
+fetch finds the fork point; a fork further back than one round needs more rounds.
+
+Production agrees: of the 10 still-open merge requests whose rebase failed since
+15/10, **4 have no conflict at all** according to GitLab (!11262 — the motivating
+case —, !11337, !11409, !11670; `has_conflicts: false` after a per-MR recheck on
+21/10/2026). Stopping on those would hand back requests over conflicts that do not
+exist, so the stop is only correct together with this fix.
+
+`ShallowHistory#ensure_merge_base!` (mixed into `RepoRebaser`, called once the
+target is known to have moved): while there is no merge base and the clone is
+shallow, deepen **both** refs by `deepen_step` (500), at most `DEEPEN_ROUNDS` (4 —
+2 000 commits, the motivating branch was 865 behind); then `--unshallow` if still
+shallow; then, if git still finds no merge base (a fetch that did not land, or
+unrelated histories), `GitError` — not a conflict a human resolves from a file list,
+so the path's ordinary failure handling, not a hand-back.
+
 ## Decision (owner)
 
 A failed rebase **stops** the line and hands it back. The danger-claude conflict
@@ -56,7 +82,11 @@ next cycle would clone, conflict and pay another danger-claude call.
 erases the information). Read twice: once when `git rebase` first stops (the files
 danger-claude is asked to resolve), once when `--continue` refuses. The second is
 named when it is not empty (it is what is still unmerged, possibly on a later commit
-of the replay); otherwise the first. In the measured case both are
+of the replay); otherwise the first.
+
+A `--continue` that fails because there is **no rebase in progress any more** —
+danger-claude ran it itself, against the prompt — on a HEAD that contains
+`origin/<base>` is a completed rebase, not a conflict: it is pushed like one. In the measured case both are
 `app/controllers/companies/sites_controller.rb`. An empty list (git refused for a
 reason that left nothing unmerged) is still a stop, and the comment says no file was
 listed. The `--continue` output itself stays in the log only — it is git's text
@@ -67,8 +97,9 @@ about a client's repository and is not published.
 The `rescue StandardError` around the resolution attempt used to answer `:failed`.
 It now aborts the rebase (as before, so the tree is clean) and **re-raises the
 original error**: `RateLimitError` already did; `AuthenticationError`, a container
-failure or a timeout now reach the boundary's existing handler (`error` + retry,
-or the 401 path), which is what every other danger-claude crash on these paths
+failure or a timeout now reach the boundary's existing failure handling (`error` —
+with a scheduled retry on the implementation path, recovered by `DormantAudit` on
+the two fix paths — or the 401 path), which is what every other danger-claude crash on these paths
 already gets. Reason: Autodev #107 measured that a tool outage read as a verdict
 abandons healthy requests (nine hours of Docker refusals spent five review
 failures on powerpanne 16030). Abandoning on a crash would be the same error. The
@@ -84,10 +115,13 @@ after a clean rebase propagated. Both propagate.
 `RebaseConflictStop#stop_on_rebase_conflict(issue, error)` (one module, included by
 `IssueProcessor`, `MrFixer`, `PipelineMonitor`):
 
-1. `abandon_issue(issue, :rebase_conflict, detail: <first five files>, branch:, base:, files:)`
+1. `abandon_issue(issue, :rebase_conflict, branch:, base:, files:)`
    — `done`, `needs_attention`, `attention_reason = 'rebase_conflict'`,
    `label_attention`, the ticket handed back (`Issue#handback_target`), one ticket
-   comment, one activity line;
+   comment, one activity line. No `detail:`: the `/errors` card renders
+   `attention_detail` under "Failing job(s)", and these are files. The handback
+   sentence of a row with no merge request (`abandon_reassigned_no_mr`) does not
+   promise one;
 2. when the row carries a merge request, one comment **on the merge request**
    (`rebase_conflict_mr_note`) naming the files, the base and how to resume —
    the reviewer reads the merge request, not the ticket. Posted through
@@ -149,12 +183,15 @@ merge request's own diff is computed by GitLab against the merge base.
 
 - `RebaseConflictError(branch:, base:, files:)` — `AutodevError`.
 - `RepoRebaser#rebase_branch_on_target` → `:no_op | :rebased`, raises
-  `RebaseConflictError`, `MissingTargetBranchError`, or the resolution attempt's own
-  error.
+  `RebaseConflictError`, `MissingTargetBranchError`, `GitError` (no merge base even
+  with the full history), or the resolution attempt's own error.
+- `ShallowHistory` (`DEEPEN_ROUNDS = 4`, `deepen_step` 500, `ensure_merge_base!`).
+- `IssueAbandonment#handback_sentence`: `abandon_reassigned` with a merge request,
+  `abandon_reassigned_no_mr` without.
 - `RebaseConflictStop#stop_on_rebase_conflict(issue, error)`.
 - `Issue` `abandon` event: sources `cloning checking_pipeline fixing_discussions reviewing`.
 - Attention reason `rebase_conflict`; locale keys `rebase_conflict`,
-  `rebase_conflict_mr_note` (notifications), `activity_rebase_conflict`,
+  `rebase_conflict_mr_note`, `rebase_conflict_no_files`, `abandon_reassigned_no_mr` (notifications), `activity_rebase_conflict`,
   `web_errors_explain_attention_rebase_conflict` — fr and en.
 - No migration, no column, no setting.
 
@@ -169,22 +206,35 @@ merge request's own diff is computed by GitLab against the merge base.
 
 ## After deploy
 
-Production could not be read when this was written (NetBird down on the
-workstation: `netbird status` → `NeedsLogin`), so the distinct-row count asked for
-is replaced by the nearest measurement GitLab gives: on 21/10/2026, of the **74**
-open merge requests autodev authored on powerpanne/core (all targeting `master`),
-**26** are `has_conflicts: true` (fast/core: 0 open). Each of those whose row
-reaches a write action (a red pipeline, a discussion round, a re-implementation)
-will stop at that action under `rebase_conflict` unless danger-claude resolves the
-conflict — an upper bound, since most of them are `done` rows waiting on a human
-and never rebase again. The owner should run, once NetBird is up:
+Measured in production (read-only, 21/10/2026). `Rebase --continue failed` appears
+40 times in the logs since `production.log.20261015-063000` (lines dated 15/10 →
+17/10), each tied to its branch by the preceding `Rebasing <branch> on origin/…`
+line of the same process. That is **11 distinct rows** (powerpanne/core):
 
-```
-ssh bobette-autodev.netbird.selfhosted 'cd ~/.autodev/log && grep -h -B40 "Rebase --continue failed" production.log* | grep -o "issue #[0-9]*\|MR ![0-9]*" | sort -u'
-```
+| Issue | MR | Status today | Conflict on GitLab |
+|---|---|---|---|
+| 12935 | !11262 | `checking_pipeline`, `dormant_exhausted` | no |
+| 15675 | !11419 | `checking_pipeline`, `dormant_exhausted` | yes |
+| 17004 | !11670 | `checking_pipeline` | no |
+| 14746 | !11409 | `done`, `stagnation_pipeline` | no |
+| 15325 | !10575 | `error` | yes |
+| 14856 | !10837 | `error`, `dormant_exhausted` | yes |
+| 15673 | !10924 | `error`, `dormant_exhausted` | yes |
+| 16210 | !11335 | `error`, `dormant_exhausted` | yes |
+| 16280 | !11337 | `error`, `dormant_exhausted` | no |
+| 10539 | !10737 | `closed` | yes |
+| 16258 | !11256 | `closed` | — |
 
-and expect those rows on the "Issues bloquées" / attention tab at their next write
-action.
+The two `closed` rows never rebase again. Of the other nine, the four with no GitLab
+conflict should now rebase cleanly (the shallow fix); the five with a real conflict
+will stop under `rebase_conflict` at their next write action unless danger-claude
+resolves it — a pipeline fix or a discussion round for the `checking_pipeline` rows,
+a retry or a re-arm for the `error` ones, the infra recheck for 14746. Beyond these,
+32 of the 74 open merge requests autodev authored on powerpanne/core are in conflict
+with `master` (per-MR recheck, two identical passes; the list endpoint said 26, its
+merge status being stale); any of them that reaches a write action is a candidate.
+Owner: expect up to five `rebase_conflict` rows on the attention tab within days of
+the deploy, each with its files on the ticket and the merge request.
 
 ## Owner may reverse
 

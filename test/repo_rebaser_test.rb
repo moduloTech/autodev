@@ -162,6 +162,77 @@ class RepoRebaserTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     assert_equal ['main_only.txt'], error.files
   end
 
+  # The other half: git refuses to continue with nothing left unmerged (every
+  # conflict resolved and staged, `--continue` refused anyway). The files named are
+  # then the ones the replay stopped on before danger-claude ran — read at that
+  # moment, since nothing later can say.
+  def test_the_files_the_replay_stopped_on_are_named_when_nothing_is_left_unmerged
+    clone_branch('feature_conflict')
+    @harness.force_conflict_resolution = lambda do |work_dir|
+      File.write(File.join(work_dir, 'README.md'), "branch-version\n")
+      system('git', 'add', 'README.md', chdir: work_dir, out: File::NULL, err: File::NULL)
+    end
+    refuse_continue(@harness)
+
+    error = assert_raises(RebaseConflictError) do
+      @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict', base: 'main')
+    end
+
+    assert_equal ['README.md'], error.files
+  end
+
+  # The production clone is `--depth 1` over https, and that transport honours the
+  # depth where a plain path does not — so these go through `file://`. The branch
+  # then has no parent, and deepening the target alone never reaches the fork
+  # point: git replayed the tip as a root commit and reported every file the
+  # target had changed as a conflict (README.md here, which the branch never
+  # touched). Deepening both sides finds the fork, and the rebase is clean.
+  def test_a_shallow_clone_rebases_without_inventing_conflicts
+    clone_branch('feature_clean', shallow: true)
+
+    verdict = @harness.send(:rebase_branch_on_target, @work_dir, 'feature_clean', base: 'main')
+
+    assert_equal :rebased, verdict
+    assert_empty @harness.claude_invocations, 'a clean rebase was handed to danger-claude as a conflict'
+  end
+
+  # Same, with a fork point further back than one deepening round reaches: the
+  # rounds go on until git finds it.
+  def test_the_deepening_goes_on_until_the_fork_point_is_reached
+    @harness.define_singleton_method(:deepen_step) { 1 }
+    clone_branch('feature_clean', shallow: true)
+
+    assert_equal :rebased, @harness.send(:rebase_branch_on_target, @work_dir, 'feature_clean', base: 'main')
+  end
+
+  # No merge base even with the whole history: not a conflict a human can resolve
+  # from a list of files, so not a hand-back.
+  def test_unrelated_histories_are_a_git_error_not_a_conflict
+    push_orphan_branch('orphan')
+    clone_branch('orphan', shallow: true)
+
+    assert_raises(GitError) do
+      @harness.send(:rebase_branch_on_target, @work_dir, 'orphan', base: 'main')
+    end
+    assert_empty @harness.claude_invocations
+  end
+
+  # danger-claude ran `git rebase --continue` itself, against the prompt: ours
+  # then fails with "no rebase in progress", on a branch that is rebased. That is
+  # a finished rebase, not a conflict.
+  def test_a_rebase_danger_claude_finished_itself_is_a_rebase
+    clone_branch('feature_conflict')
+    @harness.force_conflict_resolution = lambda do |work_dir|
+      File.write(File.join(work_dir, 'README.md'), "branch-version\n")
+      system('git', 'add', 'README.md', chdir: work_dir, out: File::NULL, err: File::NULL)
+      system({ 'GIT_EDITOR' => 'true' }, 'git', 'rebase', '--continue', chdir: work_dir, out: File::NULL,
+                                                                        err: File::NULL)
+    end
+
+    assert_equal :rebased, @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict', base: 'main')
+    refute_empty @harness.pushed
+  end
+
   # Not an outage: the family's answer — leave the row, re-read next cycle — is the
   # loop a refused rebase must not enter (Autodev #138).
   def test_a_failed_rebase_is_not_a_member_of_the_api_unavailable_family
@@ -298,9 +369,30 @@ class RepoRebaserTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     write_and_commit(seed, 'main_only.txt', "branch-only\n", 'branch creates main_only')
   end
 
-  def clone_branch(branch)
-    system('git', 'clone', '--depth', '1', '--branch', branch, @bare, @work_dir,
+  # `git rebase --continue` answers non-zero whatever the tree holds; every other
+  # git command runs for real.
+  def refuse_continue(harness)
+    harness.define_singleton_method(:run_cmd_status) do |cmd, **opts|
+      next ['', 'refused', false] if cmd == %w[git rebase --continue]
+
+      super(cmd, **opts)
+    end
+  end
+
+  # A plain path ignores `--depth` (git copies the objects); `file://` honours it,
+  # like the https clone production makes.
+  def clone_branch(branch, shallow: false)
+    source = shallow ? "file://#{@bare}" : @bare
+    system('git', 'clone', '--depth', '1', '--branch', branch, source, @work_dir,
            out: File::NULL, err: File::NULL)
+  end
+
+  # A branch sharing no commit with main.
+  def push_orphan_branch(name)
+    other = File.join(@tmpdir, 'orphan_seed')
+    git_init(other)
+    write_and_commit(other, 'alone.txt', "alone\n", 'unrelated root')
+    system('git', 'push', @bare, "main:refs/heads/#{name}", chdir: other, out: File::NULL, err: File::NULL)
   end
 
   def git_init(dir)
