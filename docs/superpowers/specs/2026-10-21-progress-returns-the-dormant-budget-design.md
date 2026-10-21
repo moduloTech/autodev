@@ -40,13 +40,14 @@ together with one answer (owner).
 
 **A row progresses when it completes a unit of work.** The transition is decided
 in one place, an `after_all_transitions` callback on `Issue`
-(`return_dormant_budget_on_progress!`), so every caller of these events counts
+(`return_dormant_budget_on_progress!`), so every caller of these events counts —
+the workers, and an operator forcing one from the dashboard's transition menu —
 and no other path does:
 
 | Event | Counts | Why |
 |---|---|---|
 | `mr_created` | yes | the MR exists (owner: "MR creation") |
-| `discussions_fixed` | yes | a discussion round completed (owner). Bounded on its own by `discussion_fix_round` / `stagnation_discussions` |
+| `discussions_fixed` | yes | a discussion round completed (owner). Bounded on its own by `discussion_fix_round` / `stagnation_discussions`. One caller fires it without moving a counter: `MrFixer#transition_no_discussions`, a pass that found no thread left. It counts too — the step is over, and the next poll reads the same thread list (`MrDiscussions`) and delivers rather than sending the row back into an empty round |
 | `pipeline_fix_done` | yes | a pipeline correction completed — the symmetric of `discussions_fixed`, and the success of the very path #128 sent to `error`. Bounded on its own by `stagnation_pipeline` — **owner may reverse** |
 | `pipeline_green` → `done`, `mr_closed` (merged), `question_answered` | yes | a delivery (owner: "delivery (done)") |
 | `pipeline_green` → `reviewing` / `fixing_discussions` | **no** | see below — **owner may reverse** |

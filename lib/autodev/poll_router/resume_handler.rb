@@ -24,8 +24,6 @@ class PollRouter
   # invisible for the same reason: the substitute is a plausible destination. The
   # read now raises and `PollRouter#route` skips this issue for the cycle.
   module ResumeHandler
-    DORMANT_BUDGET_RESET = { dormant_recheck_count: 0, dormant_recheck_at: nil }.freeze
-
     private
 
     def handle_reenter(gl_issue, existing)
@@ -135,7 +133,8 @@ class PollRouter
     # a single audit (A#139, A#144, A#148 at 3/3). The two automatic callers keep
     # it: the cap is what stops a row that keeps falling dormant from consuming
     # GitLab reads (#47, #103), and a reset on every automatic recovery would
-    # reopen that loop.
+    # reopen that loop. Their row gets it back at its next progress instead
+    # (Autodev #129 — `Issue#return_dormant_budget_on_progress!`).
     def reenter_via_pipeline_check(existing, origin: nil, reset_dormant: false)
       existing.reenter_to_check_pipeline!(origin)
       existing.update(review_count: reentry_review_count(existing), review_failure_count: 0,
@@ -144,7 +143,7 @@ class PollRouter
                       error_message: nil, finished_at: nil, activity_note_id: nil,
                       needs_attention: false, attention_reason: nil, attention_detail: nil,
                       infra_recheck_count: 0, infra_recheck_at: nil, **::Issue::POST_COMPLETION_CLEARED,
-                      **(reset_dormant ? DORMANT_BUDGET_RESET : {}))
+                      **(reset_dormant ? ::Issue::DORMANT_BUDGET_RESET : {}))
       apply_label_doing(existing.issue_iid)
       announce_reentry(existing)
     end
@@ -180,7 +179,7 @@ class PollRouter
                       finished_at: nil, started_at: nil,
                       pipeline_retrigger_count: 0, activity_note_id: nil,
                       needs_attention: false, attention_reason: nil, attention_detail: nil,
-                      **::Issue::POST_COMPLETION_CLEARED, **DORMANT_BUDGET_RESET)
+                      **::Issue::POST_COMPLETION_CLEARED, **::Issue::DORMANT_BUDGET_RESET)
       log_activity(existing, :reenter)
       enqueue_issue_processing(gl_issue, existing)
     end
