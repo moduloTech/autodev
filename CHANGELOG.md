@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The usage guides cover the alpha-58 lot (Autodev #78, #129, #135, #137, #138, #139, #140).** `/help`: a request handed back because its branch conflicts with the target (a new card, what to do: update the branch by hand, repose the starting label, reassign autodev), the "no longer progresses" card clearing once the request moves again, autodev re-reading its own questions with their answers, and the poll seeing a GitLab gesture at the next cycle even when autodev is busy; the last two mentions of a review limit are gone. `/admin/help`: the two workers and the `poll` queue, the `workers` card, the derived pools, a re-implementation enqueued as a job, `DISPATCHED_FROM[:process]` at `pending`, the dormant budget returned by progress, `ContextNotes`, and two error-catalogue rows (`rebase_conflict`, the shallow-clone merge base). Text only: no screen changed, no screenshot re-shot.
+
 ### Removed
 
 - **The review-round limit, which nothing could reach (Autodev #78).** A green pipeline at `review_count >= MAX_REVIEW_ROUNDS` (3) was given up under `review_limit_reached`, but `review_count` is written 0 → 1 once, when the review succeeds, and capped at 1 by the reentry: no production row ever carried more than 1 (21/10/2026: 65 rows at 0, 102 at 1) and none ever carried the reason. The review runs once per delivery — the correction rounds after it are never re-reviewed, only a reimplementation reentry (which resets the count to 0) sends the merge request to the review again — as PowerPanne's review skill prescribes; what bounds the correction loop is discussion stagnation (`stagnation_threshold`) and the `fix_rounds_exhausted` ceiling. Deleted: the `:review_limit` branch of the green routing, `MAX_REVIEW_ROUNDS`, the `review_limit_reached` reason and its six locale keys (fr and en), and the mention of a "review limit" in the `label_attention` form hint, the user guide and the PowerPanne lifecycle page. The tests that forced the count to 3 now pin the abandon machinery on live reasons, and a new guard fails when a watch-card explanation is left in the tables for a reason no code writes.
