@@ -35,7 +35,7 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
                 attention_reason: 'dormant_exhausted' }.freeze
 
   # What counts, as `[event, destination]`; `nil` is any destination.
-  COUNTED = [[:mr_created, nil], [:discussions_fixed, nil], [:pipeline_fix_done, nil],
+  COUNTED = [[:mr_created, nil], [:discussions_fixed, nil],
              %i[pipeline_green done], %i[mr_closed done], %i[question_answered done]].freeze
 
   # Every other event, with the reason it is not progress. Derived against
@@ -51,6 +51,7 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
     post_completion_done: 'the delivery already counted', start_post_completion: 'after the delivery',
     review_done: 'also fired by resume_watch on a review that did nothing',
     review_giveup: 'a give-up', pipeline_failed_code: 'entering a step', abandon: 'a give-up',
+    pipeline_fix_done: 'fix_round has no ceiling and stagnation restarts on a new job set',
     functional_question: 'a wait', mr_ended_while_waiting: 'nothing was completed',
     clarification_received: 'an answer, not a completion',
     reenter: 'a re-entry, handled by its caller (#125)',
@@ -127,9 +128,9 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
   # --- what the flag reads -----------------------------------------------
 
   def test_another_attention_reason_survives_progress
-    issue = create_issue(status: 'fixing_pipeline', mr_iid: 1, needs_attention: true,
+    issue = create_issue(status: 'fixing_discussions', mr_iid: 1, needs_attention: true,
                          attention_reason: 'review_failures_exhausted', dormant_recheck_count: 3)
-    issue.pipeline_fix_done!
+    issue.discussions_fixed!
     issue.reload
 
     assert_equal [true, 'review_failures_exhausted', 0],
@@ -138,9 +139,9 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
 
   # The worker loaded the row before the audit flagged it from another process.
   def test_a_flag_written_since_the_load_is_lifted
-    issue = create_issue(status: 'fixing_pipeline', mr_iid: 1)
+    issue = create_issue(status: 'fixing_discussions', mr_iid: 1)
     Issue.where(id: issue.id).update_all(EXHAUSTED)
-    issue.pipeline_fix_done!
+    issue.discussions_fixed!
     issue.reload
 
     assert_equal [false, nil, 0], [issue.needs_attention, issue.attention_reason, issue.dormant_recheck_count]
@@ -149,9 +150,9 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
   # The loaded object still says dormant_exhausted; the database says something
   # else now. The database wins: nothing is cleared that the row no longer holds.
   def test_a_flag_replaced_since_the_load_is_left_alone
-    issue = create_issue(EXHAUSTED.merge(status: 'fixing_pipeline', mr_iid: 1))
+    issue = create_issue(EXHAUSTED.merge(status: 'fixing_discussions', mr_iid: 1))
     Issue.where(id: issue.id).update_all(attention_reason: 'review_failures_exhausted')
-    issue.pipeline_fix_done!
+    issue.discussions_fixed!
     issue.reload
 
     assert_equal [true, 'review_failures_exhausted'], [issue.needs_attention, issue.attention_reason]
@@ -159,9 +160,9 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
 
   # The loaded object read 0, the audit has bumped it since: still reset.
   def test_a_count_bumped_since_the_load_is_reset
-    issue = create_issue(status: 'fixing_pipeline', mr_iid: 1)
+    issue = create_issue(status: 'fixing_discussions', mr_iid: 1)
     Issue.where(id: issue.id).update_all(dormant_recheck_count: 2, dormant_recheck_at: 1.hour.from_now)
-    issue.pipeline_fix_done!
+    issue.discussions_fixed!
     issue.reload
 
     assert_equal [0, nil], [issue.dormant_recheck_count, issue.dormant_recheck_at]
@@ -169,10 +170,10 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
 
   # Autodev #97: a transition refused as stale writes nothing — this included.
   def test_a_refused_transition_returns_nothing
-    issue = create_issue(EXHAUSTED.merge(status: 'fixing_pipeline', mr_iid: 1))
+    issue = create_issue(EXHAUSTED.merge(status: 'fixing_discussions', mr_iid: 1))
     Issue.where(id: issue.id).update_all(status: 'closed')
 
-    assert_raises(StaleTransitionError) { issue.pipeline_fix_done! }
+    assert_raises(StaleTransitionError) { issue.discussions_fixed! }
     issue.reload
 
     assert_equal [3, 'dormant_exhausted'], [issue.dormant_recheck_count, issue.attention_reason]
@@ -206,8 +207,7 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
   def test_a_flagged_row_that_restarts_and_advances_is_no_longer_given_up
     issue = create_issue(EXHAUSTED.merge(status: 'error', mr_iid: 1))
     issue.retry_pipeline!
-    issue.pipeline_failed_code!
-    issue.pipeline_fix_done!
+    round_completed(issue)
     issue.reload
 
     assert_equal [false, nil, 0], [issue.needs_attention, issue.attention_reason, issue.dormant_recheck_count]
@@ -216,23 +216,31 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
   # --- #129: the replay, and the bound -----------------------------------
 
   # #128's incident four times, ten days apart: a correction fails before
-  # `pipeline_failed_code!`, the audit revives, the retry runs, and the next
-  # correction goes through.
+  # `pipeline_failed_code!`, the audit revives, the retry runs, and the row
+  # then completes a discussion round.
   def test_four_spaced_incidents_each_followed_by_progress_are_all_revived
-    issue = create_issue(status: 'checking_pipeline', mr_iid: 1, created_at: 60.days.ago)
-    4.times do |k|
-      incident(issue, at: (40 - (10 * k)).days.ago)
-      issue.pipeline_failed_code!
-      issue.pipeline_fix_done!
-    end
+    issue = create_issue(status: 'checking_pipeline', mr_iid: 1, review_count: 1, created_at: 60.days.ago)
+    4.times { |k| incident(issue, at: lap(k)) { round_completed(issue) } }
 
     assert_equal [false, 0], [issue.reload.needs_attention, issue.dormant_recheck_count]
   end
 
+  # A pipeline correction is not counted (adversarial review): `fix_round` has
+  # no ceiling, and the stagnation guard restarts at 1 whenever the failed job
+  # set changes, so two job sets alternating would get the budget back on every
+  # lap with nothing else to end the loop.
+  def test_pipeline_corrections_between_incidents_do_not_return_the_budget
+    issue = create_issue(status: 'checking_pipeline', mr_iid: 1, created_at: 60.days.ago)
+    3.times { |k| incident(issue, at: lap(k)) { correct_the_pipeline(issue) } }
+    fail_and_audit(issue, at: lap(3))
+
+    assert_equal %w[error dormant_exhausted], [issue.reload.status, issue.attention_reason]
+  end
+
   def test_the_same_failure_relaunched_without_progress_still_exhausts
     issue = create_issue(status: 'checking_pipeline', mr_iid: 1, created_at: 60.days.ago)
-    3.times { |k| incident(issue, at: (40 - (10 * k)).days.ago) }
-    fail_and_audit(issue, at: 10.days.ago)
+    3.times { |k| incident(issue, at: lap(k)) }
+    fail_and_audit(issue, at: lap(3))
 
     assert_equal %w[error dormant_exhausted], [issue.reload.status, issue.attention_reason]
   end
@@ -243,7 +251,7 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
   # would return the budget on every lap and the loop would never end.
   def test_a_step_that_keeps_dying_after_a_green_pipeline_still_exhausts
     issue = create_issue(status: 'fixing_discussions', mr_iid: 1, review_count: 1, created_at: 60.days.ago)
-    4.times { |k| die_and_come_back_green(issue, at: (40 - (10 * k)).days.ago) }
+    4.times { |k| die_and_come_back_green(issue, at: lap(k)) }
 
     assert_equal %w[fixing_discussions dormant_exhausted], [issue.reload.status, issue.attention_reason]
   end
@@ -286,14 +294,21 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
   end
 
   # One incident: the failure, the audit a day later, and the retry
-  # `perform_retry_errored` makes.
-  def incident(issue, at:)
+  # `perform_retry_errored` makes — then, if given, what the row does next.
+  def incident(issue, at:, &)
     fail_and_audit(issue, at: at)
 
-    assert_equal 'error', issue.status
-    assert_nil issue.attention_reason
+    assert_revived(issue)
     travel_to(at + 1.day + 1.minute) { issue.retry_pipeline! }
+    travel_to(at + 1.day + 2.minutes, &) if block_given?
   end
+
+  def assert_revived(issue)
+    assert_equal ['error', nil], [issue.status, issue.attention_reason]
+  end
+
+  # Ten days apart, the last one ten days ago.
+  def lap(index) = (40 - (10 * index)).days.ago
 
   def fail_and_audit(issue, at:)
     travel_to(at) do
@@ -333,6 +348,17 @@ class ProgressReturnsTheDormantBudgetTest < Minitest::Test # rubocop:disable Met
         fixer.define_singleton_method(noop) { |*, **| nil }
       end
     end
+  end
+
+  def correct_the_pipeline(issue)
+    issue.pipeline_failed_code!
+    issue.pipeline_fix_done!
+  end
+
+  # A green pipeline with threads open, then the round that fixes them.
+  def round_completed(issue)
+    green_back_to_discussions(issue)
+    issue.discussions_fixed!
   end
 
   def green_back_to_discussions(issue)

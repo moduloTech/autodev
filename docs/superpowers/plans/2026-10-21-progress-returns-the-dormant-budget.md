@@ -2,6 +2,10 @@
 
 Spec: `docs/superpowers/specs/2026-10-21-progress-returns-the-dormant-budget-design.md`.
 
+Amended after the phase-7 reviews: `pipeline_fix_done` was taken out of
+`COMPLETION_EVENTS` (the spec says why), so the replays below complete a
+discussion round instead, and a test pins that a pipeline correction does not count.
+
 One lane: the change is one callback on `Issue` and one constant moved. Two
 lanes would split a 30-line diff; dispatching costs more than it returns.
 

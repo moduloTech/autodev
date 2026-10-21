@@ -366,9 +366,9 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   end
 
   # What "the row progresses" means (Autodev #129, #135): it completed a unit of
-  # work. Completing a step counts — an MR created, a discussion round or a
-  # pipeline correction finished, each bounded on its own by `discussion_fix_round`
-  # and the stagnation guards. So does a delivery, which is a transition *to*
+  # work that no automatic path can repeat for ever. An MR created happens once
+  # per delivery; a completed discussion round advances `discussion_fix_round`,
+  # whose ceiling only a human re-entry lifts. So does a delivery, which is a transition *to*
   # `done` by one of `DELIVERY_EVENTS`; `abandon`, `review_giveup` and a closed
   # ticket reach `done` too and are not one.
   #
@@ -379,16 +379,20 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # pipeline a revival lands on: a worker that dies in either step is revived to
   # `checking_pipeline`, whose next poll fires `pipeline_green` straight back, and
   # nothing else bounds that loop. `review_done` is out for the same reason —
-  # `resume_watch` fires it on a review that did nothing.
-  COMPLETION_EVENTS = %i[mr_created discussions_fixed pipeline_fix_done].freeze
+  # `resume_watch` fires it on a review that did nothing — and so is
+  # `pipeline_fix_done`: `fix_round` has no ceiling, and the stagnation guard
+  # restarts at 1 whenever the failed job set changes, so two job sets taking
+  # turns would get the budget back on every lap.
+  COMPLETION_EVENTS = %i[mr_created discussions_fixed].freeze
   DELIVERY_EVENTS = %i[pipeline_green mr_closed question_answered].freeze
 
   # The budget comes back for all three arms, and a `dormant_exhausted` flag is
   # lifted: it describes a row that stopped, and this one has just moved. Any
   # other reason is left alone — each has its own owner (spec of #129/#135).
   #
-  # Both are written by the transition's own `save!`, so a transition refused as
-  # stale (#97) writes neither. The flag is read from the database rather than
+  # Both are only assigned here, never written by a statement of their own: the
+  # transition's saves carry them (`persist_status_change!`, then AASM's own
+  # state write), so a transition refused as stale (#97) writes neither. The flag is read from the database rather than
   # from this object: the audit flags by `update_all` from the poll, and a worker
   # holding the row may have loaded it before that — or before a human cleared
   # or replaced the flag, which must not be undone here. The columns are marked

@@ -10,18 +10,30 @@ together with one answer (owner).
 
 ## Measurements
 
-- Production could not be read from this session (NetBird `NeedsLogin`,
-  2026-10-21). The figures below are the batch's, measured read-only on
-  production on 2026-10-16, and the tickets' own.
-- `dormant_exhausted` on 11 rows: `checking_pipeline` 2, `fixing_discussions` 2,
-  `error` 6, `done` 1 (#135 counted 11 active on 01/10, 8 on 08/10).
-- `dormant_recheck_count`: 0 → 136, 1 → 6, 2 → 2, 3 → 17.
+Production, read-only (`sqlite3 -readonly ~/.autodev/autodev.db` on bobette),
+2026-10-21:
+
+- `dormant_exhausted` on 11 rows: `fixing_discussions` 3, `checking_pipeline` 2,
+  `error` 5, `done` 1 (#135 counted 11 active on 01/10, 8 on 08/10; the batch
+  10 outside `done` on 16/10).
+- No other attention reason sits on a row outside `done` / `closed`: every
+  flagged row in an active or `error` state carries `dormant_exhausted`.
+- `dormant_recheck_count`: 0 → 140, 1 → 6, 2 → 3, 3 → 18.
+- Counted progress after the flag was set (transitions `mr_created`,
+  `discussions_fixed`, or `pipeline_green` / `mr_closed` / `question_answered`
+  to `done`, later than the row's last `dormant_exhausted` activity entry), per
+  flagged row: A#128 3, A#144 3, A#127 2, A#147 2, A#101 1, A#139 1, A#145 1;
+  A#68, A#95, A#135, A#148 0. Seven of the eleven would have lost the flag;
+  three of them (A#127, #128, #145) progressed and are back in `error` today,
+  which is #129: their next dormant episode is flagged without an audit.
+- A#148 is the loop the decision below refuses to count, measured: since the
+  flag (26/09) it went `pipeline_green` → `fixing_discussions` → `mark_failed`
+  → `retry_pipeline` → `pipeline_green` 16 times, every ~5 h (the Claude session
+  limit's reset), and never completed a discussion round. Counting
+  `pipeline_green` would have lifted its flag and returned its budget 16 times.
 - #129's probe (adversarial review of #128): 4 incidents 10 days apart, each a
   failed poll, the audit, the retry and a healthy poll, end in
   `status=error dormant=3 attn=dormant_exhausted`.
-- The development copy `~/.autodev/autodev.db` dates from 2026-08-12, before
-  `dormant_exhausted` was ever written (no row carries it, 141 rows at count 0):
-  it cannot answer anything here and was not used.
 
 ## The mechanism today
 
@@ -38,7 +50,7 @@ together with one answer (owner).
 
 ## Decision
 
-**A row progresses when it completes a unit of work.** The transition is decided
+**A row progresses when it completes a unit of work that no automatic path can repeat for ever.** The transition is decided
 in one place, an `after_all_transitions` callback on `Issue`
 (`return_dormant_budget_on_progress!`), so every caller of these events counts —
 the workers, and an operator forcing one from the dashboard's transition menu —
@@ -47,11 +59,11 @@ and no other path does:
 | Event | Counts | Why |
 |---|---|---|
 | `mr_created` | yes | the MR exists (owner: "MR creation") |
-| `discussions_fixed` | yes | a discussion round completed (owner). Bounded on its own by `discussion_fix_round` / `stagnation_discussions`. One caller fires it without moving a counter: `MrFixer#transition_no_discussions`, a pass that found no thread left. It counts too — the step is over, and the next poll reads the same thread list (`MrDiscussions`) and delivers rather than sending the row back into an empty round |
-| `pipeline_fix_done` | yes | a pipeline correction completed — the symmetric of `discussions_fixed`, and the success of the very path #128 sent to `error`. Bounded on its own by `stagnation_pipeline` — **owner may reverse** |
+| `discussions_fixed` | yes | a discussion round completed (owner). Bounded on its own: it advances `discussion_fix_round`, whose ceiling (`fix_round_ceiling`) only a human re-entry lifts. One caller fires it without moving a counter: `MrFixer#transition_no_discussions`, a pass that found no thread left. It counts too — the step is over, and the next poll reads the same thread list (`MrDiscussions`) and delivers rather than sending the row back into an empty round |
 | `pipeline_green` → `done`, `mr_closed` (merged), `question_answered` | yes | a delivery (owner: "delivery (done)") |
 | `pipeline_green` → `reviewing` / `fixing_discussions` | **no** | see below — **owner may reverse** |
 | `review_done` | no | also fired by `resume_watch` on `:tool_unavailable` / `:inconclusive` / `:clone_failed`, i.e. a review that did nothing |
+| `pipeline_fix_done` | no | `fix_round` has no ceiling, and `StagnationDetector` restarts its count at 1 whenever the failed job set changes: two job sets taking turns, each lap with an incident, would get the budget back every lap and never end (adversarial review: 12 laps over 240 days, `dormant=0`, never stagnated) — **owner may reverse** |
 | `abandon`, `review_giveup`, `clone_complete` → `done` | no | a give-up or a closed ticket is not a delivery |
 | `retry_processing`, `retry_pipeline`, and the `update_all` revivals | no | the revival itself: counting it removes the bound (owner) |
 | every other event (`start_processing`, `spec_clear`, …, `reenter*`, `close`, `mark_failed`) | no | entering a step is not completing it; re-entries are handled by their callers (#125) |
@@ -92,10 +104,17 @@ back. The budget columns are marked changed whatever the object read (the
 `clear_delivery_on_reentry!` idiom), so a count the audit bumped since the load
 is still reset.
 
+Not atomic, like `refuse_stale_transition!`: a flag the audit writes between the
+`pick` and the `save!` stays while the count goes to 0 (domain review, reached only
+by forcing the interleaving). It needs the audit to select a row a live worker is
+saving, which the #50 invariant rules out for the active arm (its window exceeds
+the longest a live worker stays silent), and the `pending` / `error` arms hold no
+worker. The next progress lifts it.
+
 ### Articulation with #125
 
 The human gestures keep their own reset, unchanged; this adds the automatic one.
-`ResumeHandler::DORMANT_BUDGET_RESET` now reads `Issue::DORMANT_BUDGET_RESET`,
+`ResumeHandler`, the Reset and the manual re-entry now use `Issue::DORMANT_BUDGET_RESET`,
 one definition for both. Nothing is duplicated: the human gesture resets at the
 gesture, progress resets at the completion.
 
@@ -132,9 +151,11 @@ case of another reason surviving an automatic resume, so only
 
 ### The rows flagged today
 
-No data migration, no rake (owner). The 4 active rows lose the flag at their
-next progress after deploy; the 6 in `error` keep it, which is accurate; the
-`done` one keeps it until a human re-enters it.
+No data migration, no rake (owner). The 5 active rows lose the flag at their
+next progress after deploy; the 5 in `error` keep it until then; the `done`
+one (A#147) keeps it until a human re-enters it. Their counts stay at 3 until
+the same moment, so A#68, #127, #128 and #145 are flagged at once if they fall
+dormant again before progressing.
 
 ## Owner may reverse
 
@@ -145,11 +166,19 @@ next progress after deploy; the 6 in `error` keep it, which is accurate; the
    fails under (b)); (c) count it only on a pipeline id not seen at the last
    revival — needs a new column. On #135's rows: under (a) a flagged row in
    `checking_pipeline` loses the flag at its next `discussions_fixed` or delivery
-   rather than at its next green poll — one round later.
-2. **`pipeline_fix_done` counts**, not in the owner's list. Options: (a) counts —
-   chosen; (b) does not. On #129's motivating case (#128's failures before
-   `pipeline_failed_code!`), (b) leaves a row whose pipeline corrections succeed
-   but never turn green exhausting the budget over four incidents; (a) does not.
+   rather than at its next green poll — one round later. On A#148 (measured
+   above) (b) would have lifted the flag 16 times on a row that never completed
+   a round.
+2. **`pipeline_fix_done` does not count**, although it is the symmetric of
+   `discussions_fixed`. Options: (a) does not count — chosen, and the owner's
+   list did not name it; (b) counts — the first version of this branch did, and
+   the adversarial review proved the loop above unbounded; (c) counts with a
+   ceiling on pipeline rounds of its own — a new bound, out of this ticket. On
+   #129's motivating case (#128's failures before `pipeline_failed_code!`), (a)
+   returns the budget only once the corrected pipeline is reviewed into a
+   completed discussion round or delivered, so a row whose pipeline corrections
+   succeed but never turn green still exhausts after four incidents — pinned by
+   `test_pipeline_corrections_between_incidents_do_not_return_the_budget`.
 
 ## Not done
 
