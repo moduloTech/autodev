@@ -27,9 +27,17 @@ Measured, read-only, on 2026-10-21:
 | production (`bobette-autodev`) | `0` → 65, `1` → 102, `> 1` → 0 | 0 | 0 |
 | development copy (`~/.autodev/autodev.db`, events up to 2026-08-12) | `0` → 82, `1` → 60 | 0 | 0 |
 
-The review running exactly once per merge request is not a defect: PowerPanne's
-review skill requires it ("The adversarial pass runs once per MR — never re-run it
-on the fixed commit … the loop never converges"). What bounds the correction loop
+The review runs once per **delivery**, and that is not a defect: the correction
+rounds that follow a review are never re-reviewed, which PowerPanne's review
+skill requires ("The adversarial pass runs once per MR — never re-run it
+on the fixed commit … the loop never converges"). It is not once per *merge
+request*: `reenter_via_reimplementation` keeps `mr_iid`, rebuilds the branch and
+resets `review_count` to 0, so the same merge request is reviewed again after
+each rebuild — measured on production (phase-7 adversarial review, re-run
+2026-10-21): MR !11489 (issue 157) carries four `post_mr_review` discussion
+snapshots, on 09-11, 09-14, 09-15 and 09-16, each of the last three after a
+`reenter` transition; three other merge requests show four as well. The count
+still never rises above 1. What bounds the correction loop
 is discussion stagnation (`stagnation_threshold` rounds of the same unresolved
 set → `stagnation_discussions`), with the `fix_rounds_exhausted` ceiling above it
 (`stagnation_threshold * 3` on `discussion_fix_round`).
@@ -71,11 +79,10 @@ no thread is open, fix otherwise), which is what a reviewed request does.
 ### The reentry cap stays
 
 `ResumeHandler#reentry_review_count` still caps at 1 (`[count, 1].min`). Its only
-stated reason was the `:review_limit` short-circuit, which is gone; what it buys
-now is that `review_count` keeps the `{0, 1}` domain every reader assumes
-(`resume_handler.rb`'s "reviewed?" wording, `ReviewArrearsSweep`'s
-`review_count: 0`). Its comment is rewritten to say so. *Owner may reverse* —
-see below.
+stated reason was the `:review_limit` short-circuit, which is gone, and no reader
+tells 1 from more (`announce_reentry` asks `positive?`, `ReviewArrearsSweep`
+selects 0, `green_branch` asks `zero?`). It is kept as the smaller change, and
+its comment now says it protects nothing. *Owner may reverse* — see below.
 
 ### A guard for the leftover, not for the original defect
 
@@ -88,7 +95,7 @@ exists but is unreachable, which was this ticket's shape; that would need a
 reachability analysis no test here performs. Nor can it read the other two sinks:
 `activity_*` and the bare notification keys share their namespaces with symbols
 that are not reasons, so an orphan there is indistinguishable from a live key by
-rule. `test/a_review_runs_once_per_merge_request_test.rb` pins the absence of
+rule. `test/a_review_runs_once_per_delivery_test.rb` pins the absence of
 this reason's six keys by name instead.
 
 ## Out of scope
@@ -101,6 +108,14 @@ this reason's six keys by name instead.
 
 - **Keeping the reentry cap at 1.** Options: (a) keep `[count, 1].min` (chosen);
   (b) drop the cap and keep the inherited value. On the motivating case (no row
-  above 1 exists, none can be produced) both behave identically; (a) keeps a
-  hand-edited value above 1 from surviving a reentry, (b) removes three lines and
-  two tests whose reason has disappeared.
+  above 1 exists, none can be produced) both behave identically, and no reader
+  tells 1 from more; (a) keeps a hand-edited value above 1 from surviving a
+  reentry, (b) removes three lines and two tests whose reason has disappeared.
+- **"Once per delivery", not the ticket's "once per MR".** The ticket and the
+  owner's answer say the review runs exactly once per merge request. Production
+  contradicts it for the reimplementation reentry (above), so the docs say once
+  per delivery. Options: (a) document it as it is (chosen); (b) make a
+  reimplementation keep `review_count`, so a rebuilt branch on the same merge
+  request is not reviewed again — a behaviour change this ticket does not make,
+  and which on !11489 would have skipped three reviews of three rebuilt
+  branches.

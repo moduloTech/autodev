@@ -6,7 +6,7 @@ two lanes would share `pipeline_monitor.rb` and the test files).
 
 ## Steps
 
-1. **Red first.** New `test/a_review_runs_once_per_merge_request_test.rb`, real AR
+1. **Red first.** New `test/a_review_runs_once_per_merge_request_test.rb` (renamed `…_once_per_delivery_test.rb` in phase 8), real AR
    rows, real `PipelineMonitor`:
    - a green pipeline on a row at `review_count: 3` (the old limit) with no
      unresolved thread ends `done` through the nominal delivery — `label_done`,
