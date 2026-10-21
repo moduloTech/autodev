@@ -19,7 +19,8 @@ require 'time'
 # every note posted before #137 carries no marker. The patterns are derived from
 # the locale table rather than restated. A header reworded later keeps the notes
 # posted after the change (they are marked) and loses the unmarked ones of the old
-# wording, so whoever rewords one of these three should keep the old wording here.
+# wording: whoever rewords one of these three has to add the old wording as an
+# extra pattern here. No such list exists today, because none has been reworded.
 #
 # `HumanActivity#human_note_after?` deliberately keeps its own rule: it asks
 # whether a *person* posted, and an autodev question is not one.

@@ -79,7 +79,8 @@ pre-YAML Ruby table holds the same strings), and `autodev_tag` has been
 `**autodev** (v<VERSION>)` since `f4f5a8e` (01/04/2026). A future rewording of a header
 keeps the notes posted after it (they carry the marker) and loses only the earlier
 unmarked notes of the old wording — written here so that whoever rewords a header
-knows to keep the old wording in the pattern list.
+knows to add the old wording to `ContextNotes` as an extra pattern (no such list exists
+yet: none of the three has been reworded).
 
 The marker and the header are recognised by `ContextNotes` (`lib/autodev/context_notes.rb`),
 the one definition both the writers (the marker constants) and the reader

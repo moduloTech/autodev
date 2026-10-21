@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'test_helper'
+require_relative 'gitlab_pages'
 require 'autodev/gitlab_helpers'
 require 'autodev/issue_processor'
 require 'autodev/mr_fixer'
@@ -219,6 +220,29 @@ class TheContextIsChronologicalTest < Minitest::Test
   end
 
   # The fetch stays the very request `HumanActivity` makes on this endpoint.
+  PP_QUESTION = TheContextKeepsAutodevQuestionsTest::PP_QUESTION
+  PP_ANSWER = TheContextKeepsAutodevQuestionsTest::PP_ANSWER
+
+  # A ticket's thread runs past one page. GitLab serves it newest first, so the
+  # question is on the last page: reading the first one alone drops exactly it.
+  class PagedClient < GitlabPagesClient
+    def issue(_path, iid) = ContextKeepsQuestionsFixtures::GlIssue.new(iid, 'Export mensuel', 'Description du ticket')
+    def issue_links(_path, _iid) = []
+  end
+
+  def two_pages
+    filler = Array.new(20) { |i| note(1_000 + i, "suite #{i}", "2026-07-0#{(i % 9) + 1}T10:00:00Z", author: HUMAN) }
+    [[note(832_966, PP_ANSWER, '2026-06-29T17:08:06.045+02:00', author: HUMAN)] + filler.first(19),
+     [filler.last, note(832_858, PP_QUESTION, '2026-06-29T15:45:00.012+02:00')]]
+  end
+
+  def test_a_question_on_the_last_page_still_precedes_its_answer
+    context = GitlabHelpers.fetch_issue_context(PagedClient.new(two_pages), 'group/project', 14_746)
+
+    refute_nil context.index('(a) un envoi mensuel automatique programmé'), 'the question on page 2 is missing'
+    assert_operator context.index('(a) un envoi mensuel'), :<, context.index(PP_ANSWER)
+  end
+
   def test_the_fetch_asks_for_no_order
     client = OrderedClient.new([])
     GitlabHelpers.fetch_issue_context(client, 'group/project', 14_746)
@@ -232,6 +256,15 @@ class TheContextRecognisesAutodevQuestionsTest < Minitest::Test
   include ContextKeepsQuestionsFixtures
 
   PP_QUESTION = TheContextKeepsAutodevQuestionsTest::PP_QUESTION
+
+  # The signature in the header is autodev's own: a first line worded like a
+  # question but signed by somebody else is not one, whatever the body quotes.
+  def test_a_question_header_signed_by_somebody_else_is_dropped
+    body = "#{Locales.t(:spec_unclear_header, locale: :fr, tag: '**someone** (v1)')}\n\n" \
+           "> #{header(:error_generic, :fr, error: 'cite')}\n\nfaux"
+
+    refute_includes context_for([note(1, body, '2026-08-29T10:00:00Z', author: HUMAN)]), 'faux'
+  end
 
   # A quoted header is not a header: the whole first line has to be one.
   def test_a_human_note_quoting_a_question_header_is_dropped
