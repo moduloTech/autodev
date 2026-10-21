@@ -109,6 +109,16 @@ the one definition both the writers (the marker constants) and the reader
   Same context on PP#14746; at the end, the first line of the note stays its visible
   header, which is what the header rule and any human reading the source expect.
 
+- **Every posted question set is kept, duplicates included.** The domain review found
+  tickets carrying several clarification notes for one parked wait (16354: 5 notes
+  within 12 minutes on 17/07; 16627: 3 within 44 s on 15/10, one `spec_unclear`
+  transition). All of them are now in the context, unmarked as to which one the
+  requester answered. Alternatives: keep only the last question set before each human
+  answer, or only the one posted by the transition that parked the row (needs a note id
+  recorded on the row). On PP#14746 all three give the same context (one question set).
+  The duplicates themselves come from spec checks that posted without parking — a
+  separate defect, not this ticket's.
+
 ## Out of scope
 
 - Replaying the spec check on PP#14746 in the danger-claude container (optional per the
