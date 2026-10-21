@@ -44,7 +44,7 @@ module Dashboard
       scope.order(id: :desc).to_a
     end
 
-    # "Gave-up done" issues (review limit / review failures / stagnation):
+    # "Gave-up done" issues (review failures / stagnation / the other give-ups):
     # delivered but flagged as needing a manual intervention on GitLab — and,
     # since Autodev #86, questions still parked in `needs_clarification` that
     # `ClarificationWatch` flagged. Those were never delivered, so their entry

@@ -366,9 +366,11 @@ module Autodev
     # routing an interrupted row to `closed` — and an abandoned row is `done`
     # without being delivered: pipeline stagnation, discussion stagnation, an
     # expired pipeline watch, an exhausted review budget, and the later ones.
-    # Two of those already reassigned the ticket to its author and so already
-    # slipped past the `still_assigned?` guard into this pass; #60 made the
-    # reassignment uniform, which would have let the other three in too. No nominal
+    # Two of the give-ups #60 found already reassigned the ticket to its author —
+    # the exhausted review budget and the review-round limit, unreachable and
+    # deleted by Autodev #78 — and so already slipped past the `still_assigned?`
+    # guard into this pass; #60 made the reassignment uniform, which would have
+    # let the other three in too. No nominal
     # completion path sets the flag and every give-up path does, so the clause
     # separates the two populations exactly.
     #

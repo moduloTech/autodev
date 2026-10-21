@@ -129,13 +129,12 @@ Le ticket passe alors en **cloture** cote Autodev (il ne le suit plus). Pour qu'
 
 ## Quand Autodev abandonne
 
-Trois situations ou Autodev s'arrete sans avoir fini et rend la main via une alerte en commentaire :
+Deux situations ou Autodev s'arrete sans avoir fini et rend la main via une alerte en commentaire :
 
 | Cas | Signal |
 |-----|--------|
 | **Memes discussions** non resolues pendant 5 rounds consecutifs | `:warning: stagnation detectee -- les memes discussions restent non resolues` |
 | **Memes jobs CI** en echec pendant 5 corrections consecutives | `:warning: stagnation detectee -- les memes jobs echouent` |
-| **3 rounds de review** deja effectues | `:warning: la limite de review (3 tours) est atteinte` |
 
 Dans tous ces cas, le ticket est marque comme termine (label `Development::Awaiting Feature Review`) et reprend manuellement.
 
@@ -229,7 +228,7 @@ sequenceDiagram
     end
 
     opt Autodev n'arrive plus a progresser
-        Note over AD: Memes discussions x5, memes jobs CI x5,<br/>ou 3 rounds de review atteints
+        Note over AD: Memes discussions x5,<br/>ou memes jobs CI x5
         AD->>GL: Alerte de stagnation,<br/>pose "Awaiting Feature Review"
     end
 ```

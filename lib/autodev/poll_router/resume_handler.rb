@@ -110,12 +110,13 @@ class PollRouter
     # powerpanne. Announced as reviewed to the very people whose job is to review
     # it, which is the harm Autodev #63 removed from the six abandon paths.
     #
-    # The cap stays. What it bought until Autodev #78 was keeping an inherited
-    # value away from `green_branch`'s review-round limit; that branch was
-    # unreachable and is gone. What it buys now is that `review_count` keeps the
-    # `{0, 1}` domain its readers assume — "reviewed or not" in
-    # `announce_reentry`, `review_count: 0` in `ReviewArrearsSweep` — since the
-    # review runs once per merge request and nothing writes more.
+    # The cap stays, though it no longer protects anything. Until Autodev #78 it
+    # kept an inherited value away from `green_branch`'s review-round limit, which
+    # was unreachable and is gone. No reader tells 1 from more —
+    # `announce_reentry` asks `positive?`, `ReviewArrearsSweep` selects 0,
+    # `green_branch` asks `zero?` — so all it does now is keep a value above 1,
+    # which nothing writes, from surviving a reentry. Kept rather than removed
+    # as the smaller change; the #78 spec leaves that choice to the owner.
     #
     # `review_failure_count: 0` beside it really is a reset, deliberately: a
     # request abandoned on `REVIEW_FAILURE_THRESHOLD` consecutive review failures

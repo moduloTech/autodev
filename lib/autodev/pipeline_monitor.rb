@@ -202,14 +202,16 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   # which branch this green pipeline is taking.
   #
   # Two branches, and no count of review rounds (Autodev #78). The review runs
-  # once per merge request — `review_count` goes 0 → 1 in
-  # `finalize_review_success` and nothing raises it further — which is what
-  # PowerPanne's review skill prescribes: a second adversarial pass on the
-  # corrected commit returns a fresh crop of findings whatever its quality, and
-  # the loop never converges. What bounds the correction loop is discussion
-  # stagnation (`stagnation_discussions`) and the `fix_rounds_exhausted` ceiling
-  # above it. A `MAX_REVIEW_ROUNDS` branch sat here until #78, unreachable: no
-  # production row ever carried a count above 1.
+  # once per delivery — `review_count` goes 0 → 1 in `finalize_review_success`
+  # and nothing raises it further, so the correction rounds that follow are never
+  # re-reviewed, which is what PowerPanne's review skill prescribes: a second
+  # adversarial pass on the corrected commit returns a fresh crop of findings
+  # whatever its quality, and the loop never converges. Only a reimplementation
+  # reentry resets the count to 0 and reviews the rebuilt branch again. What
+  # bounds the correction loop is discussion stagnation (`stagnation_discussions`)
+  # and the `fix_rounds_exhausted` ceiling above it. A `MAX_REVIEW_ROUNDS` branch
+  # sat here until #78, unreachable: no production row ever carried a count
+  # above 1.
   def green_branch(review_count)
     review_count.zero? ? :first_review : :post_review
   end

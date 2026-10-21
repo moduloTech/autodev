@@ -176,8 +176,8 @@ class PollRouterReenterTest < Minitest::Test # rubocop:disable Metrics/ClassLeng
 
   # The other half of "cap, do not pose": an inherited value above 1 comes back
   # down to 1. It used to keep the value away from `green_branch`'s review-round
-  # limit, deleted by Autodev #78 as unreachable; it now keeps `review_count` in
-  # the `{0, 1}` domain its readers assume. This is the pre-#85 test, kept
+  # limit, deleted by Autodev #78 as unreachable; no reader tells 1 from more any
+  # longer, and the cap is kept as the smaller change. This is the pre-#85 test, kept
   # verbatim on its assertion and renamed: it never said "force 1", it said
   # "never more than 1".
   def test_reenter_open_mr_caps_review_count_at_one

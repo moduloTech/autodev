@@ -3,8 +3,10 @@
 require_relative 'test_helper'
 require_relative 'database_test_helper'
 
-# The review runs once per merge request, and nothing counts rounds of it
-# (Autodev #78).
+# The review runs once per delivery, and nothing counts rounds of it
+# (Autodev #78). The correction rounds that follow it are never re-reviewed; only
+# a reimplementation reentry, which rebuilds the branch and resets the count to
+# 0, sends the same merge request to the review again.
 #
 # `PipelineMonitor#green_branch` used to send a green pipeline at
 # `review_count >= MAX_REVIEW_ROUNDS` (3) to an abandon under
@@ -20,7 +22,7 @@ require_relative 'database_test_helper'
 #
 # Driven through `PipelineMonitor#check` on real rows, so a limit reintroduced
 # anywhere on the green path — not only in `green_branch` — turns them red.
-class AReviewRunsOncePerMergeRequestTest < Minitest::Test
+class AReviewRunsOncePerDeliveryTest < Minitest::Test
   include DatabaseTestHelper
 
   PROJECT_CONFIG = { 'path' => 'group/project', 'labels_todo' => ['To do'],
@@ -184,7 +186,7 @@ class AReviewRunsOncePerMergeRequestTest < Minitest::Test
   def test_no_review_round_constant_remains
     found = code_lines_naming(/\b(MAX_REVIEW_ROUNDS|review_limit_reached)\b/)
 
-    assert_empty found, 'the review-round limit is back: the review runs once per merge request ' \
+    assert_empty found, 'the review-round limit is back: the review runs once per delivery ' \
                         "and nothing counts rounds.\n#{found.join("\n")}"
   end
 
