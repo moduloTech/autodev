@@ -81,7 +81,7 @@ it back.
 
 - A row in `needs_clarification` is never legitimately the start state of a `:process`
   run. Holds because `clarification_received!` is the only way out of that state towards
-  `pending`, and both enqueue sites fire it before enqueuing.
+  `pending`, and both enqueue sites fire it before enqueuing. (A third site came with the alpha-58 integration review: `PollRouter#enqueue_issue_processing` now enqueues instead of running the processor inside the poll; it reaches `pending` through `reenter!` from `done`/`closed`, never from `needs_clarification`.)
 - The refusal is logged and nothing else: no `activity_events` row, no GitLab write. Same
   as `log_stale_skip`, which is the job-level twin of this refusal.
 

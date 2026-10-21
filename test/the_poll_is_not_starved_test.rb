@@ -4,8 +4,10 @@ require_relative 'rails_helper'
 require_relative 'queue_database_on_file'
 
 # Autodev #139: the poll waited behind the work it had itself enqueued. On
-# 15/10/2026 the three threads of the one `"*"` worker were held by
-# `IssueProcessJob :check_pipeline` runs of 24 to 27 minutes, every poll the
+# 15/10/2026 the three threads of the one `"*"` worker were held by long jobs
+# (`:check_pipeline` runs of 24 to 27 minutes in the 08:00 UTC gap; two
+# `:process` jobs and three polls running a re-implementation inline in the
+# 02:58 UTC one, which a57f0dc removed), every poll the
 # scheduler enqueued meanwhile sat behind the older `IssueProcessJob`s still in
 # the queue, and `/healthz` went `down` on `poller` three times in the day.
 #

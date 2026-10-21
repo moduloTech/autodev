@@ -74,7 +74,7 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # `process_issue` moves an answered row to `pending` before it enqueues, so the
   # job is only ever queued from `pending`, and a job finding `needs_clarification`
   # is a duplicate of the run that parked the row — which the shared constant let
-  # through, to post new questions five times on A#164.
+  # through five times on A#164, two of them posting new questions.
   PROCESSABLE_STATES = %w[pending needs_clarification].freeze
 
   aasm column: :status, whiny_transitions: false do # rubocop:disable Metrics/BlockLength
@@ -376,7 +376,9 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # What "the row progresses" means (Autodev #129, #135): it completed a unit of
   # work that no automatic path can repeat for ever. An MR created happens once
   # per delivery; a completed discussion round advances `discussion_fix_round`,
-  # whose ceiling only a human re-entry lifts. So does a delivery, which is a transition *to*
+  # whose ceiling only a human re-entry lifts — and a pass that finds no thread
+  # left (`MrFixer#transition_no_discussions`) ends the step without a round:
+  # the next poll delivers. So does a delivery, which is a transition *to*
   # `done` by one of `DELIVERY_EVENTS`; `abandon`, `review_giveup` and a closed
   # ticket reach `done` too and are not one.
   #

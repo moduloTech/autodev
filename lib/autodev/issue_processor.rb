@@ -47,7 +47,7 @@ class IssueProcessor
   # and `whiny_transitions: false` makes it a silent `false` from anywhere else —
   # after which the label, the activity entry and the whole pipeline used to run
   # anyway (Autodev #140: five duplicate jobs on a row the first had parked in
-  # `needs_clarification`, each posting new questions). Nothing is written
+  # `needs_clarification`, two of them posting new questions). Nothing is written
   # before the transition has happened.
   def start_processing(issue) # rubocop:disable Naming/PredicateMethod -- it acts; the boolean says whether it did
     @dc_issue = issue

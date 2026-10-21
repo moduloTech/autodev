@@ -38,6 +38,10 @@ module ShallowHistory
 
       run_cmd_status(['git', 'fetch', "--deepen=#{deepen_step}", 'origin', *refspecs], chdir: work_dir)
     end
+    # The last round's fetch is checked too: `--unshallow` fetches the whole
+    # history, the cost the rounds exist to avoid (phase-10 review, alpha-58).
+    return if merge_base?(work_dir, base)
+
     run_cmd_status(['git', 'fetch', '--unshallow', 'origin', *refspecs], chdir: work_dir) if shallow?(work_dir)
     return if merge_base?(work_dir, base)
 

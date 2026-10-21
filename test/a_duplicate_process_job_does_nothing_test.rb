@@ -51,6 +51,10 @@ module DuplicateProcessJobFixtures
 
   def setup
     setup_database
+    # `GitlabHelpers.current_user_id` is memoised on the module, and other files
+    # set it to another bot (999): pinned to this client's user, or the retry
+    # path's handover check reads "no longer assigned" depending on test order.
+    GitlabHelpers.instance_variable_set(:@current_user_id, 7)
     @client = RecordingClient.new
     @clones = 0
     @activity = []

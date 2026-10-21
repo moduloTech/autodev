@@ -66,13 +66,14 @@ class IssueProcessJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # `:process` is `pending` alone, and deliberately not `Issue::PROCESSABLE_STATES`
   # (Autodev #140). That constant answers the router's question — may a waiting
   # row reach `process_issue`, the one place that asks whether the human
-  # answered (#75) — and this one answers "is the work still to do". Both
-  # `:process` enqueue sites move the row to `pending` before enqueuing
-  # (`PollDispatcher#process_issue` through `ClarificationResume#resume!`,
-  # `ClarificationSweep#apply!` likewise), so a job finding its row in
-  # `needs_clarification` is a duplicate queued behind the run that parked it.
-  # Sharing the constant let five such duplicates on A#164 each pose
-  # `label_doing`, clone, and post a new set of questions to the requester.
+  # answered (#75) — and this one answers "is the work still to do". Every
+  # `:process` enqueue site leaves the row in `pending` first
+  # (`PollDispatcher#process_issue` and `ClarificationSweep#apply!` through
+  # `ClarificationResume#resume!`, `PollRouter#enqueue_issue_processing` through
+  # `reenter!`), so a job finding its row in `needs_clarification` is a
+  # duplicate queued behind the run that parked it. Sharing the constant let
+  # five such duplicates on A#164 each pose `label_doing` and clone; two posted
+  # a new set of questions to the requester, three hit the Claude quota.
   DISPATCHED_FROM = {
     process: %w[pending].freeze,
     check_pipeline: %w[checking_pipeline].freeze,
