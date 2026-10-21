@@ -18,6 +18,7 @@ class MrFixer
   include MissingBaseBound
   include InvalidRequestBound
   include StaleTransitionBound
+  include RebaseConflictStop
 
   public :apply_label_done, :apply_label_doing
 

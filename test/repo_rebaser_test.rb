@@ -91,28 +91,81 @@ class RepoRebaserTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     assert_equal 1, @harness.claude_invocations.size
   end
 
-  def test_conflict_aborts_when_claude_does_not_resolve
+  # Autodev #138: a conflict danger-claude did not resolve is no longer the
+  # symbol `:failed`, which all three callers discarded before working on the
+  # stale base. It raises, naming what a human has to resolve.
+  def test_conflict_raises_when_claude_does_not_resolve # rubocop:disable Minitest/MultipleAssertions
     clone_branch('feature_conflict')
     @harness.force_conflict_resolution = ->(_) {} # claude does nothing
 
-    verdict = @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict', base: 'main')
+    error = assert_raises(RebaseConflictError) do
+      @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict', base: 'main')
+    end
 
-    assert_equal :failed, verdict
+    assert_equal ['README.md'], error.files
+    assert_equal 'main', error.base
+    assert_equal 'feature_conflict', error.branch
     assert_empty @harness.pushed
+    refute rebase_in_progress?(@work_dir), 'the rebase must be aborted before the error leaves'
   end
 
   # Regression: when danger-claude itself failed (e.g. session limit) inside
   # resolve_conflicts_then_continue, the raise propagated up uncaught, leaving
   # the work tree in a half-rebased state and crashing PipelineFixer mid-flight.
   # Observed on Powerpanne issue #15643 (2026-06-02) with v0.15.0.
-  def test_claude_crash_aborts_rebase_and_returns_failed
+  #
+  # The abort stays; what changed with Autodev #138 is what follows it. A crash
+  # used to answer `:failed` and the work went on, on the stale base. It now
+  # travels on as itself — not as a conflict verdict, since a tool that did not
+  # run said nothing about the conflict — to the boundary's own handler.
+  def test_claude_crash_aborts_rebase_and_travels_as_itself
     clone_branch('feature_conflict')
     @harness.force_conflict_resolution = ->(_) { raise ImplementationError, 'claude crashed' }
 
-    verdict = @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict', base: 'main')
-
-    assert_equal :failed, verdict
+    assert_raises(ImplementationError) do
+      @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict', base: 'main')
+    end
     refute rebase_in_progress?(@work_dir), 'rebase should be aborted after claude crash'
+  end
+
+  # Autodev #138: the push after a resolved conflict used to sit under the
+  # resolution's `rescue StandardError`, so a push GitLab refused read as a failed
+  # rebase and the work went on. It now propagates, as after a clean rebase.
+  def test_a_push_that_fails_after_a_resolved_conflict_propagates
+    clone_branch('feature_conflict')
+    @harness.force_conflict_resolution = lambda do |work_dir|
+      File.write(File.join(work_dir, 'README.md'), "branch-version\n")
+      system('git', 'add', 'README.md', chdir: work_dir, out: File::NULL, err: File::NULL)
+    end
+    @harness.define_singleton_method(:push_with_lease_fallback) { |*, **| raise GitError, 'push refused' }
+
+    assert_raises(GitError) do
+      @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict', base: 'main')
+    end
+  end
+
+  # Which files a human is told to resolve (Autodev #138): the ones git still
+  # lists as unmerged when it refuses to continue — here a *later* commit's — and
+  # not the ones danger-claude was first asked about, which it resolved. Read
+  # before the abort, which empties the answer.
+  def test_the_files_named_are_the_ones_still_unmerged_when_git_refuses
+    clone_branch('feature_two_conflicts')
+    @harness.force_conflict_resolution = lambda do |work_dir|
+      File.write(File.join(work_dir, 'README.md'), "branch-version\n")
+      system('git', 'add', 'README.md', chdir: work_dir, out: File::NULL, err: File::NULL)
+    end
+
+    error = assert_raises(RebaseConflictError) do
+      @harness.send(:rebase_branch_on_target, @work_dir, 'feature_two_conflicts', base: 'main')
+    end
+
+    assert_equal ['main_only.txt'], error.files
+  end
+
+  # Not an outage: the family's answer — leave the row, re-read next cycle — is the
+  # loop a refused rebase must not enter (Autodev #138).
+  def test_a_failed_rebase_is_not_a_member_of_the_api_unavailable_family
+    refute_kind_of ApiUnavailableError, RebaseConflictError.new(branch: 'b', base: 'main', files: [])
   end
 
   def test_rate_limit_in_conflict_resolution_propagates
@@ -200,7 +253,9 @@ class RepoRebaserTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     pre_head = head_sha(@work_dir)
     @harness.force_conflict_resolution = ->(_) {}
 
-    @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict', base: 'main')
+    assert_raises(RebaseConflictError) do
+      @harness.send(:rebase_branch_on_target, @work_dir, 'feature_conflict', base: 'main')
+    end
 
     assert_equal pre_head, head_sha(@work_dir)
   end
@@ -214,6 +269,7 @@ class RepoRebaserTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     write_and_commit(seed, 'main_only.txt', "main\n", 'main moves ahead')
     create_clean_branch(seed)
     create_conflict_branch(seed)
+    create_two_conflicts_branch(seed)
     system('git', 'clone', '--bare', seed, @bare, out: File::NULL, err: File::NULL)
   end
 
@@ -231,6 +287,15 @@ class RepoRebaserTest < Minitest::Test # rubocop:disable Metrics/ClassLength
     system('git', 'checkout', '-b', 'feature_conflict', 'HEAD~2', chdir: seed,
                                                                   out: File::NULL, err: File::NULL)
     write_and_commit(seed, 'README.md', "branch-version\n", 'branch edits readme')
+  end
+
+  # feature_two_conflicts: feature_conflict's README commit, then a second commit
+  # creating `main_only.txt`, which main also created with other content. The
+  # replay stops on README first and, once that is resolved, on main_only.txt.
+  def create_two_conflicts_branch(seed)
+    system('git', 'checkout', '-b', 'feature_two_conflicts', 'feature_conflict', chdir: seed,
+                                                                                 out: File::NULL, err: File::NULL)
+    write_and_commit(seed, 'main_only.txt', "branch-only\n", 'branch creates main_only')
   end
 
   def clone_branch(branch)

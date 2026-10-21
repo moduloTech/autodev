@@ -40,6 +40,7 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   include MissingBaseBound
   include InvalidRequestBound
   include StaleTransitionBound
+  include RebaseConflictStop
 
   def initialize(client:, config:, project_config:, logger:, token:)
     init_runner(client: client, config: config, project_config: project_config, logger: logger, token: token)

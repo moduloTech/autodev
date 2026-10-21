@@ -48,6 +48,10 @@ class PipelineMonitor
 
     def handle_failure_error(issue, error)
       return handle_auth_failure(issue, error) if error.is_a?(AuthenticationError)
+      # A rebase onto the target that could not be completed (Autodev #138) is not
+      # a failure to retry: the retry would meet the same conflict. The line stops
+      # and goes back to a human, before any write below.
+      return stop_on_rebase_conflict(issue, error) if error.is_a?(RebaseConflictError)
 
       bt = ::BacktraceExcerpt.format(error)
       log_error "Pipeline evaluation/fix failed: #{error.class}: #{error.message}"
