@@ -20,7 +20,9 @@
 default: &default
   autodev_poll:
     class: AutodevPollJob
-    queue: default
+    # Its own queue and worker (config/queue.yml, Autodev #139). This key
+    # overrides the class's `queue_as`, so the two must agree.
+    queue: poll
     schedule: "*/<%= [ENV.fetch('AUTODEV_POLL_INTERVAL', '300').to_i / 60, 1].max %> * * * *"
   # Daily GitLab → project_memberships reconciliation (PR2 of the
   # users-rollout chantier; cf. docs/users-rollout.md §3). Login also
