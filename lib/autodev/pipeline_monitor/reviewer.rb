@@ -13,7 +13,6 @@ class PipelineMonitor
   # the failure diagnostic Autodev #49 added. Splitting the diagnostic out would put
   # `DIAGNOSTIC_STREAM_LIMIT` in one file and its only reader in another.
   module Reviewer # rubocop:disable Metrics/ModuleLength
-    MAX_REVIEW_ROUNDS = 3
     # Consecutive **unusable review output** outcomes before we give up
     # reviewing the MR (Autodev #107). Each still fires a state transition, so
     # without a cap the checking_pipeline ↔ reviewing loop runs forever on a

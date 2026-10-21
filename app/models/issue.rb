@@ -129,10 +129,11 @@ class Issue < ApplicationRecord # rubocop:disable Metrics/ClassLength
     # The single point at which autodev stops working a ticket short of a nominal
     # delivery (Autodev #60, item 2). Four call sites used to write
     # `status: 'done'` themselves — pipeline stagnation, discussion stagnation, an
-    # expired pipeline watch, the review-round limit — so none of them produced a
-    # `transition` row, none appeared in the activity journal or the audit log, and
-    # none of the callbacks below ran: that is what left the stale
-    # `checking_pipeline_since` clock Autodev #53 had to patch at each site.
+    # expired pipeline watch, the review-round limit (unreachable, deleted by
+    # Autodev #78) — so none of them produced a `transition` row, none appeared in
+    # the activity journal or the audit log, and none of the callbacks below ran:
+    # that is what left the stale `checking_pipeline_since` clock Autodev #53 had
+    # to patch at each site.
     #
     # `IssueAbandonment#abandon_issue` is the only caller. The *reason* stays
     # per-site (`attention_reason`) because `dispatch_infra_recheck` selects

@@ -200,19 +200,24 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
 
   # Named once so the read above and the dispatch below cannot disagree about
   # which branch this green pipeline is taking.
+  #
+  # Two branches, and no count of review rounds (Autodev #78). The review runs
+  # once per merge request — `review_count` goes 0 → 1 in
+  # `finalize_review_success` and nothing raises it further — which is what
+  # PowerPanne's review skill prescribes: a second adversarial pass on the
+  # corrected commit returns a fresh crop of findings whatever its quality, and
+  # the loop never converges. What bounds the correction loop is discussion
+  # stagnation (`stagnation_discussions`) and the `fix_rounds_exhausted` ceiling
+  # above it. A `MAX_REVIEW_ROUNDS` branch sat here until #78, unreachable: no
+  # production row ever carried a count above 1.
   def green_branch(review_count)
-    return :review_limit if review_count >= Reviewer::MAX_REVIEW_ROUNDS
-    return :first_review if review_count.zero?
-
-    :post_review
+    review_count.zero? ? :first_review : :post_review
   end
 
   def dispatch_green(issue, branch, discussions)
-    case branch
-    when :review_limit then green_done_max_reviews(issue)
-    when :first_review then green_first_review(issue)
-    else green_post_review(issue, discussions)
-    end
+    return green_first_review(issue) if branch == :first_review
+
+    green_post_review(issue, discussions)
   end
 
   # Both quota deferrals live here rather than in their own modules: they say
@@ -263,17 +268,6 @@ class PipelineMonitor # rubocop:disable Metrics/ClassLength
   def snapshot(issue, context)
     DiscussionSnapshot.capture(context: context, client: @client, project_path: @project_path,
                                mr_iid: issue.mr_iid, logger: @logger, issue: issue)
-  end
-
-  # Green, but `MAX_REVIEW_ROUNDS` rounds of review never resolved the
-  # discussions: a give-up, not a delivery. Routed through the shared abandon
-  # point since Autodev #60, which is also why `pipeline_green` no longer carries a
-  # `max_review_rounds_reached?` transition to `done` — the state machine used to
-  # offer two ways into `done` from `checking_pipeline`, one of them labelled
-  # "green", which is exactly the divergence this ticket unpicked.
-  def green_done_max_reviews(issue)
-    log "Issue ##{issue.issue_iid}: max review rounds reached → done"
-    abandon_issue(issue, :review_limit_reached)
   end
 
   def finalize_green(issue, discussions)

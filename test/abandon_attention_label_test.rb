@@ -21,8 +21,9 @@ require 'autodev/mr_fixer'
 # still-in-progress is less wrong than a ticket that looks reviewed.
 #
 # The comment and the `attention_reason` stay per-reason (Autodev #60) — only the
-# label is uniform, across all six give-up paths (five at #63, plus the MR closed
-# without merging that Autodev #66 routed here).
+# label is uniform, across the give-up paths pinned below (five at #63, plus the
+# MR closed without merging that Autodev #66 routed here, minus the review-round
+# limit Autodev #78 deleted as unreachable).
 class AbandonAttentionLabelTest < Minitest::Test # rubocop:disable Metrics/ClassLength
   include DatabaseTestHelper
 
@@ -101,7 +102,7 @@ class AbandonAttentionLabelTest < Minitest::Test # rubocop:disable Metrics/Class
     @client.edits.filter_map { |(_, attrs)| attrs[:labels]&.split(',') }
   end
 
-  # --- the six give-up paths, one per test ----------------------------------
+  # --- the give-up paths, one per test --------------------------------------
   #
   # Each fires the real entry point of its path, not `abandon_issue` directly, so
   # the test would still fail if a path stopped routing through the shared point.
@@ -129,13 +130,6 @@ class AbandonAttentionLabelTest < Minitest::Test # rubocop:disable Metrics/Class
     issue
   end
 
-  def review_limit_reached(project_config)
-    issue = watched
-    issue.update_columns(review_count: 3)
-    worker(project_config: project_config).send(:green_done_max_reviews, issue)
-    issue
-  end
-
   # The one give-up that starts from `reviewing` and keeps its own AASM event
   # (`review_giveup`) — the path Autodev #63 was filed against.
   def review_failures_exhausted(project_config)
@@ -159,7 +153,7 @@ class AbandonAttentionLabelTest < Minitest::Test # rubocop:disable Metrics/Class
   end
 
   PATHS = %i[stagnation_pipeline stagnation_discussions pipeline_watch_expired
-             review_limit_reached review_failures_exhausted mr_closed_unmerged].freeze
+             review_failures_exhausted mr_closed_unmerged].freeze
 
   # --- with a `label_attention` configured ----------------------------------
 
