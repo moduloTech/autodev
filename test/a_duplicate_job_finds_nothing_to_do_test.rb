@@ -68,7 +68,9 @@ class ADuplicateJobFindsNothingToDoTest < Minitest::Test
   # `:process` run can reach once it has left `pending` — derived from the state
   # machine, `needs_clarification` included — is one the job accepts a `:process`
   # dispatch from. `pending` itself is excluded: reaching it again takes a
-  # separate gesture (an answer, a retry, a reentry) that enqueues its own job.
+  # separate gesture — an answer or a reentry, which enqueue or run their own
+  # pass, or `retry_errored`, which enqueues nothing and leaves the row to
+  # `DormantAudit`'s pending arm — never the end of this run.
   def test_no_state_a_process_run_reaches_is_one_it_is_dispatched_from
     reachable = states_reachable_from(:cloning) - [:pending]
 

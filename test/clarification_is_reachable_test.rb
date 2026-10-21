@@ -136,19 +136,40 @@ class ClarificationRoutingTest < Minitest::Test
       'apply!: resume! first, then enqueues only `if issue.pending?`'
   }.freeze
 
+  # A site that passes the action in a variable is invisible to the literal scan
+  # above, so it is declared too, with every action it can send (concurrency
+  # review of Autodev #140). One that could send `:process` belongs in
+  # PROCESS_ENQUEUE_SITES as well.
+  VARIABLE_ACTION_SITES = {
+    'app/services/autodev/poll_dispatcher.rb' => 'enqueue_retry: :retry_stuck or :retry_errored, never :process'
+  }.freeze
+
   def test_every_process_enqueue_site_is_declared
-    assert_equal PROCESS_ENQUEUE_SITES.keys.sort, process_enqueue_sites,
+    assert_equal PROCESS_ENQUEUE_SITES.keys.sort, enqueue_sites { |args| args.match?(/:process\b/) },
                  'a new :process enqueue must say how it leaves the row pending'
+    assert_equal VARIABLE_ACTION_SITES.keys.sort, enqueue_sites { |args| !args.match?(/(?<!:):[a-z_]+\b/) },
+                 'an enqueue whose action is a variable must say which actions it can send'
   end
 
   private
 
-  def process_enqueue_sites
-    root = File.expand_path('..', __dir__)
-    files = Dir.glob(File.join(root, '{app,lib}', '**', '*.rb')) + Dir.glob(File.join(root, 'bin', '*'))
-    files.select { |file| File.file?(file) && File.read(file).scrub.match?(/perform_later\([^)]*:process\b/) }
-         .map { |file| file.delete_prefix("#{root}/") }.sort
+  # The files holding an `IssueProcessJob.perform_later(…)` whose argument list
+  # matches the block.
+  def enqueue_sites(&)
+    source_files.select { |file| enqueue_arguments(file).any?(&) }
+                .map { |file| file.delete_prefix("#{repo_root}/") }.sort
   end
+
+  def enqueue_arguments(file)
+    File.read(file).scrub.scan(/IssueProcessJob\.perform_later\(([^)]*)\)/).flatten
+  end
+
+  def source_files
+    (Dir.glob(File.join(repo_root, '{app,lib}', '**', '*.rb')) + Dir.glob(File.join(repo_root, 'bin', '*')))
+      .select { |file| File.file?(file) }
+  end
+
+  def repo_root = File.expand_path('..', __dir__)
 end
 
 # --- 2. the whole pass, from GitLab discovery to the re-armed row ----------
