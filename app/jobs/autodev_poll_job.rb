@@ -9,7 +9,9 @@
 # still drives the threaded poller. The supervisor (step 6) flips the switch
 # by starting `solid_queue:start` instead of `bin/autodev`'s own thread loop.
 class AutodevPollJob < ApplicationJob
-  queue_as :default
+  # Served by a worker of its own (config/queue.yml), never by the threads
+  # that run the IssueProcessJobs this job enqueues (Autodev #139).
+  queue_as :poll
 
   def perform
     config = ::Config.load

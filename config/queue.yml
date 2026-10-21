@@ -1,22 +1,41 @@
 # Solid Queue worker + dispatcher configuration (railsification step 5).
 #
-# One worker process serves the `*` queue with N threads, where N defaults
-# to 3 to mirror the legacy `max_workers: 3` of the threaded poller. The
-# supervisor (step 6) will override this via AUTODEV_MAX_WORKERS so the
-# value tracks `max_workers` in ~/.autodev/config.yml.
+# Two workers, each its own process in fork mode (Autodev #139):
 #
-# Dispatcher polling is 1s — fine for our once-every-five-minutes recurring
-# task. Worker polling is 0.1s — Solid Queue's default and keeps issue
-# processing reactive when several arrive at once.
+# * `default` (+ `solid_queue_recurring`, where Solid Queue runs a recurring
+#   `command:` task such as `clear_solid_queue_finished_jobs`) — every job but
+#   the poll, with N threads. N is `max_workers` in ~/.autodev/config.yml,
+#   exported by the supervisor as AUTODEV_MAX_WORKERS (default 3, the legacy
+#   threaded poller's `max_workers: 3`); it is the IssueProcessJob concurrency
+#   cap.
+# * `poll` — AutodevPollJob alone, one thread. When it shared the `*` worker,
+#   the 3 threads were held by 25-minute IssueProcessJobs and every poll waited
+#   behind the older IssueProcessJobs it had itself enqueued: /healthz went
+#   `down` on `poller` three times on 15/10/2026. One thread also serialises
+#   the polls, which could run three at a time after such a gap.
+#
+# The lists are explicit, so a job on a queue named nowhere here would wait
+# for ever: test/queues_are_served_test.rb derives every queue a job can land
+# on and fails until it is served. The `queue` and `primary` pools in
+# config/database.yml follow AUTODEV_MAX_WORKERS for the same reason.
+#
+# Dispatcher polling is 1s — fine for our once-every-few-minutes recurring
+# task. The default worker polls at 0.1s — Solid Queue's default, keeps issue
+# processing reactive when several arrive at once; the poll worker at 1s, a
+# job every `poll_interval` does not need more and each poll is a query.
 default: &default
   dispatchers:
     - polling_interval: 1
       batch_size: 500
   workers:
-    - queues: "*"
+    - queues: [default, solid_queue_recurring]
       threads: <%= ENV.fetch('AUTODEV_MAX_WORKERS', 3) %>
       processes: 1
       polling_interval: 0.1
+    - queues: [poll]
+      threads: 1
+      processes: 1
+      polling_interval: 1
 
 development:
   <<: *default
