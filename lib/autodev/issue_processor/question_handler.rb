@@ -19,7 +19,7 @@ class IssueProcessor
       locale = issue_locale(iid)
       header = Locales.t(:question_answered_header, locale: locale, tag: autodev_tag)
       footer = Locales.t(:question_answered_footer, locale: locale, tag: autodev_tag)
-      notify_issue(iid, "#{header}\n\n#{answer.strip}\n\n---\n#{footer}")
+      notify_issue(iid, "#{header}\n\n#{answer.strip}\n\n---\n#{footer}\n\n#{ContextNotes::ANSWER_MARKER}")
       finalize_question(iid, issue)
     end
 

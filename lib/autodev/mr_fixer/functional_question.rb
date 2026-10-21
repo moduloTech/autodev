@@ -168,7 +168,7 @@ class MrFixer
       vars = { tag: autodev_tag, mr_iid: issue.mr_iid, count: threads.size, mention: requester_mention(gl_issue) }
       gaps = threads.map.with_index(1) { |thread, i| "#{i}. #{functional_gap(thread)}" }.join("\n\n")
       [Locales.t(:functional_question_header, locale: locale, **vars), gaps,
-       Locales.t(:functional_question_footer, locale: locale, **vars)].join("\n\n")
+       Locales.t(:functional_question_footer, locale: locale, **vars), ContextNotes::QUESTION_MARKER].join("\n\n")
     end
 
     def requester_mention(gl_issue)
