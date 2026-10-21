@@ -178,8 +178,25 @@ class AReviewRunsOncePerMergeRequestTest < Minitest::Test
     assert_empty left, 'the review-round limit is gone, its copy must go with it'
   end
 
+  # Read off the code rather than asked of one module: the constant redeclared on
+  # `PipelineMonitor`, or anywhere else, is the same revival. Comment lines are
+  # skipped, since the history of the deleted limit is told in several of them.
   def test_no_review_round_constant_remains
-    refute PipelineMonitor::Reviewer.const_defined?(:MAX_REVIEW_ROUNDS, false),
-           'MAX_REVIEW_ROUNDS is back: the review runs once per merge request and nothing counts rounds'
+    found = code_lines_naming(/\b(MAX_REVIEW_ROUNDS|review_limit_reached)\b/)
+
+    assert_empty found, 'the review-round limit is back: the review runs once per merge request ' \
+                        "and nothing counts rounds.\n#{found.join("\n")}"
+  end
+
+  private
+
+  # `path:line` of every non-comment line of `lib/`, `app/` and `bin/` matching.
+  def code_lines_naming(pattern)
+    root = File.expand_path('..', __dir__)
+    Dir[File.join(root, '{lib,app,bin}', '**', '*.rb')].flat_map do |path|
+      File.readlines(path).each_with_index.filter_map do |line, index|
+        "#{path.delete_prefix("#{root}/")}:#{index + 1}" if !line.lstrip.start_with?('#') && line.match?(pattern)
+      end
+    end
   end
 end
